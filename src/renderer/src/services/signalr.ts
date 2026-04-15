@@ -6,7 +6,7 @@ import channelJoinSound from '../assets/sounds/join.mp3';
 import channelLeaveSound from '../assets/sounds/leave.mp3';
 import achievementSound from '../assets/sounds/achievement.mp3';
 
-const SERVER_URL = "https://vnkboltik.ru:8080/zabor_v3";
+const SERVER_URL = "https://vnkboltik.ru:8443/zabor_v3";
 
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
