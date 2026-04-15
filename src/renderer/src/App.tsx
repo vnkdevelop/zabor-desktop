@@ -248,9 +248,11 @@ export default function App() {
       const errorTimer = setTimeout(() => setShowInitConnectionError(true), 10000);
       
       let connected = await signalRService.connect();
-      while (!connected) {
+      let retries = 0;
+      while (!connected && retries < 3) {
          await new Promise(r => setTimeout(r, 2000));
          connected = await signalRService.connect();
+         retries++;
       }
       clearTimeout(errorTimer);
 
@@ -1225,9 +1227,14 @@ export default function App() {
               <h1 className="text-5xl font-black text-white tracking-widest animate-pulse">ZABOR</h1>
               <div className="w-10 h-10 border-4 border-[#c70060] border-t-transparent rounded-full animate-spin" />
               {showInitConnectionError && (
-                <p className="text-danger font-bold mt-2 animate-fade-in">
-                  Нет соединения с сервером
-                </p>
+                <div className="flex flex-col items-center mt-2 animate-fade-in">
+                  <p className="text-danger font-bold text-center">Нет соединения с сервером</p>
+                  {signalRService.lastConnectionError && (
+                    <p className="text-white/60 text-xs mt-1 text-center max-w-[300px] break-words">
+                      {signalRService.lastConnectionError}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1241,7 +1248,16 @@ export default function App() {
             <div className="flex flex-col items-center gap-6">
               <h1 className="text-5xl font-black text-white tracking-widest animate-pulse">ZABOR</h1>
               <div className="w-10 h-10 border-4 border-[#c70060] border-t-transparent rounded-full animate-spin" />
-              {showErrorText && <p className="text-danger font-bold mt-4 animate-fade-in">Нет соединения с сервером. Переподключение...</p>}
+              {showErrorText && (
+                <div className="flex flex-col items-center mt-4 animate-fade-in">
+                  <p className="text-danger font-bold text-center">Нет соединения с сервером. Переподключение...</p>
+                  {signalRService.lastConnectionError && (
+                    <p className="text-white/60 text-xs mt-1 text-center max-w-[300px] break-words">
+                      {signalRService.lastConnectionError}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

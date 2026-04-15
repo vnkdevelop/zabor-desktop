@@ -6,7 +6,7 @@ import channelJoinSound from '../assets/sounds/join.mp3';
 import channelLeaveSound from '../assets/sounds/leave.mp3';
 import achievementSound from '../assets/sounds/achievement.mp3';
 
-const SERVER_URL = "https://vnkboltik.ru:8443/zabor_v3";
+const SERVER_URL = "https://vnkboltik.ru:8080/zabor_v3";
 
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
@@ -115,6 +115,8 @@ private stopSfx(src: string) {
     if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
   }
 
+  public lastConnectionError: string | null = null;
+
   public async connect(): Promise<boolean> {
     if (this.isConnected()) return true;
     if (this.isReconnecting) {
@@ -123,6 +125,7 @@ private stopSfx(src: string) {
     }
     this.intentionalDisconnect = false;
     this.isReconnecting = true;
+    this.lastConnectionError = null;
     try {
       if (this.connection) { try { await this.connection.stop(); } catch {} }
       this.connection = new signalR.HubConnectionBuilder()
@@ -142,8 +145,9 @@ private stopSfx(src: string) {
       this.startPingMeasurement();
       this.notifyConnectionUpdate(true);
       return true;
-    } catch {
+    } catch (err: any) {
       this.isReconnecting = false;
+      this.lastConnectionError = err?.message || String(err);
       this.notifyPingUpdate(-1);
       this.notifyConnectionUpdate(false);
       this.scheduleReconnect();
