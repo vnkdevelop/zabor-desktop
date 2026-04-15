@@ -358,11 +358,16 @@ this.sfxElements.clear();
       store().setFriends(store().friends.filter((f: User) => f.id !== userId));
     });
 
-    this.connection.on("ReceiveChannelInvite", (senderId: string, senderName: string, channelId: string, channelName: string) => {
-      if (!store().channelInvites.find((i) => i.channelId === channelId)) {
-        store().setChannelInvites([...store().channelInvites, { senderId, senderName, channelId, channelName }]);
-        this.playNotificationSound();
-      }
+    this.connection.on("ReceiveChannelInvite", async (senderId: string, senderName: string, channelId: string, channelName: string) => {
+      this.getChannelMembersList(channelId).then(users => {
+        if (users && users.length > 0) {
+          store().setChannelUsers(channelId, users);
+        }
+      }).catch(() => {});
+      
+      store().setIncomingChannelInvite({ senderId, senderName, channelId, channelName });
+      store().setModal('incomingChannelInvite', true);
+      this.playRingtone();
     });
 
     this.connection.on("IncomingCall", (call: IncomingCall) => {
@@ -442,14 +447,14 @@ this.sfxElements.clear();
   // this.playSfx(channelJoinSound, 0.4);
 }
 
-  private playRingtone() {
+  public playRingtone() {
   this.stopRingtone();
   this.playSfx(callRingSound, 0.3);
   const audio = this.sfxElements.get(callRingSound);
   if (audio) audio.loop = true;
 }
 
-private stopRingtone() {
+public stopRingtone() {
   if (this.ringtoneInterval) { clearInterval(this.ringtoneInterval); this.ringtoneInterval = null; }
   this.stopSfx(callRingSound);
   const audio = this.sfxElements.get(callRingSound);

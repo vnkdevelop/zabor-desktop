@@ -69,7 +69,7 @@ export class WebRTCManager {
 
       if (line.startsWith(`a=fmtp:${opusPT}`)) {
         
-        l = `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=64000;stereo=0;cbr=1`
+        l = `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=0;usedtx=0`
         fmtpDone = true
       }
 
@@ -80,7 +80,7 @@ export class WebRTCManager {
       const idx = out.findIndex(l => l.startsWith(`a=rtpmap:${opusPT}`))
       if (idx >= 0) {
         out.splice(idx + 1, 0,
-          `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=64000;stereo=0;cbr=1`
+          `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=0;usedtx=0`
         )
       }
     }
@@ -92,7 +92,7 @@ export class WebRTCManager {
     try {
       const params = sender.getParameters()
       if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
-      params.encodings[0].maxBitrate = 64000
+      params.encodings[0].maxBitrate = 128000
       params.encodings[0].priority = 'high'
       await sender.setParameters(params)
     } catch {}
@@ -112,11 +112,24 @@ export class WebRTCManager {
     inputGain.gain.value = Math.max(0, Math.min(2, this.inputVolume / 100))
     this.inputGainNode = inputGain
 
+    const highpass = ctx.createBiquadFilter()
+    highpass.type = 'highpass'
+    highpass.frequency.value = 100
+
+    const compressor = ctx.createDynamicsCompressor()
+    compressor.threshold.value = -24
+    compressor.knee.value = 30
+    compressor.ratio.value = 12
+    compressor.attack.value = 0.003
+    compressor.release.value = 0.25
+
     const source = ctx.createMediaStreamSource(rawStream)
     this.processedSource = source
 
     
-    source.connect(inputGain)
+    source.connect(highpass)
+    highpass.connect(compressor)
+    compressor.connect(inputGain)
     inputGain.connect(destination)
 
     return destination.stream
@@ -179,7 +192,7 @@ export class WebRTCManager {
       bp1.type = 'highpass'; bp1.frequency.value = 85; bp1.Q.value = 0.5
 
       const bp2 = this.vadContext.createBiquadFilter()
-      bp2.type = 'lowpass'; bp2.frequency.value = 4000; bp2.Q.value = 0.5
+      bp2.type = 'lowpass'; bp2.frequency.value = 8000; bp2.Q.value = 0.5
 
       const analyser = this.vadContext.createAnalyser()
       analyser.fftSize = 512
@@ -194,8 +207,8 @@ export class WebRTCManager {
       let wasSpeaking = false
       let voiceFrames = 0
 
-      const avgTh = isLocal ? 6 : 3
-      const peakTh = isLocal ? 16 : 10
+      const avgTh = isLocal ? 4 : 2
+      const peakTh = isLocal ? 10 : 8
 
       const check = () => {
         const store = useAppStore.getState()
@@ -288,6 +301,8 @@ export class WebRTCManager {
           autoGainControl: true, // Выравнивает громкость
           // @ts-expect-error - Скрытые настройки Chromium для глубокого "бархатного" голоса
           googHighpassFilter: false, 
+          
+          googEchoCancellation2: true,
           
           googAudioMirroring: false
         },

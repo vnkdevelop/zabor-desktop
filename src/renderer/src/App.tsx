@@ -1908,6 +1908,34 @@ export default function App() {
         </div>
       )}
 
+      {renderModal('incomingChannelInvite',
+        <div className="bg-panelBg p-8 rounded-3xl w-[350px] text-center shadow-2xl">
+          {(() => {
+             const invite = store.incomingChannelInvite;
+             if (!invite) return null;
+             const users = store.channelUsersMap[invite.channelId] || [];
+             const displayUsers = users.length > 0 ? users : [{ id: invite.senderId, displayName: invite.senderName, avatarBase64: null, avatarColor: '#c70060', username: '', isOnline: true, isMuted: false, isDeafened: false, isSpeaking: false }];
+             return (
+               <>
+                 <div className="flex justify-center mb-4">
+                   {displayUsers.slice(0, 4).map((u, i) => (
+                     <div key={u.id} className="w-[87px] h-[87px] rounded-full border-[4px] border-panelBg relative shrink-0 shadow-lg" style={{ marginLeft: i === 0 ? 0 : '-1.5rem', zIndex: 10 - i }}>
+                        <AvatarImg src={u.avatarBase64 || null} size={87} bgColor={u.avatarColor} />
+                     </div>
+                   ))}
+                 </div>
+                 <h2 className="text-xl font-bold mb-2 text-white truncate px-2">{invite.channelName}</h2>
+                 <p className="text-textMuted mb-8 font-medium">Вас зовут в канал</p>
+                 <div className="flex gap-4">
+                   <button onClick={() => { store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); }} className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"><PhoneOff size={18} /> Сбросить</button>
+                   <button onClick={() => { handleAcceptChannelInvite(invite.channelId); store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== invite.channelId)); }} className="flex-1 bg-success text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors flex items-center justify-center gap-2"><Phone size={18} /> Войти</button>
+                 </div>
+               </>
+             );
+          })()}
+        </div>
+      )}
+
       {store.modals.profile && store.selectedProfileUser && (
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-panelBg w-[350px] rounded-3xl overflow-hidden shadow-2xl relative">
@@ -2653,6 +2681,7 @@ export default function App() {
 
                       const ok = await signalRService.adminDeleteUser(adminSelectedUser.id);
                       if (ok) {
+                        store.setFriends(store.friends.filter(f => f.id !== adminSelectedUser.id));
                         setAdminSelectedUser(null);
                         store.setModal('adminUserSettings', false);
                         await loadAdminUsers();

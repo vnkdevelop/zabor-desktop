@@ -137,6 +137,7 @@ interface AppState {
     achievements: boolean;
     adminConsole: boolean;
     adminUserSettings: boolean;
+    incomingChannelInvite: boolean;
   };
 
   setModal: (modalName: keyof AppState['modals'], isOpen: boolean) => void;
@@ -149,6 +150,9 @@ interface AppState {
 
   selectedChannelForInvite: VoiceChannel | null;
   setSelectedChannelForInvite: (ch: VoiceChannel | null) => void;
+
+  incomingChannelInvite: ChannelInvite | null;
+  setIncomingChannelInvite: (invite: ChannelInvite | null) => void;
 }
 
 const updateUserInList = (list: User[], userId: string, updates: Partial<User>): User[] => {
@@ -385,6 +389,7 @@ export const useAppStore = create<AppState>((set) => ({
     achievements: false,
     adminConsole: false,
     adminUserSettings: false,
+    incomingChannelInvite: false,
   },
 
   setModal: (name, isOpen) => set((state) => ({
@@ -409,6 +414,7 @@ export const useAppStore = create<AppState>((set) => ({
       achievements: false,
       adminConsole: false,
       adminUserSettings: false,
+      incomingChannelInvite: false,
     },
     pendingChannelSwitch: null
   }),
@@ -422,5 +428,8 @@ export const useAppStore = create<AppState>((set) => ({
   setSelectedProfileUser: (user, source = 'none') => set({ selectedProfileUser: user, profileSource: source }),
 
   selectedChannelForInvite: null,
-  setSelectedChannelForInvite: (ch) => set({ selectedChannelForInvite: ch })
+  setSelectedChannelForInvite: (ch) => set({ selectedChannelForInvite: ch }),
+
+  incomingChannelInvite: null,
+  setIncomingChannelInvite: (invite) => set({ incomingChannelInvite: invite })
 }));
