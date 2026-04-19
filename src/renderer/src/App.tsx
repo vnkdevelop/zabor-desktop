@@ -100,24 +100,11 @@ export default function App() {
   const loginInputRef = useRef<HTMLInputElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminUsers, setAdminUsers] = useState<any[]>([]);
-  const [adminSearch, setAdminSearch] = useState('');
-  const [adminLoading, setAdminLoading] = useState(false);
-  const [adminActionUserId, setAdminActionUserId] = useState<string | null>(null);
-  const [adminError, setAdminError] = useState('');
-  const [adminSelectedUser, setAdminSelectedUser] = useState<any | null>(null);
-  const [adminDetailsLoading, setAdminDetailsLoading] = useState(false);
-  const [adminEditDisplayName, setAdminEditDisplayName] = useState('');
-  const [adminEditAchievements, setAdminEditAchievements] = useState('');
-  const [adminCopiedLogin, setAdminCopiedLogin] = useState<string | null>(null);
-  const [adminRenameChannelId, setAdminRenameChannelId] = useState<string | null>(null);
-  const [adminRenameChannelName, setAdminRenameChannelName] = useState('');
+
 
   const [controlsShake, setControlsShake] = useState(false);
   const [adminBlockToast, setAdminBlockToast] = useState<string | null>(null);
   const adminBlockTimerRef = useRef<NodeJS.Timeout | null>(null);
-
   const settingsRef = useRef({
     inputVolume: 100, outputVolume: 100,
     selectedInput: 'default', selectedOutput: 'default',
@@ -271,15 +258,14 @@ export default function App() {
           resetToDefaults();
         }
 
-        const [isAdminChecked, serverSettings, jokeText] = await Promise.all([
-          signalRService.isCurrentUserAdmin().catch(() => false),
+        const [serverSettings, jokeText] = await Promise.all([
           signalRService.loadAudioSettings(),
           signalRService.getJokeOfTheDay().catch(() => 'Сегодня сервер шутит молча.')
         ]);
 
         if (serverSettings) applySettings(serverSettings);
-        setIsAdmin(isAdminChecked);
         setJoke(jokeText || 'Сегодня сервер шутит молча.');
+        setServerConnected(true);
         setIsAuth(true);
 
         saveLocalCache();
@@ -376,36 +362,7 @@ export default function App() {
     } catch { }
   }, []);
 
-  const loadAdminUsers = useCallback(async () => {
-    setAdminLoading(true);
-    setAdminError('');
-    try {
-      const users = await signalRService.adminGetAllUsers();
-      setAdminUsers(users);
-    } catch {
-      setAdminError('Не удалось загрузить список пользователей');
-    } finally {
-      setAdminLoading(false);
-    }
-  }, []);
 
-  const loadAdminUserDetails = useCallback(async (userId: string) => {
-    setAdminDetailsLoading(true);
-    setAdminError('');
-    try {
-      const details = await signalRService.adminGetUserDetails(userId);
-      setAdminSelectedUser(details);
-
-      if (details) {
-        setAdminEditDisplayName(details.displayName ?? '');
-        setAdminEditAchievements((details.achievements?.unlockedIds || []).join(', '));
-      }
-    } catch {
-      setAdminError('Не удалось загрузить профиль пользователя');
-    } finally {
-      setAdminDetailsLoading(false);
-    }
-  }, []);
 
   const softClearCache = useCallback(() => {
   }, []);
@@ -506,15 +463,7 @@ export default function App() {
     setInviteFriendSearch('');
     setSentInvites(new Set());
 
-    setAdminSearch('');
-    setAdminError('');
-    setAdminActionUserId(null);
-    setAdminSelectedUser(null);
-    setAdminDetailsLoading(false);
-    setAdminEditDisplayName('');
-    setAdminCopiedLogin(null);
-    setAdminRenameChannelId(null);
-    setAdminRenameChannelName('');
+
 
     setContextMenu(null);
     setShowInvitesPanel(false);
@@ -582,15 +531,14 @@ export default function App() {
 
           const success = await signalRService.login(login, password);
           if (success) {
-            const [isAdminChecked, serverSettings, jokeText] = await Promise.all([
-              signalRService.isCurrentUserAdmin().catch(() => false),
+            const [serverSettings, jokeText] = await Promise.all([
               signalRService.loadAudioSettings(),
               signalRService.getJokeOfTheDay().catch(() => 'Сегодня сервер шутит молча.')
             ]);
 
             if (serverSettings) applySettings(serverSettings);
-            setIsAdmin(isAdminChecked);
             setJoke(jokeText || 'Сегодня сервер шутит молча.');
+            setServerConnected(true);
             setIsAuth(true);
             credentialsRef.current = { login, password };
 
@@ -611,13 +559,10 @@ export default function App() {
           login, password, displayName.trim(), avatarBase64, avatarColor
         );
         if (success) {
-          const [isAdminChecked, jokeText] = await Promise.all([
-            signalRService.isCurrentUserAdmin().catch(() => false),
-            signalRService.getJokeOfTheDay().catch(() => 'Сегодня сервер шутит молча.')
-          ]);
+          const jokeText = await signalRService.getJokeOfTheDay().catch(() => 'Сегодня сервер шутит молча.');
 
-          setIsAdmin(isAdminChecked);
           setJoke(jokeText || 'Сегодня сервер шутит молча.');
+          setServerConnected(true);
           setIsAuth(true);
           credentialsRef.current = { login, password };
 
@@ -671,9 +616,7 @@ export default function App() {
 
     setJoke('');
 
-    setIsAdmin(false);
-    setAdminUsers([]);
-    setAdminSearch('');
+
 
     setDisplayName('');
     setAvatarBase64(null);
@@ -722,7 +665,12 @@ export default function App() {
     if (passErr) { setPrivacyError(passErr); return; }
     if (newPassword && newPassword !== password) {
       const success = await signalRService.changePassword(newPassword);
-      if (success) { setPassword(newPassword); saveLocalCache(); closeAndResetModals(); }
+      if (success) {
+        setPassword(newPassword);
+        credentialsRef.current = { ...credentialsRef.current, password: newPassword };
+        saveLocalCache();
+        closeAndResetModals();
+      }
       else setPrivacyError("Не удалось сменить пароль");
     }
   }, [newPassword, password, validateInput, saveLocalCache, closeAndResetModals]);
@@ -1402,18 +1350,7 @@ export default function App() {
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                {isAdmin && (
-                  <button
-                    onClick={() => {
-                      store.setModal('adminConsole', true);
-                      loadAdminUsers();
-                    }}
-                    className="text-textMuted hover:text-white p-2 hover:bg-surface rounded-xl transition-colors"
-                    title="Админ-консоль"
-                  >
-                    <Crown size={20} />
-                  </button>
-                )}
+
 
                 <button
                   onClick={() => {
@@ -2240,481 +2177,7 @@ export default function App() {
         document.body
       )}
 
-      {renderModal('adminConsole',
-        <div className="bg-panelBg rounded-3xl w-[760px] max-h-[82vh] flex flex-col overflow-hidden shadow-2xl">
-          <div className="flex items-center justify-between p-6 pb-4">
-            <h2 className="text-xl font-bold text-white flex items-center gap-3">
-              <Crown size={24} className="text-[#c70060]" />
-              Админ-консоль
-            </h2>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={loadAdminUsers}
-                disabled={adminLoading}
-                className="bg-surface text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-surfaceHover transition-colors disabled:opacity-50"
-              >
-                Обновить
-              </button>
-              <button
-                onClick={closeAndResetModals}
-                className="text-textMuted hover:text-white transition-colors"
-              >
-                <X size={24} />
-              </button>
-            </div>
-          </div>
-
-          <div className="px-6 pb-4">
-            <input
-              type="text"
-              value={adminSearch}
-              onChange={e => setAdminSearch(e.target.value)}
-              placeholder="Поиск по логину / имени"
-              className="w-full bg-surface text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-[#c70060]"
-            />
-          </div>
-
-          {adminError && (
-            <div className="px-6 pb-3">
-              <div className="bg-danger/10 border border-danger/30 rounded-xl px-4 py-3 text-danger text-sm font-medium">
-                {adminError}
-              </div>
-            </div>
-          )}
-
-          <div className="px-6 overflow-y-auto flex-1 space-y-2 pb-6 custom-scrollbar">
-            {adminLoading ? (
-              <div className="flex justify-center py-12">
-                <div className="w-8 h-8 border-2 border-[#c70060] border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : (
-              adminUsers
-                .filter(u =>
-                  u.username.toLowerCase().includes(adminSearch.toLowerCase()) ||
-                  u.displayName.toLowerCase().includes(adminSearch.toLowerCase())
-                )
-                .map(u => (
-                  <div key={u.id} className="bg-surface rounded-xl p-4 flex items-center gap-4">
-                    <div className="w-[47px] h-[47px] shrink-0 relative">
-                      <AvatarImg src={u.avatarBase64} size={47} bgColor={u.avatarColor} />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-semibold truncate">{u.displayName}</p>
-                      <p className="text-textMuted text-xs truncate">@{u.username}</p>
-                      <p className="text-textMuted text-[11px] mt-1 truncate">
-                        {u.currentChannelId
-                          ? `В канале: ${u.currentChannelId}`
-                          : u.currentCallUserId
-                            ? `В звонке: ${u.currentCallUserId}`
-                            : 'Не в голосе'}
-                      </p>
-                    </div>
-
-                    <div className="text-xs text-textMuted shrink-0 min-w-[70px] text-right">
-                      {u.isOnline ? 'Онлайн' : 'Оффлайн'}
-                    </div>
-
-                    <button
-                      disabled={adminActionUserId === u.id}
-                      onClick={async () => {
-                        setAdminSelectedUser(null);
-                        setAdminDetailsLoading(true);
-                        setAdminError('');
-                        store.setModal('adminUserSettings', true);
-
-                        try {
-                          const details = await signalRService.adminGetUserDetails(u.id);
-
-                          if (!details) {
-                            setAdminError('Не удалось загрузить профиль пользователя');
-                          } else {
-                            setAdminSelectedUser(details);
-                            setAdminEditDisplayName(details.displayName ?? '');
-                          }
-                        } catch (e) {
-                          setAdminError('Не удалось загрузить профиль пользователя');
-                        } finally {
-                          setAdminDetailsLoading(false);
-                        }
-                      }}
-                      className="bg-surfaceHover hover:bg-white/10 text-white px-3 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
-                    >
-                      Настройки
-                    </button>
-                  </div>
-                ))
-            )}
-
-            {!adminLoading && adminUsers.length > 0 && adminUsers.filter(u =>
-              u.username.toLowerCase().includes(adminSearch.toLowerCase()) ||
-              u.displayName.toLowerCase().includes(adminSearch.toLowerCase())
-            ).length === 0 && (
-                <p className="text-textMuted text-center py-8 font-medium">Пользователи не найдены</p>
-              )}
-          </div>
-        </div>
-      )}
-
-      {renderModal('adminUserSettings',
-        <div className="bg-panelBg rounded-3xl w-[760px] max-h-[84vh] flex flex-col overflow-hidden shadow-2xl">
-          <div className="flex items-center justify-between p-6 pb-4 border-b border-white/5">
-            <h2 className="text-xl font-bold text-white flex items-center gap-3">
-              <Settings size={24} />
-              Профиль: {adminSelectedUser?.username}
-            </h2>
-            <button
-              onClick={() => {
-                setAdminSelectedUser(null);
-                setAdminEditDisplayName('');
-                setAdminRenameChannelId(null);
-                store.setModal('adminUserSettings', false);
-              }}
-              className="text-textMuted hover:text-white transition-colors"
-            >
-              <X size={24} />
-            </button>
-          </div>
-
-          {adminError && (
-            <div className="px-6 pt-4">
-              <div className="bg-danger/10 border border-danger/30 rounded-xl px-4 py-3 text-danger text-sm font-medium">
-                {adminError}
-              </div>
-            </div>
-          )}
-
-          <div className="px-6 overflow-y-auto flex-1 py-6 custom-scrollbar">
-            {adminDetailsLoading ? (
-              <div className="flex justify-center py-12">
-                <div className="w-8 h-8 border-2 border-[#c70060] border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : adminSelectedUser ? (
-              <div className="space-y-6">
-                {/* ПРОФИЛЬ */}
-                <section className="bg-surface rounded-2xl p-5">
-                  <div className="flex items-center gap-4 mb-5">
-                    <div className="w-[71px] h-[71px] shrink-0 relative">
-                      <AvatarImg src={adminSelectedUser.avatarBase64} size={71} bgColor={adminSelectedUser.avatarColor} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-white font-bold text-lg truncate">{adminSelectedUser.displayName}</p>
-                      <p className="text-textMuted text-sm truncate">@{adminSelectedUser.username}</p>
-                      <p className="text-textMuted text-xs mt-1">
-                        {adminSelectedUser.isOnline ? <span className="text-success">Онлайн</span> : 'Оффлайн'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-textMuted tracking-wider block mb-2">
-                        ОТОБРАЖАЕМОЕ ИМЯ
-                      </label>
-                      <input
-                        type="text"
-                        value={adminEditDisplayName}
-                        onChange={e => setAdminEditDisplayName(e.target.value)}
-                        className="w-full bg-surfaceHover text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-[#c70060]"
-                      />
-                    </div>
-
-                    <button
-                      onClick={async () => {
-                        if (!adminEditDisplayName.trim()) return;
-                        const ok = await signalRService.adminUpdateUser({
-                          userId: adminSelectedUser.id,
-                          displayName: adminEditDisplayName.trim()
-                        });
-
-                        if (ok) {
-                          await loadAdminUserDetails(adminSelectedUser.id);
-                          await loadAdminUsers();
-                        } else {
-                          setAdminError('Не удалось изменить имя');
-                        }
-                      }}
-                      className="w-full bg-surfaceHover hover:bg-white/10 text-white py-3 rounded-xl font-semibold transition-colors"
-                    >
-                      Сохранить имя
-                    </button>
-                  </div>
-                </section>
-
-                {/* ГОЛОС И КАНАЛЫ */}
-                <section className="bg-surface rounded-2xl p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-white font-bold">Голос и каналы</h3>
-                    {adminSelectedUser.currentChannelId && (
-                      <button
-                        onClick={async () => {
-                          const ok = await signalRService.adminKickFromCurrentChannel(adminSelectedUser.id);
-                          if (ok) {
-                            await loadAdminUserDetails(adminSelectedUser.id);
-                            await loadAdminUsers();
-                          }
-                        }}
-                        className="text-xs bg-danger/20 text-danger px-3 py-1.5 rounded-lg hover:bg-danger hover:text-white transition-colors font-semibold"
-                      >
-                        Исключить из канала
-                      </button>
-                    )}
-                  </div>
-
-                  <p className="text-textMuted text-sm mb-4 bg-surfaceHover p-3 rounded-xl">
-                    {adminSelectedUser.currentChannelId
-                      ? `Сейчас в канале: ${adminSelectedUser.currentChannelId}`
-                      : adminSelectedUser.currentCallUserId
-                        ? `Сейчас в звонке: ${adminSelectedUser.currentCallUserId}`
-                        : 'Сейчас не в голосе'}
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-3 mb-6">
-                    {/* КНОПКА МЬЮТА */}
-                    <button
-                      onClick={async () => {
-                        const newState = !adminSelectedUser.isMuted;
-
-                        // Оптимистичный UI
-                        setAdminSelectedUser({ ...adminSelectedUser, isMuted: newState });
-
-                        const ok = await signalRService.adminSetGlobalVoiceState({
-                          userId: adminSelectedUser.id,
-                          isMuted: newState
-                        });
-
-                        if (ok) {
-                          loadAdminUsers();
-                        } else {
-                          loadAdminUserDetails(adminSelectedUser.id); // Откат
-                        }
-                      }}
-                      className={`py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors ${adminSelectedUser.isMuted ? 'bg-danger text-white hover:bg-red-600' : 'bg-surfaceHover text-white hover:bg-white/10'
-                        }`}
-                    >
-                      {adminSelectedUser.isMuted ? <MicOff size={18} /> : <Mic size={18} />}
-                      {adminSelectedUser.isMuted ? 'Микрофон выключен' : 'Глобально замьютить'}
-                    </button>
-
-                    {/* КНОПКА ГЛУШЕНИЯ (DEAFEN) */}
-                    <button
-                      onClick={async () => {
-                        const newState = !adminSelectedUser.isDeafened;
-
-                        // Оптимистичный UI (если глушим уши, микрофон тоже отключается)
-                        setAdminSelectedUser({
-                          ...adminSelectedUser,
-                          isDeafened: newState,
-                          isMuted: newState ? true : adminSelectedUser.isMuted
-                        });
-
-                        const ok = await signalRService.adminSetGlobalVoiceState({
-                          userId: adminSelectedUser.id,
-                          isDeafened: newState
-                        });
-
-                        if (ok) {
-                          loadAdminUsers();
-                        } else {
-                          loadAdminUserDetails(adminSelectedUser.id); // Откат
-                        }
-                      }}
-                      className={`py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors ${adminSelectedUser.isDeafened ? 'bg-danger text-white hover:bg-red-600' : 'bg-surfaceHover text-white hover:bg-white/10'
-                        }`}
-                    >
-                      <div className="relative flex items-center justify-center">
-                        <Headphones size={18} className={adminSelectedUser.isDeafened ? 'opacity-60' : ''} />
-                        {adminSelectedUser.isDeafened && (
-                          <div className="absolute w-[22px] h-[2.5px] bg-white rotate-45 rounded-full" />
-                        )}
-                      </div>
-                      {adminSelectedUser.isDeafened ? 'Звук выключен' : 'Глобально заглушить'}
-                    </button>
-                  </div>
-
-                  <label className="text-[10px] font-bold text-textMuted mb-2 block tracking-wider">ДОСТУПНЫЕ КАНАЛЫ</label>
-                  <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
-                    {adminSelectedUser.accessibleChannels?.length > 0 ? (
-                      adminSelectedUser.accessibleChannels.map((ch: any) => (
-                        <div key={ch.id} className="bg-surfaceHover rounded-xl px-4 py-2 flex items-center justify-between min-h-[50px]">
-
-                          {adminRenameChannelId === ch.id ? (
-                            // РЕЖИМ РЕДАКТИРОВАНИЯ
-                            <div className="flex items-center gap-2 w-full">
-                              <input
-                                autoFocus
-                                type="text"
-                                value={adminRenameChannelName}
-                                onChange={e => setAdminRenameChannelName(e.target.value)}
-                                onKeyDown={async e => {
-                                  if (e.key === 'Enter') {
-                                    const newName = adminRenameChannelName.trim();
-                                    if (!newName) return;
-                                    const ok = await signalRService.adminRenameChannel(ch.id, newName);
-                                    if (ok) {
-                                      await loadAdminUserDetails(adminSelectedUser.id);
-                                      setAdminRenameChannelId(null);
-                                    }
-                                  }
-                                }}
-                                className="flex-1 bg-panelBg text-white rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-[#c70060] text-sm"
-                              />
-                              <button
-                                onClick={async () => {
-                                  const newName = adminRenameChannelName.trim();
-                                  if (!newName) return;
-                                  const ok = await signalRService.adminRenameChannel(ch.id, newName);
-                                  if (ok) {
-                                    await loadAdminUserDetails(adminSelectedUser.id);
-                                    setAdminRenameChannelId(null);
-                                  }
-                                }}
-                                className="text-success hover:bg-success/20 p-1.5 rounded-lg transition-colors"
-                                title="Сохранить"
-                              >
-                                <Check size={18} />
-                              </button>
-                              <button
-                                onClick={() => setAdminRenameChannelId(null)}
-                                className="text-danger hover:bg-danger/20 p-1.5 rounded-lg transition-colors"
-                                title="Отмена"
-                              >
-                                <X size={18} />
-                              </button>
-                            </div>
-                          ) : (
-                            // РЕЖИМ ПРОСМОТРА
-                            <>
-                              <div className="min-w-0 pr-4">
-                                <p className="text-white text-sm font-semibold truncate">{ch.name}</p>
-                                <p className="text-textMuted text-[11px] truncate">{ch.id}</p>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  setAdminRenameChannelId(ch.id);
-                                  setAdminRenameChannelName(ch.name);
-                                }}
-                                className="bg-panelBg hover:bg-[#333] text-textMuted hover:text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors shrink-0"
-                              >
-                                Изменить
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-textMuted text-sm">Нет доступных каналов</p>
-                    )}
-                  </div>
-                </section>
-
-                {/* Достижения (Инлайн и 100% прогресс) */}
-                <section className="bg-surface rounded-2xl p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-white font-bold">Достижения</h3>
-                    <span className="text-sm font-semibold text-[#c70060] bg-[#c70060]/10 px-3 py-1 rounded-full">
-                      Разблокировано: {adminSelectedUser.achievements?.unlockedIds?.length ?? 0}
-                    </span>
-                  </div>
-
-                  <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1 custom-scrollbar">
-                    {ACHIEVEMENTS.map(achievement => {
-                      const unlocked = (adminSelectedUser.achievements?.unlockedIds || []).includes(achievement.id);
-                      return (
-                        <label
-                          key={achievement.id}
-                          className={`flex items-start gap-3 rounded-xl px-4 py-3 cursor-pointer transition-colors border ${unlocked ? 'bg-[#c70060]/10 border-[#c70060]/30' : 'bg-surfaceHover border-transparent hover:bg-white/5'
-                            }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={unlocked}
-                            onChange={async (e) => {
-                              const isGranted = e.target.checked;
-
-                              // ДОБАВЛЕН ЯВНЫЙ ТИП <string> ЗДЕСЬ:
-                              const currentUnlocked = new Set<string>(adminSelectedUser.achievements?.unlockedIds || []);
-                              const currentStats = { ...(adminSelectedUser.achievements?.stats || {}) };
-
-                              // Выставляем 100% прогресса или сбрасываем в 0
-                              if (isGranted) {
-                                currentUnlocked.add(achievement.id);
-                                currentStats[achievement.statKey] = achievement.maxValue;
-                              } else {
-                                currentUnlocked.delete(achievement.id);
-                                currentStats[achievement.statKey] = 0;
-                              }
-
-                              const nextUnlocked = Array.from(currentUnlocked);
-                              const nextAchievements = {
-                                stats: currentStats,
-                                unlockedIds: nextUnlocked,
-                                visitedChannelIds: adminSelectedUser.achievements?.visitedChannelIds || []
-                              };
-
-                              // Оптимистичный UI
-                              setAdminSelectedUser({
-                                ...adminSelectedUser,
-                                achievements: nextAchievements
-                              });
-
-                              // Отправляем на сервер
-                              const ok = await signalRService.adminUpdateAchievements({
-                                userId: adminSelectedUser.id,
-                                unlockedIds: nextUnlocked,
-                                stats: currentStats
-                              });
-
-                              if (!ok) {
-                                setAdminError('Ошибка синхронизации достижений');
-                                loadAdminUserDetails(adminSelectedUser.id); // Откат
-                              }
-                            }}
-                            className="mt-1.5 w-4 h-4 accent-[#c70060] cursor-pointer"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-lg">{achievement.icon}</span>
-                              <span className={`font-semibold truncate ${unlocked ? 'text-white' : 'text-textMuted'}`}>
-                                {achievement.title}
-                              </span>
-                            </div>
-                            <p className="text-textMuted text-xs mt-1 leading-tight">{achievement.description}</p>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </section>
-
-                {/* DANGER ZONE */}
-                <section className="pt-4 border-t border-white/5">
-                  <button
-                    onClick={async () => {
-                      const confirmed = confirm(`Удалить пользователя ${adminSelectedUser.displayName}? Это действие необратимо.`);
-                      if (!confirmed) return;
-
-                      const ok = await signalRService.adminDeleteUser(adminSelectedUser.id);
-                      if (ok) {
-                        store.setFriends(store.friends.filter(f => f.id !== adminSelectedUser.id));
-                        setAdminSelectedUser(null);
-                        store.setModal('adminUserSettings', false);
-                        await loadAdminUsers();
-                      } else {
-                        setAdminError('Не удалось удалить пользователя');
-                      }
-                    }}
-                    className="w-full bg-danger/10 text-danger hover:bg-danger hover:text-white py-4 rounded-xl font-bold transition-colors"
-                  >
-                    УДАЛИТЬ ПОЛЬЗОВАТЕЛЯ НАВСЕГДА
-                  </button>
-                </section>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      )}
 
       {adminBlockToast && createPortal((() => {
         const isHiding = adminBlockToast === '__hiding__';

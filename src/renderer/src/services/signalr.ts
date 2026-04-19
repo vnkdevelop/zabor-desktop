@@ -825,36 +825,6 @@ public stopRingtone() {
   public sendIceCandidate(targetId: string, candidate: string): void {
     if (this.isConnected()) this.connection?.send("SendIceCandidate", targetId, candidate);
   }
-
-  // ── Admin ─────────────────────────────────────────────────────
-
-  public async isCurrentUserAdmin(): Promise<boolean> {
-    return await this.safeInvoke<boolean>("IsCurrentUserAdmin") ?? false;
-  }
-  public async adminGetAllUsers(): Promise<any[]> {
-    return await this.safeInvoke<any[]>("AdminGetAllUsers") ?? [];
-  }
-  public async adminUpdateUser(payload: { userId: string; displayName?: string }): Promise<boolean> {
-    return await this.safeInvoke<boolean>("AdminUpdateUser", payload) ?? false;
-  }
-  public async adminDeleteUser(userId: string): Promise<boolean> {
-    return await this.safeInvoke<boolean>("AdminDeleteUser", { userId }) ?? false;
-  }
-  public async adminGetUserDetails(userId: string): Promise<any | null> {
-    return await this.safeInvoke<any>("AdminGetUserDetails", userId);
-  }
-  public async adminUpdateAchievements(payload: { userId: string; unlockedIds: string[]; stats: Record<string, number> }): Promise<boolean> {
-    return await this.safeInvoke<boolean>("AdminUpdateAchievements", payload) ?? false;
-  }
-  public async adminKickFromCurrentChannel(userId: string): Promise<boolean> {
-    return await this.safeInvoke<boolean>("AdminKickFromCurrentChannel", { userId }) ?? false;
-  }
-  public async adminSetGlobalVoiceState(payload: { userId: string; isMuted?: boolean; isDeafened?: boolean }): Promise<boolean> {
-    return await this.safeInvoke<boolean>("AdminSetGlobalVoiceState", payload) ?? false;
-  }
-  public async adminRenameChannel(channelId: string, name: string): Promise<boolean> {
-    return await this.safeInvoke<boolean>("AdminRenameChannel", { channelId, name }) ?? false;
-  }
 }
 
 export const signalRService = new SignalRService();

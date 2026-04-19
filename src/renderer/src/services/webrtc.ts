@@ -24,7 +24,7 @@ export class WebRTCManager {
   private processedContext: AudioContext | null = null
   private processedSource: MediaStreamAudioSourceNode | null = null
   private inputGainNode: GainNode | null = null
-  private rnnoiseDestroy: (() => void) | null = null
+
 
   private vadContext: AudioContext | null = null
   private speakingIntervals: Map<string, SpeakingEntry> = new Map()
@@ -136,7 +136,7 @@ export class WebRTCManager {
   }
 
   private cleanupProcessedStream() {
-    if (this.rnnoiseDestroy) { this.rnnoiseDestroy(); this.rnnoiseDestroy = null }
+
     if (this.processedContext && this.processedContext.state !== 'closed') {
       this.processedContext.close().catch(() => {})
     }
