@@ -410,12 +410,16 @@ this.sfxElements.clear();
     });
 
     this.connection.on("CallStarted", (user: User) => {
+      // CallStarted приходит принимающей стороне (звонок успешно поднят).
+      // Принимающая сторона НЕ создаёт оффер — она ждёт ReceiveWebRTCOffer от вызывающего.
+      // Нам важно установить currentCallUser и callStatus СЕЙЧАС, чтобы handleOffer
+      // не отбросил входящий оффер из-за отсутствия callUser в store.
       store().setCurrentCallUser(user);
       store().setCallStatus('connected');
       store().setIncomingCall(null);
       store().setModal('incomingCall', false);
       this.stopRingtone();
-      webrtc.connectToPeer(user.id);
+      // Принимающая сторона НЕ вызывает connectToPeer — ждёт ReceiveWebRTCOffer
     });
 
     this.connection.on("AchievementUnlocked", (achievementId: string) => {
@@ -771,7 +775,32 @@ public stopRingtone() {
     if (useAppStore.getState().currentChannelId) await this.leaveChannel();
     const micStarted = await webrtc.startLocalStream();
     if (!micStarted) return;
-    await this.safeInvoke("AcceptCall", callerId);
+
+    // BUGFIX: Устанавливаем callStatus и callUser ДО отправки AcceptCall на сервер.
+    // Иначе после AcceptCall сервер шлёт WebRTC-оффер через ReceiveWebRTCOffer,
+    // а handleOffer проверяет currentCallUser?.id === senderId.
+    // Без этой установки оффер отвергался на устройствах где RTT высок.
+    const callerUser = useAppStore.getState().incomingCall;
+    if (callerUser) {
+      useAppStore.getState().setCurrentCallUser({
+        id: callerUser.callerId,
+        displayName: callerUser.callerName,
+        username: callerUser.callerName,
+        avatarBase64: callerUser.callerAvatarBase64 ?? null,
+        avatarColor: callerUser.callerAvatarColor ?? '#c70060',
+        isOnline: true,
+        isMuted: false,
+        isDeafened: false,
+        isSpeaking: false,
+        isServerMuted: false,
+        isServerDeafened: false,
+        currentChannelId: null,
+        currentCallUserId: null,
+      });
+    }
+    useAppStore.getState().setCallStatus('connected');
+
+    await this.safeInvoke('AcceptCall', callerId);
     useAppStore.getState().setModal('incomingCall', false);
     this.stopRingtone();
   }

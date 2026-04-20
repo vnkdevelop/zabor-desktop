@@ -30,6 +30,7 @@ export default function App() {
   const [showInitConnectionError, setShowInitConnectionError] = useState(false);
   const [appLoading, setAppLoading] = useState(true);
   const [loadingFadeOut, setLoadingFadeOut] = useState(false);
+  const disconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
@@ -97,6 +98,8 @@ export default function App() {
   const settingsLoadedRef = useRef(false);
   const credentialsRef = useRef<{ login: string; password: string }>({ login: '', password: '' });
   const initCompleteRef = useRef(false);
+  /** true когда у нас есть сохранённые креды, но автологин ещё не выполнен (сервер недоступен или вернул ошибку) */
+  const autoLoginPendingRef = useRef(false);
   const loginInputRef = useRef<HTMLInputElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
@@ -114,6 +117,74 @@ export default function App() {
   useEffect(() => {
     settingsRef.current = { inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression };
   }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression]);
+
+  // === Callbacks defined early to avoid TDZ in useEffect deps ===
+
+  const saveLocalCache = useCallback(() => {
+    try {
+      const currentUser = useAppStore.getState().currentUser;
+      const creds = credentialsRef.current;
+      if (!currentUser || !creds.login || !creds.password) return;
+      const data = JSON.stringify({
+        login: creds.login,
+        password: creds.password,
+        userId: currentUser.id,
+        settings: {
+          inputVolume: settingsRef.current.inputVolume,
+          outputVolume: settingsRef.current.outputVolume,
+          selectedInput: settingsRef.current.selectedInput,
+          selectedOutput: settingsRef.current.selectedOutput,
+          noiseSuppression: settingsRef.current.noiseSuppression
+        }
+      });
+      window.windowControls.saveSession(data).catch(() => { });
+    } catch { }
+  }, []);
+
+  const softClearCache = useCallback(() => {
+  }, []);
+
+  const deepWipeOnLogout = useCallback(async () => {
+    try {
+      await window.windowControls.clearSession();
+      await window.windowControls.wipeAppData();
+    } catch { }
+    await new Promise(r => setTimeout(r, 300));
+  }, []);
+
+  const resetToDefaults = useCallback(() => {
+    setInputVolume(100);
+    setOutputVolume(100);
+    setSelectedInput('default');
+    setSelectedOutput('default');
+    setNoiseSuppression(true);
+    setDisplayName('');
+    setAvatarBase64(null);
+    setAvatarColor('#c70060');
+    setEditProfileAvatarBase64(null);
+    setEditProfileAvatarColor('#c70060');
+    setEditProfileDisplayName('');
+    webrtc.setInputDevice('default');
+    webrtc.setOutputDevice('default');
+  }, []);
+
+  const applySettings = useCallback((s: {
+    inputVolume?: number; outputVolume?: number;
+    selectedInput?: string; selectedOutput?: string;
+    noiseSuppression?: boolean;
+  }) => {
+    const iv = s.inputVolume ?? 100;
+    const ov = s.outputVolume ?? 100;
+    setInputVolume(iv);
+    setOutputVolume(ov);
+    setSelectedInput(s.selectedInput ?? 'default');
+    setSelectedOutput(s.selectedOutput ?? 'default');
+    setNoiseSuppression(s.noiseSuppression ?? true);
+    webrtc.setInputDevice(s.selectedInput ?? 'default');
+    webrtc.setOutputDevice(s.selectedOutput ?? 'default');
+    webrtc.setInputVolume(iv);
+    webrtc.setOutputVolume(ov);
+  }, []);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -186,18 +257,65 @@ export default function App() {
       if (!initCompleteRef.current) return; // Не мешаем init-потоку
 
       if (isConnected) {
+        // Соединение восстановлено — отменяем таймер перехода в лоадинг
+        if (disconnectTimerRef.current) {
+          clearTimeout(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
         setShowErrorText(false);
-        setLoadingFadeOut(true);
-        setTimeout(() => setAppLoading(false), 600);
+
+        if (autoLoginPendingRef.current) {
+          // Автологин ещё не выполнен — пробуем сейчас (сервер только что стал доступен)
+          autoLoginPendingRef.current = false;
+          const creds = credentialsRef.current;
+          if (creds.login && creds.password) {
+            signalRService.login(creds.login, creds.password).then(async (success) => {
+              if (success) {
+                const serverUser = useAppStore.getState().currentUser;
+                const [serverSettings, jokeText] = await Promise.all([
+                  signalRService.loadAudioSettings(),
+                  signalRService.getJokeOfTheDay().catch(() => 'Сегодня сервер шутит молча.')
+                ]);
+                if (serverSettings) applySettings(serverSettings);
+                setJoke(jokeText || 'Сегодня сервер шутит молча.');
+                setServerConnected(true);
+                setIsAuth(true);
+                saveLocalCache();
+                setTimeout(() => { settingsLoadedRef.current = true; }, 1000);
+                setLoadingFadeOut(true);
+                setTimeout(() => setAppLoading(false), 600);
+              } else {
+                // Сервер снова недоступен или вернул ошибку — ждём
+                autoLoginPendingRef.current = true;
+                setShowErrorText(true);
+              }
+            });
+          }
+        } else {
+          // Пользователь уже залогинен — просто скрываем лоадинг
+          setLoadingFadeOut(true);
+          setTimeout(() => setAppLoading(false), 600);
+        }
       } else if (isAuth) {
-        setAppLoading(true);
-        setLoadingFadeOut(false);
-        setTimeout(() => setShowErrorText(true), 5000);
+        // Даём 3 секунды на переподключение прежде чем убирать UI
+        disconnectTimerRef.current = setTimeout(() => {
+          disconnectTimerRef.current = null;
+          // При разрыве во время работы — после восстановления нужен повторный автологин
+          autoLoginPendingRef.current = true;
+          setAppLoading(true);
+          setLoadingFadeOut(false);
+          setIsAuth(false);
+          setTimeout(() => setShowErrorText(true), 5000);
+        }, 3000);
       }
     });
     const unsubPing = signalRService.onPingUpdate((newPing) => setPing(newPing));
-    return () => { unsubConnection(); unsubPing(); };
-  }, [isAuth]);
+    return () => {
+      unsubConnection();
+      unsubPing();
+      if (disconnectTimerRef.current) clearTimeout(disconnectTimerRef.current);
+    };
+  }, [isAuth, applySettings, saveLocalCache]);
 
   useEffect(() => {
     const init = async () => {
@@ -246,7 +364,17 @@ export default function App() {
       setShowErrorText(false);
       setShowInitConnectionError(false);
 
-      // 4. Автологин
+      // 4. Если так и не подключились — остаёмся на экране загрузки.
+      //    Сессия НЕ трогается: она валидна, просто сервер недоступен.
+      //    onConnectionUpdate(true) сам запустит автологин когда сервер вернётся.
+      if (!connected) {
+        autoLoginPendingRef.current = true;
+        initCompleteRef.current = true;
+        setShowErrorText(true);
+        return;
+      }
+
+      // 5. Автологин
       const loginSuccess = await signalRService.login(
         cachedCredentials.login,
         cachedCredentials.password
@@ -274,27 +402,15 @@ export default function App() {
         initCompleteRef.current = true;
         setTimeout(() => {
           setLoadingFadeOut(true);
-          setTimeout(() => setAppLoading(false), 600);
-        }, 700);
+          setTimeout(() => setAppLoading(false), 500);
+        }, 300);
       } else {
-        // Пароль изменён или аккаунт удалён
-        await window.windowControls.clearSession();
-        resetToDefaults();
-        store.setCurrentUser(null);
-        store.setChannels([]);
-        store.setFriends([]);
-        store.setFriendRequests([]);
-        store.setChannelInvites([]);
-        credentialsRef.current = { login: '', password: '' };
-        setLogin('');
-        setPassword('');
-        setIsAuth(false);
-        
+        // Сервер ответил, но логин не прошёл (сервер перезапустился и сессия устарела?).
+        // НЕ очищаем сессию — просто ждём следующего reconnect и пробуем снова.
+        autoLoginPendingRef.current = true;
         initCompleteRef.current = true;
-        setTimeout(() => {
-          setLoadingFadeOut(true);
-          setTimeout(() => setAppLoading(false), 600);
-        }, 700);
+        setShowErrorText(true);
+        // Остаёмся на экране загрузки.
       }
     };
 
@@ -341,73 +457,7 @@ export default function App() {
     preloadStaticFrame(store.currentCallUser?.avatarBase64);
   }, [store.channelUsersMap, store.friends, store.voiceUsers, store.currentUser?.avatarBase64, store.currentCallUser?.avatarBase64]);
 
-  const saveLocalCache = useCallback(() => {
-    try {
-      const currentUser = useAppStore.getState().currentUser;
-      const creds = credentialsRef.current;
-      if (!currentUser || !creds.login || !creds.password) return;
-      const data = JSON.stringify({
-        login: creds.login,
-        password: creds.password,
-        userId: currentUser.id,
-        settings: {
-          inputVolume: settingsRef.current.inputVolume,
-          outputVolume: settingsRef.current.outputVolume,
-          selectedInput: settingsRef.current.selectedInput,
-          selectedOutput: settingsRef.current.selectedOutput,
-          noiseSuppression: settingsRef.current.noiseSuppression
-        }
-      });
-      window.windowControls.saveSession(data).catch(() => { });
-    } catch { }
-  }, []);
-
-
-
-  const softClearCache = useCallback(() => {
-  }, []);
-
-  const deepWipeOnLogout = useCallback(async () => {
-    try {
-      await window.windowControls.clearSession();
-      await window.windowControls.wipeAppData();
-    } catch { }
-    await new Promise(r => setTimeout(r, 300));
-  }, []);
-
-  const resetToDefaults = useCallback(() => {
-    setInputVolume(100);
-    setOutputVolume(100);
-    setSelectedInput('default');
-    setSelectedOutput('default');
-    setNoiseSuppression(true);
-    setDisplayName('');
-    setAvatarBase64(null);
-    setAvatarColor('#c70060');
-    setEditProfileAvatarBase64(null);
-    setEditProfileAvatarColor('#c70060');
-    setEditProfileDisplayName('');
-    webrtc.setInputDevice('default');
-    webrtc.setOutputDevice('default');
-  }, []);
-
-  const applySettings = useCallback((s: {
-    inputVolume?: number; outputVolume?: number;
-    selectedInput?: string; selectedOutput?: string;
-    noiseSuppression?: boolean;
-  }) => {
-    const iv = s.inputVolume ?? 100;
-    const ov = s.outputVolume ?? 100;
-    setInputVolume(iv);
-    setOutputVolume(ov);
-    setSelectedInput(s.selectedInput ?? 'default');
-    setSelectedOutput(s.selectedOutput ?? 'default');
-    setNoiseSuppression(s.noiseSuppression ?? true);
-    webrtc.setInputDevice(s.selectedInput ?? 'default');
-    webrtc.setOutputDevice(s.selectedOutput ?? 'default');
-    webrtc.setInputVolume(iv);
-    webrtc.setOutputVolume(ov);
-  }, []);
+  // (saveLocalCache, softClearCache, deepWipeOnLogout, resetToDefaults, applySettings moved above — before first useEffect)
 
   useEffect(() => {
     if (!settingsLoadedRef.current || !isAuth) return;
@@ -1211,7 +1261,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="flex flex-col h-screen w-screen bg-appBg text-textMain overflow-hidden relative animate-fade-in select-none">
+      <div className="flex flex-col h-screen w-screen bg-appBg text-textMain overflow-hidden relative select-none">
         <TitleBar />
         <div className="flex flex-1 overflow-hidden">
 

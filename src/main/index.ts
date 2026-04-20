@@ -4,7 +4,7 @@ import { existsSync, rmSync, readFileSync, writeFileSync, promises as fsPromises
 
 // ── GPU stability fixes ─────────────────────────────────────────
 if (app) {
-  app.commandLine.appendSwitch('disable-gpu-compositing');
+  // NOTE: 'disable-gpu-compositing' убран — в новых версиях Electron вызывает чёрный экран
   app.commandLine.appendSwitch('force-color-profile', 'srgb');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
@@ -231,7 +231,8 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     frame: false,
-    backgroundColor: '#0B0B0B',
+    show: false, // Показываем только после ready-to-show, чтобы не мелькал чёрный экран
+    backgroundColor: '#0C0C0E', // Синхронизировано с CSS для предотвращения мерцания
     ...stateOptions,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -245,7 +246,15 @@ function createWindow(): void {
     mainWindow.maximize();
   }
 
-  mainWindow.show();
+  // Показываем окно только когда renderer готов — исключаем мелькание чёрного экрана
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+  });
+
+  // Fallback: если ready-to-show не пришёл за 3 секунды — показываем в любом случае
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isVisible()) mainWindow.show();
+  }, 3000);
 
   mainWindow.on('resize', scheduleWindowStateSave);
   mainWindow.on('move', scheduleWindowStateSave);

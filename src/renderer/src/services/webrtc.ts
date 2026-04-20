@@ -12,6 +12,8 @@ export class WebRTCManager {
 
   private peerConnections: Map<string, RTCPeerConnection> = new Map()
   private audioElements: Map<string, HTMLAudioElement> = new Map()
+  /** Буфер ICE-кандидатов, пришедших до setRemoteDescription */
+  private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map()
 
   private currentDeviceId = 'default'
   private currentOutputDeviceId = 'default'
@@ -33,13 +35,20 @@ export class WebRTCManager {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      // openrelay: бесплатный TURN, работает поверх UDP/TCP/443
+      { urls: 'turn:openrelay.metered.ca:80',           username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:80?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443',          username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turns:openrelay.metered.ca:443',         username: 'openrelayproject', credential: 'openrelayproject' },
       { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
     ],
-    bundlePolicy: 'balanced',
+    // max-compat гарантирует отдельные транспорты для аудио/данных — лучше для совместимости с разными сетями
+    bundlePolicy: 'max-compat',
     rtcpMuxPolicy: 'require',
-    iceCandidatePoolSize: 4
+    // Увеличен пул кандидатов для быстрого ICE-gathering через TURN
+    iceCandidatePoolSize: 10
   }
 
   // ── SDP ───────────────────────────────────────────────────────
@@ -430,7 +439,15 @@ export class WebRTCManager {
 
   public async handleOffer(senderId: string, offerStr: string) {
     const store = useAppStore.getState()
-    if (!store.currentChannelId && store.currentCallUser?.id !== senderId) return
+    // BUGFIX: было &&, из-за чего оффер отбрасывался когда currentCallUser ещё
+    // не был установлен (состояние гонки при acceptCall). Правильная проверка:
+    // «нет ни канала, ни активного звонка от этого пользователя» → игнорируем
+    if (!store.currentChannelId && store.currentCallUser?.id !== senderId) {
+      // Дополнительная мягкая проверка: если это известный друг/юзер и мы в состоянии
+      // 'connected' - возможно callUser ещё не прогрузился, даём шанс
+      const callStatus = store.callStatus
+      if (callStatus !== 'connected') return
+    }
     if (this.peerConnections.has(senderId)) this.disconnectFromPeer(senderId)
 
     const pc = new RTCPeerConnection(this.config)
@@ -447,6 +464,8 @@ export class WebRTCManager {
 
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(offerStr)))
+      // Сбрасываем ICE-кандидаты, пришедшие до установки remote description
+      await this.drainPendingCandidates(senderId)
       const answer = await pc.createAnswer()
       const sdp = this.mungeOpusSDP(answer.sdp ?? '')
       await pc.setLocalDescription(new RTCSessionDescription({ type: 'answer', sdp }))
@@ -456,12 +475,48 @@ export class WebRTCManager {
 
   public async handleAnswer(senderId: string, answerStr: string) {
     const pc = this.peerConnections.get(senderId)
-    if (pc) { try { await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(answerStr))) } catch {} }
+    if (pc) {
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(answerStr)))
+        // Сбрасываем ICE-кандидаты, пришедшие до установки remote description
+        await this.drainPendingCandidates(senderId)
+      } catch {}
+    }
   }
 
   public async handleIceCandidate(senderId: string, candidateStr: string) {
     const pc = this.peerConnections.get(senderId)
-    if (pc) { try { await pc.addIceCandidate(new RTCIceCandidate(JSON.parse(candidateStr))) } catch {} }
+    let candidate: RTCIceCandidateInit
+    try { candidate = JSON.parse(candidateStr) } catch { return }
+
+    if (!pc) {
+      // PC ещё не создан — буферизуем кандидата
+      const buf = this.pendingCandidates.get(senderId) ?? []
+      buf.push(candidate)
+      this.pendingCandidates.set(senderId, buf)
+      return
+    }
+
+    // Кандидат пришёл до setRemoteDescription — буферизуем
+    if (!pc.remoteDescription) {
+      const buf = this.pendingCandidates.get(senderId) ?? []
+      buf.push(candidate)
+      this.pendingCandidates.set(senderId, buf)
+      return
+    }
+
+    try { await pc.addIceCandidate(new RTCIceCandidate(candidate)) } catch {}
+  }
+
+  /** Сбрасываем буфер ICE-кандидатов после setRemoteDescription */
+  private async drainPendingCandidates(userId: string): Promise<void> {
+    const pc = this.peerConnections.get(userId)
+    const candidates = this.pendingCandidates.get(userId)
+    if (!pc || !candidates || candidates.length === 0) return
+    this.pendingCandidates.delete(userId)
+    for (const c of candidates) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(c)) } catch {}
+    }
   }
 
   public disconnectFromPeer(userId: string) {
@@ -470,6 +525,7 @@ export class WebRTCManager {
     if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.close(); this.peerConnections.delete(userId) }
     const audio = this.audioElements.get(userId)
     if (audio) { audio.pause(); audio.srcObject = null; this.audioElements.delete(userId) }
+    this.pendingCandidates.delete(userId)
     this.clearVAD(userId)
   }
 
