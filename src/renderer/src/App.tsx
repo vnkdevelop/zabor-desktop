@@ -283,7 +283,7 @@ export default function App() {
                 saveLocalCache();
                 setTimeout(() => { settingsLoadedRef.current = true; }, 1000);
                 setLoadingFadeOut(true);
-                setTimeout(() => setAppLoading(false), 600);
+                setTimeout(() => setAppLoading(false), 650);
               } else {
                 // Сервер снова недоступен или вернул ошибку — ждём
                 autoLoginPendingRef.current = true;
@@ -294,19 +294,12 @@ export default function App() {
         } else {
           // Пользователь уже залогинен — просто скрываем лоадинг
           setLoadingFadeOut(true);
-          setTimeout(() => setAppLoading(false), 600);
+          setTimeout(() => setAppLoading(false), 650);
         }
       } else if (isAuth) {
-        // Даём 3 секунды на переподключение прежде чем убирать UI
-        disconnectTimerRef.current = setTimeout(() => {
-          disconnectTimerRef.current = null;
-          // При разрыве во время работы — после восстановления нужен повторный автологин
-          autoLoginPendingRef.current = true;
-          setAppLoading(true);
-          setLoadingFadeOut(false);
-          setIsAuth(false);
-          setTimeout(() => setShowErrorText(true), 5000);
-        }, 3000);
+        // СигналР сам попытается переподключиться и вызовет Login.
+        // Не сбрасываем UI (appLoading), чтобы не было мигания или потери контекста.
+        autoLoginPendingRef.current = true;
       }
     });
     const unsubPing = signalRService.onPingUpdate((newPing) => setPing(newPing));
@@ -344,7 +337,7 @@ export default function App() {
       if (!cachedCredentials) {
         initCompleteRef.current = true;
         setLoadingFadeOut(true);
-        setTimeout(() => setAppLoading(false), 300);
+        setTimeout(() => setAppLoading(false), 650);
         return;
       }
 
@@ -402,7 +395,7 @@ export default function App() {
         initCompleteRef.current = true;
         setTimeout(() => {
           setLoadingFadeOut(true);
-          setTimeout(() => setAppLoading(false), 500);
+          setTimeout(() => setAppLoading(false), 650);
         }, 300);
       } else {
         // Сервер ответил, но логин не прошёл (сервер перезапустился и сессия устарела?).
@@ -1149,7 +1142,7 @@ export default function App() {
   return (
     <>
       {/* Auth screen — показывается поверх основного UI, когда пользователь не авторизован */}
-      {!isAuth && !appLoading && (
+      {!isAuth && (
         <div className="fixed inset-0 z-[100000] flex flex-col bg-appBg text-textMain animate-fade-in select-none">
           <TitleBar />
           <div className="flex-1 flex items-center justify-center p-4">
@@ -2179,7 +2172,8 @@ export default function App() {
               return filtered.map(a => {
                 const isUnlocked = unlocked.includes(a.id);
                 const statVal = stats[a.statKey] ?? 0;
-                const progress = Math.min(statVal / a.maxValue, 1);
+                const effectiveStatVal = isUnlocked ? Math.max(statVal, a.maxValue) : statVal;
+                const progress = Math.min(effectiveStatVal / a.maxValue, 1);
                 const showHidden = a.hidden && !isUnlocked;
                 return (
                   <div key={a.id} className={`p-4 rounded-xl border transition-colors ${isUnlocked ? 'bg-[#c70060]/10 border-[#c70060]/30' : 'bg-surface border-transparent'}`}>
@@ -2196,7 +2190,7 @@ export default function App() {
                             <div className="flex-1 h-1.5 bg-black/30 rounded-full overflow-hidden">
                               <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress * 100}%`, backgroundColor: isUnlocked ? '#c70060' : '#555' }} />
                             </div>
-                            <span className="text-xs text-textMuted font-mono shrink-0">{formatProgress(statVal, a.maxValue, a.unit)}</span>
+                            <span className="text-xs text-textMuted font-mono shrink-0">{formatProgress(effectiveStatVal, a.maxValue, a.unit)}</span>
                           </div>
                         )}
                       </div>

@@ -143,6 +143,27 @@ private stopSfx(src: string) {
       this.reconnectAttempts = 0;
       this.isReconnecting = false;
       this.startPingMeasurement();
+
+      const store = useAppStore.getState();
+      if (store.currentUser && window.windowControls) {
+        try {
+          const raw = await window.windowControls.loadSession();
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed.login && parsed.password) {
+              await this.connection.invoke("Login", parsed.login, parsed.password);
+              await this.loadData();
+              const channelToRejoin = this.wasInChannel || store.currentChannelId;
+              this.wasInChannel = null;
+              if (channelToRejoin) {
+                this.safeInvoke("LeaveChannel");
+                this.joinChannel(channelToRejoin);
+              }
+            }
+          }
+        } catch {}
+      }
+
       this.notifyConnectionUpdate(true);
       return true;
     } catch (err: any) {
@@ -363,12 +384,6 @@ this.sfxElements.clear();
     });
 
     this.connection.on("ReceiveChannelInvite", async (senderId: string, senderName: string, channelId: string, channelName: string) => {
-      this.getChannelMembersList(channelId).then(users => {
-        if (users && users.length > 0) {
-          store().setChannelUsers(channelId, users);
-        }
-      }).catch(() => {});
-      
       store().setIncomingChannelInvite({ senderId, senderName, channelId, channelName });
       store().setModal('incomingChannelInvite', true);
       this.playRingtone();

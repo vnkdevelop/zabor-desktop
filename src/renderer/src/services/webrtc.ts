@@ -331,7 +331,10 @@ export class WebRTCManager {
       if (me && this.rawStream) this.setupVAD(this.rawStream, me.id, true)
 
       return true
-    } catch { return false }
+    } catch (e) { 
+      console.warn('[WebRTC] Mic error, continuing as listener:', e)
+      return true 
+    }
   }
 
   public async updateSettings(deviceId: string, useNS: boolean) {
