@@ -215,6 +215,8 @@ export class WebRTCManager {
       let lastVoice = 0
       let wasSpeaking = false
       let voiceFrames = 0
+      let silenceFrames = 0
+      let hasWarnedSilence = false
 
       const avgTh = isLocal ? 4 : 2
       const peakTh = isLocal ? 10 : 8
@@ -227,6 +229,7 @@ export class WebRTCManager {
             store.setSpeakingStatus(userId, false)
             signalRService.setSpeakingState(false)
           }
+          silenceFrames = 0
           return
         }
 
@@ -238,6 +241,26 @@ export class WebRTCManager {
           sum += s
         }
         const avg = sum / buf.length
+        
+        if (isLocal) {
+          if (peak === 0) {
+            silenceFrames++
+          } else {
+            silenceFrames = 0
+            hasWarnedSilence = false
+          }
+
+          if (silenceFrames > 150 && !hasWarnedSilence) {
+            store.setSystemToast('Вас не слышно, проверьте микрофон')
+            setTimeout(() => {
+              const currentStore = useAppStore.getState()
+              if (currentStore.systemToast === 'Вас не слышно, проверьте микрофон') {
+                currentStore.setSystemToast(null)
+              }
+            }, 4000)
+            hasWarnedSilence = true
+          }
+        }
 
         if (avg >= avgTh || peak >= peakTh) voiceFrames++; else voiceFrames = 0
         if (voiceFrames >= 2) lastVoice = Date.now()

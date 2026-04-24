@@ -120,7 +120,9 @@ private stopSfx(src: string) {
   public async connect(): Promise<boolean> {
     if (this.isConnected()) return true;
     if (this.isReconnecting) {
-      await new Promise<void>(resolve => setTimeout(resolve, 500));
+      while (this.isReconnecting) {
+        await new Promise<void>(resolve => setTimeout(resolve, 200));
+      }
       return this.isConnected();
     }
     this.intentionalDisconnect = false;

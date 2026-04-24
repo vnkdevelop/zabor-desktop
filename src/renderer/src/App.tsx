@@ -2221,6 +2221,21 @@ export default function App() {
         document.body
       )}
 
+      {store.systemToast && createPortal(
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000000] animate-toast-in">
+          <div className="bg-[#09090B]/90 backdrop-blur-xl border border-warning/40 rounded-3xl px-8 py-5 shadow-[0_0_50px_rgba(234,179,8,0.25)] flex items-center gap-4">
+            <div className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center shrink-0">
+               <MicOff size={20} className="text-warning" />
+            </div>
+            <div>
+              <p className="text-white font-bold text-base leading-tight">Уведомление</p>
+              <p className="text-warning/90 font-medium text-sm mt-0.5">{store.systemToast}</p>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
 
 
       {adminBlockToast && createPortal((() => {

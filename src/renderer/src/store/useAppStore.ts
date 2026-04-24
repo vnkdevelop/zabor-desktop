@@ -95,12 +95,18 @@ interface AppState {
 
   setCurrentUser: (user: User | null) => void;
   setChannels: (channels: VoiceChannel[]) => void;
-  setFriends: (friends: User[]) => void;
   setFriendRequests: (reqs: User[]) => void;
   setChannelInvites: (invites: ChannelInvite[]) => void;
   setVoiceUsers: (users: User[]) => void;
   setCurrentChannelId: (id: string | null) => void;
   setIsJoiningChannel: (isJoining: boolean) => void;
+  
+  systemToast: string | null;
+  setSystemToast: (msg: string | null) => void;
+
+  setCurrentUser: (user: User | null) => void;
+  setChannels: (channels: VoiceChannel[]) => void;
+  setFriends: (friends: User[]) => void;
 
   setChannelUsers: (channelId: string, users: User[]) => void;
   setFullChannelState: (stateMap: Record<string, User[]>) => void;
@@ -198,6 +204,9 @@ export const useAppStore = create<AppState>((set) => ({
   setAchievementToast: (id) => set({ achievementToast: id }),
   setAchievementsData: (data) => set({ achievementsData: data }),
   setAchievementsViewUserId: (id) => set({ achievementsViewUserId: id }),
+
+  systemToast: null,
+  setSystemToast: (msg) => set({ systemToast: msg }),
 
   setCurrentUser: (user) => set({ currentUser: user }),
   setChannels: (channels) => set({ channels }),

@@ -4,6 +4,7 @@ import { existsSync, rmSync, readFileSync, writeFileSync, promises as fsPromises
 
 // ── GPU stability fixes ─────────────────────────────────────────
 if (app) {
+  app.disableHardwareAcceleration();
   // NOTE: 'disable-gpu-compositing' убран — в новых версиях Electron вызывает чёрный экран
   app.commandLine.appendSwitch('force-color-profile', 'srgb');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
