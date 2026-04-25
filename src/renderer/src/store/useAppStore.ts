@@ -104,8 +104,6 @@ interface AppState {
   systemToast: string | null;
   setSystemToast: (msg: string | null) => void;
 
-  setCurrentUser: (user: User | null) => void;
-  setChannels: (channels: VoiceChannel[]) => void;
   setFriends: (friends: User[]) => void;
 
   setChannelUsers: (channelId: string, users: User[]) => void;

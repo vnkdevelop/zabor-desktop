@@ -44,10 +44,10 @@ export class WebRTCManager {
       { urls: 'turns:openrelay.metered.ca:443',         username: 'openrelayproject', credential: 'openrelayproject' },
       { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
     ],
-    // max-compat гарантирует отдельные транспорты для аудио/данных — лучше для совместимости с разными сетями
-    bundlePolicy: 'max-compat',
+    // 'balanced' (значение по умолчанию) собирает медиа-потоки на одном транспорте, что решает проблемы с NAT, не ломая совместимость
+    bundlePolicy: 'balanced',
     rtcpMuxPolicy: 'require',
-    // Увеличен пул кандидатов для быстрого ICE-gathering через TURN
+    // Увеличен пул кандидатов для быстрого ICE-gathering
     iceCandidatePoolSize: 10
   }
 
