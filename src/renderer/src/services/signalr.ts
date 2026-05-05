@@ -531,11 +531,27 @@ public stopRingtone() {
 
   // ── Settings ──────────────────────────────────────────────────
 
-  public async saveAudioSettings(settings: { inputVolume: number; outputVolume: number; selectedInput: string; selectedOutput: string; noiseSuppression: boolean; }): Promise<void> {
+  public async saveAudioSettings(settings: {
+    inputVolume: number;
+    outputVolume: number;
+    selectedInput: string;
+    selectedOutput: string;
+    noiseSuppression: boolean;
+    userVolumes?: Record<string, number>;
+    language?: string;
+  }): Promise<void> {
     await this.safeInvoke("SaveAudioSettings", JSON.stringify(settings));
   }
 
-  public async loadAudioSettings(): Promise<{ inputVolume: number; outputVolume: number; selectedInput: string; selectedOutput: string; noiseSuppression: boolean; } | null> {
+  public async loadAudioSettings(): Promise<{
+    inputVolume: number;
+    outputVolume: number;
+    selectedInput: string;
+    selectedOutput: string;
+    noiseSuppression: boolean;
+    userVolumes?: Record<string, number>;
+    language?: string;
+  } | null> {
     const json = await this.safeInvoke<string>("GetAudioSettings");
     if (!json) return null;
     try { return JSON.parse(json); } catch { return null; }

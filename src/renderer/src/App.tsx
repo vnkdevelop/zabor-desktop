@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation, Trans } from 'react-i18next';
 import {
   Settings, Mic, MicOff, Headphones, Phone, Eye, EyeOff, UserMinus, Camera,
   Check, X, LogOut, UserPlus, Mail, Edit2, Volume2,
-  PhoneOff, Wifi, WifiOff, Users, LogOut as LeaveIcon, Crown, UserX
+  PhoneOff, Wifi, WifiOff, Users, LogOut as LeaveIcon, Crown, UserX, Globe
 } from 'lucide-react';
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
 import { signalRService } from './services/signalr';
@@ -19,9 +20,11 @@ import { AvatarImg } from './components/Shared/AvatarImg';
 
 // === Main App ===
 export default function App() {
+  const { t, i18n } = useTranslation();
   const store = useAppStore();
 
   const [isAuth, setIsAuth] = useState(false);
+  const [language, setLanguage] = useState(i18n.language || 'ru');
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'channels' | 'friends'>('channels');
 
@@ -50,6 +53,7 @@ export default function App() {
   const [editChannelId, setEditChannelId] = useState<string | null>(null);
 
   const [friendName, setFriendName] = useState('');
+  const [friendRequestStatus, setFriendRequestStatus] = useState<'idle' | 'loading' | 'sent' | 'notfound' | 'alreadyfriend'>('idle');
   const [newPassword, setNewPassword] = useState('');
   const [showPrivacyPass, setShowPrivacyPass] = useState(false);
   const [privacyError, setPrivacyError] = useState('');
@@ -66,6 +70,7 @@ export default function App() {
   const [noiseSuppression, setNoiseSuppression] = useState(true);
   const [isSwitchingChannel, setIsSwitchingChannel] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState(false);
+  const [minimizeToTray, setMinimizeToTray] = useState(true);
 
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean; x: number; y: number;
@@ -111,12 +116,12 @@ export default function App() {
   const settingsRef = useRef({
     inputVolume: 100, outputVolume: 100,
     selectedInput: 'default', selectedOutput: 'default',
-    noiseSuppression: true
+    noiseSuppression: true, language: i18n.language || 'ru'
   });
 
   useEffect(() => {
-    settingsRef.current = { inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression };
-  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression]);
+    settingsRef.current = { inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language };
+  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language]);
 
   // === Callbacks defined early to avoid TDZ in useEffect deps ===
 
@@ -134,7 +139,8 @@ export default function App() {
           outputVolume: settingsRef.current.outputVolume,
           selectedInput: settingsRef.current.selectedInput,
           selectedOutput: settingsRef.current.selectedOutput,
-          noiseSuppression: settingsRef.current.noiseSuppression
+          noiseSuppression: settingsRef.current.noiseSuppression,
+          language: settingsRef.current.language
         }
       });
       window.windowControls.saveSession(data).catch(() => { });
@@ -172,6 +178,8 @@ export default function App() {
     inputVolume?: number; outputVolume?: number;
     selectedInput?: string; selectedOutput?: string;
     noiseSuppression?: boolean;
+    userVolumes?: Record<string, number>;
+    language?: string;
   }) => {
     const iv = s.inputVolume ?? 100;
     const ov = s.outputVolume ?? 100;
@@ -184,6 +192,20 @@ export default function App() {
     webrtc.setOutputDevice(s.selectedOutput ?? 'default');
     webrtc.setInputVolume(iv);
     webrtc.setOutputVolume(ov);
+
+    if (s.language) {
+      setLanguage(s.language);
+      i18n.changeLanguage(s.language);
+    }
+    // Восстанавливаем индивидуальные громкости пользователей
+    if (s.userVolumes && typeof s.userVolumes === 'object') {
+      const store = useAppStore.getState();
+      Object.entries(s.userVolumes).forEach(([userId, volume]) => {
+        store.setUserVolume(userId, volume);
+        // Применяем к уже существующим аудио-элементам (если пользователь в канале)
+        webrtc.setUserVolume(userId, volume);
+      });
+    }
   }, []);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -344,13 +366,13 @@ export default function App() {
       // 3. Подключаемся к серверу (с таймером на текст ошибки)
       setShowInitConnectionError(false);
       const errorTimer = setTimeout(() => setShowInitConnectionError(true), 10000);
-      
+
       let connected = await signalRService.connect();
       let retries = 0;
       while (!connected && retries < 3) {
-         await new Promise(r => setTimeout(r, 2000));
-         connected = await signalRService.connect();
-         retries++;
+        await new Promise(r => setTimeout(r, 2000));
+        connected = await signalRService.connect();
+        retries++;
       }
       clearTimeout(errorTimer);
 
@@ -452,6 +474,8 @@ export default function App() {
 
   // (saveLocalCache, softClearCache, deepWipeOnLogout, resetToDefaults, applySettings moved above — before first useEffect)
 
+  const userVolumesSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     if (!settingsLoadedRef.current || !isAuth) return;
 
@@ -463,11 +487,31 @@ export default function App() {
         outputVolume: s.outputVolume,
         selectedInput: s.selectedInput,
         selectedOutput: s.selectedOutput,
-        noiseSuppression: s.noiseSuppression
+        noiseSuppression: s.noiseSuppression,
+        userVolumes: useAppStore.getState().userVolumes,
+        language: s.language
       });
       saveLocalCache();
     }, 500);
-  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, isAuth]);
+  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, isAuth, language]);
+
+  // Сохраняем индивидуальные громкости пользователей на сервере при их изменении
+  useEffect(() => {
+    if (!settingsLoadedRef.current || !isAuth) return;
+
+    if (userVolumesSaveTimerRef.current) clearTimeout(userVolumesSaveTimerRef.current);
+    userVolumesSaveTimerRef.current = setTimeout(() => {
+      const s = settingsRef.current;
+      signalRService.saveAudioSettings({
+        inputVolume: s.inputVolume,
+        outputVolume: s.outputVolume,
+        selectedInput: s.selectedInput,
+        selectedOutput: s.selectedOutput,
+        noiseSuppression: s.noiseSuppression,
+        userVolumes: useAppStore.getState().userVolumes
+      });
+    }, 800);
+  }, [store.userVolumes, isAuth]);
 
   useEffect(() => {
     if (!isAuth || !serverConnected || joke) return;
@@ -495,6 +539,7 @@ export default function App() {
     setEditChannelId(null);
 
     setFriendName('');
+    setFriendRequestStatus('idle');
     setNewPassword('');
     setError('');
     setPrivacyError('');
@@ -770,15 +815,22 @@ export default function App() {
   }, [store.pendingChannelSwitch, store.currentCallUser]);
 
   const handleAddFriend = useCallback(async () => {
-    if (!friendName.trim()) return;
-    const name = friendName.trim();
-    closeAndResetModals();
-    const success = await signalRService.sendFriendRequest(name);
-    if (!success) {
-      setOfflineToast('Пользователь не найден');
-      setTimeout(() => setOfflineToast(null), 3000);
+    if (!friendName.trim() || friendRequestStatus === 'loading' || friendRequestStatus === 'sent') return;
+    const trimmedName = friendName.trim().toLowerCase();
+    const alreadyFriend = store.friends.some(f => f.username?.toLowerCase() === trimmedName);
+    if (alreadyFriend) { setFriendRequestStatus('alreadyfriend'); return; }
+    setFriendRequestStatus('loading');
+    const success = await signalRService.sendFriendRequest(friendName.trim());
+    if (success) {
+      setFriendRequestStatus('sent');
+      setTimeout(() => {
+        closeAndResetModals();
+        setFriendRequestStatus('idle');
+      }, 1000);
+    } else {
+      setFriendRequestStatus('notfound');
     }
-  }, [friendName, closeAndResetModals]);
+  }, [friendName, friendRequestStatus, store.friends, closeAndResetModals]);
 
   const handleAcceptChannelInvite = useCallback(async (channelId: string) => {
     store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== channelId));
@@ -803,21 +855,21 @@ export default function App() {
   const openChannelMembers = useCallback(async (ch: VoiceChannel) => {
     const currentStore = useAppStore.getState();
     currentStore.setSelectedChannelForMembers(ch);
-    
+
     // Instant cache-hit (fallback to empty array)
     const cached = currentStore.channelMembersCache?.[ch.id] || [];
     currentStore.setChannelMembers(cached);
     currentStore.setModal('channelMembers', true);
 
     try {
-        // Silent background sync
-        const members = await signalRService.getChannelMembersList(ch.id);
-        if (members && Array.isArray(members)) {
-            useAppStore.getState().setChannelMembers(members);
-            useAppStore.getState().setChannelMembersCache(ch.id, members);
-        }
+      // Silent background sync
+      const members = await signalRService.getChannelMembersList(ch.id);
+      if (members && Array.isArray(members)) {
+        useAppStore.getState().setChannelMembers(members);
+        useAppStore.getState().setChannelMembersCache(ch.id, members);
+      }
     } catch (e) {
-        console.error("Failed to sync channel members", e);
+      console.error("Failed to sync channel members", e);
     }
   }, []);
 
@@ -1012,8 +1064,8 @@ export default function App() {
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>, context: 'setup' | 'profile') => {
     if (e.target.files?.[0]) {
       const file = e.target.files[0];
-      if (file.size > 5 * 1024 * 1024) { alert('Макс 5 МБ'); return; }
-      if (!file.type.startsWith('image/')) { alert('Только изображения'); return; }
+      if (file.size > 5 * 1024 * 1024) { alert(t('common.fileTooLarge')); return; }
+      if (!file.type.startsWith('image/')) { alert(t('common.onlyImages')); return; }
 
       if (file.type === 'image/gif') {
         const reader = new FileReader();
@@ -1060,7 +1112,7 @@ export default function App() {
       <div className="fixed inset-0 z-[99999] bg-black/90 flex items-center justify-center p-4">
         <div className="bg-panelBg p-6 rounded-3xl flex flex-col items-center shadow-2xl w-[360px] max-w-full">
           <div className="w-full flex items-center justify-between mb-6">
-            <h2 className="text-white text-xl font-bold">Обрезка аватара</h2>
+            <h2 className="text-white text-xl font-bold">{t('auth.cropTitle')}</h2>
             <button
               onClick={() => {
                 setShowCropper(false);
@@ -1121,13 +1173,13 @@ export default function App() {
               }}
               className="flex-1 py-3 text-textMuted hover:bg-surface rounded-xl font-bold transition-colors"
             >
-              Отмена
+              {t('common.cancel')}
             </button>
             <button
               onClick={applyCrop}
               className="flex-1 py-3 bg-[#c70060] text-white font-bold rounded-xl hover:opacity-90 transition-opacity"
             >
-              Применить
+              {t('common.apply')}
             </button>
           </div>
         </div>
@@ -1149,7 +1201,7 @@ export default function App() {
             {authStep === 'login' && (
               <div className="bg-panelBg p-10 rounded-3xl w-[400px] shadow-2xl flex flex-col">
                 <h1 className="text-4xl font-black text-center mb-8 tracking-wider text-white">ZABOR</h1>
-                <label className="text-xs font-bold text-textMuted mb-2 tracking-wider">ЛОГИН</label>
+                <label className="text-xs font-bold text-textMuted mb-2 tracking-wider">{t('auth.login')}</label>
                 <input
                   ref={loginInputRef}
                   type="text"
@@ -1158,7 +1210,7 @@ export default function App() {
                   maxLength={25}
                   className="bg-surface text-white rounded-xl p-3 mb-4 outline-none focus:ring-2 focus:ring-[#c70060]"
                 />
-                <label className="text-xs font-bold text-textMuted mb-2 tracking-wider">ПАРОЛЬ</label>
+                <label className="text-xs font-bold text-textMuted mb-2 tracking-wider">{t('auth.password')}</label>
                 <div className="relative mb-6">
                   <input
                     ref={passwordInputRef}
@@ -1177,31 +1229,31 @@ export default function App() {
                   </button>
                 </div>
                 {error && <p className="text-danger text-sm mb-4 text-center font-medium">{error}</p>}
-                <button onClick={handleAuth} disabled={isLoading} className="bg-[#c70060] text-white font-bold py-3 rounded-xl disabled:opacity-50 hover:opacity-90 transition-opacity">{isLoading ? 'ЗАГРУЗКА...' : 'ПРОДОЛЖИТЬ'}</button>
+                <button onClick={handleAuth} disabled={isLoading} className="bg-[#c70060] text-white font-bold py-3 rounded-xl disabled:opacity-50 hover:opacity-90 transition-opacity">{isLoading ? t('auth.loading') : t('auth.continue')}</button>
               </div>
             )}
             {authStep === 'confirm' && (
               <div className="bg-panelBg p-8 rounded-3xl w-[400px] text-center shadow-2xl">
-                <h2 className="text-2xl font-bold mb-4 text-white">Аккаунт не найден</h2>
-                <p className="text-textMuted mb-8">Создать новый профиль с таким логином?</p>
+                <h2 className="text-2xl font-bold mb-4 text-white">{t('auth.accountNotFound')}</h2>
+                <p className="text-textMuted mb-8">{t('auth.createNewProfile')}</p>
                 <div className="flex gap-4">
-                  <button onClick={() => setAuthStep('login')} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">Нет</button>
-                  <button onClick={() => { setAuthStep('setup'); setDisplayName(login); }} className="flex-1 bg-[#c70060] text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity">Да</button>
+                  <button onClick={() => setAuthStep('login')} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">{t('auth.no')}</button>
+                  <button onClick={() => { setAuthStep('setup'); setDisplayName(login); }} className="flex-1 bg-[#c70060] text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity">{t('auth.yes')}</button>
                 </div>
               </div>
             )}
             {authStep === 'setup' && (
               <div className="bg-panelBg p-10 rounded-3xl w-[400px] flex flex-col shadow-2xl">
-                <h1 className="text-2xl font-bold text-center mb-2 text-white">Создать профиль</h1>
-                <p className="text-sm text-textMuted text-center mb-8">Как вас будут видеть другие?</p>
+                <h1 className="text-2xl font-bold text-center mb-2 text-white">{t('auth.createProfile')}</h1>
+                <p className="text-sm text-textMuted text-center mb-8">{t('auth.howOthersSeeYou')}</p>
                 <label className="w-[103px] h-[103px] rounded-full mx-auto mb-8 flex items-center justify-center cursor-pointer relative shadow-lg hover:opacity-80 transition-opacity">
                   {avatarBase64 ? <AvatarImg src={avatarBase64} size={103} bgColor={avatarColor} /> : <div className="w-full h-full rounded-full flex items-center justify-center" style={{ backgroundColor: avatarColor }}><Camera size={32} className="text-white" /></div>}
                   <input type="file" accept="image/*" className="hidden" onChange={e => onFileChange(e, 'setup')} />
                 </label>
-                <label className="text-xs font-bold text-textMuted mb-2 tracking-wider">ОТОБРАЖАЕМОЕ ИМЯ</label>
-                <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={20} placeholder="Максимум 20 символов" className="bg-surface text-white rounded-xl p-3 mb-6 outline-none focus:ring-2 focus:ring-[#c70060]" />
+                <label className="text-xs font-bold text-textMuted mb-2 tracking-wider">{t('auth.displayName')}</label>
+                <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={20} placeholder={t('auth.max20chars')} className="bg-surface text-white rounded-xl p-3 mb-6 outline-none focus:ring-2 focus:ring-[#c70060]" />
                 {error && <p className="text-danger text-sm mb-4 text-center font-medium">{error}</p>}
-                <button onClick={handleAuth} disabled={isLoading} className="bg-[#c70060] text-white font-bold py-3 rounded-xl disabled:opacity-50 hover:opacity-90 transition-opacity">{isLoading ? 'СОЗДАНИЕ...' : 'СОЗДАТЬ'}</button>
+                <button onClick={handleAuth} disabled={isLoading} className="bg-[#c70060] text-white font-bold py-3 rounded-xl disabled:opacity-50 hover:opacity-90 transition-opacity">{isLoading ? t('auth.creating') : t('auth.create')}</button>
               </div>
             )}
             {renderCropper()}
@@ -1219,7 +1271,7 @@ export default function App() {
               <div className="w-10 h-10 border-4 border-[#c70060] border-t-transparent rounded-full animate-spin" />
               {showInitConnectionError && (
                 <div className="flex flex-col items-center mt-2 animate-fade-in">
-                  <p className="text-danger font-bold text-center">Нет соединения с сервером</p>
+                  <p className="text-danger font-bold text-center">{t('main.connection.noConnection')}</p>
                   {signalRService.lastConnectionError && (
                     <p className="text-white/60 text-xs mt-1 text-center max-w-[300px] break-words">
                       {signalRService.lastConnectionError}
@@ -1241,7 +1293,7 @@ export default function App() {
               <div className="w-10 h-10 border-4 border-[#c70060] border-t-transparent rounded-full animate-spin" />
               {showErrorText && (
                 <div className="flex flex-col items-center mt-4 animate-fade-in">
-                  <p className="text-danger font-bold text-center">Нет соединения с сервером. Переподключение...</p>
+                  <p className="text-danger font-bold text-center">{t('main.connection.reconnecting')}</p>
                   {signalRService.lastConnectionError && (
                     <p className="text-white/60 text-xs mt-1 text-center max-w-[300px] break-words">
                       {signalRService.lastConnectionError}
@@ -1265,7 +1317,7 @@ export default function App() {
             {showInvitesPanel && (
               <div className="absolute inset-0 bg-panelBg z-[60] flex flex-col animate-fade-in">
                 <div className="flex items-center justify-between p-4 border-b border-[#303035]">
-                  <span className="text-sm font-bold text-white tracking-wider">УВЕДОМЛЕНИЯ</span>
+                  <span className="text-sm font-bold text-white tracking-wider">{t('main.notifications.title')}</span>
                   <button onClick={() => setShowInvitesPanel(false)} className="text-textMuted hover:text-white transition-colors"><X size={20} /></button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -1277,12 +1329,12 @@ export default function App() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-white font-semibold text-sm truncate">{req.displayName}</p>
-                          <p className="text-textMuted text-xs font-medium">Запрос в друзья</p>
+                          <p className="text-textMuted text-xs font-medium">{t('main.notifications.friendRequest')}</p>
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={() => signalRService.acceptFriendRequest(req.id)} className="flex-1 bg-success/20 text-success py-2 rounded-xl text-sm font-bold hover:bg-success/30 transition-colors">Принять</button>
-                        <button onClick={() => signalRService.declineFriendRequest(req.id)} className="flex-1 bg-danger/20 text-danger py-2 rounded-xl text-sm font-bold hover:bg-danger/30 transition-colors">Отклонить</button>
+                        <button onClick={() => signalRService.acceptFriendRequest(req.id)} className="flex-1 bg-success/20 text-success py-2 rounded-xl text-sm font-bold hover:bg-success/30 transition-colors">{t('main.notifications.accept')}</button>
+                        <button onClick={() => signalRService.declineFriendRequest(req.id)} className="flex-1 bg-danger/20 text-danger py-2 rounded-xl text-sm font-bold hover:bg-danger/30 transition-colors">{t('main.notifications.decline')}</button>
                       </div>
                     </div>
                   ))}
@@ -1290,18 +1342,18 @@ export default function App() {
                     <div key={inv.channelId} className="bg-surface p-4 rounded-xl">
                       <div className="mb-3">
                         <p className="text-white font-semibold text-sm truncate">{inv.channelName}</p>
-                        <p className="text-textMuted text-xs font-medium">Приглашение от {inv.senderName}</p>
+                        <p className="text-textMuted text-xs font-medium">{t('main.notifications.channelInvite', { name: inv.senderName })}</p>
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={() => { handleAcceptChannelInvite(inv.channelId); setShowInvitesPanel(false); }} className="flex-1 bg-success/20 text-success py-2 rounded-xl text-sm font-bold hover:bg-success/30 transition-colors">Войти</button>
-                        <button onClick={() => handleDeclineChannelInvite(inv.channelId)} className="flex-1 bg-danger/20 text-danger py-2 rounded-xl text-sm font-bold hover:bg-danger/30 transition-colors">Отклонить</button>
+                        <button onClick={() => { handleAcceptChannelInvite(inv.channelId); setShowInvitesPanel(false); }} className="flex-1 bg-success/20 text-success py-2 rounded-xl text-sm font-bold hover:bg-success/30 transition-colors">{t('main.notifications.join')}</button>
+                        <button onClick={() => handleDeclineChannelInvite(inv.channelId)} className="flex-1 bg-danger/20 text-danger py-2 rounded-xl text-sm font-bold hover:bg-danger/30 transition-colors">{t('main.notifications.decline')}</button>
                       </div>
                     </div>
                   ))}
                   {store.friendRequests.length === 0 && store.channelInvites.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-16 text-textMuted">
                       <Mail size={40} className="mb-4 opacity-20" />
-                      <p className="font-medium text-sm">Нет уведомлений</p>
+                      <p className="font-medium text-sm">{t('main.notifications.none')}</p>
                     </div>
                   )}
                 </div>
@@ -1312,7 +1364,7 @@ export default function App() {
               {activeTab === 'channels' && (
                 <div className="animate-fade-in">
                   <div className="flex justify-between items-center mb-4 px-2">
-                    <span className="text-xs font-bold text-textMuted tracking-wider">ГОЛОСОВЫЕ КАНАЛЫ</span>
+                    <span className="text-xs font-bold text-textMuted tracking-wider">{t('main.voice.voiceChannels')}</span>
                     <button onClick={() => store.setModal('createChannel', true)} className="text-textMuted hover:text-white text-xl transition-colors">+</button>
                   </div>
                   {store.channels.map(ch => {
@@ -1347,7 +1399,7 @@ export default function App() {
               {activeTab === 'friends' && (
                 <div className="animate-fade-in">
                   <div className="flex justify-between items-center mb-4 px-2">
-                    <span className="text-xs font-bold text-textMuted tracking-wider">ДРУЗЬЯ</span>
+                    <span className="text-xs font-bold text-textMuted tracking-wider">{t('main.tabs.friends')}</span>
                     <button onClick={() => store.setModal('addFriend', true)} className="text-textMuted hover:text-white text-xl transition-colors">+</button>
                   </div>
                   {store.friends.map(f => (
@@ -1375,21 +1427,21 @@ export default function App() {
             </div>
 
             <div className="bg-surface rounded-full mx-4 my-2 p-1 flex relative shrink-0">
-              <button onClick={() => setActiveTab('channels')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-colors ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>Каналы</button>
-              <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-colors ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>Друзья</button>
+              <button onClick={() => setActiveTab('channels')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-colors ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.channels')}</button>
+              <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-colors ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.friends')}</button>
               <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-[#333] rounded-full transition-all duration-300 ease-out ${activeTab === 'channels' ? 'left-1' : 'left-[calc(50%+2px)]'}`} />
             </div>
 
             <div className="h-[75px] bg-[#09090B] rounded-2xl mx-4 mb-4 flex items-center px-4 shrink-0 shadow-lg">
-                <div onClick={() => { store.setSelectedProfileUser(store.currentUser, 'none'); setEditProfileDisplayName(store.currentUser!.displayName); setEditProfileAvatarBase64(null); store.setModal('profile', true); }}
+              <div onClick={() => { store.setSelectedProfileUser(store.currentUser, 'none'); setEditProfileDisplayName(store.currentUser!.displayName); setEditProfileAvatarBase64(null); store.setModal('profile', true); }}
                 className="relative w-[51px] h-[51px] mr-3 cursor-pointer shrink-0 hover:opacity-80 transition-opacity">
-                  <AvatarImg src={store.currentUser?.avatarBase64} size={51} bgColor={store.currentUser?.avatarColor} />
-                  <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-[3px] border-[#09090B] ${serverConnected ? 'bg-success' : 'bg-gray-500'}`} />
-                </div>
+                <AvatarImg src={store.currentUser?.avatarBase64} size={51} bgColor={store.currentUser?.avatarColor} />
+                <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-[3px] border-[#09090B] ${serverConnected ? 'bg-success' : 'bg-gray-500'}`} />
+              </div>
               <div className="flex-1 min-w-0 flex flex-col justify-center">
                 <div className="font-bold text-sm truncate text-white">{store.currentUser?.displayName}</div>
-                <div onClick={handleCopyUsername} className="text-xs font-semibold text-textMuted truncate cursor-pointer hover:text-white transition-colors mt-0.5" title="Нажмите, чтобы скопировать">
-                  {isCopied ? <span className="text-success">Скопировано!</span> : store.currentUser?.username}
+                <div onClick={handleCopyUsername} className="text-xs font-semibold text-textMuted truncate cursor-pointer hover:text-white transition-colors mt-0.5" title={t('main.user.copyUsername')}>
+                  {isCopied ? <span className="text-success">{t('main.user.copied')}</span> : store.currentUser?.username}
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
@@ -1400,6 +1452,7 @@ export default function App() {
                     store.setModal('settings', true);
                     loadDevices();
                     window.windowControls.getAutoLaunch().then(setAutoLaunch).catch(() => { });
+                    window.windowControls.getMinimizeToTray().then(setMinimizeToTray).catch(() => { });
                   }}
                   className="text-textMuted hover:text-white p-2 hover:bg-surface rounded-xl transition-colors"
                 >
@@ -1574,7 +1627,7 @@ export default function App() {
                   )}
                 </button>
                 <button onClick={handleEndCall} className="bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
-                  <PhoneOff size={20} /> Завершить
+                  <PhoneOff size={20} /> {t('main.voice.endCall')}
                 </button>
               </div>
             )}
@@ -1609,7 +1662,7 @@ export default function App() {
                   )}
                 </button>
                 <button onClick={() => signalRService.leaveChannel()} className="bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
-                  <Phone size={20} /> Завершить
+                  <Phone size={20} /> {t('main.voice.endCall')}
                 </button>
               </div>
             )}
@@ -1620,8 +1673,8 @@ export default function App() {
               </div>
               {showPingTooltip && (
                 <div className="absolute bottom-12 left-0 bg-surface border border-[#303035] rounded-xl px-4 py-2 shadow-xl whitespace-nowrap">
-                  <div className="text-xs text-textMuted mb-1 font-bold tracking-wider">ПИНГ</div>
-                  <div className="font-bold" style={{ color: getPingColor() }}>{ping < 0 ? 'Офлайн' : `${ping} мс`}</div>
+                  <div className="text-xs text-textMuted mb-1 font-bold tracking-wider">{t('main.voice.ping')}</div>
+                  <div className="font-bold" style={{ color: getPingColor() }}>{ping < 0 ? t('main.voice.offline') : `${ping} мс`}</div>
                 </div>
               )}
             </div>
@@ -1632,39 +1685,69 @@ export default function App() {
 
       {renderModal('createChannel',
         <div className="bg-panelBg p-8 rounded-3xl w-[400px] shadow-2xl">
-          <h2 className="text-xl font-bold mb-6 text-white">Создать канал</h2>
-          <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">НАЗВАНИЕ КАНАЛА</label>
-          <input type="text" value={newChannelName} onChange={e => setNewChannelName(e.target.value)} maxLength={25} onKeyDown={e => e.key === 'Enter' && handleCreateChannel()} placeholder="Максимум 25 символов" className="w-full bg-surface text-white rounded-xl p-3 mb-6 outline-none focus:ring-2 focus:ring-[#c70060]" />
+          <h2 className="text-xl font-bold mb-6 text-white">{t('modals.createChannel.title')}</h2>
+          <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('modals.createChannel.label')}</label>
+          <input type="text" value={newChannelName} onChange={e => setNewChannelName(e.target.value)} maxLength={25} onKeyDown={e => e.key === 'Enter' && handleCreateChannel()} placeholder={t('modals.createChannel.placeholder')} className="w-full bg-surface text-white rounded-xl p-3 mb-6 outline-none focus:ring-2 focus:ring-[#c70060]" />
           {error && <p className="text-danger text-sm mb-4 font-medium">{error}</p>}
           <div className="flex gap-4">
-            <button onClick={closeAndResetModals} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">Отмена</button>
-            <button onClick={handleCreateChannel} className="flex-1 bg-[#c70060] text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity">Создать</button>
+            <button onClick={closeAndResetModals} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">{t('common.cancel')}</button>
+            <button onClick={handleCreateChannel} className="flex-1 bg-[#c70060] text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity">{t('modals.createChannel.submit')}</button>
           </div>
         </div>
       )}
 
       {renderModal('channelEdit',
         <div className="bg-panelBg p-8 rounded-3xl w-[400px] shadow-2xl">
-          <h2 className="text-xl font-bold mb-6 text-white">Переименовать канал</h2>
-          <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">НОВОЕ НАЗВАНИЕ</label>
+          <h2 className="text-xl font-bold mb-6 text-white">{t('modals.renameChannel.title')}</h2>
+          <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('modals.renameChannel.label')}</label>
           <input type="text" value={editChannelName} onChange={e => setEditChannelName(e.target.value)} maxLength={25} onKeyDown={e => e.key === 'Enter' && saveChannelEdit()} className="w-full bg-surface text-white rounded-xl p-3 mb-6 outline-none focus:ring-2 focus:ring-[#c70060]" />
           {error && <p className="text-danger text-sm mb-4 font-medium">{error}</p>}
           <div className="flex gap-4">
-            <button onClick={closeAndResetModals} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">Отмена</button>
-            <button onClick={saveChannelEdit} className="flex-1 bg-[#c70060] text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity">Сохранить</button>
+            <button onClick={closeAndResetModals} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">{t('common.cancel')}</button>
+            <button onClick={saveChannelEdit} className="flex-1 bg-[#c70060] text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity">{t('modals.renameChannel.submit')}</button>
           </div>
         </div>
       )}
 
       {renderModal('addFriend',
         <div className="bg-panelBg p-8 rounded-3xl w-[400px] shadow-2xl">
-          <h2 className="text-xl font-bold mb-2 text-white">Добавить друга</h2>
-          <p className="text-textMuted text-sm mb-6 font-medium">Введите логин пользователя</p>
-          <input type="text" value={friendName} onChange={e => { setFriendName(e.target.value); setError(''); }} maxLength={25} onKeyDown={e => e.key === 'Enter' && handleAddFriend()} placeholder="Логин" className="w-full bg-surface text-white rounded-xl p-3 mb-4 outline-none focus:ring-2 focus:ring-[#c70060]" />
-          {error && <p className="text-danger text-sm mb-4 font-medium">{error}</p>}
-          <div className="flex gap-4">
-            <button onClick={closeAndResetModals} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">Отмена</button>
-            <button onClick={handleAddFriend} className="flex-1 bg-[#c70060] text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity">Отправить</button>
+          <h2 className="text-xl font-bold mb-2 text-white">{t('modals.addFriend.title')}</h2>
+          <p className="text-textMuted text-sm mb-6 font-medium">{t('modals.addFriend.desc')}</p>
+          <input
+            type="text"
+            value={friendName}
+            onChange={e => { setFriendName(e.target.value); if (friendRequestStatus === 'notfound' || friendRequestStatus === 'alreadyfriend') setFriendRequestStatus('idle'); }}
+            maxLength={25}
+            onKeyDown={e => e.key === 'Enter' && handleAddFriend()}
+            placeholder={t('modals.addFriend.placeholder')}
+            className={`w-full bg-surface text-white rounded-xl p-3 outline-none focus:ring-2 ${friendRequestStatus === 'notfound' ? 'focus:ring-danger ring-2 ring-danger' :
+              friendRequestStatus === 'alreadyfriend' ? 'focus:ring-yellow-400 ring-2 ring-yellow-400' :
+                'focus:ring-[#c70060]'
+              }`}
+          />
+          {friendRequestStatus === 'notfound' && (
+            <p className="text-danger text-sm mt-2 mb-0 font-medium">{t('modals.addFriend.errorNotFound')}</p>
+          )}
+          {friendRequestStatus === 'alreadyfriend' && (
+            <p className="text-yellow-400 text-sm mt-2 mb-0 font-medium">{t('modals.addFriend.errorAlreadyFriend')}</p>
+          )}
+          <div className="flex gap-4 mt-4">
+            <button
+              onClick={() => { closeAndResetModals(); setFriendRequestStatus('idle'); }}
+              className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors"
+            >{t('common.cancel')}</button>
+            <button
+              onClick={handleAddFriend}
+              disabled={friendRequestStatus === 'loading' || friendRequestStatus === 'sent'}
+              className={`flex-1 py-3 rounded-xl font-bold transition-all ${friendRequestStatus === 'sent'
+                ? 'bg-green-600 text-white cursor-default scale-105'
+                : friendRequestStatus === 'loading'
+                  ? 'bg-[#c70060]/60 text-white cursor-wait'
+                  : 'bg-[#c70060] text-white hover:opacity-90'
+                }`}
+            >
+              {friendRequestStatus === 'sent' ? `✓ ${t('modals.addFriend.sent')}` : friendRequestStatus === 'loading' ? '...' : t('modals.addFriend.submit')}
+            </button>
           </div>
         </div>
       )}
@@ -1676,21 +1759,52 @@ export default function App() {
             <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X size={24} /></button>
           </div>
           <div className="flex gap-2 px-6 pt-4">
-            <button onClick={() => setSettingsTab('general')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'general' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>Общие</button>
-            <button onClick={() => setSettingsTab('audio')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'audio' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>Звук</button>
-            <button onClick={() => setSettingsTab('privacy')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'privacy' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>Безопасность</button>
+            <button onClick={() => setSettingsTab('general')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'general' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>{t('settings.tabs.general')}</button>
+            <button onClick={() => setSettingsTab('audio')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'audio' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>{t('settings.tabs.audio')}</button>
+            <button onClick={() => setSettingsTab('privacy')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'privacy' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>{t('settings.tabs.privacy')}</button>
           </div>
           <div className="p-6 overflow-y-auto flex-1">
             {settingsTab === 'general' && (
               <div className="space-y-6">
                 <div>
-                  <label className="text-xs font-bold text-textMuted mb-3 block tracking-wider">СИСТЕМА</label>
+                  <label className="text-xs font-bold text-textMuted mb-3 block tracking-wider">{t('settings.general.system')}</label>
+
+                  <div className="flex items-center justify-between bg-surface p-4 rounded-xl mb-3">
+                    <div className="mr-4">
+                      <span className="font-semibold text-white text-[15px]">{t('settings.general.language')}</span>
+                      <p className="text-xs text-textMuted mt-1">{t('settings.general.languageDesc')}</p>
+                    </div>
+                    <select
+                      value={language}
+                      onChange={(e) => {
+                        const newLang = e.target.value;
+                        setLanguage(newLang);
+                        i18n.changeLanguage(newLang);
+                      }}
+                      className="bg-[#2B2D31] text-white rounded-xl px-3 py-2 outline-none border border-[#303035] focus:ring-2 focus:ring-[#c70060] font-bold text-sm cursor-pointer"
+                    >
+                      <option value="ru">Русский</option>
+                      <option value="en">English</option>
+                    </select>
+                  </div>
+
                   <div className="flex items-center justify-between bg-surface p-4 rounded-xl">
                     <div className="mr-4">
-                      <span className="font-semibold text-white text-[15px]">Запускать вместе с Windows</span>
-                      <p className="text-xs text-textMuted mt-1">ZABOR откроется автоматически при включении компьютера</p>
+                      <span className="font-semibold text-white text-[15px]">{t('settings.general.autoLaunch')}</span>
+                      <p className="text-xs text-textMuted mt-1">{t('settings.general.autoLaunchDesc')}</p>
                     </div>
                     <Md3Switch checked={autoLaunch} onChange={handleAutoLaunchToggle} />
+                  </div>
+
+                  <div className="flex items-center justify-between bg-surface p-4 rounded-xl mt-3">
+                    <div className="mr-4">
+                      <span className="font-semibold text-white text-[15px]">{t('settings.general.minimizeToTray')}</span>
+                      <p className="text-xs text-textMuted mt-1">{t('settings.general.minimizeToTrayDesc')}</p>
+                    </div>
+                    <Md3Switch checked={minimizeToTray} onChange={(v) => {
+                      setMinimizeToTray(v);
+                      window.windowControls.setMinimizeToTray(v).catch(() => { });
+                    }} />
                   </div>
                 </div>
               </div>
@@ -1698,35 +1812,35 @@ export default function App() {
             {settingsTab === 'audio' && (
               <div className="space-y-6">
                 <div>
-                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">УСТРОЙСТВО ВВОДА</label>
+                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.audio.inputDevice')}</label>
                   <select value={selectedInput} onChange={e => { setSelectedInput(e.target.value); webrtc.updateSettings(e.target.value, noiseSuppression); }} className="w-full bg-surface text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-[#c70060]">
-                    <option value="default">По умолчанию</option>
+                    <option value="default">{t('settings.audio.default')}</option>
                     {audioDevices.inputs.length === 0 && selectedInput !== 'default' && (
-                      <option value={selectedInput}>Загрузка...</option>
+                      <option value={selectedInput}>{t('common.loading')}</option>
                     )}
-                    {audioDevices.inputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Микрофон'}</option>)}
+                    {audioDevices.inputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || t('settings.audio.micFallback')}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">УСТРОЙСТВО ВЫВОДА</label>
+                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.audio.outputDevice')}</label>
                   <select value={selectedOutput} onChange={e => { setSelectedOutput(e.target.value); webrtc.setOutputDevice(e.target.value); }} className="w-full bg-surface text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-[#c70060]">
-                    <option value="default">По умолчанию</option>
+                    <option value="default">{t('settings.audio.default')}</option>
                     {audioDevices.outputs.length === 0 && selectedOutput !== 'default' && (
-                      <option value={selectedOutput}>Загрузка...</option>
+                      <option value={selectedOutput}>{t('common.loading')}</option>
                     )}
-                    {audioDevices.outputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Динамики'}</option>)}
+                    {audioDevices.outputs.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || t('settings.audio.speakerFallback')}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">ГРОМКОСТЬ МИКРОФОНА — {inputVolume}%</label>
+                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.audio.inputVolume')} — {inputVolume}%</label>
                   <Md3Slider min={0} max={200} step={5} value={inputVolume} onChange={v => { setInputVolume(v); webrtc.setInputVolume(v); }} />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">ГРОМКОСТЬ ЗВУКА — {outputVolume}%</label>
+                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.audio.outputVolume')} — {outputVolume}%</label>
                   <Md3Slider min={0} max={200} step={5} value={outputVolume} onChange={v => { setOutputVolume(v); webrtc.setOutputVolume(v); }} />
                 </div>
                 <div className="flex items-center justify-between bg-surface p-4 rounded-xl">
-                  <span className="font-semibold text-white">Шумоподавление</span>
+                  <span className="font-semibold text-white">{t('settings.audio.noiseSuppression')}</span>
                   <Md3Switch checked={noiseSuppression} onChange={v => {
                     setNoiseSuppression(v);
                     webrtc.setNoiseSuppression(v);
@@ -1738,15 +1852,15 @@ export default function App() {
             {settingsTab === 'privacy' && (
               <div className="space-y-6">
                 <div>
-                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">НОВЫЙ ПАРОЛЬ</label>
+                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.privacy.newPassword')}</label>
                   <div className="relative">
-                    <input type={showPrivacyPass ? 'text' : 'password'} value={newPassword} onChange={e => { setNewPassword(e.target.value); setPrivacyError(''); }} maxLength={25} placeholder="Максимум 25 символов" className="w-full bg-surface text-white rounded-xl p-3 outline-none pr-10 focus:ring-2 focus:ring-[#c70060]" />
+                    <input type={showPrivacyPass ? 'text' : 'password'} value={newPassword} onChange={e => { setNewPassword(e.target.value); setPrivacyError(''); }} maxLength={25} placeholder={t('settings.privacy.passwordHint')} className="w-full bg-surface text-white rounded-xl p-3 outline-none pr-10 focus:ring-2 focus:ring-[#c70060]" />
                     <button onClick={() => setShowPrivacyPass(!showPrivacyPass)} className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors">{showPrivacyPass ? <EyeOff size={20} /> : <Eye size={20} />}</button>
                   </div>
                   {privacyError && <p className="text-danger text-sm mt-2 font-medium">{privacyError}</p>}
-                  <button onClick={changePassword} className="mt-3 w-full bg-[#c70060] hover:opacity-90 text-white py-3 rounded-xl font-bold transition-opacity">Сменить пароль</button>
+                  <button onClick={changePassword} className="mt-3 w-full bg-[#c70060] hover:opacity-90 text-white py-3 rounded-xl font-bold transition-opacity">{t('settings.privacy.changePassword')}</button>
                 </div>
-                <button onClick={handleLogout} className="w-full bg-danger hover:bg-red-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"><LogOut size={18} /> Выйти из аккаунта</button>
+                <button onClick={handleLogout} className="w-full bg-danger hover:bg-red-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"><LogOut size={18} /> {t('settings.privacy.logout')}</button>
               </div>
             )}
           </div>
@@ -1857,11 +1971,15 @@ export default function App() {
       {renderModal('kickConfirm',
         <div className="bg-panelBg p-8 rounded-3xl w-[400px] text-center shadow-2xl">
           <div className="w-16 h-16 bg-danger/20 rounded-full flex items-center justify-center mx-auto mb-4"><UserX size={32} className="text-danger" /></div>
-          <h2 className="text-xl font-bold mb-2 text-white">Исключить пользователя?</h2>
-          <p className="text-textMuted mb-8">Вы уверены, что хотите лишить пользователя <span className="text-white font-bold">{store.userToKick?.displayName}</span> доступа к каналу?</p>
+          <h2 className="text-xl font-bold mb-2 text-white">{t('modals.kick.title')}</h2>
+          <p className="text-textMuted mb-8">
+            <Trans i18nKey="modals.kick.desc" values={{ name: store.userToKick?.displayName }}>
+              Вы уверены, что хотите лишить пользователя <span className="text-white font-bold">{store.userToKick?.displayName}</span> доступа к каналу?
+            </Trans>
+          </p>
           <div className="flex gap-4">
-            <button onClick={() => { store.setModal('kickConfirm', false); store.setUserToKick(null); }} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">Отмена</button>
-            <button onClick={handleKickConfirm} className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-600 transition-colors">Исключить</button>
+            <button onClick={() => { store.setModal('kickConfirm', false); store.setUserToKick(null); }} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">{t('common.cancel')}</button>
+            <button onClick={handleKickConfirm} className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-600 transition-colors">{t('modals.kick.submit')}</button>
           </div>
         </div>
       )}
@@ -1907,27 +2025,27 @@ export default function App() {
       {renderModal('incomingChannelInvite',
         <div className="bg-panelBg p-8 rounded-3xl w-[350px] text-center shadow-2xl">
           {(() => {
-             const invite = store.incomingChannelInvite;
-             if (!invite) return null;
-             const users = store.channelUsersMap[invite.channelId] || [];
-             const displayUsers = users.length > 0 ? users : [{ id: invite.senderId, displayName: invite.senderName, avatarBase64: null, avatarColor: '#c70060', username: '', isOnline: true, isMuted: false, isDeafened: false, isSpeaking: false }];
-             return (
-               <>
-                 <div className="flex justify-center mb-4">
-                   {displayUsers.slice(0, 4).map((u, i) => (
-                     <div key={u.id} className="w-[87px] h-[87px] rounded-full border-[4px] border-panelBg relative shrink-0 shadow-lg" style={{ marginLeft: i === 0 ? 0 : '-1.5rem', zIndex: 10 - i }}>
-                        <AvatarImg src={u.avatarBase64 || null} size={87} bgColor={u.avatarColor} />
-                     </div>
-                   ))}
-                 </div>
-                 <h2 className="text-xl font-bold mb-2 text-white truncate px-2">{invite.channelName}</h2>
-                 <p className="text-textMuted mb-8 font-medium">Вас зовут в канал</p>
-                 <div className="flex gap-4">
-                   <button onClick={() => { store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); }} className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"><PhoneOff size={18} /> Сбросить</button>
-                   <button onClick={() => { handleAcceptChannelInvite(invite.channelId); store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== invite.channelId)); }} className="flex-1 bg-success text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors flex items-center justify-center gap-2"><Phone size={18} /> Войти</button>
-                 </div>
-               </>
-             );
+            const invite = store.incomingChannelInvite;
+            if (!invite) return null;
+            const users = store.channelUsersMap[invite.channelId] || [];
+            const displayUsers = users.length > 0 ? users : [{ id: invite.senderId, displayName: invite.senderName, avatarBase64: null, avatarColor: '#c70060', username: '', isOnline: true, isMuted: false, isDeafened: false, isSpeaking: false }];
+            return (
+              <>
+                <div className="flex justify-center mb-4">
+                  {displayUsers.slice(0, 4).map((u, i) => (
+                    <div key={u.id} className="w-[87px] h-[87px] rounded-full border-[4px] border-panelBg relative shrink-0 shadow-lg" style={{ marginLeft: i === 0 ? 0 : '-1.5rem', zIndex: 10 - i }}>
+                      <AvatarImg src={u.avatarBase64 || null} size={87} bgColor={u.avatarColor} />
+                    </div>
+                  ))}
+                </div>
+                <h2 className="text-xl font-bold mb-2 text-white truncate px-2">{invite.channelName}</h2>
+                <p className="text-textMuted mb-8 font-medium">Вас зовут в канал</p>
+                <div className="flex gap-4">
+                  <button onClick={() => { store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); }} className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"><PhoneOff size={18} /> Сбросить</button>
+                  <button onClick={() => { handleAcceptChannelInvite(invite.channelId); store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== invite.channelId)); }} className="flex-1 bg-success text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors flex items-center justify-center gap-2"><Phone size={18} /> Войти</button>
+                </div>
+              </>
+            );
           })()}
         </div>
       )}
@@ -2210,7 +2328,7 @@ export default function App() {
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000000] animate-toast-in">
           <div className="bg-[#09090B]/90 backdrop-blur-xl border border-danger/40 rounded-3xl px-8 py-5 shadow-[0_0_50px_rgba(239,68,68,0.25)] flex items-center gap-4">
             <div className="w-10 h-10 rounded-full bg-danger/20 flex items-center justify-center shrink-0">
-               <WifiOff size={20} className="text-danger" />
+              <WifiOff size={20} className="text-danger" />
             </div>
             <div>
               <p className="text-white font-bold text-base leading-tight">Уведомление</p>
@@ -2225,7 +2343,7 @@ export default function App() {
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000000] animate-toast-in">
           <div className="bg-[#09090B]/90 backdrop-blur-xl border border-warning/40 rounded-3xl px-8 py-5 shadow-[0_0_50px_rgba(234,179,8,0.25)] flex items-center gap-4">
             <div className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center shrink-0">
-               <MicOff size={20} className="text-warning" />
+              <MicOff size={20} className="text-warning" />
             </div>
             <div>
               <p className="text-white font-bold text-base leading-tight">Уведомление</p>

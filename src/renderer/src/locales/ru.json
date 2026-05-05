@@ -1,0 +1,118 @@
+{
+  "settings": {
+    "title": "Настройки",
+    "tabs": {
+      "general": "Общие",
+      "audio": "Звук",
+      "privacy": "Безопасность"
+    },
+    "general": {
+      "system": "СИСТЕМА",
+      "autoLaunch": "Запускать вместе с Windows",
+      "autoLaunchDesc": "ZABOR откроется автоматически при включении компьютера",
+      "minimizeToTray": "Сворачивать в трей",
+      "minimizeToTrayDesc": "При нажатии на крестик приложение свернётся, а не закроется",
+      "language": "Язык приложения",
+      "languageDesc": "Выберите основной язык интерфейса"
+    },
+    "audio": {
+      "inputDevice": "УСТРОЙСТВО ВВОДА",
+      "outputDevice": "УСТРОЙСТВО ВЫВОДА",
+      "inputVolume": "ГРОМКОСТЬ МИКРОФОНА",
+      "outputVolume": "ГРОМКОСТЬ ЗВУКА",
+      "noiseSuppression": "Шумоподавление",
+      "default": "По умолчанию",
+      "micFallback": "Микрофон",
+      "speakerFallback": "Динамики"
+    },
+    "privacy": {
+      "newPassword": "НОВЫЙ ПАРОЛЬ",
+      "passwordHint": "Максимум 25 символов",
+      "changePassword": "Сменить пароль",
+      "logout": "Выйти из аккаунта"
+    }
+  },
+  "auth": {
+    "login": "ЛОГИН",
+    "password": "ПАРОЛЬ",
+    "continue": "ПРОДОЛЖИТЬ",
+    "loading": "ЗАГРУЗКА...",
+    "accountNotFound": "Аккаунт не найден",
+    "createNewProfile": "Создать новый профиль с таким логином?",
+    "yes": "Да",
+    "no": "Нет",
+    "createProfile": "Создать профиль",
+    "howOthersSeeYou": "Как вас будут видеть другие?",
+    "displayName": "ОТОБРАЖАЕМОЕ ИМЯ",
+    "max20chars": "Максимум 20 символов",
+    "creating": "СОЗДАНИЕ...",
+    "create": "СОЗДАТЬ",
+    "cropTitle": "Обрезка аватара"
+  },
+  "main": {
+    "tabs": {
+      "channels": "Каналы",
+      "friends": "Друзья"
+    },
+    "voice": {
+      "endCall": "Завершить",
+      "ping": "ПИНГ",
+      "offline": "Офлайн",
+      "voiceChannels": "ГОЛОСОВЫЕ КАНАЛЫ"
+    },
+    "notifications": {
+      "title": "УВЕДОМЛЕНИЯ",
+      "friendRequest": "Запрос в друзья",
+      "channelInvite": "Приглашение от {{name}}",
+      "accept": "Принять",
+      "decline": "Отклонить",
+      "join": "Войти",
+      "none": "Нет уведомлений"
+    },
+    "user": {
+      "copyUsername": "Нажмите, чтобы скопировать",
+      "copied": "Скопировано!"
+    },
+    "connection": {
+      "noConnection": "Нет соединения с сервером",
+      "reconnecting": "Нет соединения с сервером. Переподключение..."
+    }
+  },
+  "modals": {
+    "createChannel": {
+      "title": "Создать канал",
+      "label": "НАЗВАНИЕ КАНАЛА",
+      "placeholder": "Максимум 25 символов",
+      "submit": "Создать"
+    },
+    "renameChannel": {
+      "title": "Переименовать канал",
+      "label": "НОВОЕ НАЗВАНИЕ",
+      "submit": "Сохранить"
+    },
+    "addFriend": {
+      "title": "Добавить друга",
+      "desc": "Введите логин пользователя",
+      "placeholder": "Логин",
+      "errorNotFound": "Пользователь не найден",
+      "errorAlreadyFriend": "Он уже с тобой дружит ;) ",
+      "submit": "Отправить",
+      "sent": "Отправлено"
+    },
+    "kick": {
+      "title": "Исключить пользователя?",
+      "desc": "Вы уверены, что хотите лишить пользователя <1>{{name}}</1> доступа к каналу?",
+      "submit": "Исключить"
+    }
+  },
+  "common": {
+    "cancel": "Отмена",
+    "save": "Сохранить",
+    "close": "Закрыть",
+    "loading": "Загрузка...",
+    "error": "Ошибка",
+    "apply": "Применить",
+    "fileTooLarge": "Макс 5 МБ",
+    "onlyImages": "Только изображения"
+  }
+}

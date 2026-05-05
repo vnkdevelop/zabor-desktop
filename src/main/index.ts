@@ -41,6 +41,7 @@ if (!gotLock) {
 // ═══════════════════════════════════
 interface AppSettings {
   openAtLogin: boolean;
+  minimizeToTray: boolean;
 }
 
 function getSettingsPath(): string {
@@ -51,10 +52,10 @@ function loadAppSettings(): AppSettings {
   try {
     const filePath = getSettingsPath();
     if (existsSync(filePath)) {
-      return { openAtLogin: false, ...JSON.parse(readFileSync(filePath, 'utf-8')) };
+      return { openAtLogin: false, minimizeToTray: true, ...JSON.parse(readFileSync(filePath, 'utf-8')) };
     }
   } catch {}
-  return { openAtLogin: false };
+  return { openAtLogin: false, minimizeToTray: true };
 }
 
 function saveAppSettings(settings: AppSettings): void {
@@ -271,7 +272,8 @@ function createWindow(): void {
   });
 
   mainWindow.on('close', (event) => {
-    if (!isQuitting) {
+    const settings = loadAppSettings();
+    if (!isQuitting && settings.minimizeToTray) {
       event.preventDefault();
       scheduleWindowStateSave();
       mainWindow?.hide();
@@ -316,7 +318,13 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('window-close', () => {
-    mainWindow?.hide();
+    const settings = loadAppSettings();
+    if (settings.minimizeToTray) {
+      mainWindow?.hide();
+    } else {
+      isQuitting = true;
+      app.quit();
+    }
   });
 
   ipcMain.on('app-quit', () => {
@@ -388,6 +396,18 @@ app.whenReady().then(() => {
     currentSettings.openAtLogin = enabled;
     saveAppSettings(currentSettings);
     applyAutoLaunch(enabled);
+    return true;
+  });
+
+  // ── Minimize to tray ──
+  ipcMain.handle('get-minimize-to-tray', () => {
+    return loadAppSettings().minimizeToTray;
+  });
+
+  ipcMain.handle('set-minimize-to-tray', (_event, enabled: boolean) => {
+    const currentSettings = loadAppSettings();
+    currentSettings.minimizeToTray = enabled;
+    saveAppSettings(currentSettings);
     return true;
   });
 

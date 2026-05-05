@@ -4,6 +4,8 @@ import { useAppStore } from '../store/useAppStore'
 type SpeakingEntry = {
   timer: NodeJS.Timeout
   stream: MediaStream
+  /** Аудио-узлы VAD-цепочки для корректного disconnect при очистке */
+  nodes: AudioNode[]
 }
 
 export class WebRTCManager {
@@ -14,6 +16,8 @@ export class WebRTCManager {
   private audioElements: Map<string, HTMLAudioElement> = new Map()
   /** Буфер ICE-кандидатов, пришедших до setRemoteDescription */
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map()
+  /** Таймеры переподключения — хранятся на уровне класса чтобы отменять при явном дисконнекте */
+  private dcTimers: Map<string, NodeJS.Timeout> = new Map()
 
   private currentDeviceId = 'default'
   private currentOutputDeviceId = 'default'
@@ -26,7 +30,7 @@ export class WebRTCManager {
   private processedContext: AudioContext | null = null
   private processedSource: MediaStreamAudioSourceNode | null = null
   private inputGainNode: GainNode | null = null
-
+  private dfNode: AudioWorkletNode | null = null
 
   private vadContext: AudioContext | null = null
   private speakingIntervals: Map<string, SpeakingEntry> = new Map()
@@ -116,28 +120,73 @@ export class WebRTCManager {
     this.processedContext = ctx
     const destination = ctx.createMediaStreamDestination()
 
-    // Оставляем только GainNode для управления громкостью микрофона
-    const inputGain = ctx.createGain()
-    inputGain.gain.value = Math.max(0, Math.min(2, this.inputVolume / 100))
-    this.inputGainNode = inputGain
+    let dfNode: AudioWorkletNode | null = null
+    try {
+      // Assuming Vite compile logic or static public asset. Adjust path as necessary.
+      // Often in Vite this would be imported as a worker URL, but for dynamic AudioWorklet 
+      // adding the module via a known public URL is common.
+      await ctx.audioWorklet.addModule('/deepfilter-processor.js')
+      dfNode = new AudioWorkletNode(ctx, 'deepfilter-processor')
+      this.dfNode = dfNode
 
-    const highpass = ctx.createBiquadFilter()
-    highpass.type = 'highpass'
-    highpass.frequency.value = 100
-
-    const compressor = ctx.createDynamicsCompressor()
-    compressor.threshold.value = -24
-    compressor.knee.value = 30
-    compressor.ratio.value = 12
-    compressor.attack.value = 0.003
-    compressor.release.value = 0.25
+      const me = useAppStore.getState().currentUser
+      dfNode.port.onmessage = (event) => {
+        if (event.data.type === 'vad' && me) {
+           useAppStore.getState().setSpeakingStatus(me.id, event.data.isSpeaking)
+           signalRService.setSpeakingState(event.data.isSpeaking)
+        }
+      }
+    } catch (e) {
+      console.warn('[WebRTC] Failed to load deepfilter-processor.js, running without it.', e)
+    }
 
     const source = ctx.createMediaStreamSource(rawStream)
     this.processedSource = source
 
+    // 1. Source -> 2. DeepFilterNet -> 3. High-pass (80Hz)
+    const highpass = ctx.createBiquadFilter()
+    highpass.type = 'highpass'
+    highpass.frequency.value = 80
+
+    // 4. Peaking Filter (350Hz, Q=1.4, -3dB) - Remove boxiness
+    const peaking = ctx.createBiquadFilter()
+    peaking.type = 'peaking'
+    peaking.frequency.value = 350
+    peaking.Q.value = 1.4
+    peaking.gain.value = -3
+
+    // 5. High-Shelf Filter (8kHz, +3dB) - Add air
+    const highShelf = ctx.createBiquadFilter()
+    highShelf.type = 'highshelf'
+    highShelf.frequency.value = 8000
+    highShelf.gain.value = 3
+
+    // 6. Soft Compressor
+    const compressor = ctx.createDynamicsCompressor()
+    compressor.threshold.value = -24
+    compressor.knee.value = 10
+    compressor.ratio.value = 3
+    compressor.attack.value = 0.005
+    compressor.release.value = 0.150
+
+    // 7. Output Gain
+    const inputGain = ctx.createGain()
+    inputGain.gain.value = Math.max(0, Math.min(2, this.inputVolume / 100))
+    this.inputGainNode = inputGain
+
+    // Connections
+    let currentNode: AudioNode = source
     
-    source.connect(highpass)
-    highpass.connect(compressor)
+    // Only route through DeepFilterNet if noise suppression is enabled and node exists
+    if (this.dfNode && this.noiseSuppression) {
+      currentNode.connect(this.dfNode)
+      currentNode = this.dfNode
+    }
+
+    currentNode.connect(highpass)
+    highpass.connect(peaking)
+    peaking.connect(highShelf)
+    highShelf.connect(compressor)
     compressor.connect(inputGain)
     inputGain.connect(destination)
 
@@ -145,6 +194,12 @@ export class WebRTCManager {
   }
 
   private cleanupProcessedStream() {
+
+    if (this.dfNode) {
+      this.dfNode.port.close()
+      this.dfNode.disconnect()
+      this.dfNode = null
+    }
 
     if (this.processedContext && this.processedContext.state !== 'closed') {
       this.processedContext.close().catch(() => {})
@@ -205,21 +260,24 @@ export class WebRTCManager {
 
       const analyser = this.vadContext.createAnalyser()
       analyser.fftSize = 512
-      analyser.smoothingTimeConstant = 0.3
+      analyser.smoothingTimeConstant = 0.6  // 0.3 → 0.6: лучше улавливает тихую речь
 
       source.connect(bp1)
       bp1.connect(bp2)
       bp2.connect(analyser)
+      // Сохраняем узлы для явного disconnect в clearVAD (иначе утечка памяти в vadContext)
+      const vadNodes: AudioNode[] = [source, bp1, bp2, analyser]
 
       const buf = new Uint8Array(analyser.fftSize)
       let lastVoice = 0
       let wasSpeaking = false
       let voiceFrames = 0
-      let silenceFrames = 0
+      let silenceFrames = 0     // Счётчик для теста "микрофон мёртв"
+      let vadSilenceFrames = 0  // Отдельный счётчик для гистерезиса VAD
       let hasWarnedSilence = false
 
-      const avgTh = isLocal ? 4 : 2
-      const peakTh = isLocal ? 10 : 8
+      const avgTh  = isLocal ? 2 : 1   // было 4/2 — снижаем для тихих голосов
+      const peakTh = isLocal ? 6 : 4   // было 10/8
 
       const check = () => {
         const store = useAppStore.getState()
@@ -262,10 +320,19 @@ export class WebRTCManager {
           }
         }
 
-        if (avg >= avgTh || peak >= peakTh) voiceFrames++; else voiceFrames = 0
+        // Гистерезис VAD: voiceFrames сбрасывается только после ~10 тихих фреймов (300ms),
+        // а не на каждом тихом фрейме. Устраняет ложные отключения на паузах между словами.
+        const isVoice = avg >= avgTh || peak >= peakTh
+        if (isVoice) {
+          voiceFrames++
+          vadSilenceFrames = 0
+        } else {
+          vadSilenceFrames++
+          if (vadSilenceFrames >= 6) voiceFrames = 0  // 180ms тишины до сброса (было 300ms)
+        }
         if (voiceFrames >= 2) lastVoice = Date.now()
 
-        const speaking = (Date.now() - lastVoice) < 500
+        const speaking = (Date.now() - lastVoice) < 400  // hold 400ms
         if (speaking !== wasSpeaking) {
           wasSpeaking = speaking
           store.setSpeakingStatus(userId, speaking)
@@ -274,7 +341,7 @@ export class WebRTCManager {
       }
 
       const timer = setInterval(check, 30)
-      this.speakingIntervals.set(userId, { timer, stream: cloned })
+      this.speakingIntervals.set(userId, { timer, stream: cloned, nodes: vadNodes })
     } catch (e) { console.error('[VAD] setup failed', e) }
   }
 
@@ -282,10 +349,18 @@ export class WebRTCManager {
     const entry = this.speakingIntervals.get(userId)
     if (entry) {
       clearInterval(entry.timer)
+      // Отключаем узлы от vadContext — без этого они остаются в памяти до закрытия контекста
+      entry.nodes.forEach(n => { try { n.disconnect() } catch {} })
       entry.stream.getTracks().forEach(t => { t.stop(); t.enabled = false })
       this.speakingIntervals.delete(userId)
     }
     useAppStore.getState().setSpeakingStatus(userId, false)
+
+    // Закрываем vadContext когда больше нет активных VAD-сессий
+    if (this.speakingIntervals.size === 0 && this.vadContext && this.vadContext.state !== 'closed') {
+      this.vadContext.close().catch(() => {})
+      this.vadContext = null
+    }
   }
 
   // ── Devices ───────────────────────────────────────────────────
@@ -329,9 +404,9 @@ export class WebRTCManager {
           sampleRate: 48000,
           channelCount: 1,
           echoCancellation: true, // Обязательно, чтобы не было эха
-          noiseSuppression: this.noiseSuppression, // Используем мощный нативный шумодав Chromium!
-          autoGainControl: true, // Выравнивает громкость
-          // @ts-expect-error - Скрытые настройки Chromium для глубокого "бархатного" голоса
+          noiseSuppression: false, // Отключено, используем DeepFilterNet
+          autoGainControl: false, // Отключено, так как делаем свой компрессор
+          // @ts-expect-error - Скрытые настройки Chromium
           googHighpassFilter: false, 
           
           googEchoCancellation2: true,
@@ -351,7 +426,9 @@ export class WebRTCManager {
       if (localTrack) localTrack.contentHint = 'speech'
 
       const me = useAppStore.getState().currentUser
-      if (me && this.rawStream) this.setupVAD(this.rawStream, me.id, true)
+      // JS VAD запускается только если DeepFilterNet не загружен.
+      // Когда dfNode активен с WASM, он сам отправляет VAD через port.onmessage.
+      if (me && this.rawStream && !this.dfNode) this.setupVAD(this.rawStream, me.id, true)
 
       return true
     } catch (e) { 
@@ -423,7 +500,6 @@ export class WebRTCManager {
       if (e.candidate) signalRService.sendIceCandidate(userId, JSON.stringify(e.candidate))
     }
 
-    let dcTimer: NodeJS.Timeout | null = null
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState
       if (st === 'connected') {
@@ -432,10 +508,17 @@ export class WebRTCManager {
         useAppStore.getState().setWebRTCConnectionStatus(userId, false)
       }
 
-      if (dcTimer && st !== 'disconnected') { clearTimeout(dcTimer); dcTimer = null }
-      if (st === 'failed' || st === 'closed') this.disconnectFromPeer(userId)
-      else if (st === 'disconnected') {
-        dcTimer = setTimeout(() => { if (pc.connectionState === 'disconnected') this.disconnectFromPeer(userId) }, 5000)
+      const existingTimer = this.dcTimers.get(userId)
+      if (existingTimer && st !== 'disconnected') { clearTimeout(existingTimer); this.dcTimers.delete(userId) }
+
+      if (st === 'failed' || st === 'closed') {
+        this.disconnectFromPeer(userId)
+      } else if (st === 'disconnected') {
+        const t = setTimeout(() => {
+          if (pc.connectionState === 'disconnected') this.disconnectFromPeer(userId)
+          this.dcTimers.delete(userId)
+        }, 5000)
+        this.dcTimers.set(userId, t)
       }
     }
   }
@@ -547,6 +630,11 @@ export class WebRTCManager {
 
   public disconnectFromPeer(userId: string) {
     useAppStore.getState().setWebRTCConnectionStatus(userId, false)
+
+    // Отменяем таймер переподключения — иначе он может сработать после явного дисконнекта
+    const dcTimer = this.dcTimers.get(userId)
+    if (dcTimer) { clearTimeout(dcTimer); this.dcTimers.delete(userId) }
+
     const pc = this.peerConnections.get(userId)
     if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.close(); this.peerConnections.delete(userId) }
     const audio = this.audioElements.get(userId)

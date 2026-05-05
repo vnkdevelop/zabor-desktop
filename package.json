@@ -1,6 +1,6 @@
 {
   "name": "zabor-desktop",
-  "version": "2.8.5",
+  "version": "2.8.6",
   "description": "ZABOR - Звоночки",
   "main": "./out/main/index.js",
   "author": "vnk",
@@ -61,9 +61,12 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@microsoft/signalr": "^8.0.7",
+    "i18next": "^26.0.8",
+    "i18next-browser-languagedetector": "^8.2.1",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.4",
     "zustand": "^5.0.2"
   },
   "devDependencies": {

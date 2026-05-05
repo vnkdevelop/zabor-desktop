@@ -27,7 +27,6 @@ nsis:
   allowElevation: true
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
-  deleteAppDataOnUninstall: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: ZABOR

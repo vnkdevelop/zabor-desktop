@@ -1,0 +1,118 @@
+{
+  "settings": {
+    "title": "Settings",
+    "tabs": {
+      "general": "General",
+      "audio": "Audio",
+      "privacy": "Privacy"
+    },
+    "general": {
+      "system": "SYSTEM",
+      "autoLaunch": "Launch on Startup",
+      "autoLaunchDesc": "ZABOR will open automatically when you turn on your computer",
+      "minimizeToTray": "Minimize to Tray",
+      "minimizeToTrayDesc": "When you click the close button, the app will minimize instead of closing",
+      "language": "App Language",
+      "languageDesc": "Choose the primary interface language"
+    },
+    "audio": {
+      "inputDevice": "INPUT DEVICE",
+      "outputDevice": "OUTPUT DEVICE",
+      "inputVolume": "MICROPHONE VOLUME",
+      "outputVolume": "AUDIO VOLUME",
+      "noiseSuppression": "Noise Suppression",
+      "default": "Default",
+      "micFallback": "Microphone",
+      "speakerFallback": "Speakers"
+    },
+    "privacy": {
+      "newPassword": "NEW PASSWORD",
+      "passwordHint": "Maximum 25 characters",
+      "changePassword": "Change Password",
+      "logout": "Logout"
+    }
+  },
+  "auth": {
+    "login": "LOGIN",
+    "password": "PASSWORD",
+    "continue": "CONTINUE",
+    "loading": "LOADING...",
+    "accountNotFound": "Account not found",
+    "createNewProfile": "Create new profile with this login?",
+    "yes": "Yes",
+    "no": "No",
+    "createProfile": "Create Profile",
+    "howOthersSeeYou": "How will others see you?",
+    "displayName": "DISPLAY NAME",
+    "max20chars": "Maximum 20 characters",
+    "creating": "CREATING...",
+    "create": "CREATE",
+    "cropTitle": "Crop Avatar"
+  },
+  "main": {
+    "tabs": {
+      "channels": "Channels",
+      "friends": "Friends"
+    },
+    "voice": {
+      "endCall": "End Call",
+      "ping": "PING",
+      "offline": "Offline",
+      "voiceChannels": "VOICE CHANNELS"
+    },
+    "notifications": {
+      "title": "NOTIFICATIONS",
+      "friendRequest": "Friend request",
+      "channelInvite": "Invite from {{name}}",
+      "accept": "Accept",
+      "decline": "Decline",
+      "join": "Join",
+      "none": "No notifications"
+    },
+    "user": {
+      "copyUsername": "Click to copy",
+      "copied": "Copied!"
+    },
+    "connection": {
+      "noConnection": "No server connection",
+      "reconnecting": "No server connection. Reconnecting..."
+    }
+  },
+  "modals": {
+    "createChannel": {
+      "title": "Create Channel",
+      "label": "CHANNEL NAME",
+      "placeholder": "Maximum 25 characters",
+      "submit": "Create"
+    },
+    "renameChannel": {
+      "title": "Rename Channel",
+      "label": "NEW NAME",
+      "submit": "Save"
+    },
+    "addFriend": {
+      "title": "Add Friend",
+      "desc": "Enter user login",
+      "placeholder": "Login",
+      "errorNotFound": "User not found",
+      "errorAlreadyFriend": "They are already your friend ;) ",
+      "submit": "Send",
+      "sent": "Sent"
+    },
+    "kick": {
+      "title": "Kick User?",
+      "desc": "Are you sure you want to remove <1>{{name}}</1> from the channel?",
+      "submit": "Kick"
+    }
+  },
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "close": "Close",
+    "loading": "Loading...",
+    "error": "Error",
+    "apply": "Apply",
+    "fileTooLarge": "Max 5 MB",
+    "onlyImages": "Images only"
+  }
+}

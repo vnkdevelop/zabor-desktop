@@ -40,7 +40,7 @@
   MessageBox MB_YESNO|MB_ICONQUESTION "Обнаружена предыдущая версия.$\nСохранить ваши локальные данные?$\n$\nНажмите 'Да', чтобы оставить.$\nНажмите 'Нет', чтобы полностью удалить конфигурацию." IDYES _keep_data IDNO _delete_data
   
   _keep_data:
-  StrCpy $KeepAppDataOnUpdate "1"
+  StrCpy $KeepAppDataOnUpdate "1" 
   StrCpy $R0 "$R0 /S --keep-app-data"
   Goto _run_now
   
@@ -80,12 +80,12 @@
       ; Запущено стандартное удаление пользователем
       ${IfNot} ${Silent}
         MessageBox MB_YESNO|MB_ICONQUESTION "Удалить локальные данные пользователя?" IDYES _delete_un IDNO _keep_un
+        Goto _continue_un
         _delete_un:
           StrCpy $shouldDeleteAppData "1"
           Goto _continue_un
         _keep_un:
           StrCpy $shouldDeleteAppData "0"
-          Goto _continue_un
         _continue_un:
       ${EndIf}
     ${EndIf}
