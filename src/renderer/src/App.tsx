@@ -116,12 +116,13 @@ export default function App() {
   const settingsRef = useRef({
     inputVolume: 100, outputVolume: 100,
     selectedInput: 'default', selectedOutput: 'default',
-    noiseSuppression: true, language: i18n.language || 'ru'
+    noiseSuppression: true, language: i18n.language || 'ru',
+    openAtLogin: false, minimizeToTray: true
   });
 
   useEffect(() => {
-    settingsRef.current = { inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language };
-  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language]);
+    settingsRef.current = { inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language, openAtLogin: autoLaunch, minimizeToTray };
+  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language, autoLaunch, minimizeToTray]);
 
   // === Callbacks defined early to avoid TDZ in useEffect deps ===
 
@@ -140,7 +141,9 @@ export default function App() {
           selectedInput: settingsRef.current.selectedInput,
           selectedOutput: settingsRef.current.selectedOutput,
           noiseSuppression: settingsRef.current.noiseSuppression,
-          language: settingsRef.current.language
+          language: settingsRef.current.language,
+          openAtLogin: settingsRef.current.openAtLogin,
+          minimizeToTray: settingsRef.current.minimizeToTray
         }
       });
       window.windowControls.saveSession(data).catch(() => { });
@@ -180,6 +183,8 @@ export default function App() {
     noiseSuppression?: boolean;
     userVolumes?: Record<string, number>;
     language?: string;
+    openAtLogin?: boolean;
+    minimizeToTray?: boolean;
   }) => {
     const iv = s.inputVolume ?? 100;
     const ov = s.outputVolume ?? 100;
@@ -197,6 +202,17 @@ export default function App() {
       setLanguage(s.language);
       i18n.changeLanguage(s.language);
     }
+
+    // Восстанавливаем системные настройки из кэша сессии без лишних IPC-вызовов
+    if (s.openAtLogin !== undefined) {
+      setAutoLaunch(s.openAtLogin);
+      window.windowControls.setAutoLaunch(s.openAtLogin).catch(() => { });
+    }
+    if (s.minimizeToTray !== undefined) {
+      setMinimizeToTray(s.minimizeToTray);
+      window.windowControls.setMinimizeToTray(s.minimizeToTray).catch(() => { });
+    }
+
     // Восстанавливаем индивидуальные громкости пользователей
     if (s.userVolumes && typeof s.userVolumes === 'object') {
       const store = useAppStore.getState();
@@ -494,6 +510,12 @@ export default function App() {
       saveLocalCache();
     }, 500);
   }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, isAuth, language]);
+
+  // Сохраняем системные настройки (autoLaunch / minimizeToTray) в локальный кэш сессии при изменении
+  useEffect(() => {
+    if (!settingsLoadedRef.current || !isAuth) return;
+    saveLocalCache();
+  }, [autoLaunch, minimizeToTray, isAuth, saveLocalCache]);
 
   // Сохраняем индивидуальные громкости пользователей на сервере при их изменении
   useEffect(() => {

@@ -22,6 +22,12 @@ class SignalRService {
   private wasInChannel: string | null = null;
   private sfxContext: AudioContext | null = null;
   private sfxElements: Map<string, HTMLAudioElement> = new Map();
+  /** Защита от параллельных вызовов joinChannel */
+  private isJoiningChannel = false;
+  /** Защита от параллельных вызовов startCall */
+  private isStartingCall = false;
+  /** Таймаут ожидания isReconnecting, чтобы не зависнуть навсегда */
+  private static readonly CONNECT_WAIT_TIMEOUT_MS = 15000;
 
 private playSfx(src: string, volume = 0.5) {
   try {
@@ -120,8 +126,14 @@ private stopSfx(src: string) {
   public async connect(): Promise<boolean> {
     if (this.isConnected()) return true;
     if (this.isReconnecting) {
-      while (this.isReconnecting) {
+      // Ожидаем завершения текущей попытки, но не более CONNECT_WAIT_TIMEOUT_MS
+      const deadline = Date.now() + SignalRService.CONNECT_WAIT_TIMEOUT_MS;
+      while (this.isReconnecting && Date.now() < deadline) {
         await new Promise<void>(resolve => setTimeout(resolve, 200));
+      }
+      // Если флаг так и не сброшен — принудительно сбрасываем (deadlock protection)
+      if (this.isReconnecting) {
+        this.isReconnecting = false;
       }
       return this.isConnected();
     }
@@ -141,7 +153,16 @@ private stopSfx(src: string) {
       this.connection.keepAliveIntervalInMilliseconds = 5000;
       this.setupListeners();
       this.setupReconnectionHandlers();
-      await this.connection.start();
+
+      // Таймаут на connection.start(), чтобы не зависнуть навсегда при network-hang
+      const startWithTimeout = Promise.race([
+        this.connection.start(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Connection start timeout')), SignalRService.CONNECT_WAIT_TIMEOUT_MS)
+        )
+      ]);
+      await startWithTimeout;
+
       this.reconnectAttempts = 0;
       this.isReconnecting = false;
       this.startPingMeasurement();
@@ -676,6 +697,17 @@ public stopRingtone() {
   // ── Join / Leave (optimistic) ─────────────────────────────────
 
   public async joinChannel(channelId: string): Promise<'ok' | 'network' | 'mic_failed' | 'full'> {
+    // Защита от параллельных/повторных вызовов (двойной клик, быстрые инвайты)
+    if (this.isJoiningChannel) return 'network';
+    this.isJoiningChannel = true;
+    try {
+      return await this._joinChannelImpl(channelId);
+    } finally {
+      this.isJoiningChannel = false;
+    }
+  }
+
+  private async _joinChannelImpl(channelId: string): Promise<'ok' | 'network' | 'mic_failed' | 'full'> {
     if (!await this.ensureConnected()) return 'network';
     const store = useAppStore.getState();
     const currentUser = store.currentUser;
@@ -791,6 +823,17 @@ public stopRingtone() {
   // ── Calls (optimistic) ────────────────────────────────────────
 
   public async startCall(targetUserId: string): Promise<boolean> {
+    // Защита от двойного запуска звонка
+    if (this.isStartingCall) return false;
+    this.isStartingCall = true;
+    try {
+      return await this._startCallImpl(targetUserId);
+    } finally {
+      this.isStartingCall = false;
+    }
+  }
+
+  private async _startCallImpl(targetUserId: string): Promise<boolean> {
     const store = useAppStore.getState();
 
     // Optimistic

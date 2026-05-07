@@ -170,8 +170,8 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       }
       const rms = Math.sqrt(sumSquares / this.FRAME_SIZE)
       
-      // Порог VAD (0.004 ≈ -48 dBFS). Хватает даже для тихой речи.
-      const isVoiceFrame = rms > 0.004
+      // Порог VAD. Используем this.vadThreshold для управления чувствительностью.
+      const isVoiceFrame = rms > this.vadThreshold
 
       if (isVoiceFrame) {
         this.framesSinceLastVoice = 0

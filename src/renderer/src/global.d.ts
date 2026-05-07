@@ -18,6 +18,8 @@ declare global {
       getUserDataPath: () => Promise<string>;
       getAutoLaunch: () => Promise<boolean>;
       setAutoLaunch: (enabled: boolean) => Promise<boolean>;
+      getMinimizeToTray: () => Promise<boolean>;
+      setMinimizeToTray: (enabled: boolean) => Promise<boolean>;
       saveSession: (data: string) => Promise<boolean>;
       loadSession: () => Promise<string | null>;
       clearSession: () => Promise<boolean>;

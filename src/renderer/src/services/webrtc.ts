@@ -278,8 +278,8 @@ export class WebRTCManager {
       let vadSilenceFrames = 0  // Отдельный счётчик для гистерезиса VAD
       let hasWarnedSilence = false
 
-      const avgTh  = isLocal ? 2 : 1   // было 4/2 — снижаем для тихих голосов
-      const peakTh = isLocal ? 6 : 4   // было 10/8
+      const avgTh  = isLocal ? 4 : 2   // Повышаем порог для уменьшения чувствительности
+      const peakTh = isLocal ? 10 : 8  // Повышаем порог для уменьшения чувствительности
 
       const check = () => {
         const store = useAppStore.getState()
