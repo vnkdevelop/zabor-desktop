@@ -510,33 +510,36 @@ export class WebRTCManager {
       if (e.candidate) signalRService.sendIceCandidate(userId, JSON.stringify(e.candidate))
     }
 
-    pc.onconnectionstatechange = () => {
+    const checkState = () => {
       const st = pc.connectionState
-      if (st === 'connected') {
+      const iceSt = pc.iceConnectionState
+      
+      if (st === 'connected' || iceSt === 'connected' || iceSt === 'completed') {
         useAppStore.getState().setWebRTCConnectionStatus(userId, true)
-        // Успешно подключились — очищаем таймаут и счётчик
         this.clearIceTimeout(userId)
         this.retryCount.delete(userId)
+      } else if (st === 'failed' || iceSt === 'failed') {
+        useAppStore.getState().setWebRTCConnectionStatus(userId, false)
+        this.attemptRenegotiation(userId)
+      } else if (st === 'disconnected' || iceSt === 'disconnected') {
+        useAppStore.getState().setWebRTCConnectionStatus(userId, false)
+        const existingTimer = this.dcTimers.get(userId)
+        if (!existingTimer) {
+          const t = setTimeout(() => {
+            if (pc.connectionState === 'disconnected' || pc.iceConnectionState === 'disconnected') {
+              this.attemptRenegotiation(userId)
+            }
+            this.dcTimers.delete(userId)
+          }, 5000)
+          this.dcTimers.set(userId, t)
+        }
       } else {
         useAppStore.getState().setWebRTCConnectionStatus(userId, false)
       }
-
-      const existingTimer = this.dcTimers.get(userId)
-      if (existingTimer && st !== 'disconnected') { clearTimeout(existingTimer); this.dcTimers.delete(userId) }
-
-      if (st === 'failed') {
-        // При failed пробуем renegotiation вместо полного отключения
-        this.attemptRenegotiation(userId)
-      } else if (st === 'closed') {
-        this.disconnectFromPeer(userId)
-      } else if (st === 'disconnected') {
-        const t = setTimeout(() => {
-          if (pc.connectionState === 'disconnected') this.attemptRenegotiation(userId)
-          this.dcTimers.delete(userId)
-        }, 5000)
-        this.dcTimers.set(userId, t)
-      }
     }
+
+    pc.onconnectionstatechange = checkState
+    pc.oniceconnectionstatechange = checkState
   }
 
   /** Таймаут ICE-подключения: если за ICE_TIMEOUT_MS не перешли в connected — renegotiation */
@@ -562,20 +565,27 @@ export class WebRTCManager {
     const count = this.retryCount.get(userId) ?? 0
     if (count >= WebRTCManager.MAX_ICE_RETRIES) {
       this.retryCount.delete(userId)
-      this.disconnectFromPeer(userId)
+      // Вместо дисконнекта, который оставит UI висеть навсегда, просто завершаем попытки. 
+      // Состояние останется 'false', показывая "ПОДКЛЮЧЕНИЕ". 
+      // При желании можно кикнуть пользователя или сбросить счётчик через время.
       return
     }
     this.retryCount.set(userId, count + 1)
-    // Убираем старый PC и пробуем заново
+    
     const oldPc = this.peerConnections.get(userId)
     if (oldPc) {
-      oldPc.ontrack = null; oldPc.onicecandidate = null; oldPc.onconnectionstatechange = null
+      oldPc.ontrack = null; oldPc.onicecandidate = null; oldPc.onconnectionstatechange = null; oldPc.oniceconnectionstatechange = null
       oldPc.close()
       this.peerConnections.delete(userId)
     }
     this.pendingCandidates.delete(userId)
-    // Переподключаемся (создаём новый offer)
-    this.connectToPeer(userId)
+    
+    const me = useAppStore.getState().currentUser?.id
+    // Во избежание glare-состояния (когда оба шлют offer одновременно),
+    // заставляем инициировать переподключение только одного из пиров
+    if (me && me < userId) {
+      this.connectToPeer(userId)
+    }
   }
 
   public async connectToPeer(userId: string) {
@@ -695,7 +705,7 @@ export class WebRTCManager {
     if (dcTimer) { clearTimeout(dcTimer); this.dcTimers.delete(userId) }
 
     const pc = this.peerConnections.get(userId)
-    if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.close(); this.peerConnections.delete(userId) }
+    if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.oniceconnectionstatechange = null; pc.close(); this.peerConnections.delete(userId) }
     const audio = this.audioElements.get(userId)
     if (audio) { audio.pause(); audio.srcObject = null; this.audioElements.delete(userId) }
     this.pendingCandidates.delete(userId)

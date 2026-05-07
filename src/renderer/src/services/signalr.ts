@@ -425,6 +425,7 @@ this.sfxElements.clear();
       store().setModal('incomingCall', false);
       this.stopRingtone();
       webrtc.connectToPeer(user.id);
+      this.playSfx(channelJoinSound, 0.3);
     });
 
     this.connection.on("CallDeclined", () => {
@@ -463,6 +464,7 @@ this.sfxElements.clear();
       store().setModal('incomingCall', false);
       this.stopRingtone();
       // Принимающая сторона НЕ вызывает connectToPeer — ждёт ReceiveWebRTCOffer
+      this.playSfx(channelJoinSound, 0.3);
     });
 
     this.connection.on("AchievementUnlocked", (achievementId: string) => {
