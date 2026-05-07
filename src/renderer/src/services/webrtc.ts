@@ -19,6 +19,14 @@ export class WebRTCManager {
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map()
   /** Таймеры переподключения — хранятся на уровне класса чтобы отменять при явном дисконнекте */
   private dcTimers: Map<string, NodeJS.Timeout> = new Map()
+  /** Таймеры ICE-таймаута для renegotiation */
+  private iceTimeoutTimers: Map<string, NodeJS.Timeout> = new Map()
+  /** Счётчик попыток renegotiation на каждого пира */
+  private retryCount: Map<string, number> = new Map()
+  /** Максимум попыток renegotiation */
+  private static readonly MAX_ICE_RETRIES = 2
+  /** Таймаут ICE-соединения (мс) — если за это время не `connected`, делаем renegotiation */
+  private static readonly ICE_TIMEOUT_MS = 15000
 
   private currentDeviceId = 'default'
   private currentOutputDeviceId = 'default'
@@ -506,6 +514,9 @@ export class WebRTCManager {
       const st = pc.connectionState
       if (st === 'connected') {
         useAppStore.getState().setWebRTCConnectionStatus(userId, true)
+        // Успешно подключились — очищаем таймаут и счётчик
+        this.clearIceTimeout(userId)
+        this.retryCount.delete(userId)
       } else {
         useAppStore.getState().setWebRTCConnectionStatus(userId, false)
       }
@@ -513,16 +524,58 @@ export class WebRTCManager {
       const existingTimer = this.dcTimers.get(userId)
       if (existingTimer && st !== 'disconnected') { clearTimeout(existingTimer); this.dcTimers.delete(userId) }
 
-      if (st === 'failed' || st === 'closed') {
+      if (st === 'failed') {
+        // При failed пробуем renegotiation вместо полного отключения
+        this.attemptRenegotiation(userId)
+      } else if (st === 'closed') {
         this.disconnectFromPeer(userId)
       } else if (st === 'disconnected') {
         const t = setTimeout(() => {
-          if (pc.connectionState === 'disconnected') this.disconnectFromPeer(userId)
+          if (pc.connectionState === 'disconnected') this.attemptRenegotiation(userId)
           this.dcTimers.delete(userId)
         }, 5000)
         this.dcTimers.set(userId, t)
       }
     }
+  }
+
+  /** Таймаут ICE-подключения: если за ICE_TIMEOUT_MS не перешли в connected — renegotiation */
+  private startIceTimeout(userId: string) {
+    this.clearIceTimeout(userId)
+    const timer = setTimeout(() => {
+      this.iceTimeoutTimers.delete(userId)
+      const pc = this.peerConnections.get(userId)
+      if (pc && pc.connectionState !== 'connected') {
+        this.attemptRenegotiation(userId)
+      }
+    }, WebRTCManager.ICE_TIMEOUT_MS)
+    this.iceTimeoutTimers.set(userId, timer)
+  }
+
+  private clearIceTimeout(userId: string) {
+    const t = this.iceTimeoutTimers.get(userId)
+    if (t) { clearTimeout(t); this.iceTimeoutTimers.delete(userId) }
+  }
+
+  /** Пробуем переподключиться к пиру (renegotiation). При исчерпании попыток — полный disconnect. */
+  private attemptRenegotiation(userId: string) {
+    const count = this.retryCount.get(userId) ?? 0
+    if (count >= WebRTCManager.MAX_ICE_RETRIES) {
+      this.retryCount.delete(userId)
+      this.disconnectFromPeer(userId)
+      return
+    }
+    this.retryCount.set(userId, count + 1)
+    // Убираем старый PC и пробуем заново
+    const oldPc = this.peerConnections.get(userId)
+    if (oldPc) {
+      oldPc.ontrack = null; oldPc.onicecandidate = null; oldPc.onconnectionstatechange = null
+      oldPc.close()
+      this.peerConnections.delete(userId)
+    }
+    this.pendingCandidates.delete(userId)
+    // Переподключаемся (создаём новый offer)
+    this.connectToPeer(userId)
   }
 
   public async connectToPeer(userId: string) {
@@ -539,6 +592,7 @@ export class WebRTCManager {
     }
 
     this.setupPeerHandlers(pc, userId)
+    this.startIceTimeout(userId)
 
     try {
       const offer = await pc.createOffer({ offerToReceiveAudio: true })
@@ -572,6 +626,7 @@ export class WebRTCManager {
     }
 
     this.setupPeerHandlers(pc, senderId)
+    this.startIceTimeout(senderId)
 
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(offerStr)))
@@ -633,7 +688,9 @@ export class WebRTCManager {
   public disconnectFromPeer(userId: string) {
     useAppStore.getState().setWebRTCConnectionStatus(userId, false)
 
-    // Отменяем таймер переподключения — иначе он может сработать после явного дисконнекта
+    // Отменяем все таймеры
+    this.clearIceTimeout(userId)
+    this.retryCount.delete(userId)
     const dcTimer = this.dcTimers.get(userId)
     if (dcTimer) { clearTimeout(dcTimer); this.dcTimers.delete(userId) }
 

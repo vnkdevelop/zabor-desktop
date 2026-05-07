@@ -1,6 +1,6 @@
 {
   "name": "zabor-desktop",
-  "version": "2.8.8",
+  "version": "2.8.9",
   "description": "ZABOR - Звоночки",
   "main": "./out/main/index.js",
   "author": "vnk",
