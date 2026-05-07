@@ -1,5 +1,6 @@
 import { signalRService } from './signalr'
 import { useAppStore } from '../store/useAppStore'
+import processorUrl from './deepfilter-processor?worker&url'
 
 type SpeakingEntry = {
   timer: NodeJS.Timeout
@@ -82,7 +83,7 @@ export class WebRTCManager {
 
       if (line.startsWith(`a=fmtp:${opusPT}`)) {
         
-        l = `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=0;usedtx=0`
+        l = `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=0;usedtx=1`
         fmtpDone = true
       }
 
@@ -93,7 +94,7 @@ export class WebRTCManager {
       const idx = out.findIndex(l => l.startsWith(`a=rtpmap:${opusPT}`))
       if (idx >= 0) {
         out.splice(idx + 1, 0,
-          `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=0;usedtx=0`
+          `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=0;usedtx=1`
         )
       }
     }
@@ -122,10 +123,7 @@ export class WebRTCManager {
 
     let dfNode: AudioWorkletNode | null = null
     try {
-      // Assuming Vite compile logic or static public asset. Adjust path as necessary.
-      // Often in Vite this would be imported as a worker URL, but for dynamic AudioWorklet 
-      // adding the module via a known public URL is common.
-      await ctx.audioWorklet.addModule('/deepfilter-processor.js')
+      await ctx.audioWorklet.addModule(processorUrl)
       dfNode = new AudioWorkletNode(ctx, 'deepfilter-processor')
       this.dfNode = dfNode
 
@@ -177,8 +175,9 @@ export class WebRTCManager {
     // Connections
     let currentNode: AudioNode = source
     
-    // Only route through DeepFilterNet if noise suppression is enabled and node exists
-    if (this.dfNode && this.noiseSuppression) {
+    // Always route through processor for VAD and Noise Gate
+    if (this.dfNode) {
+      this.dfNode.port.postMessage({ type: 'setConfig', noiseSuppression: this.noiseSuppression })
       currentNode.connect(this.dfNode)
       currentNode = this.dfNode
     }
@@ -236,6 +235,9 @@ export class WebRTCManager {
 
   public setNoiseSuppression(enabled: boolean) {
     this.noiseSuppression = enabled
+    if (this.dfNode) {
+      this.dfNode.port.postMessage({ type: 'setConfig', noiseSuppression: enabled })
+    }
   }
 
   // ── VAD ───────────────────────────────────────────────────────
@@ -404,7 +406,7 @@ export class WebRTCManager {
           sampleRate: 48000,
           channelCount: 1,
           echoCancellation: true, // Обязательно, чтобы не было эха
-          noiseSuppression: false, // Отключено, используем DeepFilterNet
+          noiseSuppression: this.noiseSuppression, // Используем встроенную нейросеть Chromium
           autoGainControl: false, // Отключено, так как делаем свой компрессор
           // @ts-expect-error - Скрытые настройки Chromium
           googHighpassFilter: false, 

@@ -49,13 +49,22 @@ function getSettingsPath(): string {
 }
 
 function loadAppSettings(): AppSettings {
+  let parsed: Partial<AppSettings> = {};
   try {
     const filePath = getSettingsPath();
     if (existsSync(filePath)) {
-      return { openAtLogin: false, minimizeToTray: true, ...JSON.parse(readFileSync(filePath, 'utf-8')) };
+      parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
     }
   } catch {}
-  return { openAtLogin: false, minimizeToTray: true };
+
+  return {
+    openAtLogin: parsed.openAtLogin !== undefined 
+      ? parsed.openAtLogin 
+      : (isDev ? false : app.getLoginItemSettings({ args: ['--autostart'] }).openAtLogin),
+    minimizeToTray: parsed.minimizeToTray !== undefined 
+      ? parsed.minimizeToTray 
+      : true
+  };
 }
 
 function saveAppSettings(settings: AppSettings): void {
@@ -386,9 +395,11 @@ app.whenReady().then(() => {
     return app.getPath('userData');
   });
 
-  // ── Auto-launch ──
   ipcMain.handle('get-auto-launch', () => {
-    return loadAppSettings().openAtLogin;
+    if (isDev) return false;
+    // Используем реальное состояние из ОС, чтобы UI всегда отображал правду
+    const osSetting = app.getLoginItemSettings({ args: ['--autostart'] }).openAtLogin;
+    return osSetting;
   });
 
   ipcMain.handle('set-auto-launch', (_event, enabled: boolean) => {

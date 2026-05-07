@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { StandaloneDeepFilter } from 'deepfilter-standalone'
 
 // AudioWorklet-типы не включены в стандартный lib TypeScript — объявляем вручную
 declare abstract class AudioWorkletProcessor {
@@ -27,6 +28,9 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private readonly FRAME_SIZE = 480
   private readonly BUFFER_SIZE = 4800 // 10 фреймов при 48kHz
 
+  private denoiser: StandaloneDeepFilter | null = null
+  private denoiserReady = false
+
   /**
    * Предвыделенные рабочие буферы — исключают аллокации в горячем пути process().
    * new Float32Array() каждый вызов провоцирует GC-паузы каждые ~3ms.
@@ -43,6 +47,13 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   /** Счётчик переполнений для rate-limit предупреждений (не спамим в hot path) */
   private overflowCount = 0
 
+  private noiseSuppression = true
+  private framesSinceLastVoice = 0
+  private currentGain = 0
+  private readonly HOLD_FRAMES = 40 // 400ms (40 фреймов по 10мс)
+  private readonly ATTACK_STEP = 1.0 / (this.FRAME_SIZE * 2) // Плавное нарастание за ~20мс (2 фрейма)
+  private readonly RELEASE_STEP = 1.0 / (this.FRAME_SIZE * 20) // Плавное затухание за ~200мс (20 фреймов)
+
   constructor() {
     super()
     this.inputBuffer = new Float32Array(this.BUFFER_SIZE)
@@ -52,11 +63,30 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
     this.port.onmessage = (event) => {
       if (event.data.type === 'loadWasm') {
-        // Инициализация WASM-инстанса DeepFilterNet:
-        // this.dfState = initDeepFilter(event.data.module, event.data.model)
-        this.wasmLoaded = true
-        this.port.postMessage({ type: 'ready' })
+        this.initDeepFilter()
+      } else if (event.data.type === 'setConfig') {
+        this.noiseSuppression = event.data.noiseSuppression
       }
+    }
+
+    // Инициализируем нейросеть сразу при старте воркера
+    this.initDeepFilter()
+  }
+
+  private async initDeepFilter() {
+    if (this.denoiserReady) return
+    try {
+      this.denoiser = new StandaloneDeepFilter({
+        attenuationLimit: 100, // Глубокое подавление
+        postFilterBeta: 0.02
+      })
+      await this.denoiser.initialize()
+      this.denoiserReady = true
+      this.wasmLoaded = true
+      this.port.postMessage({ type: 'ready' })
+      console.log('[DeepFilterProcessor] Neural net initialized successfully')
+    } catch (e) {
+      console.error('[DeepFilterProcessor] Failed to load DeepFilterNet:', e)
     }
   }
 
@@ -133,29 +163,53 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         this.inputReadIndex
       )
 
-      if (this.wasmLoaded) {
-        // Реальная обработка через WASM (когда будет интегрировано):
-        // df_process(this.dfState, this.frameToProcess, this.processedFrame)
-        // isSpeaking = calculateVADFromMask(mask)
+      // Встроенный умный Noise Gate с плавным фейдом + VAD
+      let sumSquares = 0
+      for (let i = 0; i < this.FRAME_SIZE; i++) {
+        sumSquares += this.frameToProcess[i] * this.frameToProcess[i]
+      }
+      const rms = Math.sqrt(sumSquares / this.FRAME_SIZE)
+      
+      // Порог VAD (0.004 ≈ -48 dBFS). Хватает даже для тихой речи.
+      const isVoiceFrame = rms > 0.004
 
-        // Временный bypass до интеграции WASM
-        this.processedFrame.set(this.frameToProcess)
-
-        // RMS-based VAD как fallback пока WASM не даёт маску
-        let sumSquares = 0
-        for (let i = 0; i < this.FRAME_SIZE; i++) {
-          sumSquares += this.processedFrame[i] * this.processedFrame[i]
-        }
-        const isSpeaking = Math.sqrt(sumSquares / this.FRAME_SIZE) > this.vadThreshold
-
-        if (isSpeaking !== this.lastVadSent) {
-          this.port.postMessage({ type: 'vad', isSpeaking })
-          this.lastVadSent = isSpeaking
-        }
+      if (isVoiceFrame) {
+        this.framesSinceLastVoice = 0
       } else {
-        // Bypass без WASM — копируем без изменений.
-        // VAD в этом режиме обрабатывается в JS-потоке через setupVAD().
+        this.framesSinceLastVoice++
+      }
+
+      // Отправляем VAD статус в UI
+      const isSpeaking = this.framesSinceLastVoice < this.HOLD_FRAMES
+      if (isSpeaking !== this.lastVadSent) {
+        this.port.postMessage({ type: 'vad', isSpeaking })
+        this.lastVadSent = isSpeaking
+      }
+
+      // Если шумоподавление включено и нейросеть готова, очищаем кадр
+      if (this.noiseSuppression && this.denoiserReady && this.denoiser) {
+        const cleanFrame = this.denoiser.processAudio(this.frameToProcess)
+        this.processedFrame.set(cleanFrame)
+      } else {
+        // Иначе просто копируем
         this.processedFrame.set(this.frameToProcess)
+      }
+
+      if (this.noiseSuppression) {
+        // Плавный Noise Gate поверх очищенного звука
+        const targetGain = isSpeaking ? 1.0 : 0.0
+        
+        for (let i = 0; i < this.FRAME_SIZE; i++) {
+          if (this.currentGain < targetGain) {
+            this.currentGain = Math.min(targetGain, this.currentGain + this.ATTACK_STEP)
+          } else if (this.currentGain > targetGain) {
+            this.currentGain = Math.max(targetGain, this.currentGain - this.RELEASE_STEP)
+          }
+          
+          // Применяем gain и убираем микроскопический шум (приравниваем к 0, чтобы Opus включил DTX)
+          const sample = this.processedFrame[i] * this.currentGain
+          this.processedFrame[i] = Math.abs(sample) < 1e-6 ? 0.0 : sample
+        }
       }
 
       this.outputWriteIndex = this.pushToBuffer(

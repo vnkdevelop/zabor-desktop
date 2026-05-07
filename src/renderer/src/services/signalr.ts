@@ -416,6 +416,7 @@ this.sfxElements.clear();
     });
 
     this.connection.on("CallEnded", () => {
+      const callStatus = store().callStatus;
       const callUser = store().currentCallUser;
       if (callUser) webrtc.disconnectFromPeer(callUser.id);
       webrtc.stopLocalStream();
@@ -424,6 +425,10 @@ this.sfxElements.clear();
       store().setCurrentCallUser(null);
       store().setCallStatus('idle');
       this.stopRingtone();
+
+      if (callStatus === 'connected') {
+        this.playSfx(channelLeaveSound, 0.3);
+      }
     });
 
     this.connection.on("CallStarted", (user: User) => {
@@ -851,6 +856,7 @@ public stopRingtone() {
   }
 
   public async endCall(): Promise<void> {
+    const callStatus = useAppStore.getState().callStatus;
     const callUser = useAppStore.getState().currentCallUser;
     if (callUser) webrtc.disconnectFromPeer(callUser.id);
     webrtc.stopLocalStream();
@@ -859,6 +865,10 @@ public stopRingtone() {
     useAppStore.getState().setIncomingCall(null);
     useAppStore.getState().setCurrentCallUser(null);
     useAppStore.getState().setCallStatus('idle');
+
+    if (callStatus === 'connected') {
+      this.playSfx(channelLeaveSound, 0.3);
+    }
 
     this.safeInvoke("EndCall");
   }
