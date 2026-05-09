@@ -406,8 +406,16 @@ this.sfxElements.clear();
       store().setFriends(store().friends.filter((f: User) => f.id !== userId));
     });
 
-    this.connection.on("ReceiveChannelInvite", async (senderId: string, senderName: string, channelId: string, channelName: string) => {
-      store().setIncomingChannelInvite({ senderId, senderName, channelId, channelName });
+    this.connection.on("ReceiveChannelInvite", async (invite: ChannelInvite) => {
+      const invites = store().channelInvites;
+      if (!invites.find(i => i.channelId === invite.channelId)) {
+        store().setChannelInvites([...invites, invite]);
+        this.playNotificationSound();
+      }
+    });
+
+    this.connection.on("IncomingChannelCall", (call: IncomingCall, channelId: string, channelName: string) => {
+      store().setIncomingChannelInvite({ senderId: call.callerId, senderName: call.callerName, channelId, channelName });
       store().setModal('incomingChannelInvite', true);
       this.playRingtone();
     });
@@ -615,14 +623,16 @@ public stopRingtone() {
   // ── Data ──────────────────────────────────────────────────────
 
   public async loadData(): Promise<void> {
-    const [channels, friends, requests] = await Promise.all([
+    const [channels, friends, requests, channelInvites] = await Promise.all([
       this.safeInvoke<VoiceChannel[]>("GetChannels"),
       this.safeInvoke<User[]>("GetFriends"),
-      this.safeInvoke<User[]>("GetFriendRequests")
+      this.safeInvoke<User[]>("GetFriendRequests"),
+      this.safeInvoke<ChannelInvite[]>("GetChannelInvites")
     ]);
     useAppStore.getState().setChannels(channels || []);
     useAppStore.getState().setFriends(friends || []);
     useAppStore.getState().setFriendRequests(requests || []);
+    useAppStore.getState().setChannelInvites(channelInvites || []);
   }
 
   // ── Channels (optimistic) ─────────────────────────────────────
@@ -694,6 +704,22 @@ public stopRingtone() {
 
   public async sendChannelInvite(targetUserId: string, channelId: string, channelName: string): Promise<void> {
     await this.safeInvoke("SendChannelInvite", targetUserId, channelId, channelName);
+  }
+
+  public async callToChannel(targetUserId: string, channelId: string, channelName: string): Promise<void> {
+    await this.safeInvoke("CallToChannel", targetUserId, channelId, channelName);
+  }
+
+  public async acceptChannelInvite(channelId: string): Promise<void> {
+    const store = useAppStore.getState();
+    store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== channelId));
+    await this.safeInvoke("AcceptChannelInvite", channelId);
+  }
+
+  public async declineChannelInvite(channelId: string): Promise<void> {
+    const store = useAppStore.getState();
+    store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== channelId));
+    await this.safeInvoke("DeclineChannelInvite", channelId);
   }
 
   // ── Join / Leave (optimistic) ─────────────────────────────────

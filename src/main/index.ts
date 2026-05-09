@@ -11,6 +11,9 @@ if (app) {
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-background-timer-throttling');
   app.commandLine.appendSwitch('ignore-certificate-errors');
+  // Отключаем скрытие локальных IP-адресов через mDNS. Это критически важно для работы WebRTC 
+  // через VPN-туннели, чтобы клиенты могли соединяться напрямую по локальным IP (10.x.x.x).
+  app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
 }
 
 const isDev = !app.isPackaged;

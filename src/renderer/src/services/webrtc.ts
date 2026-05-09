@@ -48,76 +48,14 @@ export class WebRTCManager {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      // openrelay: бесплатный TURN, работает поверх UDP/TCP/443
-      { urls: 'turn:openrelay.metered.ca:80',           username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:80?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443',          username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turns:openrelay.metered.ca:443',         username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      { urls: 'stun:stun.twilio.com:3478' },
+      // fallbacks
+      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:turn.bistri.com:80', username: 'homeo', credential: 'homeo' }
     ],
-    // 'balanced' (значение по умолчанию) собирает медиа-потоки на одном транспорте, что решает проблемы с NAT, не ломая совместимость
-    bundlePolicy: 'balanced',
-    rtcpMuxPolicy: 'require',
-    // Увеличен пул кандидатов для быстрого ICE-gathering
-    iceCandidatePoolSize: 10
-  }
-
-  // ── SDP ───────────────────────────────────────────────────────
-
-  private mungeOpusSDP(sdp: string): string {
-    const lines = sdp.split('\r\n')
-    let opusPT: string | null = null
-
-    for (const line of lines) {
-      const m = line.match(/^a=rtpmap:(\d+)\s+opus\/48000/i)
-      if (m) { opusPT = m[1]; break }
-    }
-    if (!opusPT) return sdp
-
-    const out: string[] = []
-    let fmtpDone = false
-
-    for (const line of lines) {
-      let l = line
-
-      if (line.startsWith('m=audio')) {
-        const p = line.split(' ')
-        const hdr = p.slice(0, 3)
-        const pts = p.slice(3).filter(x => x !== opusPT)
-        l = [...hdr, opusPT, ...pts].join(' ')
-      }
-
-      if (line.startsWith(`a=fmtp:${opusPT}`)) {
-        
-        l = `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=0;usedtx=1`
-        fmtpDone = true
-      }
-
-      out.push(l)
-    }
-
-    if (!fmtpDone) {
-      const idx = out.findIndex(l => l.startsWith(`a=rtpmap:${opusPT}`))
-      if (idx >= 0) {
-        out.splice(idx + 1, 0,
-          `a=fmtp:${opusPT} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=0;usedtx=1`
-        )
-      }
-    }
-
-    return out.join('\r\n')
-  }
-
-  private async optimizeSender(sender: RTCRtpSender): Promise<void> {
-    try {
-      const params = sender.getParameters()
-      if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
-      params.encodings[0].maxBitrate = 128000
-      params.encodings[0].priority = 'high'
-      await sender.setParameters(params)
-    } catch {}
+    bundlePolicy: 'max-bundle'
   }
 
   // ── Audio Pipeline (минималистичный) ──────────────────────────
@@ -458,7 +396,6 @@ export class WebRTCManager {
         const newTrack = this.localStream?.getAudioTracks()[0]
         if (sender && newTrack) {
           await sender.replaceTrack(newTrack).catch(() => {})
-          await this.optimizeSender(sender)
         }
       }
     }
@@ -578,7 +515,7 @@ export class WebRTCManager {
       oldPc.close()
       this.peerConnections.delete(userId)
     }
-    this.pendingCandidates.delete(userId)
+    // НЕ удаляем pendingCandidates, так как они могут принадлежать к новому циклу renegotiation
     
     const me = useAppStore.getState().currentUser?.id
     // Во избежание glare-состояния (когда оба шлют offer одновременно),
@@ -596,8 +533,7 @@ export class WebRTCManager {
 
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => {
-        const sender = pc.addTrack(track, this.localStream!)
-        this.optimizeSender(sender).catch(() => {})
+        pc.addTrack(track, this.localStream!)
       })
     }
 
@@ -605,11 +541,13 @@ export class WebRTCManager {
     this.startIceTimeout(userId)
 
     try {
-      const offer = await pc.createOffer({ offerToReceiveAudio: true })
-      const sdp = this.mungeOpusSDP(offer.sdp ?? '')
-      await pc.setLocalDescription(new RTCSessionDescription({ type: 'offer', sdp }))
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
       signalRService.sendWebRTCOffer(userId, JSON.stringify(pc.localDescription))
-    } catch { this.disconnectFromPeer(userId) }
+    } catch (e) { 
+      console.error('[WebRTC] connectToPeer failed', e)
+      this.disconnectFromPeer(userId) 
+    }
   }
 
   public async handleOffer(senderId: string, offerStr: string) {
@@ -623,15 +561,22 @@ export class WebRTCManager {
       const callStatus = store.callStatus
       if (callStatus !== 'connected') return
     }
-    if (this.peerConnections.has(senderId)) this.disconnectFromPeer(senderId)
+    let existingCandidates: RTCIceCandidateInit[] = []
+    if (this.peerConnections.has(senderId)) {
+      existingCandidates = this.pendingCandidates.get(senderId) ?? []
+      this.disconnectFromPeer(senderId)
+      // Восстанавливаем кандидаты, которые могли прийти за миллисекунды до оффера
+      if (existingCandidates.length > 0) {
+        this.pendingCandidates.set(senderId, existingCandidates)
+      }
+    }
 
     const pc = new RTCPeerConnection(this.config)
     this.peerConnections.set(senderId, pc)
 
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => {
-        const sender = pc.addTrack(track, this.localStream!)
-        this.optimizeSender(sender).catch(() => {})
+        pc.addTrack(track, this.localStream!)
       })
     }
 
@@ -640,13 +585,15 @@ export class WebRTCManager {
 
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(offerStr)))
-      // Сбрасываем ICE-кандидаты, пришедшие до установки remote description
-      await this.drainPendingCandidates(senderId)
       const answer = await pc.createAnswer()
-      const sdp = this.mungeOpusSDP(answer.sdp ?? '')
-      await pc.setLocalDescription(new RTCSessionDescription({ type: 'answer', sdp }))
+      await pc.setLocalDescription(answer)
+      // Сбрасываем кандидатов ТОЛЬКО ПОСЛЕ установки обоих Description
+      await this.drainPendingCandidates(senderId)
       signalRService.sendWebRTCAnswer(senderId, JSON.stringify(pc.localDescription))
-    } catch { this.disconnectFromPeer(senderId) }
+    } catch (e) { 
+      console.error('[WebRTC] handleOffer failed', e)
+      this.disconnectFromPeer(senderId) 
+    }
   }
 
   public async handleAnswer(senderId: string, answerStr: string) {
@@ -656,7 +603,9 @@ export class WebRTCManager {
         await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(answerStr)))
         // Сбрасываем ICE-кандидаты, пришедшие до установки remote description
         await this.drainPendingCandidates(senderId)
-      } catch {}
+      } catch (e) {
+        console.error('[WebRTC] handleAnswer failed', e)
+      }
     }
   }
 

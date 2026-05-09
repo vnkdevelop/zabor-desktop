@@ -855,17 +855,17 @@ export default function App() {
   }, [friendName, friendRequestStatus, store.friends, closeAndResetModals]);
 
   const handleAcceptChannelInvite = useCallback(async (channelId: string) => {
-    store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== channelId));
+    signalRService.acceptChannelInvite(channelId);
     if (store.currentChannelId || store.currentCallUser) {
       store.setPendingChannelSwitch(channelId); store.setModal('channelSwitch', true); return;
     }
     const status = await signalRService.joinChannel(channelId);
     if (status === 'full') store.setModal('channelFull', true);
-  }, [store.channelInvites, store.currentChannelId, store.currentCallUser]);
+  }, [store.currentChannelId, store.currentCallUser]);
 
   const handleDeclineChannelInvite = useCallback((channelId: string) => {
-    store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== channelId));
-  }, [store.channelInvites]);
+    signalRService.declineChannelInvite(channelId);
+  }, []);
 
   const handleInviteToChannel = useCallback(async (friendId: string) => {
     const ch = store.selectedChannelForInvite;
@@ -1984,6 +1984,16 @@ export default function App() {
                   </div>
                   <p className="text-xs text-textMuted truncate">@{m.username}</p>
                 </div>
+                {m.isOnline && m.currentChannelId !== store.selectedChannelForMembers?.id && m.id !== store.currentUser?.id && (
+                  <button onClick={(e) => {
+                    e.stopPropagation();
+                    if (store.selectedChannelForMembers) {
+                      signalRService.callToChannel(m.id, store.selectedChannelForMembers.id, store.selectedChannelForMembers.name);
+                    }
+                  }} className="text-success hover:bg-success/20 p-2 rounded-xl transition-colors shrink-0" title="Позвонить">
+                    <Phone size={18} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -2182,7 +2192,7 @@ export default function App() {
                               setOfflineToast('Пользователь не в сети');
                               setTimeout(() => setOfflineToast(null), 3000);
                             } else if (store.selectedChannelForMembers) {
-                              signalRService.sendChannelInvite(
+                              signalRService.callToChannel(
                                 store.selectedProfileUser.id,
                                 store.selectedChannelForMembers.id,
                                 store.selectedChannelForMembers.name
