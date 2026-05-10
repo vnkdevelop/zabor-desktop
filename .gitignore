@@ -34,3 +34,6 @@ npm-debug.log*
 .temp/
 push.bat
 release.bat
+
+TECHNICAL_DOCUMENTATION.md
+.gitignore
