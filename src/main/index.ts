@@ -2,17 +2,17 @@ import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'ele
 import { join } from 'path';
 import { existsSync, rmSync, readFileSync, writeFileSync, promises as fsPromises } from 'fs';
 
-// ── GPU stability fixes ─────────────────────────────────────────
+
 if (app) {
   app.disableHardwareAcceleration();
-  // NOTE: 'disable-gpu-compositing' убран — в новых версиях Electron вызывает чёрный экран
+
   app.commandLine.appendSwitch('force-color-profile', 'srgb');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-background-timer-throttling');
   app.commandLine.appendSwitch('ignore-certificate-errors');
-  // Отключаем скрытие локальных IP-адресов через mDNS. Это критически важно для работы WebRTC 
-  // через VPN-туннели, чтобы клиенты могли соединяться напрямую по локальным IP (10.x.x.x).
+
+
   app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
 }
 
@@ -22,9 +22,9 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 
-// ═══════════════════════════════════
-// Single Instance Lock
-// ═══════════════════════════════════
+
+
+
 const gotLock = app.requestSingleInstanceLock();
 
 if (!gotLock) {
@@ -39,9 +39,9 @@ if (!gotLock) {
   });
 }
 
-// ═══════════════════════════════════
-// App Settings
-// ═══════════════════════════════════
+
+
+
 interface AppSettings {
   openAtLogin: boolean;
   minimizeToTray: boolean;
@@ -61,11 +61,11 @@ function loadAppSettings(): AppSettings {
   } catch {}
 
   return {
-    openAtLogin: parsed.openAtLogin !== undefined 
-      ? parsed.openAtLogin 
+    openAtLogin: parsed.openAtLogin !== undefined
+      ? parsed.openAtLogin
       : (isDev ? false : app.getLoginItemSettings({ args: ['--autostart'] }).openAtLogin),
-    minimizeToTray: parsed.minimizeToTray !== undefined 
-      ? parsed.minimizeToTray 
+    minimizeToTray: parsed.minimizeToTray !== undefined
+      ? parsed.minimizeToTray
       : true
   };
 }
@@ -87,9 +87,9 @@ function applyAutoLaunch(enabled: boolean): void {
   });
 }
 
-// ═══════════════════════════════════
-// Window State
-// ═══════════════════════════════════
+
+
+
 interface WindowState {
   x?: number;
   y?: number;
@@ -137,9 +137,9 @@ function scheduleWindowStateSave() {
   }, 500);
 }
 
-// ═══════════════════════════════════
-// Tray
-// ═══════════════════════════════════
+
+
+
 function createTray(): void {
   const iconPath = isDev
     ? join(__dirname, '../../build/icon.ico')
@@ -192,15 +192,15 @@ function createTray(): void {
   });
 }
 
-// ═══════════════════════════════════
-// Window
-// ═══════════════════════════════════
+
+
+
 function createWindow(): void {
   const isAutoStart = process.argv.includes('--autostart');
-  
+
   let stateOptions: Partial<Electron.BrowserWindowConstructorOptions> = {};
   let savedState: WindowState | null = null;
-  
+
   if (isAutoStart) {
     savedState = loadWindowState();
     if (savedState) {
@@ -216,7 +216,7 @@ function createWindow(): void {
             savedState!.y! < bounds.y + bounds.height
           );
         });
-        
+
         if (isVisible) {
           stateOptions = {
             x: savedState.x,
@@ -245,8 +245,8 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     frame: false,
-    show: false, // Показываем только после ready-to-show, чтобы не мелькал чёрный экран
-    backgroundColor: '#0C0C0E', // Синхронизировано с CSS для предотвращения мерцания
+    show: false,
+    backgroundColor: '#0C0C0E',
     ...stateOptions,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -260,12 +260,12 @@ function createWindow(): void {
     mainWindow.maximize();
   }
 
-  // Показываем окно только когда renderer готов — исключаем мелькание чёрного экрана
+
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
   });
 
-  // Fallback: если ready-to-show не пришёл за 3 секунды — показываем в любом случае
+
   setTimeout(() => {
     if (mainWindow && !mainWindow.isVisible()) mainWindow.show();
   }, 3000);
@@ -310,14 +310,14 @@ function createWindow(): void {
   }
 }
 
-// ═══════════════════════════════════
-// App lifecycle
-// ═══════════════════════════════════
+
+
+
 app.whenReady().then(() => {
   const settings = loadAppSettings();
   applyAutoLaunch(settings.openAtLogin);
 
-  // ── Window controls ──
+
   ipcMain.on('window-minimize', () => {
     BrowserWindow.getFocusedWindow()?.minimize();
   });
@@ -344,7 +344,7 @@ app.whenReady().then(() => {
     app.quit();
   });
 
-  // ── Disk wipe — вызывается ТОЛЬКО при явном logout ──
+
   ipcMain.handle('wipe-app-data', async () => {
     const userDataPath = app.getPath('userData');
     const dirsToKill = [
@@ -375,7 +375,7 @@ app.whenReady().then(() => {
     return true;
   });
 
-  // ── Session persistence ──
+
   const SESSION_PATH = join(app.getPath('userData'), 'session.json');
 
   ipcMain.handle('save-session', async (_event, data: string) => {
@@ -400,7 +400,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('get-auto-launch', () => {
     if (isDev) return false;
-    // Используем реальное состояние из ОС, чтобы UI всегда отображал правду
+
     const osSetting = app.getLoginItemSettings({ args: ['--autostart'] }).openAtLogin;
     return osSetting;
   });
@@ -413,7 +413,7 @@ app.whenReady().then(() => {
     return true;
   });
 
-  // ── Minimize to tray ──
+
   ipcMain.handle('get-minimize-to-tray', () => {
     return loadAppSettings().minimizeToTray;
   });
@@ -434,7 +434,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  
+
 });
 
 app.on('before-quit', (event) => {

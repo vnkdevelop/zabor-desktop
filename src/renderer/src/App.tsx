@@ -47,6 +47,9 @@ export default function App() {
   const [editProfileDisplayName, setEditProfileDisplayName] = useState('');
   const [editProfileAvatarBase64, setEditProfileAvatarBase64] = useState<string | null>(null);
   const [editProfileAvatarColor, setEditProfileAvatarColor] = useState<string>('#c70060');
+  const [editProfileAboutMe, setEditProfileAboutMe] = useState('');
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isLoginCopied, setIsLoginCopied] = useState(false);
 
   const [newChannelName, setNewChannelName] = useState('');
   const [editChannelName, setEditChannelName] = useState('');
@@ -173,6 +176,9 @@ export default function App() {
     setEditProfileAvatarBase64(null);
     setEditProfileAvatarColor('#c70060');
     setEditProfileDisplayName('');
+    setEditProfileAboutMe('');
+    setIsEditingProfile(false);
+    setIsLoginCopied(false);
     webrtc.setInputDevice('default');
     webrtc.setOutputDevice('default');
   }, []);
@@ -569,6 +575,9 @@ export default function App() {
 
     setEditProfileAvatarBase64(null);
     setEditProfileAvatarColor('#c70060');
+    setEditProfileAboutMe('');
+    setIsEditingProfile(false);
+    setIsLoginCopied(false);
 
     setInviteFriendSearch('');
     setSentInvites(new Set());
@@ -792,13 +801,14 @@ export default function App() {
     if (nameErr) { setError(nameErr); return; }
     const finalAvatar = editProfileAvatarBase64 ?? user.avatarBase64;
     const finalColor = editProfileAvatarBase64 ? editProfileAvatarColor : user.avatarColor;
-    const updatedUser = { ...user, displayName: editProfileDisplayName.trim(), avatarBase64: finalAvatar, avatarColor: finalColor };
+    const updatedUser = { ...user, displayName: editProfileDisplayName.trim(), avatarBase64: finalAvatar, avatarColor: finalColor, aboutMe: editProfileAboutMe.trim() };
     store.setCurrentUser(updatedUser);
     if (store.currentChannelId) store.setVoiceUsers(store.voiceUsers.map(u => u.id === user.id ? updatedUser : u));
     store.setFriends(store.friends.map(f => f.id === user.id ? updatedUser : f));
-    saveLocalCache(); store.closeProfileOnly();
-    signalRService.updateProfile(editProfileDisplayName.trim(), finalAvatar, finalColor);
-  }, [store.currentUser, editProfileDisplayName, editProfileAvatarBase64, editProfileAvatarColor, validateName, saveLocalCache]);
+    saveLocalCache();
+    setIsEditingProfile(false);
+    signalRService.updateProfile(editProfileDisplayName.trim(), finalAvatar, finalColor, editProfileAboutMe.trim());
+  }, [store.currentUser, editProfileDisplayName, editProfileAvatarBase64, editProfileAvatarColor, editProfileAboutMe, validateName, saveLocalCache]);
 
   const handleCreateChannel = useCallback(async () => {
     const nameErr = validateName(newChannelName);
@@ -1426,7 +1436,7 @@ export default function App() {
                   </div>
                   {store.friends.map(f => (
                     <div key={f.id} onContextMenu={e => handleContextMenu(e, 'friend', f)}
-                      onClick={() => { store.setSelectedProfileUser(f, 'friends'); setEditProfileDisplayName(f.displayName); store.setModal('profile', true); signalRService.viewProfile(f.id); }}
+                      onClick={() => { store.setSelectedProfileUser(f, 'friends'); setEditProfileDisplayName(f.displayName); setEditProfileAboutMe(f.aboutMe || ''); setIsEditingProfile(false); store.setModal('profile', true); signalRService.viewProfile(f.id); }}
                       className="px-3 py-2 rounded-xl mb-1 cursor-pointer hover:bg-surfaceHover flex items-center gap-3 transition-colors">
                       <div className="relative w-[47px] h-[47px] shrink-0">
                         <div className="w-full h-full relative">
@@ -1455,10 +1465,10 @@ export default function App() {
             </div>
 
             <div className="h-[75px] bg-[#09090B] rounded-2xl mx-4 mb-4 flex items-center px-4 shrink-0 shadow-lg">
-              <div onClick={() => { store.setSelectedProfileUser(store.currentUser, 'none'); setEditProfileDisplayName(store.currentUser!.displayName); setEditProfileAvatarBase64(null); store.setModal('profile', true); }}
+              <div onClick={() => { store.setSelectedProfileUser(store.currentUser, 'none'); setEditProfileDisplayName(store.currentUser!.displayName); setEditProfileAboutMe(store.currentUser!.aboutMe || ''); setEditProfileAvatarBase64(null); setIsEditingProfile(false); store.setModal('profile', true); }}
                 className="relative w-[51px] h-[51px] mr-3 cursor-pointer shrink-0 hover:opacity-80 transition-opacity">
                 <AvatarImg src={store.currentUser?.avatarBase64} size={51} bgColor={store.currentUser?.avatarColor} />
-                <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-[3px] border-[#09090B] ${serverConnected ? 'bg-success' : 'bg-gray-500'}`} />
+                <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] border-[#09090B] ${serverConnected ? 'bg-success' : 'bg-gray-500'}`} />
               </div>
               <div className="flex-1 min-w-0 flex flex-col justify-center">
                 <div className="font-bold text-sm truncate text-white">{store.currentUser?.displayName}</div>
@@ -2084,99 +2094,149 @@ export default function App() {
 
       {store.modals.profile && store.selectedProfileUser && (
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-panelBg w-[350px] rounded-3xl overflow-hidden shadow-2xl relative">
+          <div className="bg-panelBg w-[380px] rounded-[32px] overflow-hidden shadow-2xl relative border border-[#303035]">
             <div
-              className="h-28 w-full relative"
+              className="h-32 w-full relative transition-colors duration-500"
               style={{ backgroundColor: editProfileAvatarBase64 ? editProfileAvatarColor : store.selectedProfileUser?.avatarColor }}
             >
               <button
-                onClick={() => {
-                  const uid = store.selectedProfileUser!.id;
-                  if (uid === store.currentUser?.id) openMyAchievements();
-                  else openUserAchievements(uid);
-                  store.closeProfileOnly();
-                }}
-                className="absolute bottom-3 right-4 w-10 h-10 rounded-xl bg-transparent border-2 border-white/90 flex items-center justify-center hover:bg-white/5 transition-colors shadow-lg"
-                title="Достижения"
-              >
-                <span
-                  className="w-full h-full flex items-center justify-center text-white text-[20px] leading-none select-none"
-                  style={{
-                    WebkitFontSmoothing: 'antialiased',
-                    MozOsxFontSmoothing: 'grayscale',
-                    textRendering: 'geometricPrecision'
-                  }}
-                >
-                  ✦
-                </span>
-              </button>
-
-              <button
                 onClick={() => store.closeProfileOnly()}
-                className="absolute top-4 right-4 text-textMuted hover:text-white transition-colors"
+                className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-full backdrop-blur-md transition-all"
               >
                 <X size={20} />
               </button>
+
+              {store.selectedProfileUser?.id === store.currentUser?.id && !isEditingProfile && (
+                <button
+                  onClick={() => setIsEditingProfile(true)}
+                  className="absolute top-4 right-14 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-full backdrop-blur-md transition-all"
+                  title="Редактировать профиль"
+                >
+                  <Edit2 size={20} />
+                </button>
+              )}
             </div>
 
-            <div className="px-6 pb-8 relative">
-              <div className="absolute -top-12 left-6 w-[103px] h-[103px]">
-                <div className="w-full h-full rounded-full border-[6px] border-panelBg bg-panelBg relative">
-                  <AvatarImg
-                    src={editProfileAvatarBase64 || store.selectedProfileUser?.avatarBase64}
-                    size={91}
-                    bgColor={editProfileAvatarBase64 ? editProfileAvatarColor : store.selectedProfileUser?.avatarColor}
-                  />
+            <div className="px-8 pb-8 relative mt-[-56px]">
+              <div className="flex justify-between items-end mb-4 relative z-10">
+                <div className="relative group">
+                  <div className="w-[112px] h-[112px] rounded-full border-[6px] border-panelBg bg-panelBg relative shadow-xl">
+                    <AvatarImg
+                      src={isEditingProfile ? (editProfileAvatarBase64 || store.selectedProfileUser?.avatarBase64) : store.selectedProfileUser?.avatarBase64}
+                      size={100}
+                      bgColor={isEditingProfile ? (editProfileAvatarBase64 ? editProfileAvatarColor : store.selectedProfileUser?.avatarColor) : store.selectedProfileUser?.avatarColor}
+                    />
+                  </div>
+                  <div className={`absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full border-[4px] border-panelBg ${store.selectedProfileUser?.id === store.currentUser?.id
+                    ? (serverConnected ? 'bg-success' : 'bg-gray-500')
+                    : (store.selectedProfileUser?.isOnline ? 'bg-success' : 'bg-gray-500')
+                    }`} />
+
+                  {isEditingProfile && (
+                    <div
+                      className="absolute inset-[6px] bg-black/60 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer backdrop-blur-sm"
+                      onClick={() => profileFileInputRef.current?.click()}
+                    >
+                      <Camera size={32} className="text-white" />
+                      <input
+                        ref={profileFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={e => onFileChange(e, 'profile')}
+                      />
+                    </div>
+                  )}
                 </div>
-                <div className={`absolute bottom-0.5 right-0.5 w-6 h-6 rounded-full border-[4px] border-panelBg ${store.selectedProfileUser?.id === store.currentUser?.id
-                  ? (serverConnected ? 'bg-success' : 'bg-gray-500')
-                  : (store.selectedProfileUser?.isOnline ? 'bg-success' : 'bg-gray-500')
-                  }`} />
+
+                <button
+                  onClick={() => {
+                    const uid = store.selectedProfileUser!.id;
+                    if (uid === store.currentUser?.id) openMyAchievements();
+                    else openUserAchievements(uid);
+                    store.closeProfileOnly();
+                  }}
+                  className="w-12 h-12 rounded-xl bg-surface border border-[#303035] flex items-center justify-center hover:bg-surfaceHover hover:scale-105 transition-all text-[#c70060] hover:shadow-[0_0_15px_rgba(199,0,96,0.3)] active:shadow-[0_0_20px_rgba(199,0,96,0.5)] active:scale-95 -mr-6"
+                  title="Достижения"
+                >
+                  <Trophy size={22} />
+                </button>
               </div>
 
-              <div className="pt-14 mb-6">
-                {store.selectedProfileUser?.id === store.currentUser?.id ? (
-                  <>
-                    <label className="text-[10px] font-bold text-textMuted mb-2 block tracking-wider">ОТОБРАЖАЕМОЕ ИМЯ</label>
-                    <input
-                      type="text"
-                      value={editProfileDisplayName}
-                      onChange={e => {
-                        setEditProfileDisplayName(e.target.value);
-                        setError('');
-                      }}
-                      maxLength={20}
-                      className="bg-surface w-full p-3 rounded-xl text-white font-bold text-lg mb-3 outline-none focus:ring-2 focus:ring-[#c70060]"
-                    />
-                    {error && <p className="text-danger text-xs mb-2 font-medium">{error}</p>}
-                    <p className="text-textMuted text-sm font-medium">@{store.selectedProfileUser?.username}</p>
-                  </>
+              <div className="mb-6">
+                {isEditingProfile ? (
+                  <div className="space-y-4 animate-fade-in">
+                    <div>
+                      <label className="text-[10px] font-bold text-textMuted mb-2 block tracking-wider uppercase">Отображаемое имя</label>
+                      <input
+                        type="text"
+                        value={editProfileDisplayName}
+                        onChange={e => {
+                          setEditProfileDisplayName(e.target.value);
+                          setError('');
+                        }}
+                        maxLength={20}
+                        className="bg-surface w-full p-3 rounded-xl text-white font-bold text-base outline-none focus:ring-2 focus:ring-[#c70060] transition-shadow"
+                      />
+                      {error && <p className="text-danger text-xs mt-2 font-medium">{error}</p>}
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-textMuted mb-2 block tracking-wider uppercase">О себе</label>
+                      <textarea
+                        value={editProfileAboutMe}
+                        onChange={e => setEditProfileAboutMe(e.target.value)}
+                        maxLength={150}
+                        rows={3}
+                        placeholder="Напишите немного о себе..."
+                        className="bg-surface w-full p-3 rounded-xl text-white text-sm outline-none focus:ring-2 focus:ring-[#c70060] resize-none transition-shadow"
+                      />
+                    </div>
+                  </div>
                 ) : (
-                  <>
-                    <h2 className="text-2xl font-bold text-white truncate">{store.selectedProfileUser?.displayName}</h2>
-                    <p className="text-textMuted text-sm mt-1 font-medium">@{store.selectedProfileUser?.username}</p>
-                  </>
+                  <div className="animate-fade-in">
+                    <h2 className="text-2xl font-black text-white tracking-tight break-words">{store.selectedProfileUser?.displayName}</h2>
+                    <p
+                      className={`text-sm mt-1 font-bold cursor-pointer transition-opacity inline-block ${isLoginCopied ? 'text-success' : 'text-[#c70060] hover:underline hover:opacity-80'}`}
+                      title={isLoginCopied ? "" : "Скопировать логин"}
+                      onClick={() => {
+                        if (store.selectedProfileUser && !isLoginCopied) {
+                          navigator.clipboard.writeText(store.selectedProfileUser.username);
+                          setIsLoginCopied(true);
+                          setTimeout(() => setIsLoginCopied(false), 2000);
+                        }
+                      }}
+                    >
+                      {isLoginCopied ? 'Скопировано!' : `@${store.selectedProfileUser?.username}`}
+                    </p>
+                    {store.selectedProfileUser?.aboutMe && (
+                      <div className="mt-4 bg-surface/50 p-4 rounded-2xl border border-[#303035]/50">
+                        <h3 className="text-[10px] font-bold text-textMuted mb-2 uppercase tracking-wider">О себе</h3>
+                        <p className="text-white/90 text-sm leading-relaxed break-words whitespace-pre-wrap">
+                          {store.selectedProfileUser.aboutMe}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
-              {store.selectedProfileUser?.id === store.currentUser?.id ? (
-                <div className="flex flex-col gap-3">
-                  <input
-                    ref={profileFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={e => onFileChange(e, 'profile')}
-                  />
+              {isEditingProfile ? (
+                <div className="flex gap-3 pt-4 border-t border-[#303035]">
                   <button
-                    onClick={() => profileFileInputRef.current?.click()}
-                    className="w-full bg-surface text-white py-3.5 rounded-xl font-bold flex items-center justify-center hover:bg-surfaceHover transition-colors"
+                    onClick={() => {
+                      setIsEditingProfile(false);
+                      setError('');
+                      setEditProfileDisplayName(store.currentUser!.displayName);
+                      setEditProfileAboutMe(store.currentUser!.aboutMe || '');
+                      setEditProfileAvatarBase64(null);
+                    }}
+                    className="flex-1 bg-surface text-white py-3.5 rounded-xl font-bold hover:bg-surfaceHover transition-colors"
                   >
-                    <Camera size={18} className="mr-2" /> Сменить аватар
+                    Отмена
                   </button>
                   <button
                     onClick={saveProfileChanges}
-                    className="w-full bg-[#c70060] text-white py-3.5 rounded-xl font-bold hover:opacity-90 transition-opacity"
+                    className="flex-1 bg-[#c70060] text-white py-3.5 rounded-xl font-bold hover:shadow-[0_0_25px_rgba(199,0,96,0.5)] active:shadow-[0_0_15px_rgba(199,0,96,0.8)] active:scale-95 transition-all"
                   >
                     Сохранить
                   </button>
@@ -2202,9 +2262,9 @@ export default function App() {
                           }
                           store.closeProfileOnly();
                         }}
-                        className="w-full bg-[#c70060] text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+                        className="w-full bg-[#c70060] text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all hover:shadow-[0_0_25px_rgba(199,0,96,0.5)] active:shadow-[0_0_15px_rgba(199,0,96,0.8)] active:scale-[0.98]"
                       >
-                        <UserPlus size={18} /> Позвать
+                        <UserPlus size={18} /> Позвать в канал
                       </button>
                       {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && (
                         <button
@@ -2222,32 +2282,34 @@ export default function App() {
                       )}
                     </>
                   ) : (
-                    <>
-                      <button
-                        onClick={async () => {
-                          if (store.selectedProfileUser) {
-                            const ok = await signalRService.startCall(store.selectedProfileUser.id);
-                            if (!ok) {
-                              setOfflineToast('Пользователь не в сети');
-                              setTimeout(() => setOfflineToast(null), 3000);
+                    store.selectedProfileUser?.id !== store.currentUser?.id && (
+                      <>
+                        <button
+                          onClick={async () => {
+                            if (store.selectedProfileUser) {
+                              const ok = await signalRService.startCall(store.selectedProfileUser.id);
+                              if (!ok) {
+                                setOfflineToast('Пользователь не в сети');
+                                setTimeout(() => setOfflineToast(null), 3000);
+                              }
                             }
-                          }
-                          store.closeProfileOnly();
-                        }}
-                        className="w-full bg-success text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-600 transition-colors"
-                      >
-                        <Phone size={18} /> Позвонить
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (store.selectedProfileUser) signalRService.removeFriend(store.selectedProfileUser.id);
-                          store.closeProfileOnly();
-                        }}
-                        className="w-full bg-surface text-danger py-3.5 rounded-xl font-bold hover:bg-[#2B2D31] transition-colors"
-                      >
-                        Удалить из друзей
-                      </button>
-                    </>
+                            store.closeProfileOnly();
+                          }}
+                          className="w-full bg-success text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-600 transition-all hover:shadow-[0_0_25px_rgba(34,197,94,0.5)] active:shadow-[0_0_15px_rgba(34,197,94,0.8)] active:scale-[0.98]"
+                        >
+                          <Phone size={18} /> Позвонить
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (store.selectedProfileUser) signalRService.removeFriend(store.selectedProfileUser.id);
+                            store.closeProfileOnly();
+                          }}
+                          className="w-full bg-surface text-danger py-3.5 rounded-xl font-bold hover:bg-[#2B2D31] transition-colors"
+                        >
+                          Удалить из друзей
+                        </button>
+                      </>
+                    )
                   )}
                 </div>
               )}

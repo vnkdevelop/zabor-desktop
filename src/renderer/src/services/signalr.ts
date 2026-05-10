@@ -1,5 +1,5 @@
 import * as signalR from '@microsoft/signalr';
-import { useAppStore, User, VoiceChannel, ChannelUpdate, IncomingCall } from '../store/useAppStore';
+import { useAppStore, User, VoiceChannel, ChannelUpdate, IncomingCall, ChannelInvite } from '../store/useAppStore';
 import { webrtc } from './webrtc';
 import callRingSound from '../assets/sounds/call.mp3';
 import channelJoinSound from '../assets/sounds/join.mp3';
@@ -557,8 +557,8 @@ public stopRingtone() {
     return false;
   }
 
-  public async updateProfile(displayName: string, avatarBase64: string | null, avatarColor: string): Promise<void> {
-    await this.safeInvoke("UpdateProfile", displayName, avatarBase64, avatarColor);
+  public async updateProfile(displayName: string, avatarBase64: string | null, avatarColor: string, aboutMe: string = ''): Promise<void> {
+    await this.safeInvoke("UpdateProfile", displayName, avatarBase64, avatarColor, aboutMe);
   }
 
   public async changePassword(newPassword: string): Promise<boolean> {

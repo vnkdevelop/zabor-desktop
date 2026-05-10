@@ -1,10 +1,6 @@
 import { unpackGif, getStaticFrameSync } from '../../utils/avatar';
 
-/**
- * AvatarImg component that uses physical oversizing to solve edge artifacts.
- * When an image is present, it is rendered slightly larger than the container
- * to ensure its pixels cover the anti-aliased circular clip boundary.
- */
+
 export function AvatarImg({ src, size, bgColor, animate = true, className = '' }: {
   src: string | null | undefined;
   size: number;
@@ -25,7 +21,7 @@ export function AvatarImg({ src, size, bgColor, animate = true, className = '' }
 
     const packed = unpackGif(src);
 
-    // Animated GIF
+
     if (packed && animate) {
       return (
         <div className="absolute inset-0 pointer-events-none">
@@ -44,7 +40,7 @@ export function AvatarImg({ src, size, bgColor, animate = true, className = '' }
       );
     }
 
-    // Static packed GIF or regular image
+
     const staticSrc = (packed && !animate) ? getStaticFrameSync(src) : src;
     if (!staticSrc) return null;
 
@@ -58,7 +54,7 @@ export function AvatarImg({ src, size, bgColor, animate = true, className = '' }
   };
 
   return (
-    <div 
+    <div
       className={`w-full h-full rounded-full overflow-hidden relative shrink-0 ${className}`}
       style={containerStyle}
     >

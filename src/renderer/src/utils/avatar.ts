@@ -1,8 +1,8 @@
 export interface PackedGif {
-  g: string; // data:image/gif;base64,...
-  s: number; // scale
-  x: number; // x offset (px, relative to 200x200)
-  y: number; // y offset (px, relative to 200x200)
+  g: string;
+  s: number;
+  x: number;
+  y: number;
 }
 
 export function isPackedGif(src: string | null | undefined): boolean {
@@ -28,14 +28,14 @@ export function unpackGif(src: string): PackedGif | null {
   }
 }
 
-/** Возвращает src для обычного <img> (распаковывает GIF если нужно) */
+
 export function getDisplaySrc(avatarBase64: string | null | undefined): string | null {
   if (!avatarBase64) return null;
   const packed = unpackGif(avatarBase64);
   return packed ? packed.g : avatarBase64;
 }
 
-// === Кэш статических кадров ===
+
 const staticCache = new Map<string, string>();
 
 export function getStaticFrameSync(src: string): string | null {

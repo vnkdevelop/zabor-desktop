@@ -8,6 +8,7 @@ export interface User {
   displayName: string;
   avatarBase64: string | null;
   avatarColor: string;
+  aboutMe?: string;
   isOnline: boolean;
 
   

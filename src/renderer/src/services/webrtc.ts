@@ -354,7 +354,7 @@ export class WebRTCManager {
           echoCancellation: true, // Обязательно, чтобы не было эха
           noiseSuppression: this.noiseSuppression, // Используем встроенную нейросеть Chromium
           autoGainControl: false, // Отключено, так как делаем свой компрессор
-          // @ts-expect-error - Скрытые настройки Chromium
+          // @ts-ignore - Скрытые настройки Chromium
           googHighpassFilter: false, 
           
           googEchoCancellation2: true,

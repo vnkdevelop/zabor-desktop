@@ -1,7 +1,7 @@
-/// <reference lib="webworker" />
+
 import { StandaloneDeepFilter } from 'deepfilter-standalone'
 
-// AudioWorklet-типы не включены в стандартный lib TypeScript — объявляем вручную
+
 declare abstract class AudioWorkletProcessor {
   readonly port: MessagePort
   abstract process(
@@ -26,33 +26,30 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private outputWriteIndex = 0
 
   private readonly FRAME_SIZE = 480
-  private readonly BUFFER_SIZE = 4800 // 10 фреймов при 48kHz
+  private readonly BUFFER_SIZE = 4800
 
   private denoiser: StandaloneDeepFilter | null = null
   private denoiserReady = false
 
-  /**
-   * Предвыделенные рабочие буферы — исключают аллокации в горячем пути process().
-   * new Float32Array() каждый вызов провоцирует GC-паузы каждые ~3ms.
-   */
+
   private readonly frameToProcess: Float32Array
   private readonly processedFrame: Float32Array
 
-  private dfState: unknown = null // WASM-инстанс DeepFilterNet
+  private dfState: unknown = null
   private wasmLoaded = false
 
-  private vadThreshold = 0.01
+  private vadThreshold = 0.004
   private lastVadSent = false
 
-  /** Счётчик переполнений для rate-limit предупреждений (не спамим в hot path) */
+
   private overflowCount = 0
 
   private noiseSuppression = true
   private framesSinceLastVoice = 0
   private currentGain = 0
-  private readonly HOLD_FRAMES = 40 // 400ms (40 фреймов по 10мс)
-  private readonly ATTACK_STEP = 1.0 / (this.FRAME_SIZE * 2) // Плавное нарастание за ~20мс (2 фрейма)
-  private readonly RELEASE_STEP = 1.0 / (this.FRAME_SIZE * 20) // Плавное затухание за ~200мс (20 фреймов)
+  private readonly HOLD_FRAMES = 80
+  private readonly ATTACK_STEP = 1.0 / (this.FRAME_SIZE * 2)
+  private readonly RELEASE_STEP = 1.0 / (this.FRAME_SIZE * 25)
 
   constructor() {
     super()
@@ -69,7 +66,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Инициализируем нейросеть сразу при старте воркера
+
     this.initDeepFilter()
   }
 
@@ -77,7 +74,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     if (this.denoiserReady) return
     try {
       this.denoiser = new StandaloneDeepFilter({
-        attenuationLimit: 100, // Глубокое подавление
+        attenuationLimit: 40,
         postFilterBeta: 0.02
       })
       await this.denoiser.initialize()
@@ -90,7 +87,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     }
   }
 
-  /** Записывает samples в кольцевой буфер. Возвращает обновлённый writeIndex. */
+
   private pushToBuffer(
     buffer: Float32Array,
     data: Float32Array,
@@ -100,7 +97,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     const availableSpace = (readIndex - writeIndex - 1 + this.BUFFER_SIZE) % this.BUFFER_SIZE
     if (availableSpace < data.length) {
       this.overflowCount++
-      // Rate-limit: логируем раз в 100 переполнений, чтобы не спамить в hot path
+
       if (this.overflowCount % 100 === 1) {
         console.warn(`DeepFilterProcessor: ring buffer overflow (×${this.overflowCount})`)
       }
@@ -114,7 +111,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     return writeIndex
   }
 
-  /** Читает samples из кольцевого буфера. Возвращает обновлённый readIndex. */
+
   private pullFromBuffer(
     buffer: Float32Array,
     data: Float32Array,
@@ -143,7 +140,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     const inputChannel = input[0]
     const outputChannel = output[0]
 
-    // 1. Пишем 128 новых семплов в кольцевой входной буфер
+
     this.inputWriteIndex = this.pushToBuffer(
       this.inputBuffer,
       inputChannel,
@@ -151,7 +148,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       this.inputReadIndex
     )
 
-    // 2. Обрабатываем фреймы по 480 семплов (требование DeepFilterNet @ 48kHz)
+
     while (
       (this.inputWriteIndex - this.inputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE >=
       this.FRAME_SIZE
@@ -163,14 +160,26 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         this.inputReadIndex
       )
 
-      // Встроенный умный Noise Gate с плавным фейдом + VAD
+
+      if (this.noiseSuppression && this.denoiserReady && this.denoiser) {
+        const cleanFrame = this.denoiser.processAudio(this.frameToProcess)
+        this.processedFrame.set(cleanFrame)
+      } else {
+
+        this.processedFrame.set(this.frameToProcess)
+      }
+
+
+
+
+
       let sumSquares = 0
       for (let i = 0; i < this.FRAME_SIZE; i++) {
-        sumSquares += this.frameToProcess[i] * this.frameToProcess[i]
+        sumSquares += this.processedFrame[i] * this.processedFrame[i]
       }
       const rms = Math.sqrt(sumSquares / this.FRAME_SIZE)
-      
-      // Порог VAD. Используем this.vadThreshold для управления чувствительностью.
+
+
       const isVoiceFrame = rms > this.vadThreshold
 
       if (isVoiceFrame) {
@@ -179,34 +188,25 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         this.framesSinceLastVoice++
       }
 
-      // Отправляем VAD статус в UI
+
       const isSpeaking = this.framesSinceLastVoice < this.HOLD_FRAMES
       if (isSpeaking !== this.lastVadSent) {
         this.port.postMessage({ type: 'vad', isSpeaking })
         this.lastVadSent = isSpeaking
       }
 
-      // Если шумоподавление включено и нейросеть готова, очищаем кадр
-      if (this.noiseSuppression && this.denoiserReady && this.denoiser) {
-        const cleanFrame = this.denoiser.processAudio(this.frameToProcess)
-        this.processedFrame.set(cleanFrame)
-      } else {
-        // Иначе просто копируем
-        this.processedFrame.set(this.frameToProcess)
-      }
-
       if (this.noiseSuppression) {
-        // Плавный Noise Gate поверх очищенного звука
+
         const targetGain = isSpeaking ? 1.0 : 0.0
-        
+
         for (let i = 0; i < this.FRAME_SIZE; i++) {
           if (this.currentGain < targetGain) {
             this.currentGain = Math.min(targetGain, this.currentGain + this.ATTACK_STEP)
           } else if (this.currentGain > targetGain) {
             this.currentGain = Math.max(targetGain, this.currentGain - this.RELEASE_STEP)
           }
-          
-          // Применяем gain и убираем микроскопический шум (приравниваем к 0, чтобы Opus включил DTX)
+
+
           const sample = this.processedFrame[i] * this.currentGain
           this.processedFrame[i] = Math.abs(sample) < 1e-6 ? 0.0 : sample
         }
@@ -220,7 +220,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       )
     }
 
-    // 3. Отдаём 128 семплов из выходного буфера в Web Audio API
+
     const availableOutput =
       (this.outputWriteIndex - this.outputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE
 
@@ -232,7 +232,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         this.outputReadIndex
       )
     } else {
-      // Стартовая задержка накопления фреймов — пишем тишину
+
       outputChannel.fill(0)
     }
 

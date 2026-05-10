@@ -17,7 +17,7 @@ export interface AchievementsPayload {
 }
 
 export const ACHIEVEMENTS: AchievementDef[] = [
-  // Голосовые каналы
+
   {
     id: 'first_channel',
     title: 'Первооткрыватель',
@@ -104,7 +104,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     category: 'voice'
   },
 
-  // Звонки
+
   {
     id: 'first_call',
     title: 'Первый звонок',
@@ -143,7 +143,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     category: 'calls'
   },
 
-  // Социальные
+
   {
     id: 'first_friend',
     title: 'Первый друг',
@@ -172,7 +172,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     category: 'social'
   },
 
-  // Скрытые
+
   {
     id: 'night_owl',
     title: 'Ночная сова',
