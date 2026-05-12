@@ -1,6 +1,6 @@
 {
   "name": "zabor-desktop",
-  "version": "2.9.6",
+  "version": "2.9.5",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
   "author": "vnk",

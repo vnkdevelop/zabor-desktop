@@ -83,7 +83,11 @@ export class WebRTCManager {
       const me = useAppStore.getState().currentUser
       dfNode.port.onmessage = (event) => {
         if (event.data.type === 'vad' && me) {
-           useAppStore.getState().setSpeakingStatus(me.id, event.data.isSpeaking)
+           const store = useAppStore.getState()
+           if (store.currentUser?.isMuted || store.currentUser?.isServerMuted) {
+             return
+           }
+           store.setSpeakingStatus(me.id, event.data.isSpeaking)
            signalRService.setSpeakingState(event.data.isSpeaking)
         }
       }
@@ -193,7 +197,7 @@ export class WebRTCManager {
     const gainNode = this.userGainNodes.get(userId)
     if (!gainNode) return
     const userVol = useAppStore.getState().userVolumes[userId] ?? 100
-    gainNode.gain.value = Math.max(0, Math.min(1, (this.outputVolume / 100) * (userVol / 100)))
+    gainNode.gain.value = Math.max(0, Math.min(4, (this.outputVolume / 100) * (userVol / 100)))
   }
 
   public setNoiseSuppression(enabled: boolean) {
@@ -433,6 +437,15 @@ export class WebRTCManager {
 
   public toggleMute(isMuted: boolean) {
     if (this.localStream) this.localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted })
+    
+    if (isMuted) {
+      const store = useAppStore.getState()
+      const me = store.currentUser
+      if (me) {
+        store.setSpeakingStatus(me.id, false)
+        signalRService.setSpeakingState(false)
+      }
+    }
   }
 
   public setUserVolume(userId: string, volume: number) {
