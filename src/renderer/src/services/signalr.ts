@@ -509,11 +509,13 @@ this.sfxElements.clear();
 }
 
   public playRingtone() {
-  this.stopRingtone();
-  this.playSfx(callRingSound, 0.3);
-  const audio = this.sfxElements.get(callRingSound);
-  if (audio) audio.loop = true;
-}
+    const audio = this.sfxElements.get(callRingSound);
+    if (audio && !audio.paused) return;
+    this.stopRingtone();
+    this.playSfx(callRingSound, 0.3);
+    const newAudio = this.sfxElements.get(callRingSound);
+    if (newAudio) newAudio.loop = true;
+  }
 
 public stopRingtone() {
   if (this.ringtoneInterval) { clearInterval(this.ringtoneInterval); this.ringtoneInterval = null; }

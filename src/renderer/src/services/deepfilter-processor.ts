@@ -74,7 +74,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     if (this.denoiserReady) return
     try {
       this.denoiser = new StandaloneDeepFilter({
-        attenuationLimit: 40,
+        attenuationLimit: 80,
         postFilterBeta: 0.02
       })
       await this.denoiser.initialize()

@@ -84,6 +84,57 @@ export default function App() {
   const [inviteFriendSearch, setInviteFriendSearch] = useState('');
   const [sentInvites, setSentInvites] = useState<Set<string>>(new Set());
 
+  const addSentInvite = useCallback((userId: string) => {
+    setSentInvites(prev => new Set(prev).add(userId));
+    setTimeout(() => {
+      setSentInvites(prev => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+    }, 30000);
+  }, []);
+
+  useEffect(() => {
+    if (!store.incomingChannelInvite) return;
+    const timer = setTimeout(() => {
+      const inviteName = useAppStore.getState().incomingChannelInvite?.channelName;
+      store.setModal('incomingChannelInvite', false);
+      store.setIncomingChannelInvite(null);
+      signalRService.stopRingtone();
+      if (inviteName) {
+        useAppStore.getState().setSystemToast(`Пропущенный зов в канал: ${inviteName}`);
+        setTimeout(() => useAppStore.getState().setSystemToast(null), 4000);
+      }
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [store.incomingChannelInvite]);
+
+  useEffect(() => {
+    if (!store.incomingCall) return;
+    const timer = setTimeout(() => {
+      const callerName = useAppStore.getState().incomingCall?.callerName;
+      store.setModal('incomingCall', false);
+      store.setIncomingCall(null);
+      signalRService.stopRingtone();
+      if (callerName) {
+        useAppStore.getState().setSystemToast(`Пропущенный звонок от: ${callerName}`);
+        setTimeout(() => useAppStore.getState().setSystemToast(null), 4000);
+      }
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [store.incomingCall]);
+
+  useEffect(() => {
+    if (store.callStatus !== 'calling') return;
+    const timer = setTimeout(() => {
+      signalRService.endCall();
+      setOfflineToast('Не отвечает');
+      setTimeout(() => setOfflineToast(null), 4000);
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [store.callStatus]);
+
   const [showCropper, setShowCropper] = useState(false);
   const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
   const [cropScale, setCropScale] = useState(1);
@@ -881,8 +932,8 @@ export default function App() {
     const ch = store.selectedChannelForInvite;
     if (!ch) return;
     await signalRService.sendChannelInvite(friendId, ch.id, ch.name);
-    setSentInvites(prev => new Set(prev).add(friendId));
-  }, [store.selectedChannelForInvite]);
+    addSentInvite(friendId);
+  }, [store.selectedChannelForInvite, addSentInvite]);
 
   const openChannelMembers = useCallback(async (ch: VoiceChannel) => {
     const currentStore = useAppStore.getState();
@@ -1416,8 +1467,8 @@ export default function App() {
                         </button>
                         {channelUsers.length > 0 && (
                           <div className="flex items-center -space-x-2 px-8 mt-1.5 pointer-events-none">
-                            {channelUsers.map(u => (
-                              <div key={u.id} className="w-[31px] h-[31px] rounded-full border-2 border-panelBg relative shrink-0 overflow-hidden" title={u.displayName}>
+                            {channelUsers.map((u, i) => (
+                              <div key={u.id} className="w-[31px] h-[31px] rounded-full border-2 border-panelBg relative shrink-0 overflow-hidden" style={{ zIndex: 100 - i }} title={u.displayName}>
                                 <AvatarImg src={u.avatarBase64} size={31} bgColor={u.avatarColor} animate={false} />
                               </div>
                             ))}
@@ -1503,7 +1554,7 @@ export default function App() {
                     onContextMenu={e => handleContextMenu(e, 'voiceUser', store.currentCallUser)}
                     className={`relative flex flex-col items-center justify-center overflow-hidden shrink-0 transition-all duration-200
           ${store.callStatus === 'calling' ? 'animate-call-pulse' : ''}
-          ${store.currentCallUser.isSpeaking && store.callStatus === 'connected'
+          ${(store.currentCallUser.isSpeaking && store.callStatus === 'connected' && store.webrtcConnections[store.currentCallUser.id])
                         ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)]'
                         : 'shadow-xl'
                       }`}
@@ -1601,7 +1652,7 @@ export default function App() {
                   {[...store.voiceUsers].sort((a, b) => a.displayName.localeCompare(b.displayName)).map(user => (
                     <div key={user.id} onContextMenu={e => handleContextMenu(e, 'voiceUser', user)}
                       className={`relative flex flex-col items-center justify-center cursor-pointer transition-all duration-200 overflow-hidden shrink-0 hover:-translate-y-1
-                        ${user.isSpeaking ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)] z-10' : 'shadow-xl'}`}
+                        ${(user.isSpeaking && (store.webrtcConnections[user.id] || user.id === store.currentUser?.id)) ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)] z-10' : 'shadow-xl'}`}
                       style={{ backgroundColor: user.avatarColor, width: `${cardSize.w}px`, height: `${cardSize.h}px`, borderRadius: '24px' }}>
                       <div className="relative" style={{ width: `${cardSize.avatarSize}px`, height: `${cardSize.avatarSize}px`, marginBottom: '16px' }}>
                         <AvatarImg src={user.avatarBase64} size={cardSize.avatarSize} bgColor="transparent" />
@@ -1994,16 +2045,7 @@ export default function App() {
                   </div>
                   <p className="text-xs text-textMuted truncate">@{m.username}</p>
                 </div>
-                {m.isOnline && m.currentChannelId !== store.selectedChannelForMembers?.id && m.id !== store.currentUser?.id && (
-                  <button onClick={(e) => {
-                    e.stopPropagation();
-                    if (store.selectedChannelForMembers) {
-                      signalRService.callToChannel(m.id, store.selectedChannelForMembers.id, store.selectedChannelForMembers.name);
-                    }
-                  }} className="text-success hover:bg-success/20 p-2 rounded-xl transition-colors shrink-0" title="Позвонить">
-                    <Phone size={18} />
-                  </button>
-                )}
+
               </div>
             ))}
           </div>
@@ -2248,6 +2290,7 @@ export default function App() {
                       <button
                         onClick={() => {
                           if (store.selectedProfileUser) {
+                            if (sentInvites.has(store.selectedProfileUser.id)) return;
                             if (!store.selectedProfileUser.isOnline) {
                               setOfflineToast('Пользователь не в сети');
                               setTimeout(() => setOfflineToast(null), 3000);
@@ -2257,14 +2300,18 @@ export default function App() {
                                 store.selectedChannelForMembers.id,
                                 store.selectedChannelForMembers.name
                               );
-                              setSentInvites(prev => new Set(prev).add(store.selectedProfileUser!.id));
+                              addSentInvite(store.selectedProfileUser!.id);
                             }
                           }
-                          store.closeProfileOnly();
+                          // We don't close it so the user can see the button state change
                         }}
-                        className="w-full bg-[#c70060] text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all hover:shadow-[0_0_25px_rgba(199,0,96,0.5)] active:shadow-[0_0_15px_rgba(199,0,96,0.8)] active:scale-[0.98]"
+                        disabled={store.selectedProfileUser ? sentInvites.has(store.selectedProfileUser.id) : false}
+                        className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id)
+                          ? 'bg-success/20 text-success cursor-default'
+                          : 'bg-[#c70060] text-white hover:opacity-90 hover:shadow-[0_0_25px_rgba(199,0,96,0.5)] active:shadow-[0_0_15px_rgba(199,0,96,0.8)] active:scale-[0.98]'
+                          }`}
                       >
-                        <UserPlus size={18} /> Позвать в канал
+                        <UserPlus size={18} /> {store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id) ? 'Зовём...' : 'Позвать в канал'}
                       </button>
                       {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && (
                         <button
@@ -2488,16 +2535,20 @@ export default function App() {
               <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'channelMembers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Settings size={16} /> Профиль</button>
               {contextMenu.item.id !== store.currentUser?.id && (
                 <button onClick={() => {
+                  if (sentInvites.has(contextMenu.item.id)) return;
                   if (!contextMenu.item.isOnline) {
                     setOfflineToast('Пользователь не в сети');
                     setTimeout(() => setOfflineToast(null), 3000);
                   } else if (store.selectedChannelForMembers) {
                     signalRService.sendChannelInvite(contextMenu.item.id, store.selectedChannelForMembers.id, store.selectedChannelForMembers.name);
-                    setSentInvites(prev => new Set(prev).add(contextMenu.item.id));
+                    addSentInvite(contextMenu.item.id);
                   }
                   setContextMenu(null);
-                }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1">
-                  <UserPlus size={16} /> Позвать в канал
+                }}
+                  disabled={sentInvites.has(contextMenu.item.id)}
+                  className={`w-full text-left px-4 py-2 flex items-center gap-3 font-medium mt-1 ${sentInvites.has(contextMenu.item.id) ? 'text-success cursor-default' : 'text-white hover:bg-surfaceHover'
+                    }`}>
+                  <UserPlus size={16} /> {sentInvites.has(contextMenu.item.id) ? 'Зовём...' : 'Позвать в канал'}
                 </button>
               )}
               {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && contextMenu.item.id !== store.currentUser?.id && (

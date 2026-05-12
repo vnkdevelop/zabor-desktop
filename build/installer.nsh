@@ -1,3 +1,35 @@
+!macro DeleteAppData
+  SetShellVarContext current
+  
+  nsExec::Exec 'cmd /c "taskkill /F /IM ZABOR.exe /T"'
+  nsExec::Exec 'cmd /c "taskkill /F /IM zabor-desktop.exe /T"'
+  nsExec::Exec 'cmd /c "taskkill /F /IM ${PRODUCT_NAME}.exe /T"'
+  Sleep 1000
+
+  RMDir /r "$APPDATA\zabor-desktop"
+  RMDir /r "$LOCALAPPDATA\zabor-desktop"
+  RMDir /r "$APPDATA\zabor"
+  RMDir /r "$APPDATA\ZABOR"
+  RMDir /r "$APPDATA\${PRODUCT_NAME}"
+  RMDir /r "$LOCALAPPDATA\zabor"
+  RMDir /r "$LOCALAPPDATA\ZABOR"
+  RMDir /r "$LOCALAPPDATA\${PRODUCT_NAME}"
+  RMDir /r "$LOCALAPPDATA\Temp\zabor*"
+  RMDir /r "$LOCALAPPDATA\Temp\${PRODUCT_NAME}*"
+
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCT_NAME}"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ZABOR"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "zabor-desktop"
+
+  DeleteRegKey HKCU "Software\ZABOR"
+  DeleteRegKey HKLM "Software\ZABOR"
+  DeleteRegKey HKCU "Software\${PRODUCT_NAME}"
+  DeleteRegKey HKLM "Software\${PRODUCT_NAME}"
+  DeleteRegKey HKCU "Software\zabor-desktop"
+  
+  SetShellVarContext all
+!macroend
+
 !macro customInit
   ; === УДАЛЕНИЕ СТАРОЙ ВЕРСИИ (АВТОМАТИЧЕСКИ) ===
 
@@ -60,6 +92,10 @@
   RMDir /r "$PROGRAMFILES64\${PRODUCT_NAME}"
   RMDir /r "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
 
+  ${If} $KeepAppDataOnUpdate == "0"
+    !insertmacro DeleteAppData
+  ${EndIf}
+
   _zabor_init_done:
 !macroend
 
@@ -92,27 +128,6 @@
   ${EndIf}
 
   ${If} $shouldDeleteAppData == "1"
-    SetShellVarContext current
-    RMDir /r "$APPDATA\zabor-desktop"
-    RMDir /r "$LOCALAPPDATA\zabor-desktop"
-    RMDir /r "$APPDATA\zabor"
-    RMDir /r "$APPDATA\ZABOR"
-    RMDir /r "$APPDATA\${PRODUCT_NAME}"
-    RMDir /r "$LOCALAPPDATA\zabor"
-    RMDir /r "$LOCALAPPDATA\ZABOR"
-    RMDir /r "$LOCALAPPDATA\${PRODUCT_NAME}"
-    RMDir /r "$LOCALAPPDATA\Temp\zabor*"
-    RMDir /r "$LOCALAPPDATA\Temp\${PRODUCT_NAME}*"
-    SetShellVarContext all
+    !insertmacro DeleteAppData
   ${EndIf}
-
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCT_NAME}"
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ZABOR"
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "zabor-desktop"
-
-  DeleteRegKey HKCU "Software\ZABOR"
-  DeleteRegKey HKLM "Software\ZABOR"
-  DeleteRegKey HKCU "Software\${PRODUCT_NAME}"
-  DeleteRegKey HKLM "Software\${PRODUCT_NAME}"
-  DeleteRegKey HKCU "Software\zabor-desktop"
 !macroend

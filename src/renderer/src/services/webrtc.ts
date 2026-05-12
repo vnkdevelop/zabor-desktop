@@ -44,6 +44,13 @@ export class WebRTCManager {
   private vadContext: AudioContext | null = null
   private speakingIntervals: Map<string, SpeakingEntry> = new Map()
 
+  // ── Output Mixer ──────────────────────────────────────────────
+  private outputMixContext: AudioContext | null = null
+  private outputCompressor: DynamicsCompressorNode | null = null
+  private mixAudioElement: HTMLAudioElement | null = null
+  private userGainNodes: Map<string, GainNode> = new Map()
+  private userSourceNodes: Map<string, MediaStreamAudioSourceNode> = new Map()
+
   private readonly config: RTCConfiguration = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -118,6 +125,14 @@ export class WebRTCManager {
     inputGain.gain.value = Math.max(0, Math.min(2, this.inputVolume / 100))
     this.inputGainNode = inputGain
 
+    // 8. Soft Limiter (Мягкий лимитер для защиты от перегруза)
+    const limiter = ctx.createDynamicsCompressor()
+    limiter.threshold.value = -3
+    limiter.knee.value = 5
+    limiter.ratio.value = 20
+    limiter.attack.value = 0.002
+    limiter.release.value = 0.100
+
     // Connections
     let currentNode: AudioNode = source
     
@@ -133,7 +148,8 @@ export class WebRTCManager {
     peaking.connect(highShelf)
     highShelf.connect(compressor)
     compressor.connect(inputGain)
-    inputGain.connect(destination)
+    inputGain.connect(limiter)
+    limiter.connect(destination)
 
     return destination.stream
   }
@@ -163,26 +179,33 @@ export class WebRTCManager {
 
   public setOutputVolume(volume: number) {
     this.outputVolume = volume
-    this.audioElements.forEach((_, userId) => this.updateRemoteVolume(userId))
+    this.userGainNodes.forEach((_, userId) => this.updateRemoteVolume(userId))
   }
 
   public setDeafened(deafened: boolean) {
     this.isDeafened = deafened
-    this.audioElements.forEach(audio => { audio.muted = deafened })
+    if (this.mixAudioElement) {
+      this.mixAudioElement.muted = deafened
+    }
   }
 
   private updateRemoteVolume(userId: string) {
-    const audio = this.audioElements.get(userId)
-    if (!audio) return
+    const gainNode = this.userGainNodes.get(userId)
+    if (!gainNode) return
     const userVol = useAppStore.getState().userVolumes[userId] ?? 100
-    audio.volume = Math.max(0, Math.min(1, (this.outputVolume / 100) * (userVol / 100)))
-    audio.muted = this.isDeafened
+    gainNode.gain.value = Math.max(0, Math.min(1, (this.outputVolume / 100) * (userVol / 100)))
   }
 
   public setNoiseSuppression(enabled: boolean) {
     this.noiseSuppression = enabled
     if (this.dfNode) {
       this.dfNode.port.postMessage({ type: 'setConfig', noiseSuppression: enabled })
+    }
+    if (this.rawStream) {
+      const track = this.rawStream.getAudioTracks()[0]
+      if (track) {
+        track.applyConstraints({ noiseSuppression: !enabled }).catch(() => {})
+      }
     }
   }
 
@@ -328,11 +351,9 @@ export class WebRTCManager {
 
   public setOutputDevice(deviceId: string) {
     this.currentOutputDeviceId = deviceId
-    this.audioElements.forEach(audio => {
-      if (typeof (audio as any).setSinkId === 'function') {
-        (audio as any).setSinkId(deviceId).catch(() => {})
-      }
-    })
+    if (this.mixAudioElement && typeof (this.mixAudioElement as any).setSinkId === 'function') {
+      (this.mixAudioElement as any).setSinkId(deviceId).catch(() => {})
+    }
   }
 
   // ── Local Stream ──────────────────────────────────────────────
@@ -352,8 +373,8 @@ export class WebRTCManager {
           sampleRate: 48000,
           channelCount: 1,
           echoCancellation: true, // Обязательно, чтобы не было эха
-          noiseSuppression: this.noiseSuppression, // Используем встроенную нейросеть Chromium
-          autoGainControl: false, // Отключено, так как делаем свой компрессор
+          noiseSuppression: !this.noiseSuppression, // Если нейросеть выключена, включаем слабое встроенное
+          autoGainControl: true, // Включаем AGC браузера для предотвращения перегруза (клиппинга) при громких звуках
           // @ts-ignore - Скрытые настройки Chromium
           googHighpassFilter: false, 
           
@@ -421,26 +442,68 @@ export class WebRTCManager {
 
   // ── Peer Connections ──────────────────────────────────────────
 
-  private createAudioElement(userId: string): HTMLAudioElement {
-    let audio = this.audioElements.get(userId)
-    if (!audio) {
-      audio = new Audio()
-      audio.autoplay = true
-      if (this.currentOutputDeviceId !== 'default' && typeof (audio as any).setSinkId === 'function') {
-        (audio as any).setSinkId(this.currentOutputDeviceId).catch(() => {})
-      }
-      this.audioElements.set(userId, audio)
+  private initOutputMixer() {
+    if (this.outputMixContext) {
+      if (this.outputMixContext.state === 'suspended') this.outputMixContext.resume().catch(() => {})
+      return
     }
-    this.updateRemoteVolume(userId)
-    return audio
+    this.outputMixContext = new AudioContext({ latencyHint: 'playback' })
+    this.outputCompressor = this.outputMixContext.createDynamicsCompressor()
+    
+    // Настройки компрессора: прозрачный студийный лимитер (Transparent Safety Limiter)
+    // Он не будет постоянно "сплющивать" звук, а сработает только при реальной угрозе перегруза
+    this.outputCompressor.threshold.value = -6     // Срабатывает только на высоких пиках (когда голоса накладываются)
+    this.outputCompressor.knee.value = 15          // Очень мягкое скругление (Soft Knee) для незаметного срабатывания
+    this.outputCompressor.ratio.value = 10         // Высокое ратио, работает как защитный барьер (Limiter)
+    this.outputCompressor.attack.value = 0.005     // 5мс — достаточно быстро для защиты, но сохраняет "живость" голоса
+    this.outputCompressor.release.value = 0.250    // 250мс — плавное восстановление, убирает эффект "насоса" (pumping)
+
+    const dest = this.outputMixContext.createMediaStreamDestination()
+    this.outputCompressor.connect(dest)
+
+    this.mixAudioElement = new Audio()
+    this.mixAudioElement.autoplay = true
+    this.mixAudioElement.srcObject = dest.stream
+    this.mixAudioElement.muted = this.isDeafened
+    if (this.currentOutputDeviceId !== 'default' && typeof (this.mixAudioElement as any).setSinkId === 'function') {
+      (this.mixAudioElement as any).setSinkId(this.currentOutputDeviceId).catch(() => {})
+    }
   }
 
   private setupPeerHandlers(pc: RTCPeerConnection, userId: string) {
     pc.ontrack = (event) => {
       const remote = event.streams[0]
-      const audio = this.createAudioElement(userId)
-      audio.srcObject = remote
       this.setupVAD(remote, userId, false)
+
+      this.initOutputMixer()
+
+      // Создаем "фиктивный" аудио элемент, чтобы браузер не убил WebRTC поток
+      // И ставим его на mute (звук пойдет через AudioContext миксер)
+      let dummyAudio = this.audioElements.get(userId)
+      if (!dummyAudio) {
+        dummyAudio = new Audio()
+        dummyAudio.autoplay = true
+        dummyAudio.muted = true
+        this.audioElements.set(userId, dummyAudio)
+      }
+      dummyAudio.srcObject = remote
+
+      // Если мы уже создавали узлы для этого юзера, очистим
+      if (this.userSourceNodes.has(userId)) {
+        try { this.userSourceNodes.get(userId)?.disconnect() } catch {}
+        try { this.userGainNodes.get(userId)?.disconnect() } catch {}
+      }
+
+      const source = this.outputMixContext!.createMediaStreamSource(remote)
+      const gain = this.outputMixContext!.createGain()
+
+      source.connect(gain)
+      gain.connect(this.outputCompressor!)
+
+      this.userSourceNodes.set(userId, source)
+      this.userGainNodes.set(userId, gain)
+
+      this.updateRemoteVolume(userId)
     }
 
     pc.onicecandidate = (e) => {
@@ -655,8 +718,16 @@ export class WebRTCManager {
 
     const pc = this.peerConnections.get(userId)
     if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.oniceconnectionstatechange = null; pc.close(); this.peerConnections.delete(userId) }
+    
     const audio = this.audioElements.get(userId)
     if (audio) { audio.pause(); audio.srcObject = null; this.audioElements.delete(userId) }
+    
+    const source = this.userSourceNodes.get(userId)
+    if (source) { try { source.disconnect() } catch {}; this.userSourceNodes.delete(userId) }
+    
+    const gain = this.userGainNodes.get(userId)
+    if (gain) { try { gain.disconnect() } catch {}; this.userGainNodes.delete(userId) }
+
     this.pendingCandidates.delete(userId)
     this.clearVAD(userId)
   }

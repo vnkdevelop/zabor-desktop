@@ -36,3 +36,7 @@ push.bat
 release.bat
 
 TECHNICAL_DOCUMENTATION.md
+
+*.tsbuildinfo
+dist-electron/
+electron.vite.config.*.mjs
