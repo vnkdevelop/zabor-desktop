@@ -83,11 +83,7 @@ export class WebRTCManager {
       const me = useAppStore.getState().currentUser
       dfNode.port.onmessage = (event) => {
         if (event.data.type === 'vad' && me) {
-           const store = useAppStore.getState()
-           if (store.currentUser?.isMuted || store.currentUser?.isServerMuted) {
-             return
-           }
-           store.setSpeakingStatus(me.id, event.data.isSpeaking)
+           useAppStore.getState().setSpeakingStatus(me.id, event.data.isSpeaking)
            signalRService.setSpeakingState(event.data.isSpeaking)
         }
       }
@@ -129,14 +125,6 @@ export class WebRTCManager {
     inputGain.gain.value = Math.max(0, Math.min(2, this.inputVolume / 100))
     this.inputGainNode = inputGain
 
-    // 8. Soft Limiter (Мягкий лимитер для защиты от перегруза)
-    const limiter = ctx.createDynamicsCompressor()
-    limiter.threshold.value = -3
-    limiter.knee.value = 5
-    limiter.ratio.value = 20
-    limiter.attack.value = 0.002
-    limiter.release.value = 0.100
-
     // Connections
     let currentNode: AudioNode = source
     
@@ -152,8 +140,7 @@ export class WebRTCManager {
     peaking.connect(highShelf)
     highShelf.connect(compressor)
     compressor.connect(inputGain)
-    inputGain.connect(limiter)
-    limiter.connect(destination)
+    inputGain.connect(destination)
 
     return destination.stream
   }
@@ -197,19 +184,13 @@ export class WebRTCManager {
     const gainNode = this.userGainNodes.get(userId)
     if (!gainNode) return
     const userVol = useAppStore.getState().userVolumes[userId] ?? 100
-    gainNode.gain.value = Math.max(0, Math.min(4, (this.outputVolume / 100) * (userVol / 100)))
+    gainNode.gain.value = Math.max(0, Math.min(1, (this.outputVolume / 100) * (userVol / 100)))
   }
 
   public setNoiseSuppression(enabled: boolean) {
     this.noiseSuppression = enabled
     if (this.dfNode) {
       this.dfNode.port.postMessage({ type: 'setConfig', noiseSuppression: enabled })
-    }
-    if (this.rawStream) {
-      const track = this.rawStream.getAudioTracks()[0]
-      if (track) {
-        track.applyConstraints({ noiseSuppression: !enabled }).catch(() => {})
-      }
     }
   }
 
@@ -377,7 +358,7 @@ export class WebRTCManager {
           sampleRate: 48000,
           channelCount: 1,
           echoCancellation: true, // Обязательно, чтобы не было эха
-          noiseSuppression: !this.noiseSuppression, // Если нейросеть выключена, включаем слабое встроенное
+          noiseSuppression: this.noiseSuppression, // Используем встроенную нейросеть Chromium
           autoGainControl: true, // Включаем AGC браузера для предотвращения перегруза (клиппинга) при громких звуках
           // @ts-ignore - Скрытые настройки Chromium
           googHighpassFilter: false, 
@@ -437,15 +418,6 @@ export class WebRTCManager {
 
   public toggleMute(isMuted: boolean) {
     if (this.localStream) this.localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted })
-    
-    if (isMuted) {
-      const store = useAppStore.getState()
-      const me = store.currentUser
-      if (me) {
-        store.setSpeakingStatus(me.id, false)
-        signalRService.setSpeakingState(false)
-      }
-    }
   }
 
   public setUserVolume(userId: string, volume: number) {

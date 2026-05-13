@@ -38,14 +38,14 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private dfState: unknown = null
   private wasmLoaded = false
 
-  private vadThreshold = 0.07
+  private vadThreshold = 0.004
   private lastVadSent = false
 
 
   private overflowCount = 0
 
   private noiseSuppression = true
-  private framesSinceLastVoice = 80 // HOLD_FRAMES по умолчанию (предотвращает ложное срабатывание при старте)
+  private framesSinceLastVoice = 0
   private currentGain = 0
   private readonly HOLD_FRAMES = 80
   private readonly ATTACK_STEP = 1.0 / (this.FRAME_SIZE * 2)
