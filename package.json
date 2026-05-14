@@ -1,16 +1,16 @@
 {
   "name": "zabor-desktop",
-  "version": "2.9.6",
+  "version": "2.9.7",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
   "author": "vnk",
   "license": "MIT",
   "scripts": {
-    "start": "electron-vite dev",
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "dist:win": "electron-vite build && electron-builder --win",
-    "release": "npm version patch && electron-vite build && electron-builder --win"
+    "start": "cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite dev",
+    "dev": "cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite dev",
+    "build": "cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite build",
+    "dist:win": "cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite build && electron-builder --win",
+    "release": "npm version patch && cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite build && electron-builder --win"
   },
   "build": {
     "appId": "com.zabor.desktop",
@@ -77,6 +77,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "cross-env": "^7.0.3",
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",

@@ -11,7 +11,7 @@ import { signalRService } from './services/signalr';
 import { webrtc } from './services/webrtc';
 import { isPackedGif, packGif, unpackGif, getDisplaySrc, getStaticFrameSync, preloadStaticFrame } from './utils/avatar';
 import { Trophy } from 'lucide-react';
-import { ACHIEVEMENTS, getAchievementDef, formatProgress, AchievementsPayload } from './achievements';
+import { ACHIEVEMENTS, getAchievementDef, formatProgress, AchievementsPayload, getProgressPercent } from './achievements';
 
 import { TitleBar } from './components/Layout/TitleBar';
 import { Md3Slider } from './components/Shared/Md3Slider';
@@ -2432,7 +2432,7 @@ export default function App() {
                 const isUnlocked = unlocked.includes(a.id);
                 const statVal = stats[a.statKey] ?? 0;
                 const effectiveStatVal = isUnlocked ? Math.max(statVal, a.maxValue) : statVal;
-                const progress = Math.min(effectiveStatVal / a.maxValue, 1);
+                const progress = getProgressPercent(effectiveStatVal, a.maxValue, a.unit);
                 const showHidden = a.hidden && !isUnlocked;
                 return (
                   <div key={a.id} className={`p-4 rounded-xl border transition-colors ${isUnlocked ? 'bg-[#c70060]/10 border-[#c70060]/30' : 'bg-surface border-transparent'}`}>

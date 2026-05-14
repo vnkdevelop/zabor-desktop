@@ -81,6 +81,8 @@ interface AppState {
 
   isJoiningChannel: boolean;
   userVolumes: Record<string, number>;
+  noiseSuppression: boolean;
+  setNoiseSuppression: (enabled: boolean) => void;
   webrtcConnections: Record<string, boolean>;
   pendingChannelSwitch: string | null;
   setPendingChannelSwitch: (channelId: string | null) => void;
@@ -192,6 +194,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   isJoiningChannel: false,
   userVolumes: {},
+  noiseSuppression: true,
+  setNoiseSuppression: (enabled) => set({ noiseSuppression: enabled }),
   webrtcConnections: {},
 
   pendingChannelSwitch: null,

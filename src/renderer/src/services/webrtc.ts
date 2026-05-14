@@ -65,11 +65,12 @@ export class WebRTCManager {
     bundlePolicy: 'max-bundle'
   }
 
-  // ── Audio Pipeline (минималистичный) ──────────────────────────
+  // ── Audio Pipeline (Строгий порядок DSP по ТЗ) ────────────────
 
   private async createProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
     this.cleanupProcessedStream()
 
+    // 1. Частота дискретизации строго 48 кГц
     const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
     this.processedContext = ctx
     const destination = ctx.createMediaStreamDestination()
@@ -83,8 +84,8 @@ export class WebRTCManager {
       const me = useAppStore.getState().currentUser
       dfNode.port.onmessage = (event) => {
         if (event.data.type === 'vad' && me) {
-           useAppStore.getState().setSpeakingStatus(me.id, event.data.isSpeaking)
-           signalRService.setSpeakingState(event.data.isSpeaking)
+          useAppStore.getState().setSpeakingStatus(me.id, event.data.isSpeaking)
+          signalRService.setSpeakingState(event.data.isSpeaking)
         }
       }
     } catch (e) {
@@ -94,25 +95,7 @@ export class WebRTCManager {
     const source = ctx.createMediaStreamSource(rawStream)
     this.processedSource = source
 
-    // 1. Source -> 2. DeepFilterNet -> 3. High-pass (80Hz)
-    const highpass = ctx.createBiquadFilter()
-    highpass.type = 'highpass'
-    highpass.frequency.value = 80
-
-    // 4. Peaking Filter (350Hz, Q=1.4, -3dB) - Remove boxiness
-    const peaking = ctx.createBiquadFilter()
-    peaking.type = 'peaking'
-    peaking.frequency.value = 350
-    peaking.Q.value = 1.4
-    peaking.gain.value = -3
-
-    // 5. High-Shelf Filter (8kHz, +3dB) - Add air
-    const highShelf = ctx.createBiquadFilter()
-    highShelf.type = 'highshelf'
-    highShelf.frequency.value = 8000
-    highShelf.gain.value = 3
-
-    // 6. Soft Compressor
+    // 4. Компрессор динамического диапазона (Строго ПОСЛЕ нейросети)
     const compressor = ctx.createDynamicsCompressor()
     compressor.threshold.value = -24
     compressor.knee.value = 10
@@ -120,33 +103,57 @@ export class WebRTCManager {
     compressor.attack.value = 0.005
     compressor.release.value = 0.150
 
+    // 5. Параметрический эквалайзер
+    const highpass = ctx.createBiquadFilter()
+    highpass.type = 'highpass'
+    highpass.frequency.value = 80 // Срез гула ниже 80 Гц
+
+    const peaking = ctx.createBiquadFilter()
+    peaking.type = 'peaking'
+    peaking.frequency.value = 3000 // Подъем для разборчивости речи
+    peaking.Q.value = 1.0
+    peaking.gain.value = 2 // Легкий подъем
+
+    // 6. Brickwall Limiter (Защита канала от клиппинга)
+    const limiter = ctx.createDynamicsCompressor()
+    limiter.threshold.value = -0.5
+    limiter.knee.value = 0
+    limiter.ratio.value = 20
+    limiter.attack.value = 0.001
+    limiter.release.value = 0.050
+
     // 7. Output Gain
     const inputGain = ctx.createGain()
     inputGain.gain.value = Math.max(0, Math.min(2, this.inputVolume / 100))
     this.inputGainNode = inputGain
 
-    // Connections
+    // Сборка графа DSP
     let currentNode: AudioNode = source
-    
-    // Always route through processor for VAD and Noise Gate
+
+    // 2. Ядро DeepFilterNet3 + 3. Шумовой затвор
     if (this.dfNode) {
-      this.dfNode.port.postMessage({ type: 'setConfig', noiseSuppression: this.noiseSuppression })
+      const store = useAppStore.getState()
+      const isMuted = store.currentUser?.isMuted || store.currentUser?.isServerMuted || false
+      this.dfNode.port.postMessage({
+        type: 'setConfig',
+        noiseSuppression: this.noiseSuppression,
+        isMuted: isMuted
+      })
       currentNode.connect(this.dfNode)
       currentNode = this.dfNode
     }
 
-    currentNode.connect(highpass)
+    currentNode.connect(compressor)
+    compressor.connect(highpass)
     highpass.connect(peaking)
-    peaking.connect(highShelf)
-    highShelf.connect(compressor)
-    compressor.connect(inputGain)
+    peaking.connect(limiter)
+    limiter.connect(inputGain)
     inputGain.connect(destination)
 
     return destination.stream
   }
 
   private cleanupProcessedStream() {
-
     if (this.dfNode) {
       this.dfNode.port.close()
       this.dfNode.disconnect()
@@ -154,7 +161,7 @@ export class WebRTCManager {
     }
 
     if (this.processedContext && this.processedContext.state !== 'closed') {
-      this.processedContext.close().catch(() => {})
+      this.processedContext.close().catch(() => { })
     }
     this.processedContext = null
     this.processedSource = null
@@ -194,7 +201,7 @@ export class WebRTCManager {
     }
   }
 
-  // ── VAD ───────────────────────────────────────────────────────
+  // ── VAD (Резервный Fallback) ──────────────────────────────────
 
   private setupVAD(stream: MediaStream, userId: string, isLocal: boolean) {
     this.clearVAD(userId)
@@ -203,7 +210,7 @@ export class WebRTCManager {
       if (!this.vadContext || this.vadContext.state === 'closed') {
         this.vadContext = new AudioContext({ latencyHint: 'playback' })
       }
-      if (this.vadContext.state === 'suspended') this.vadContext.resume().catch(() => {})
+      if (this.vadContext.state === 'suspended') this.vadContext.resume().catch(() => { })
 
       const cloned = new MediaStream(stream.getAudioTracks().map(t => t.clone()))
       const source = this.vadContext.createMediaStreamSource(cloned)
@@ -216,24 +223,23 @@ export class WebRTCManager {
 
       const analyser = this.vadContext.createAnalyser()
       analyser.fftSize = 512
-      analyser.smoothingTimeConstant = 0.6  // 0.3 → 0.6: лучше улавливает тихую речь
+      analyser.smoothingTimeConstant = 0.6
 
       source.connect(bp1)
       bp1.connect(bp2)
       bp2.connect(analyser)
-      // Сохраняем узлы для явного disconnect в clearVAD (иначе утечка памяти в vadContext)
       const vadNodes: AudioNode[] = [source, bp1, bp2, analyser]
 
       const buf = new Uint8Array(analyser.fftSize)
       let lastVoice = 0
       let wasSpeaking = false
       let voiceFrames = 0
-      let silenceFrames = 0     // Счётчик для теста "микрофон мёртв"
-      let vadSilenceFrames = 0  // Отдельный счётчик для гистерезиса VAD
+      let silenceFrames = 0
+      let vadSilenceFrames = 0
       let hasWarnedSilence = false
 
-      const avgTh  = isLocal ? 4 : 2   // Повышаем порог для уменьшения чувствительности
-      const peakTh = isLocal ? 10 : 8  // Повышаем порог для уменьшения чувствительности
+      const avgTh = isLocal ? 4 : 2
+      const peakTh = isLocal ? 10 : 8
 
       const check = () => {
         const store = useAppStore.getState()
@@ -255,7 +261,7 @@ export class WebRTCManager {
           sum += s
         }
         const avg = sum / buf.length
-        
+
         if (isLocal) {
           if (peak === 0) {
             silenceFrames++
@@ -276,19 +282,17 @@ export class WebRTCManager {
           }
         }
 
-        // Гистерезис VAD: voiceFrames сбрасывается только после ~10 тихих фреймов (300ms),
-        // а не на каждом тихом фрейме. Устраняет ложные отключения на паузах между словами.
         const isVoice = avg >= avgTh || peak >= peakTh
         if (isVoice) {
           voiceFrames++
           vadSilenceFrames = 0
         } else {
           vadSilenceFrames++
-          if (vadSilenceFrames >= 6) voiceFrames = 0  // 180ms тишины до сброса (было 300ms)
+          if (vadSilenceFrames >= 6) voiceFrames = 0
         }
         if (voiceFrames >= 2) lastVoice = Date.now()
 
-        const speaking = (Date.now() - lastVoice) < 400  // hold 400ms
+        const speaking = (Date.now() - lastVoice) < 400
         if (speaking !== wasSpeaking) {
           wasSpeaking = speaking
           store.setSpeakingStatus(userId, speaking)
@@ -305,16 +309,14 @@ export class WebRTCManager {
     const entry = this.speakingIntervals.get(userId)
     if (entry) {
       clearInterval(entry.timer)
-      // Отключаем узлы от vadContext — без этого они остаются в памяти до закрытия контекста
-      entry.nodes.forEach(n => { try { n.disconnect() } catch {} })
+      entry.nodes.forEach(n => { try { n.disconnect() } catch { } })
       entry.stream.getTracks().forEach(t => { t.stop(); t.enabled = false })
       this.speakingIntervals.delete(userId)
     }
     useAppStore.getState().setSpeakingStatus(userId, false)
 
-    // Закрываем vadContext когда больше нет активных VAD-сессий
     if (this.speakingIntervals.size === 0 && this.vadContext && this.vadContext.state !== 'closed') {
-      this.vadContext.close().catch(() => {})
+      this.vadContext.close().catch(() => { })
       this.vadContext = null
     }
   }
@@ -337,7 +339,7 @@ export class WebRTCManager {
   public setOutputDevice(deviceId: string) {
     this.currentOutputDeviceId = deviceId
     if (this.mixAudioElement && typeof (this.mixAudioElement as any).setSinkId === 'function') {
-      (this.mixAudioElement as any).setSinkId(deviceId).catch(() => {})
+      (this.mixAudioElement as any).setSinkId(deviceId).catch(() => { })
     }
   }
 
@@ -357,14 +359,12 @@ export class WebRTCManager {
           deviceId: this.currentDeviceId !== 'default' ? { exact: this.currentDeviceId } : undefined,
           sampleRate: 48000,
           channelCount: 1,
-          echoCancellation: true, // Обязательно, чтобы не было эха
-          noiseSuppression: this.noiseSuppression, // Используем встроенную нейросеть Chromium
-          autoGainControl: true, // Включаем AGC браузера для предотвращения перегруза (клиппинга) при громких звуках
-          // @ts-ignore - Скрытые настройки Chromium
-          googHighpassFilter: false, 
-          
-          googEchoCancellation2: true,
-          
+          echoCancellation: true, // WebRTC AEC - строго до нейросети
+          noiseSuppression: !this.noiseSuppression, // Отключаем браузерный, если включен DF3
+          autoGainControl: false,  // ВАЖНО: Выключаем для предотвращения заглатывания звука
+          // @ts-ignore
+          googHighpassFilter: false,
+          googEchoCancellation2: false, // Агрессивный AEC выключен
           googAudioMirroring: false
         },
         video: false
@@ -380,14 +380,13 @@ export class WebRTCManager {
       if (localTrack) localTrack.contentHint = 'speech'
 
       const me = useAppStore.getState().currentUser
-      // JS VAD запускается только если DeepFilterNet не загружен.
-      // Когда dfNode активен с WASM, он сам отправляет VAD через port.onmessage.
       if (me && this.rawStream && !this.dfNode) this.setupVAD(this.rawStream, me.id, true)
 
       return true
-    } catch (e) { 
-      console.warn('[WebRTC] Mic error, continuing as listener:', e)
-      return true 
+    } catch (e) {
+      console.error('[WebRTC] Mic error:', e)
+      // Пробрасываем ошибку для слоя-фасада (Hot-swap отказоустойчивость)
+      throw new Error(`MIC_ACCESS_FAILED: ${(e as Error).message}`)
     }
   }
 
@@ -396,13 +395,17 @@ export class WebRTCManager {
     this.noiseSuppression = useNS
 
     if (this.localStream) {
-      await this.startLocalStream(deviceId, useNS)
-      for (const pc of this.peerConnections.values()) {
-        const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
-        const newTrack = this.localStream?.getAudioTracks()[0]
-        if (sender && newTrack) {
-          await sender.replaceTrack(newTrack).catch(() => {})
+      try {
+        await this.startLocalStream(deviceId, useNS)
+        for (const pc of this.peerConnections.values()) {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
+          const newTrack = this.localStream?.getAudioTracks()[0]
+          if (sender && newTrack) {
+            await sender.replaceTrack(newTrack).catch(() => { })
+          }
         }
+      } catch (e) {
+        throw e // Проброс для обработки в UI
       }
     }
   }
@@ -417,7 +420,12 @@ export class WebRTCManager {
   }
 
   public toggleMute(isMuted: boolean) {
-    if (this.localStream) this.localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted })
+    if (this.dfNode) {
+      this.dfNode.port.postMessage({ type: 'setConfig', isMuted: isMuted })
+    }
+    if (this.localStream) {
+      this.localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted })
+    }
   }
 
   public setUserVolume(userId: string, volume: number) {
@@ -429,19 +437,18 @@ export class WebRTCManager {
 
   private initOutputMixer() {
     if (this.outputMixContext) {
-      if (this.outputMixContext.state === 'suspended') this.outputMixContext.resume().catch(() => {})
+      if (this.outputMixContext.state === 'suspended') this.outputMixContext.resume().catch(() => { })
       return
     }
     this.outputMixContext = new AudioContext({ latencyHint: 'playback' })
     this.outputCompressor = this.outputMixContext.createDynamicsCompressor()
-    
-    // Настройки компрессора: прозрачный студийный лимитер (Transparent Safety Limiter)
-    // Он не будет постоянно "сплющивать" звук, а сработает только при реальной угрозе перегруза
-    this.outputCompressor.threshold.value = -6     // Срабатывает только на высоких пиках (когда голоса накладываются)
-    this.outputCompressor.knee.value = 15          // Очень мягкое скругление (Soft Knee) для незаметного срабатывания
-    this.outputCompressor.ratio.value = 10         // Высокое ратио, работает как защитный барьер (Limiter)
-    this.outputCompressor.attack.value = 0.005     // 5мс — достаточно быстро для защиты, но сохраняет "живость" голоса
-    this.outputCompressor.release.value = 0.250    // 250мс — плавное восстановление, убирает эффект "насоса" (pumping)
+
+    // Лимитер миксера для защиты от перегруза при 10+ спикерах
+    this.outputCompressor.threshold.value = -1.0
+    this.outputCompressor.knee.value = 0
+    this.outputCompressor.ratio.value = 20
+    this.outputCompressor.attack.value = 0.001
+    this.outputCompressor.release.value = 0.100
 
     const dest = this.outputMixContext.createMediaStreamDestination()
     this.outputCompressor.connect(dest)
@@ -451,7 +458,7 @@ export class WebRTCManager {
     this.mixAudioElement.srcObject = dest.stream
     this.mixAudioElement.muted = this.isDeafened
     if (this.currentOutputDeviceId !== 'default' && typeof (this.mixAudioElement as any).setSinkId === 'function') {
-      (this.mixAudioElement as any).setSinkId(this.currentOutputDeviceId).catch(() => {})
+      (this.mixAudioElement as any).setSinkId(this.currentOutputDeviceId).catch(() => { })
     }
   }
 
@@ -462,8 +469,6 @@ export class WebRTCManager {
 
       this.initOutputMixer()
 
-      // Создаем "фиктивный" аудио элемент, чтобы браузер не убил WebRTC поток
-      // И ставим его на mute (звук пойдет через AudioContext миксер)
       let dummyAudio = this.audioElements.get(userId)
       if (!dummyAudio) {
         dummyAudio = new Audio()
@@ -473,10 +478,9 @@ export class WebRTCManager {
       }
       dummyAudio.srcObject = remote
 
-      // Если мы уже создавали узлы для этого юзера, очистим
       if (this.userSourceNodes.has(userId)) {
-        try { this.userSourceNodes.get(userId)?.disconnect() } catch {}
-        try { this.userGainNodes.get(userId)?.disconnect() } catch {}
+        try { this.userSourceNodes.get(userId)?.disconnect() } catch { }
+        try { this.userGainNodes.get(userId)?.disconnect() } catch { }
       }
 
       const source = this.outputMixContext!.createMediaStreamSource(remote)
@@ -498,7 +502,7 @@ export class WebRTCManager {
     const checkState = () => {
       const st = pc.connectionState
       const iceSt = pc.iceConnectionState
-      
+
       if (st === 'connected' || iceSt === 'connected' || iceSt === 'completed') {
         useAppStore.getState().setWebRTCConnectionStatus(userId, true)
         this.clearIceTimeout(userId)
@@ -527,7 +531,6 @@ export class WebRTCManager {
     pc.oniceconnectionstatechange = checkState
   }
 
-  /** Таймаут ICE-подключения: если за ICE_TIMEOUT_MS не перешли в connected — renegotiation */
   private startIceTimeout(userId: string) {
     this.clearIceTimeout(userId)
     const timer = setTimeout(() => {
@@ -545,29 +548,22 @@ export class WebRTCManager {
     if (t) { clearTimeout(t); this.iceTimeoutTimers.delete(userId) }
   }
 
-  /** Пробуем переподключиться к пиру (renegotiation). При исчерпании попыток — полный disconnect. */
   private attemptRenegotiation(userId: string) {
     const count = this.retryCount.get(userId) ?? 0
     if (count >= WebRTCManager.MAX_ICE_RETRIES) {
       this.retryCount.delete(userId)
-      // Вместо дисконнекта, который оставит UI висеть навсегда, просто завершаем попытки. 
-      // Состояние останется 'false', показывая "ПОДКЛЮЧЕНИЕ". 
-      // При желании можно кикнуть пользователя или сбросить счётчик через время.
       return
     }
     this.retryCount.set(userId, count + 1)
-    
+
     const oldPc = this.peerConnections.get(userId)
     if (oldPc) {
       oldPc.ontrack = null; oldPc.onicecandidate = null; oldPc.onconnectionstatechange = null; oldPc.oniceconnectionstatechange = null
       oldPc.close()
       this.peerConnections.delete(userId)
     }
-    // НЕ удаляем pendingCandidates, так как они могут принадлежать к новому циклу renegotiation
-    
+
     const me = useAppStore.getState().currentUser?.id
-    // Во избежание glare-состояния (когда оба шлют offer одновременно),
-    // заставляем инициировать переподключение только одного из пиров
     if (me && me < userId) {
       this.connectToPeer(userId)
     }
@@ -592,20 +588,15 @@ export class WebRTCManager {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       signalRService.sendWebRTCOffer(userId, JSON.stringify(pc.localDescription))
-    } catch (e) { 
+    } catch (e) {
       console.error('[WebRTC] connectToPeer failed', e)
-      this.disconnectFromPeer(userId) 
+      this.disconnectFromPeer(userId)
     }
   }
 
   public async handleOffer(senderId: string, offerStr: string) {
     const store = useAppStore.getState()
-    // BUGFIX: было &&, из-за чего оффер отбрасывался когда currentCallUser ещё
-    // не был установлен (состояние гонки при acceptCall). Правильная проверка:
-    // «нет ни канала, ни активного звонка от этого пользователя» → игнорируем
     if (!store.currentChannelId && store.currentCallUser?.id !== senderId) {
-      // Дополнительная мягкая проверка: если это известный друг/юзер и мы в состоянии
-      // 'connected' - возможно callUser ещё не прогрузился, даём шанс
       const callStatus = store.callStatus
       if (callStatus !== 'connected') return
     }
@@ -613,7 +604,6 @@ export class WebRTCManager {
     if (this.peerConnections.has(senderId)) {
       existingCandidates = this.pendingCandidates.get(senderId) ?? []
       this.disconnectFromPeer(senderId)
-      // Восстанавливаем кандидаты, которые могли прийти за миллисекунды до оффера
       if (existingCandidates.length > 0) {
         this.pendingCandidates.set(senderId, existingCandidates)
       }
@@ -635,12 +625,11 @@ export class WebRTCManager {
       await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(offerStr)))
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
-      // Сбрасываем кандидатов ТОЛЬКО ПОСЛЕ установки обоих Description
       await this.drainPendingCandidates(senderId)
       signalRService.sendWebRTCAnswer(senderId, JSON.stringify(pc.localDescription))
-    } catch (e) { 
+    } catch (e) {
       console.error('[WebRTC] handleOffer failed', e)
-      this.disconnectFromPeer(senderId) 
+      this.disconnectFromPeer(senderId)
     }
   }
 
@@ -649,7 +638,6 @@ export class WebRTCManager {
     if (pc) {
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(answerStr)))
-        // Сбрасываем ICE-кандидаты, пришедшие до установки remote description
         await this.drainPendingCandidates(senderId)
       } catch (e) {
         console.error('[WebRTC] handleAnswer failed', e)
@@ -663,14 +651,12 @@ export class WebRTCManager {
     try { candidate = JSON.parse(candidateStr) } catch { return }
 
     if (!pc) {
-      // PC ещё не создан — буферизуем кандидата
       const buf = this.pendingCandidates.get(senderId) ?? []
       buf.push(candidate)
       this.pendingCandidates.set(senderId, buf)
       return
     }
 
-    // Кандидат пришёл до setRemoteDescription — буферизуем
     if (!pc.remoteDescription) {
       const buf = this.pendingCandidates.get(senderId) ?? []
       buf.push(candidate)
@@ -678,24 +664,22 @@ export class WebRTCManager {
       return
     }
 
-    try { await pc.addIceCandidate(new RTCIceCandidate(candidate)) } catch {}
+    try { await pc.addIceCandidate(new RTCIceCandidate(candidate)) } catch { }
   }
 
-  /** Сбрасываем буфер ICE-кандидатов после setRemoteDescription */
   private async drainPendingCandidates(userId: string): Promise<void> {
     const pc = this.peerConnections.get(userId)
     const candidates = this.pendingCandidates.get(userId)
     if (!pc || !candidates || candidates.length === 0) return
     this.pendingCandidates.delete(userId)
     for (const c of candidates) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(c)) } catch {}
+      try { await pc.addIceCandidate(new RTCIceCandidate(c)) } catch { }
     }
   }
 
   public disconnectFromPeer(userId: string) {
     useAppStore.getState().setWebRTCConnectionStatus(userId, false)
 
-    // Отменяем все таймеры
     this.clearIceTimeout(userId)
     this.retryCount.delete(userId)
     const dcTimer = this.dcTimers.get(userId)
@@ -703,15 +687,15 @@ export class WebRTCManager {
 
     const pc = this.peerConnections.get(userId)
     if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.oniceconnectionstatechange = null; pc.close(); this.peerConnections.delete(userId) }
-    
+
     const audio = this.audioElements.get(userId)
     if (audio) { audio.pause(); audio.srcObject = null; this.audioElements.delete(userId) }
-    
+
     const source = this.userSourceNodes.get(userId)
-    if (source) { try { source.disconnect() } catch {}; this.userSourceNodes.delete(userId) }
-    
+    if (source) { try { source.disconnect() } catch { }; this.userSourceNodes.delete(userId) }
+
     const gain = this.userGainNodes.get(userId)
-    if (gain) { try { gain.disconnect() } catch {}; this.userGainNodes.delete(userId) }
+    if (gain) { try { gain.disconnect() } catch { }; this.userGainNodes.delete(userId) }
 
     this.pendingCandidates.delete(userId)
     this.clearVAD(userId)

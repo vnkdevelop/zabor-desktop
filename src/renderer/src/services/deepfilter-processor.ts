@@ -1,6 +1,4 @@
-
 import { StandaloneDeepFilter } from 'deepfilter-standalone'
-
 
 declare abstract class AudioWorkletProcessor {
   readonly port: MessagePort
@@ -27,29 +25,36 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
   private readonly FRAME_SIZE = 480
   private readonly BUFFER_SIZE = 4800
+  private readonly SAMPLE_RATE = 48000
 
   private denoiser: StandaloneDeepFilter | null = null
   private denoiserReady = false
 
-
   private readonly frameToProcess: Float32Array
   private readonly processedFrame: Float32Array
 
-  private dfState: unknown = null
-  private wasmLoaded = false
+  private isMuted = false
+  private noiseSuppression = true
 
-  private vadThreshold = 0.004
+  // VAD Thresholds & Smoothing
+  private rmsSmoothed = 0
+  private readonly GATE_THRESHOLD_ON = 0.012  // Чувствительный порог включения
+  private readonly GATE_THRESHOLD_OFF = 0.005 // Порог удержания
   private lastVadSent = false
-
 
   private overflowCount = 0
 
-  private noiseSuppression = true
-  private framesSinceLastVoice = 0
-  private currentGain = 0
-  private readonly HOLD_FRAMES = 80
-  private readonly ATTACK_STEP = 1.0 / (this.FRAME_SIZE * 2)
-  private readonly RELEASE_STEP = 1.0 / (this.FRAME_SIZE * 25)
+  private readonly HOLD_FRAMES = 40 // ~400ms удержания гейта после завершения речи
+  private framesSinceLastVoice = this.HOLD_FRAMES
+
+  // VCA-эмуляция (Гибридный гейт для суммарных -60dB)
+  private currentGain = 1.0
+  private readonly TARGET_GAIN_ON = 1.0
+  private readonly TARGET_GAIN_OFF = 0.0316 // -30 dB. В сумме с DF (-30dB) дает -60 dB
+
+  // Экспоненциальные огибающие: Время атаки (20мс) и релиза (500мс)
+  private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.02))
+  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.50))
 
   constructor() {
     super()
@@ -62,11 +67,18 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       if (event.data.type === 'loadWasm') {
         this.initDeepFilter()
       } else if (event.data.type === 'setConfig') {
-        this.noiseSuppression = event.data.noiseSuppression
+        if (event.data.noiseSuppression !== undefined) {
+          this.noiseSuppression = event.data.noiseSuppression
+        }
+        if (event.data.isMuted !== undefined) {
+          this.isMuted = event.data.isMuted
+          if (this.isMuted && this.lastVadSent) {
+            this.port.postMessage({ type: 'vad', isSpeaking: false })
+            this.lastVadSent = false
+          }
+        }
       }
     }
-
-
     this.initDeepFilter()
   }
 
@@ -74,12 +86,11 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     if (this.denoiserReady) return
     try {
       this.denoiser = new StandaloneDeepFilter({
-        attenuationLimit: 80,
-        postFilterBeta: 0.02
+        attenuationLimit: 30, // Строго по ТЗ: лимит 20-30 дБ, чтобы не ломать голос
+        postFilterBeta: 0.08  // Оптимальное сглаживание артефактов (песка)
       })
       await this.denoiser.initialize()
       this.denoiserReady = true
-      this.wasmLoaded = true
       this.port.postMessage({ type: 'ready' })
       console.log('[DeepFilterProcessor] Neural net initialized successfully')
     } catch (e) {
@@ -87,23 +98,15 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     }
   }
 
-
-  private pushToBuffer(
-    buffer: Float32Array,
-    data: Float32Array,
-    writeIndex: number,
-    readIndex: number
-  ): number {
+  private pushToBuffer(buffer: Float32Array, data: Float32Array, writeIndex: number, readIndex: number): number {
     const availableSpace = (readIndex - writeIndex - 1 + this.BUFFER_SIZE) % this.BUFFER_SIZE
     if (availableSpace < data.length) {
       this.overflowCount++
-
       if (this.overflowCount % 100 === 1) {
         console.warn(`DeepFilterProcessor: ring buffer overflow (×${this.overflowCount})`)
       }
       return writeIndex
     }
-
     for (let i = 0; i < data.length; i++) {
       buffer[writeIndex] = data[i]
       writeIndex = (writeIndex + 1) % this.BUFFER_SIZE
@@ -111,19 +114,12 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     return writeIndex
   }
 
-
-  private pullFromBuffer(
-    buffer: Float32Array,
-    data: Float32Array,
-    writeIndex: number,
-    readIndex: number
-  ): number {
+  private pullFromBuffer(buffer: Float32Array, data: Float32Array, writeIndex: number, readIndex: number): number {
     const availableData = (writeIndex - readIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE
     if (availableData < data.length) {
       data.fill(0)
       return readIndex
     }
-
     for (let i = 0; i < data.length; i++) {
       data[i] = buffer[readIndex]
       readIndex = (readIndex + 1) % this.BUFFER_SIZE
@@ -140,47 +136,41 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     const inputChannel = input[0]
     const outputChannel = output[0]
 
+    // Полное отсечение аудио при мьюте (Аппаратный гейт)
+    if (this.isMuted) {
+      outputChannel.fill(0)
+      return true
+    }
 
-    this.inputWriteIndex = this.pushToBuffer(
-      this.inputBuffer,
-      inputChannel,
-      this.inputWriteIndex,
-      this.inputReadIndex
-    )
+    this.inputWriteIndex = this.pushToBuffer(this.inputBuffer, inputChannel, this.inputWriteIndex, this.inputReadIndex)
 
-
-    while (
-      (this.inputWriteIndex - this.inputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE >=
-      this.FRAME_SIZE
-    ) {
-      this.inputReadIndex = this.pullFromBuffer(
-        this.inputBuffer,
-        this.frameToProcess,
-        this.inputWriteIndex,
-        this.inputReadIndex
-      )
-
+    while ((this.inputWriteIndex - this.inputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE >= this.FRAME_SIZE) {
+      this.inputReadIndex = this.pullFromBuffer(this.inputBuffer, this.frameToProcess, this.inputWriteIndex, this.inputReadIndex)
 
       if (this.noiseSuppression && this.denoiserReady && this.denoiser) {
         const cleanFrame = this.denoiser.processAudio(this.frameToProcess)
         this.processedFrame.set(cleanFrame)
       } else {
-
         this.processedFrame.set(this.frameToProcess)
       }
 
-
-
-
-
+      // Вычисление RMS для определения голоса
       let sumSquares = 0
       for (let i = 0; i < this.FRAME_SIZE; i++) {
         sumSquares += this.processedFrame[i] * this.processedFrame[i]
       }
-      const rms = Math.sqrt(sumSquares / this.FRAME_SIZE)
+      const currentRms = Math.sqrt(sumSquares / this.FRAME_SIZE)
 
+      // Сглаживание RMS
+      this.rmsSmoothed = 0.3 * currentRms + 0.7 * this.rmsSmoothed
 
-      const isVoiceFrame = rms > this.vadThreshold
+      // Гистерезис VAD
+      let isVoiceFrame = false
+      if (this.framesSinceLastVoice < this.HOLD_FRAMES) {
+        isVoiceFrame = this.rmsSmoothed > this.GATE_THRESHOLD_OFF
+      } else {
+        isVoiceFrame = this.rmsSmoothed > this.GATE_THRESHOLD_ON
+      }
 
       if (isVoiceFrame) {
         this.framesSinceLastVoice = 0
@@ -188,51 +178,35 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         this.framesSinceLastVoice++
       }
 
-
       const isSpeaking = this.framesSinceLastVoice < this.HOLD_FRAMES
       if (isSpeaking !== this.lastVadSent) {
         this.port.postMessage({ type: 'vad', isSpeaking })
         this.lastVadSent = isSpeaking
       }
 
+      // Гибридный VCA-экспандер
       if (this.noiseSuppression) {
-
-        const targetGain = isSpeaking ? 1.0 : 0.0
+        const targetGain = isSpeaking ? this.TARGET_GAIN_ON : this.TARGET_GAIN_OFF
 
         for (let i = 0; i < this.FRAME_SIZE; i++) {
-          if (this.currentGain < targetGain) {
-            this.currentGain = Math.min(targetGain, this.currentGain + this.ATTACK_STEP)
-          } else if (this.currentGain > targetGain) {
-            this.currentGain = Math.max(targetGain, this.currentGain - this.RELEASE_STEP)
+          if (targetGain > this.currentGain) {
+            // Быстрая атака
+            this.currentGain = this.attackCoef * this.currentGain + (1 - this.attackCoef) * targetGain
+          } else {
+            // Плавный релиз
+            this.currentGain = this.releaseCoef * this.currentGain + (1 - this.releaseCoef) * targetGain
           }
-
-
-          const sample = this.processedFrame[i] * this.currentGain
-          this.processedFrame[i] = Math.abs(sample) < 1e-6 ? 0.0 : sample
+          this.processedFrame[i] *= this.currentGain
         }
       }
 
-      this.outputWriteIndex = this.pushToBuffer(
-        this.outputBuffer,
-        this.processedFrame,
-        this.outputWriteIndex,
-        this.outputReadIndex
-      )
+      this.outputWriteIndex = this.pushToBuffer(this.outputBuffer, this.processedFrame, this.outputWriteIndex, this.outputReadIndex)
     }
 
-
-    const availableOutput =
-      (this.outputWriteIndex - this.outputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE
-
+    const availableOutput = (this.outputWriteIndex - this.outputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE
     if (availableOutput >= outputChannel.length) {
-      this.outputReadIndex = this.pullFromBuffer(
-        this.outputBuffer,
-        outputChannel,
-        this.outputWriteIndex,
-        this.outputReadIndex
-      )
+      this.outputReadIndex = this.pullFromBuffer(this.outputBuffer, outputChannel, this.outputWriteIndex, this.outputReadIndex)
     } else {
-
       outputChannel.fill(0)
     }
 

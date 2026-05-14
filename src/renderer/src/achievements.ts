@@ -249,3 +249,17 @@ export const formatProgress = (value: number, max: number, unit?: string): strin
 
   return `${safeValue} / ${max}`;
 };
+
+export const getProgressPercent = (value: number, max: number, unit?: string): number => {
+  const safeValue = Math.min(value ?? 0, max);
+
+  if (unit === 'min') {
+    const valH = Math.floor(safeValue / 60);
+    const maxH = Math.floor(max / 60);
+    if (maxH === 0) return 0;
+    return Math.min(valH / maxH, 1);
+  }
+
+  if (max === 0) return 0;
+  return Math.min(safeValue / max, 1);
+};
