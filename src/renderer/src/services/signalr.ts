@@ -174,14 +174,16 @@ private stopSfx(src: string) {
           if (raw) {
             const parsed = JSON.parse(raw);
             if (parsed.login && parsed.password) {
-              await this.connection.invoke("Login", parsed.login, parsed.password);
-              await this.loadData();
-              const channelToRejoin = this.wasInChannel || store.currentChannelId;
+              const user = await this.connection.invoke<User>("Login", parsed.login, parsed.password);
+              if (user) {
+                useAppStore.getState().setCurrentUser(user);
+              }
+              const channelToRejoin = this.wasInChannel || user?.currentChannelId || store.currentChannelId;
               this.wasInChannel = null;
               if (channelToRejoin) {
-                this.safeInvoke("LeaveChannel");
-                this.joinChannel(channelToRejoin);
+                this.joinChannel(channelToRejoin).catch(() => {});
               }
+              await this.loadData();
             }
           }
         } catch {}
@@ -221,19 +223,24 @@ private stopSfx(src: string) {
       this.startPingMeasurement();
 
       const store = useAppStore.getState();
+      let serverRestoredChannel: string | null | undefined = null;
       if (store.currentUser) {
         try {
           const raw = await window.windowControls.loadSession();
           if (raw) {
             const parsed = JSON.parse(raw);
             if (parsed.login && parsed.password) {
-              await this.connection!.invoke("Login", parsed.login, parsed.password);
-              await this.loadData();
+              const user = await this.connection!.invoke<User>("Login", parsed.login, parsed.password);
+              if (user) {
+                useAppStore.getState().setCurrentUser(user);
+                serverRestoredChannel = user.currentChannelId;
+              }
+              this.loadData().catch(() => {});
             }
           }
         } catch {}
       }
-      const channelToRejoin = this.wasInChannel || store.currentChannelId;
+      const channelToRejoin = this.wasInChannel || serverRestoredChannel || store.currentChannelId;
       this.wasInChannel = null;
       if (channelToRejoin) await this.rejoinChannel(channelToRejoin);
 
@@ -357,6 +364,7 @@ this.sfxElements.clear();
     this.connection.on("ForceLeaveVoice", async () => { await this.leaveChannel(); });
 
     this.connection.on("UserStateChanged", (update: any) => {
+      // Для других пользователей — применяем все поля как обычно
       const nextUpdates: Partial<User> = {
         isMuted: update.isMuted ?? false,
         isDeafened: update.isDeafened ?? false,
@@ -365,18 +373,26 @@ this.sfxElements.clear();
         isServerDeafened: update.isServerDeafened ?? false
       };
       store().updateUserStatus(update.userId, nextUpdates);
+
       const currentUser = store().currentUser;
       if (currentUser && update.userId === currentUser.id) {
-        const effectiveMuted = (update.isMuted ?? currentUser.isMuted) || (update.isServerMuted ?? currentUser.isServerMuted ?? false);
-        const effectiveDeafened = (update.isDeafened ?? currentUser.isDeafened) || (update.isServerDeafened ?? currentUser.isServerDeafened ?? false);
+        // Для ТЕКУЩЕГО пользователя локальные isMuted/isDeafened — источник истины.
+        // Сервер может только выставить серверный мьют/deaf (права администратора).
+        // Мы НЕ перезаписываем isMuted/isDeafened из серверного события,
+        // чтобы избежать эффекта «мьют сбрасывается сразу после нажатия».
+        const newServerMuted = update.isServerMuted ?? currentUser.isServerMuted ?? false;
+        const newServerDeafened = update.isServerDeafened ?? currentUser.isServerDeafened ?? false;
+
+        const effectiveMuted = currentUser.isMuted || newServerMuted;
+        const effectiveDeafened = currentUser.isDeafened || newServerDeafened;
         webrtc.toggleMute(effectiveMuted);
         webrtc.setDeafened(effectiveDeafened);
+
         store().setCurrentUser({
           ...currentUser,
-          isMuted: update.isMuted ?? currentUser.isMuted,
-          isDeafened: update.isDeafened ?? currentUser.isDeafened,
-          isServerMuted: update.isServerMuted ?? currentUser.isServerMuted ?? false,
-          isServerDeafened: update.isServerDeafened ?? currentUser.isServerDeafened ?? false,
+          // isMuted / isDeafened — не трогаем, они управляются только через toggleMute/toggleDeafen
+          isServerMuted: newServerMuted,
+          isServerDeafened: newServerDeafened,
           isSpeaking: update.isSpeaking ?? currentUser.isSpeaking
         });
       }
@@ -549,13 +565,27 @@ public stopRingtone() {
 
   public async login(username: string, password: string): Promise<boolean> {
     const user = await this.safeInvoke<User>("Login", username, password);
-    if (user) { useAppStore.getState().setCurrentUser(user); await this.loadData(); return true; }
+    if (user) { 
+      useAppStore.getState().setCurrentUser(user); 
+      if (user.currentChannelId) {
+        this.joinChannel(user.currentChannelId).catch(() => {});
+      }
+      await this.loadData(); 
+      return true; 
+    }
     return false;
   }
 
   public async register(username: string, password: string, displayName: string, avatarBase64: string | null, avatarColor: string): Promise<boolean> {
     const user = await this.safeInvoke<User>("Register", username, password, displayName, avatarBase64, avatarColor);
-    if (user) { useAppStore.getState().setCurrentUser(user); await this.loadData(); return true; }
+    if (user) { 
+      useAppStore.getState().setCurrentUser(user); 
+      if (user.currentChannelId) {
+        this.joinChannel(user.currentChannelId).catch(() => {});
+      }
+      await this.loadData(); 
+      return true; 
+    }
     return false;
   }
 
@@ -950,7 +980,7 @@ public stopRingtone() {
 
   public toggleState(isMuted: boolean, isDeafened: boolean): void {
     webrtc.toggleMute(isMuted);
-    if (this.isConnected()) this.connection?.send("UpdateUserState", { isMuted, isDeafened });
+    if (this.isConnected()) this.connection?.send("UpdateUserState", isMuted, isDeafened);
   }
 
   public setSpeakingState(isSpeaking: boolean): void {

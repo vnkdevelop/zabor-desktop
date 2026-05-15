@@ -1,16 +1,13 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy } from '@phosphor-icons/react';
 import { useTranslation, Trans } from 'react-i18next';
-import {
-  Settings, Mic, MicOff, Headphones, Phone, Eye, EyeOff, UserMinus, Camera,
-  Check, X, LogOut, UserPlus, Mail, Edit2, Volume2,
-  PhoneOff, Wifi, WifiOff, Users, LogOut as LeaveIcon, Crown, UserX, Globe
-} from 'lucide-react';
+
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
 import { signalRService } from './services/signalr';
 import { webrtc } from './services/webrtc';
 import { isPackedGif, packGif, unpackGif, getDisplaySrc, getStaticFrameSync, preloadStaticFrame } from './utils/avatar';
-import { Trophy } from 'lucide-react';
+
 import { ACHIEVEMENTS, getAchievementDef, formatProgress, AchievementsPayload, getProgressPercent } from './achievements';
 
 import { TitleBar } from './components/Layout/TitleBar';
@@ -1207,7 +1204,7 @@ export default function App() {
               }}
               className="text-textMuted hover:text-white transition-colors"
             >
-              <X size={24} />
+              <X weight="bold" size={24} />
             </button>
           </div>
 
@@ -1308,7 +1305,7 @@ export default function App() {
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors"
                   >
-                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    {showPassword ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}
                   </button>
                 </div>
                 {error && <p className="text-danger text-sm mb-4 text-center font-medium">{error}</p>}
@@ -1330,7 +1327,7 @@ export default function App() {
                 <h1 className="text-2xl font-bold text-center mb-2 text-white">{t('auth.createProfile')}</h1>
                 <p className="text-sm text-textMuted text-center mb-8">{t('auth.howOthersSeeYou')}</p>
                 <label className="w-[103px] h-[103px] rounded-full mx-auto mb-8 flex items-center justify-center cursor-pointer relative shadow-lg hover:opacity-80 transition-opacity">
-                  {avatarBase64 ? <AvatarImg src={avatarBase64} size={103} bgColor={avatarColor} /> : <div className="w-full h-full rounded-full flex items-center justify-center" style={{ backgroundColor: avatarColor }}><Camera size={32} className="text-white" /></div>}
+                  {avatarBase64 ? <AvatarImg src={avatarBase64} size={103} bgColor={avatarColor} /> : <div className="w-full h-full rounded-full flex items-center justify-center" style={{ backgroundColor: avatarColor }}><Camera weight="bold" size={32} className="text-white" /></div>}
                   <input type="file" accept="image/*" className="hidden" onChange={e => onFileChange(e, 'setup')} />
                 </label>
                 <label className="text-xs font-bold text-textMuted mb-2 tracking-wider">{t('auth.displayName')}</label>
@@ -1401,7 +1398,7 @@ export default function App() {
               <div className="absolute inset-0 bg-panelBg z-[60] flex flex-col animate-fade-in">
                 <div className="flex items-center justify-between p-4 border-b border-[#303035]">
                   <span className="text-sm font-bold text-white tracking-wider">{t('main.notifications.title')}</span>
-                  <button onClick={() => setShowInvitesPanel(false)} className="text-textMuted hover:text-white transition-colors"><X size={20} /></button>
+                  <button onClick={() => setShowInvitesPanel(false)} className="text-textMuted hover:text-white transition-colors"><X weight="bold" size={20} /></button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {store.friendRequests.map(req => (
@@ -1435,7 +1432,7 @@ export default function App() {
                   ))}
                   {store.friendRequests.length === 0 && store.channelInvites.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-16 text-textMuted">
-                      <Mail size={40} className="mb-4 opacity-20" />
+                      <Mail weight="bold" size={40} className="mb-4 opacity-20" />
                       <p className="font-medium text-sm">{t('main.notifications.none')}</p>
                     </div>
                   )}
@@ -1461,8 +1458,8 @@ export default function App() {
                             <span className="font-medium text-[15px] truncate select-none text-white">{ch.name}</span>
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pr-2 shrink-0">
-                            <div onClick={e => { e.stopPropagation(); e.preventDefault(); store.setSelectedChannelForInvite(ch); store.setModal('inviteToChannel', true); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title="Пригласить"><UserPlus size={16} /></div>
-                            <div onClick={e => { e.stopPropagation(); e.preventDefault(); openChannelMembers(ch); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title="Участники канала"><Users size={16} /></div>
+                            <div onClick={e => { e.stopPropagation(); e.preventDefault(); store.setSelectedChannelForInvite(ch); store.setModal('inviteToChannel', true); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title="Пригласить"><UserPlus weight="bold" size={16} /></div>
+                            <div onClick={e => { e.stopPropagation(); e.preventDefault(); openChannelMembers(ch); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title="Участники канала"><Users weight="bold" size={16} /></div>
                           </div>
                         </button>
                         {channelUsers.length > 0 && (
@@ -1504,7 +1501,7 @@ export default function App() {
 
             <div className={`absolute bottom-[145px] right-6 transition-all duration-500 ${hasInvites ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-[150%] opacity-0 pointer-events-none'}`}>
               <button onClick={() => setShowInvitesPanel(true)} className="w-14 h-14 bg-[#c70060] rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(199,0,96,0.5)] hover:scale-105 transition-transform relative">
-                <Mail size={24} color="white" />
+                <Mail weight="bold" size={24} color="white" />
                 <div className="absolute top-0 right-0 w-4 h-4 bg-danger rounded-full border-2 border-panelBg animate-pulse" />
               </button>
             </div>
@@ -1539,7 +1536,7 @@ export default function App() {
                   }}
                   className="text-textMuted hover:text-white p-2 hover:bg-surface rounded-xl transition-colors"
                 >
-                  <Settings size={20} />
+                  <Settings weight="bold" size={20} />
                 </button>
               </div>
             </div>
@@ -1617,10 +1614,10 @@ export default function App() {
                         )}
 
                         {store.callStatus === 'connected' && (store.currentCallUser.isMuted || store.currentCallUser.isServerMuted) && (
-                          <Mic size={14} className="text-danger shrink-0" />
+                          <Mic weight="bold" size={14} className="text-danger shrink-0" />
                         )}
                         {store.callStatus === 'connected' && (store.currentCallUser.isDeafened || store.currentCallUser.isServerDeafened) && (
-                          <Headphones size={14} className="text-danger shrink-0" />
+                          <Headphones weight="bold" size={14} className="text-danger shrink-0" />
                         )}
                       </div>
                     </div>
@@ -1670,8 +1667,8 @@ export default function App() {
                       <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 transition-all duration-300 ${isIdle ? 'translate-y-8 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
                         <div className="bg-[#09090B]/80 backdrop-blur-md border border-[#303035]/50 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-lg whitespace-nowrap" style={{ maxWidth: `${cardSize.w - 40}px` }}>
                           <span className="text-white font-bold text-sm truncate">{user.displayName}</span>
-                          {(user.isMuted || user.isServerMuted) && <Mic size={14} className="text-danger shrink-0" />}
-                          {(user.isDeafened || user.isServerDeafened) && <Headphones size={14} className="text-danger shrink-0" />}
+                          {(user.isMuted || user.isServerMuted) && <Mic weight="bold" size={14} className="text-danger shrink-0" />}
+                          {(user.isDeafened || user.isServerDeafened) && <Headphones weight="bold" size={14} className="text-danger shrink-0" />}
                         </div>
                       </div>
                     </div>
@@ -1687,30 +1684,33 @@ export default function App() {
               ].join(" ")}>
                 <button
                   onClick={toggleMute}
-                  className={`w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)
+                  className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)
                     ? 'bg-[#2B2D31] text-white'
                     : 'bg-surface hover:bg-surfaceHover text-white'
                     }`}
                 >
-                  <Mic size={24} />
-                  {(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened) && (
-                    <div className="absolute w-[30px] h-[3px] bg-danger rotate-45 rounded-full" />
-                  )}
+                  <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
+                    <Mic weight="bold" size={24} />
+                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${ (store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45' }`} />
+                  </div>
                 </button>
                 <button
                   onClick={toggleDeafen}
-                  className={`w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened)
+                  className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened)
                     ? 'bg-[#2B2D31] text-white'
                     : 'bg-surface hover:bg-surfaceHover text-white'
                     }`}
                 >
-                  <Headphones size={24} />
-                  {(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) && (
-                    <div className="absolute w-[30px] h-[3px] bg-danger rotate-45 rounded-full" />
-                  )}
+                  <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
+                    <Headphones weight="bold" size={24} />
+                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${ (store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45' }`} />
+                  </div>
                 </button>
-                <button onClick={handleEndCall} className="bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
-                  <PhoneOff size={20} /> {t('main.voice.endCall')}
+                <button onClick={handleEndCall} className="group bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
+                  <div className="transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110">
+                    <PhoneOff weight="bold" size={20} />
+                  </div>
+                  {t('main.voice.endCall')}
                 </button>
               </div>
             )}
@@ -1722,37 +1722,40 @@ export default function App() {
               ].join(" ")}>
                 <button
                   onClick={toggleMute}
-                  className={`w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)
+                  className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)
                     ? 'bg-[#2B2D31] text-white'
                     : 'bg-surface hover:bg-surfaceHover text-white'
                     }`}
                 >
-                  <Mic size={24} />
-                  {(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened) && (
-                    <div className="absolute w-[30px] h-[3px] bg-danger rotate-45 rounded-full" />
-                  )}
+                  <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
+                    <Mic weight="bold" size={24} />
+                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${ (store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45' }`} />
+                  </div>
                 </button>
                 <button
                   onClick={toggleDeafen}
-                  className={`w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened)
+                  className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened)
                     ? 'bg-[#2B2D31] text-white'
                     : 'bg-surface hover:bg-surfaceHover text-white'
                     }`}
                 >
-                  <Headphones size={24} />
-                  {(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) && (
-                    <div className="absolute w-[30px] h-[3px] bg-danger rotate-45 rounded-full" />
-                  )}
+                  <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
+                    <Headphones weight="bold" size={24} />
+                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${ (store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45' }`} />
+                  </div>
                 </button>
-                <button onClick={() => signalRService.leaveChannel()} className="bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
-                  <Phone size={20} /> {t('main.voice.endCall')}
+                <button onClick={() => signalRService.leaveChannel()} className="group bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
+                  <div className="transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110">
+                    <Phone weight="bold" size={20} />
+                  </div>
+                  {t('main.voice.endCall')}
                 </button>
               </div>
             )}
 
             <div className="absolute bottom-4 left-4 z-50" onMouseEnter={() => setShowPingTooltip(true)} onMouseLeave={() => setShowPingTooltip(false)}>
               <div className="w-10 h-10 rounded-full bg-surface flex items-center justify-center cursor-pointer hover:bg-surfaceHover transition-colors shadow-lg" style={{ color: getPingColor() }}>
-                {ping < 0 ? <WifiOff size={18} /> : <Wifi size={18} />}
+                {ping < 0 ? <WifiOff weight="bold" size={18} /> : <Wifi weight="bold" size={18} />}
               </div>
               {showPingTooltip && (
                 <div className="absolute bottom-12 left-0 bg-surface border border-[#303035] rounded-xl px-4 py-2 shadow-xl whitespace-nowrap">
@@ -1839,7 +1842,7 @@ export default function App() {
         <div className="bg-panelBg rounded-3xl w-[500px] max-h-[80vh] flex flex-col overflow-hidden shadow-2xl">
           <div className="flex items-center justify-between p-6 pb-0">
             <h2 className="text-xl font-bold text-white">Настройки</h2>
-            <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X size={24} /></button>
+            <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X weight="bold" size={24} /></button>
           </div>
           <div className="flex gap-2 px-6 pt-4">
             <button onClick={() => setSettingsTab('general')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'general' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>{t('settings.tabs.general')}</button>
@@ -1938,12 +1941,17 @@ export default function App() {
                   <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.privacy.newPassword')}</label>
                   <div className="relative">
                     <input type={showPrivacyPass ? 'text' : 'password'} value={newPassword} onChange={e => { setNewPassword(e.target.value); setPrivacyError(''); }} maxLength={25} placeholder={t('settings.privacy.passwordHint')} className="w-full bg-surface text-white rounded-xl p-3 outline-none pr-10 focus:ring-2 focus:ring-[#c70060]" />
-                    <button onClick={() => setShowPrivacyPass(!showPrivacyPass)} className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors">{showPrivacyPass ? <EyeOff size={20} /> : <Eye size={20} />}</button>
+                    <button onClick={() => setShowPrivacyPass(!showPrivacyPass)} className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors">{showPrivacyPass ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}</button>
                   </div>
                   {privacyError && <p className="text-danger text-sm mt-2 font-medium">{privacyError}</p>}
                   <button onClick={changePassword} className="mt-3 w-full bg-[#c70060] hover:opacity-90 text-white py-3 rounded-xl font-bold transition-opacity">{t('settings.privacy.changePassword')}</button>
                 </div>
-                <button onClick={handleLogout} className="w-full bg-danger hover:bg-red-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"><LogOut size={18} /> {t('settings.privacy.logout')}</button>
+                <button onClick={handleLogout} className="group w-full bg-danger hover:bg-red-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
+                  <div className="transition-transform duration-200 group-hover:-translate-x-1">
+                    <LogOut weight="bold" size={18} />
+                  </div>
+                  {t('settings.privacy.logout')}
+                </button>
               </div>
             )}
           </div>
@@ -1959,7 +1967,7 @@ export default function App() {
                 onClick={() => store.setPendingChannelSwitch(null)}
                 className="text-textMuted hover:text-white transition-colors"
               >
-                <X size={24} />
+                <X weight="bold" size={24} />
               </button>
             </div>
 
@@ -2020,8 +2028,8 @@ export default function App() {
       {renderModal('channelMembers',
         <div className="bg-panelBg p-8 rounded-3xl w-[420px] shadow-2xl">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-white flex items-center gap-3"><Users size={24} /> Участники</h2>
-            <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X size={24} /></button>
+            <h2 className="text-xl font-bold text-white flex items-center gap-3"><Users weight="bold" size={24} /> Участники</h2>
+            <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X weight="bold" size={24} /></button>
           </div>
           <p className="text-textMuted text-sm mb-6 truncate">{store.selectedChannelForMembers?.name}</p>
           <div className="max-h-[350px] overflow-y-auto space-y-2 pr-2">
@@ -2040,7 +2048,7 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-white truncate">{m.displayName}</span>
                     {store.selectedChannelForMembers?.ownerId === m.id && (
-                      <span className="text-[10px] font-bold bg-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0"><Crown size={12} /> Создатель</span>
+                      <span className="text-[10px] font-bold bg-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0"><Crown weight="bold" size={12} /> Создатель</span>
                     )}
                   </div>
                   <p className="text-xs text-textMuted truncate">@{m.username}</p>
@@ -2054,7 +2062,7 @@ export default function App() {
 
       {renderModal('kickConfirm',
         <div className="bg-panelBg p-8 rounded-3xl w-[400px] text-center shadow-2xl">
-          <div className="w-16 h-16 bg-danger/20 rounded-full flex items-center justify-center mx-auto mb-4"><UserX size={32} className="text-danger" /></div>
+          <div className="w-16 h-16 bg-danger/20 rounded-full flex items-center justify-center mx-auto mb-4"><UserX weight="bold" size={32} className="text-danger" /></div>
           <h2 className="text-xl font-bold mb-2 text-white">{t('modals.kick.title')}</h2>
           <p className="text-textMuted mb-8">
             <Trans i18nKey="modals.kick.desc" values={{ name: store.userToKick?.displayName }}>
@@ -2070,7 +2078,7 @@ export default function App() {
 
       {renderModal('channelFull',
         <div className="bg-panelBg p-8 rounded-3xl w-[400px] text-center shadow-2xl border border-danger/30">
-          <div className="w-20 h-20 bg-danger/20 rounded-full flex items-center justify-center mx-auto mb-4"><Users size={40} className="text-danger" /></div>
+          <div className="w-20 h-20 bg-danger/20 rounded-full flex items-center justify-center mx-auto mb-4"><Users weight="bold" size={40} className="text-danger" /></div>
           <h2 className="text-xl font-bold mb-4 text-white">Канал переполнен</h2>
           <p className="text-textMuted mb-8">Максимальное количество участников в канале — 10 человек. Подождите, пока кто-то выйдет.</p>
           <button onClick={closeAndResetModals} className="w-full bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">Понятно</button>
@@ -2100,8 +2108,8 @@ export default function App() {
           <h2 className="text-xl font-bold mb-2 text-white">{store.incomingCall?.callerName}</h2>
           <p className="text-textMuted mb-8 font-medium">Входящий звонок...</p>
           <div className="flex gap-4">
-            <button onClick={handleDeclineCall} className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"><PhoneOff size={18} /> Отклонить</button>
-            <button onClick={handleAcceptCall} className="flex-1 bg-success text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors flex items-center justify-center gap-2"><Phone size={18} /> Принять</button>
+            <button onClick={handleDeclineCall} className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"><PhoneOff weight="bold" size={18} /> Отклонить</button>
+            <button onClick={handleAcceptCall} className="flex-1 bg-success text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors flex items-center justify-center gap-2"><Phone weight="bold" size={18} /> Принять</button>
           </div>
         </div>
       )}
@@ -2125,8 +2133,8 @@ export default function App() {
                 <h2 className="text-xl font-bold mb-2 text-white truncate px-2">{invite.channelName}</h2>
                 <p className="text-textMuted mb-8 font-medium">Вас зовут в канал</p>
                 <div className="flex gap-4">
-                  <button onClick={() => { store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); }} className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"><PhoneOff size={18} /> Сбросить</button>
-                  <button onClick={() => { handleAcceptChannelInvite(invite.channelId); store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== invite.channelId)); }} className="flex-1 bg-success text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors flex items-center justify-center gap-2"><Phone size={18} /> Войти</button>
+                  <button onClick={() => { store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); }} className="flex-1 bg-danger text-white py-3 rounded-xl font-bold hover:bg-red-600 transition-colors flex items-center justify-center gap-2"><PhoneOff weight="bold" size={18} /> Сбросить</button>
+                  <button onClick={() => { handleAcceptChannelInvite(invite.channelId); store.setModal('incomingChannelInvite', false); store.setIncomingChannelInvite(null); signalRService.stopRingtone(); store.setChannelInvites(store.channelInvites.filter(i => i.channelId !== invite.channelId)); }} className="flex-1 bg-success text-white py-3 rounded-xl font-bold hover:bg-green-600 transition-colors flex items-center justify-center gap-2"><Phone weight="bold" size={18} /> Войти</button>
                 </div>
               </>
             );
@@ -2145,7 +2153,7 @@ export default function App() {
                 onClick={() => store.closeProfileOnly()}
                 className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-full backdrop-blur-md transition-all"
               >
-                <X size={20} />
+                <X weight="bold" size={20} />
               </button>
 
               {store.selectedProfileUser?.id === store.currentUser?.id && !isEditingProfile && (
@@ -2154,7 +2162,7 @@ export default function App() {
                   className="absolute top-4 right-14 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-full backdrop-blur-md transition-all"
                   title="Редактировать профиль"
                 >
-                  <Edit2 size={20} />
+                  <Edit2 weight="bold" size={20} />
                 </button>
               )}
             </div>
@@ -2179,7 +2187,7 @@ export default function App() {
                       className="absolute inset-[6px] bg-black/60 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer backdrop-blur-sm"
                       onClick={() => profileFileInputRef.current?.click()}
                     >
-                      <Camera size={32} className="text-white" />
+                      <Camera weight="bold" size={32} className="text-white" />
                       <input
                         ref={profileFileInputRef}
                         type="file"
@@ -2201,7 +2209,7 @@ export default function App() {
                   className="w-12 h-12 rounded-xl bg-surface border border-[#303035] flex items-center justify-center hover:bg-surfaceHover hover:scale-105 transition-all text-[#c70060] hover:shadow-[0_0_15px_rgba(199,0,96,0.3)] active:shadow-[0_0_20px_rgba(199,0,96,0.5)] active:scale-95 -mr-6"
                   title="Достижения"
                 >
-                  <Trophy size={22} />
+                  <Trophy weight="bold" size={22} />
                 </button>
               </div>
 
@@ -2311,7 +2319,7 @@ export default function App() {
                           : 'bg-[#c70060] text-white hover:opacity-90 hover:shadow-[0_0_25px_rgba(199,0,96,0.5)] active:shadow-[0_0_15px_rgba(199,0,96,0.8)] active:scale-[0.98]'
                           }`}
                       >
-                        <UserPlus size={18} /> {store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id) ? 'Зовём...' : 'Позвать в канал'}
+                        <Phone weight="bold" size={18} /> {store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id) ? 'Зовём...' : 'Позвать в канал'}
                       </button>
                       {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && (
                         <button
@@ -2344,7 +2352,7 @@ export default function App() {
                           }}
                           className="w-full bg-success text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-600 transition-all hover:shadow-[0_0_25px_rgba(34,197,94,0.5)] active:shadow-[0_0_15px_rgba(34,197,94,0.8)] active:scale-[0.98]"
                         >
-                          <Phone size={18} /> Позвонить
+                          <Phone weight="bold" size={18} /> Позвонить
                         </button>
                         <button
                           onClick={() => {
@@ -2392,10 +2400,10 @@ export default function App() {
         <div className="bg-panelBg rounded-3xl w-[500px] max-h-[80vh] flex flex-col overflow-hidden shadow-2xl">
           <div className="flex items-center justify-between p-6 pb-4">
             <h2 className="text-xl font-bold text-white flex items-center gap-3">
-              <Trophy size={24} />
+              <Trophy weight="bold" size={24} />
               {store.achievementsViewUserId ? 'Достижения' : 'Мои достижения'}
             </h2>
-            <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X size={24} /></button>
+            <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X weight="bold" size={24} /></button>
           </div>
           <div className="px-6 overflow-y-auto flex-1 space-y-3 pb-6">
             {(() => {
@@ -2469,7 +2477,7 @@ export default function App() {
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000000] animate-toast-in">
           <div className="bg-[#09090B]/90 backdrop-blur-xl border border-danger/40 rounded-3xl px-8 py-5 shadow-[0_0_50px_rgba(239,68,68,0.25)] flex items-center gap-4">
             <div className="w-10 h-10 rounded-full bg-danger/20 flex items-center justify-center shrink-0">
-              <WifiOff size={20} className="text-danger" />
+              <WifiOff weight="bold" size={20} className="text-danger" />
             </div>
             <div>
               <p className="text-white font-bold text-base leading-tight">Уведомление</p>
@@ -2484,7 +2492,7 @@ export default function App() {
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000000] animate-toast-in">
           <div className="bg-[#09090B]/90 backdrop-blur-xl border border-warning/40 rounded-3xl px-8 py-5 shadow-[0_0_50px_rgba(234,179,8,0.25)] flex items-center gap-4">
             <div className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center shrink-0">
-              <MicOff size={20} className="text-warning" />
+              <MicOff weight="bold" size={20} className="text-warning" />
             </div>
             <div>
               <p className="text-white font-bold text-base leading-tight">Уведомление</p>
@@ -2503,7 +2511,7 @@ export default function App() {
           <div className={`fixed top-14 left-1/2 z-[1000000] ${isHiding ? 'animate-admin-block-out' : 'animate-admin-block-in'}`}>
             <div className="bg-[#09090B]/90 backdrop-blur-xl border border-danger/50 rounded-3xl px-8 py-6 flex items-center gap-5 shadow-[0_0_60px_rgba(239,68,68,0.3)] ring-1 ring-white/5">
               <div className="w-12 h-12 rounded-2xl bg-danger/20 flex items-center justify-center shrink-0 shadow-inner">
-                <MicOff size={24} className="text-danger" />
+                <MicOff weight="bold" size={24} className="text-danger" />
               </div>
               <div className="min-w-0">
                 <p className="text-white font-black text-lg tracking-tight leading-none mb-1">Доступ ограничен</p>
@@ -2526,13 +2534,17 @@ export default function App() {
           {contextMenu.type === 'channel' ? (
             <>
               {contextMenu.item.ownerId === store.currentUser?.id && (
-                <button onClick={() => { setEditChannelId(contextMenu.item.id); setEditChannelName(contextMenu.item.name); store.setModal('channelEdit', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Edit2 size={16} /> Переименовать</button>
+                <button onClick={() => { setEditChannelId(contextMenu.item.id); setEditChannelName(contextMenu.item.name); store.setModal('channelEdit', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Edit2 weight="bold" size={16} /> Переименовать</button>
               )}
-              <button onClick={() => { signalRService.quitAccessChannel(contextMenu.item.id); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1"><LeaveIcon size={16} /> Выйти из канала</button>
+              <button onClick={() => { signalRService.quitAccessChannel(contextMenu.item.id); setContextMenu(null); }} className="group w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1">
+                <div className="transition-transform duration-200 group-hover:translate-x-1">
+                  <LeaveIcon weight="bold" size={16} />
+                </div>
+                Выйти из канала</button>
             </>
           ) : contextMenu.type === 'channelMember' ? (
             <>
-              <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'channelMembers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Settings size={16} /> Профиль</button>
+              <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'channelMembers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Settings weight="bold" size={16} /> Профиль</button>
               {contextMenu.item.id !== store.currentUser?.id && (
                 <button onClick={() => {
                   if (sentInvites.has(contextMenu.item.id)) return;
@@ -2548,22 +2560,22 @@ export default function App() {
                   disabled={sentInvites.has(contextMenu.item.id)}
                   className={`w-full text-left px-4 py-2 flex items-center gap-3 font-medium mt-1 ${sentInvites.has(contextMenu.item.id) ? 'text-success cursor-default' : 'text-white hover:bg-surfaceHover'
                     }`}>
-                  <UserPlus size={16} /> {sentInvites.has(contextMenu.item.id) ? 'Зовём...' : 'Позвать в канал'}
+                  <Phone weight="bold" size={16} /> {sentInvites.has(contextMenu.item.id) ? 'Зовём...' : 'Позвать в канал'}
                 </button>
               )}
               {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && contextMenu.item.id !== store.currentUser?.id && (
-                <button onClick={() => { store.setUserToKick(contextMenu.item); store.setModal('kickConfirm', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1"><UserX size={16} /> Исключить</button>
+                <button onClick={() => { store.setUserToKick(contextMenu.item); store.setModal('kickConfirm', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1"><UserX weight="bold" size={16} /> Исключить</button>
               )}
             </>
           ) : contextMenu.type === 'voiceUser' ? (
             <>
-              <button onClick={() => { setVolumeUser(contextMenu.item); setVolumeUserValue(store.userVolumes[contextMenu.item.id] ?? 100); store.setModal('userVolume', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Volume2 size={16} /> Громкость</button>
-              <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'voiceUsers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1"><Settings size={16} /> Профиль</button>
+              <button onClick={() => { setVolumeUser(contextMenu.item); setVolumeUserValue(store.userVolumes[contextMenu.item.id] ?? 100); store.setModal('userVolume', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Volume2 weight="bold" size={16} /> Громкость</button>
+              <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'voiceUsers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1"><Settings weight="bold" size={16} /> Профиль</button>
             </>
           ) : (
             <>
-              <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'friends'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Settings size={16} /> Профиль</button>
-              <button onClick={() => { signalRService.removeFriend(contextMenu.item.id); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1"><UserMinus size={16} /> Удалить</button>
+              <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'friends'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Settings weight="bold" size={16} /> Профиль</button>
+              <button onClick={() => { signalRService.removeFriend(contextMenu.item.id); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1"><UserMinus weight="bold" size={16} /> Удалить</button>
             </>
           )}
         </div>
