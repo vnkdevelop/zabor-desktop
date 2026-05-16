@@ -361,9 +361,8 @@ export default function App() {
           autoLoginPendingRef.current = false;
           const creds = credentialsRef.current;
           if (creds.login && creds.password) {
-            signalRService.login(creds.login, creds.password).then(async (success) => {
-              if (success) {
-                const serverUser = useAppStore.getState().currentUser;
+            signalRService.login(creds.login, creds.password).then(async (result) => {
+              if (result === 'ok') {
                 const [serverSettings, jokeText] = await Promise.all([
                   signalRService.loadAudioSettings(),
                   signalRService.getJokeOfTheDay().catch(() => 'Сегодня сервер шутит молча.')
@@ -376,8 +375,13 @@ export default function App() {
                 setTimeout(() => { settingsLoadedRef.current = true; }, 1000);
                 setLoadingFadeOut(true);
                 setTimeout(() => setAppLoading(false), 650);
+              } else if (result === 'invalid') {
+                // Неверные credentials — не ретраим, показываем экран логина
+                autoLoginPendingRef.current = false;
+                setLoadingFadeOut(true);
+                setTimeout(() => setAppLoading(false), 650);
               } else {
-                // Сервер снова недоступен или вернул ошибку — ждём
+                // 'network' — сеть упала снова, ждём следующего reconnect
                 autoLoginPendingRef.current = true;
                 setShowErrorText(true);
               }
@@ -460,12 +464,12 @@ export default function App() {
       }
 
       // 5. Автологин
-      const loginSuccess = await signalRService.login(
+      const loginResult = await signalRService.login(
         cachedCredentials.login,
         cachedCredentials.password
       );
 
-      if (loginSuccess) {
+      if (loginResult === 'ok') {
         const serverUser = useAppStore.getState().currentUser;
         if (cachedCredentials.userId && serverUser && cachedCredentials.userId !== serverUser.id) {
           resetToDefaults();
@@ -489,13 +493,17 @@ export default function App() {
           setLoadingFadeOut(true);
           setTimeout(() => setAppLoading(false), 650);
         }, 300);
+      } else if (loginResult === 'invalid') {
+        // Неверные credentials — очищаем сессию и показываем экран логина
+        await window.windowControls.clearSession().catch(() => {});
+        initCompleteRef.current = true;
+        setLoadingFadeOut(true);
+        setTimeout(() => setAppLoading(false), 650);
       } else {
-        // Сервер ответил, но логин не прошёл (сервер перезапустился и сессия устарела?).
-        // НЕ очищаем сессию — просто ждём следующего reconnect и пробуем снова.
+        // 'network' — сеть прервалась во время login(), ждём reconnect
         autoLoginPendingRef.current = true;
         initCompleteRef.current = true;
         setShowErrorText(true);
-        // Остаёмся на экране загрузки.
       }
     };
 
@@ -696,8 +704,8 @@ export default function App() {
           settingsLoadedRef.current = false;
           resetToDefaults();
 
-          const success = await signalRService.login(login, password);
-          if (success) {
+          const loginResult = await signalRService.login(login, password);
+          if (loginResult === 'ok') {
             const [serverSettings, jokeText] = await Promise.all([
               signalRService.loadAudioSettings(),
               signalRService.getJokeOfTheDay().catch(() => 'Сегодня сервер шутит молча.')
@@ -712,8 +720,10 @@ export default function App() {
             saveLocalCache();
             setTimeout(() => { settingsLoadedRef.current = true; }, 1000);
 
-          } else {
+          } else if (loginResult === 'invalid') {
             setError("Неверный пароль!");
+          } else {
+            setError("Ошибка сети, попробуйте ещё раз");
           }
         } else {
           setAuthStep('confirm');

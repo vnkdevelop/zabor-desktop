@@ -141,7 +141,15 @@ private stopSfx(src: string) {
     this.isReconnecting = true;
     this.lastConnectionError = null;
     try {
-      if (this.connection) { try { await this.connection.stop(); } catch {} }
+      if (this.connection) {
+        try {
+          // Обёртка в Promise.race — защита от зависания stop() на half-open WebSocket
+          await Promise.race([
+            this.connection.stop(),
+            new Promise<void>(resolve => setTimeout(resolve, 2000))
+          ]);
+        } catch {}
+      }
       this.connection = new signalR.HubConnectionBuilder()
         .withUrl(SERVER_URL, {
           skipNegotiation: false,
@@ -289,7 +297,12 @@ private stopSfx(src: string) {
     this.stopPingMeasurement();
     if (this.reconnectGraceTimer) { clearTimeout(this.reconnectGraceTimer); this.reconnectGraceTimer = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-    if (this.connection) { this.connection.stop(); this.connection = null; this.listenersAttached = false; }
+    if (this.connection) {
+      const c = this.connection;
+      this.connection = null;
+      this.listenersAttached = false;
+      Promise.race([c.stop(), new Promise<void>(resolve => setTimeout(resolve, 2000))]).catch(() => {});
+    }
     if (this.sfxContext) { this.sfxContext.close().catch(() => {}); this.sfxContext = null; }
     this.sfxElements.forEach(audio => { audio.pause(); audio.srcObject = null; });
 this.sfxElements.clear();
@@ -563,17 +576,23 @@ public stopRingtone() {
     return await this.safeInvoke<boolean>("CheckUserExists", username) ?? false;
   }
 
-  public async login(username: string, password: string): Promise<boolean> {
-    const user = await this.safeInvoke<User>("Login", username, password);
-    if (user) { 
-      useAppStore.getState().setCurrentUser(user); 
-      if (user.currentChannelId) {
-        this.joinChannel(user.currentChannelId).catch(() => {});
+  public async login(username: string, password: string): Promise<'ok' | 'invalid' | 'network'> {
+    if (!this.isConnected()) return 'network';
+    try {
+      const user = await this.connection!.invoke<User | null>("Login", username, password);
+      if (user) { 
+        useAppStore.getState().setCurrentUser(user); 
+        if (user.currentChannelId) {
+          this.joinChannel(user.currentChannelId).catch(() => {});
+        }
+        await this.loadData(); 
+        return 'ok'; 
       }
-      await this.loadData(); 
-      return true; 
+      return 'invalid';
+    } catch (e) {
+      console.error("[SignalR] Login error:", e);
+      return 'network';
     }
-    return false;
   }
 
   public async register(username: string, password: string, displayName: string, avatarBase64: string | null, avatarColor: string): Promise<boolean> {
