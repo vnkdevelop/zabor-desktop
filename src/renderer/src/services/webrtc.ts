@@ -345,9 +345,13 @@ export class WebRTCManager {
 
   // ── Local Stream ──────────────────────────────────────────────
 
-  public async startLocalStream(deviceId?: string, useNS?: boolean): Promise<boolean> {
+  public async startLocalStream(deviceId?: string, useNS?: boolean, forceRestart = false): Promise<boolean> {
     if (deviceId !== undefined) this.currentDeviceId = deviceId
     if (useNS !== undefined) this.noiseSuppression = useNS
+
+    if (!forceRestart && this.localStream && this.localStream.getAudioTracks().length > 0 && this.localStream.getAudioTracks().every(t => t.readyState === 'live')) {
+      return true
+    }
 
     try {
       if (this.rawStream) { this.rawStream.getTracks().forEach(t => t.stop()); this.rawStream = null }
@@ -396,7 +400,7 @@ export class WebRTCManager {
 
     if (this.localStream) {
       try {
-        await this.startLocalStream(deviceId, useNS)
+        await this.startLocalStream(deviceId, useNS, true)
         for (const pc of this.peerConnections.values()) {
           const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
           const newTrack = this.localStream?.getAudioTracks()[0]

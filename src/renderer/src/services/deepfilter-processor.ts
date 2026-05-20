@@ -54,7 +54,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
   // Экспоненциальные огибающие: Время атаки (20мс) и релиза (500мс)
   private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.02))
-  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.50))
+  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.35))
 
   constructor() {
     super()
@@ -86,8 +86,8 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     if (this.denoiserReady) return
     try {
       this.denoiser = new StandaloneDeepFilter({
-        attenuationLimit: 30, // Строго по ТЗ: лимит 20-30 дБ, чтобы не ломать голос
-        postFilterBeta: 0.08  // Оптимальное сглаживание артефактов (песка)
+        attenuationLimit: 45, // Строго по ТЗ: лимит 20-30 дБ, чтобы не ломать голос
+        postFilterBeta: 0.09  // Оптимальное сглаживание артефактов (песка)
       })
       await this.denoiser.initialize()
       this.denoiserReady = true

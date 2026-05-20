@@ -28,6 +28,7 @@ export default function App() {
   const [serverConnected, setServerConnected] = useState(false);
   const [showErrorText, setShowErrorText] = useState(false);
   const [showInitConnectionError, setShowInitConnectionError] = useState(false);
+  const [showReconnectingOverlay, setShowReconnectingOverlay] = useState(false);
   const [appLoading, setAppLoading] = useState(true);
   const [loadingFadeOut, setLoadingFadeOut] = useState(false);
   const disconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -355,6 +356,8 @@ export default function App() {
           disconnectTimerRef.current = null;
         }
         setShowErrorText(false);
+        setShowInitConnectionError(false);
+        setShowReconnectingOverlay(false);
 
         if (autoLoginPendingRef.current) {
           // Автологин ещё не выполнен — пробуем сейчас (сервер только что стал доступен)
@@ -384,6 +387,7 @@ export default function App() {
                 // 'network' — сеть упала снова, ждём следующего reconnect
                 autoLoginPendingRef.current = true;
                 setShowErrorText(true);
+                setShowReconnectingOverlay(true);
               }
             });
           }
@@ -396,6 +400,14 @@ export default function App() {
         // СигналР сам попытается переподключиться и вызовет Login.
         // Не сбрасываем UI (appLoading), чтобы не было мигания или потери контекста.
         autoLoginPendingRef.current = true;
+
+        // Запускаем 3-секундный таймер перед показом оверлея реконнекта
+        if (!disconnectTimerRef.current) {
+          disconnectTimerRef.current = setTimeout(() => {
+            setShowReconnectingOverlay(true);
+            setShowErrorText(true);
+          }, 3000);
+        }
       }
     });
     const unsubPing = signalRService.onPingUpdate((newPing) => setPing(newPing));
@@ -459,7 +471,7 @@ export default function App() {
       if (!connected) {
         autoLoginPendingRef.current = true;
         initCompleteRef.current = true;
-        setShowErrorText(true);
+        setShowInitConnectionError(true);
         return;
       }
 
@@ -504,6 +516,8 @@ export default function App() {
         autoLoginPendingRef.current = true;
         initCompleteRef.current = true;
         setShowErrorText(true);
+        setShowReconnectingOverlay(true);
+        setShowInitConnectionError(true);
       }
     };
 

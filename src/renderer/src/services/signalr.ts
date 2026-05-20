@@ -13,7 +13,6 @@ class SignalRService {
   private listenersAttached = false;
   private reconnectAttempts = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private reconnectGraceTimer: NodeJS.Timeout | null = null;
   private isReconnecting = false;
   private intentionalDisconnect = false;
   private pingInterval: NodeJS.Timeout | null = null;
@@ -105,12 +104,12 @@ private stopSfx(src: string) {
         await this.connection!.invoke("Ping");
         this.missedPings = 0;
         this.notifyPingUpdate(Math.round(performance.now() - start));
-      } catch { 
+      } catch {
         this.missedPings++;
         this.notifyPingUpdate(-1);
-        if (this.missedPings >= 2 && this.connection) {
-          try { this.connection.stop(); } catch {}
-        }
+        // НЕ вызываем connection.stop() здесь!
+        // Это рушило встроенный реконнект SignalR, запуская scheduleReconnect параллельно.
+        // Сервер сам разорвёт соединение через serverTimeoutInMilliseconds (45s).
       }
     };
     measurePing();
@@ -157,8 +156,8 @@ private stopSfx(src: string) {
         })
         .withAutomaticReconnect([0, 1000, 2000, 5000, 5000, 10000, 10000, 30000, 30000])
         .build();
-      this.connection.serverTimeoutInMilliseconds = 15000;
-      this.connection.keepAliveIntervalInMilliseconds = 5000;
+      this.connection.serverTimeoutInMilliseconds = 45000;
+      this.connection.keepAliveIntervalInMilliseconds = 8000;
       this.setupListeners();
       this.setupReconnectionHandlers();
 
@@ -174,29 +173,8 @@ private stopSfx(src: string) {
       this.reconnectAttempts = 0;
       this.isReconnecting = false;
       this.startPingMeasurement();
-
-      const store = useAppStore.getState();
-      if (store.currentUser && window.windowControls) {
-        try {
-          const raw = await window.windowControls.loadSession();
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed.login && parsed.password) {
-              const user = await this.connection.invoke<User>("Login", parsed.login, parsed.password);
-              if (user) {
-                useAppStore.getState().setCurrentUser(user);
-              }
-              const channelToRejoin = this.wasInChannel || user?.currentChannelId || store.currentChannelId;
-              this.wasInChannel = null;
-              if (channelToRejoin) {
-                this.joinChannel(channelToRejoin).catch(() => {});
-              }
-              await this.loadData();
-            }
-          }
-        } catch {}
-      }
-
+      // Логин выполняется только через App.tsx (autoLoginPendingRef) — единственная точка входа.
+      // connect() только устанавливает транспорт и оповещает слушателей.
       this.notifyConnectionUpdate(true);
       return true;
     } catch (err: any) {
@@ -217,41 +195,18 @@ private stopSfx(src: string) {
       this.notifyPingUpdate(-1);
       const store = useAppStore.getState();
       if (store.currentChannelId) this.wasInChannel = store.currentChannelId;
-      if (!this.reconnectGraceTimer) {
-        this.reconnectGraceTimer = setTimeout(() => {
-          this.reconnectGraceTimer = null;
-          if (this.isReconnecting) this.notifyConnectionUpdate(false);
-        }, 5000);
-      }
+      // Оповещаем НЕМЕДЛЕННО, чтобы App.tsx всегда взводил autoLoginPendingRef ДО
+      // того, как onreconnected вызовет notifyConnectionUpdate(true).
+      // Иначе при быстром реконнекте (<5s) пользователь не перелогинится на новом соединении.
+      this.notifyConnectionUpdate(false);
     });
     this.connection.onreconnected(async () => {
       this.reconnectAttempts = 0;
       this.isReconnecting = false;
-      if (this.reconnectGraceTimer) { clearTimeout(this.reconnectGraceTimer); this.reconnectGraceTimer = null; }
       this.startPingMeasurement();
-
-      const store = useAppStore.getState();
-      let serverRestoredChannel: string | null | undefined = null;
-      if (store.currentUser) {
-        try {
-          const raw = await window.windowControls.loadSession();
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed.login && parsed.password) {
-              const user = await this.connection!.invoke<User>("Login", parsed.login, parsed.password);
-              if (user) {
-                useAppStore.getState().setCurrentUser(user);
-                serverRestoredChannel = user.currentChannelId;
-              }
-              this.loadData().catch(() => {});
-            }
-          }
-        } catch {}
-      }
-      const channelToRejoin = this.wasInChannel || serverRestoredChannel || store.currentChannelId;
-      this.wasInChannel = null;
-      if (channelToRejoin) await this.rejoinChannel(channelToRejoin);
-
+      // НЕ вызываем Login и НЕ восстанавливаем канал здесь — это делает App.tsx
+      // через autoLoginPendingRef → signalRService.login().
+      // login() сам проверит wasInChannel и перезайдёт в канал после аутентификации.
       this.notifyConnectionUpdate(true);
     });
     this.connection.onclose(() => {
@@ -261,12 +216,9 @@ private stopSfx(src: string) {
       if (!this.intentionalDisconnect) {
         const store = useAppStore.getState();
         if (store.currentChannelId) this.wasInChannel = store.currentChannelId;
-        if (!this.reconnectGraceTimer) {
-          this.reconnectGraceTimer = setTimeout(() => {
-            this.reconnectGraceTimer = null;
-            this.notifyConnectionUpdate(false);
-          }, 5000);
-        }
+        // Немедленно оповещаем — autoLoginPendingRef должен быть взведён
+        // ДО того, как scheduleReconnect → connect() завершится успехом.
+        this.notifyConnectionUpdate(false);
         this.scheduleReconnect();
       }
     });
@@ -281,12 +233,6 @@ private stopSfx(src: string) {
     }, 5000);
   }
 
-  private async rejoinChannel(channelId: string) {
-    try {
-      await this.safeInvoke("LeaveChannel");
-      await this.joinChannel(channelId);
-    } catch {}
-  }
 
   public disconnect() {
     this.intentionalDisconnect = true;
@@ -295,7 +241,6 @@ private stopSfx(src: string) {
     this.lastSpeakingState = null;
     this.wasInChannel = null;
     this.stopPingMeasurement();
-    if (this.reconnectGraceTimer) { clearTimeout(this.reconnectGraceTimer); this.reconnectGraceTimer = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.connection) {
       const c = this.connection;
@@ -556,12 +501,10 @@ public stopRingtone() {
   // ── Network helpers ───────────────────────────────────────────
 
   private async ensureConnected(): Promise<boolean> {
-    if (this.isConnected()) return true;
-    for (let i = 0; i < 3; i++) {
-      if (await this.connect()) return true;
-      await new Promise<void>(resolve => setTimeout(resolve, 1000));
-    }
-    return false;
+    // Просто проверяем состояние — НЕ пытаемся переподключиться здесь.
+    // Реконнект управляется собственной машиной (onreconnecting/onclose/scheduleReconnect).
+    // Попытка вызвать connect() из саф-инвок создавала конкуренцию с isReconnecting флагом.
+    return this.isConnected();
   }
 
   private async safeInvoke<T>(method: string, ...args: any[]): Promise<T | null> {
@@ -580,13 +523,17 @@ public stopRingtone() {
     if (!this.isConnected()) return 'network';
     try {
       const user = await this.connection!.invoke<User | null>("Login", username, password);
-      if (user) { 
-        useAppStore.getState().setCurrentUser(user); 
-        if (user.currentChannelId) {
-          this.joinChannel(user.currentChannelId).catch(() => {});
+      if (user) {
+        useAppStore.getState().setCurrentUser(user);
+        // Восстанавливаем канал: сначала локальное состояние (wasInChannel),
+        // потом серверное (user.currentChannelId). Именно здесь, ПОСЛЕ аутентификации.
+        const channelToRejoin = this.wasInChannel || user.currentChannelId;
+        this.wasInChannel = null;
+        if (channelToRejoin) {
+          this.joinChannel(channelToRejoin).catch(() => {});
         }
-        await this.loadData(); 
-        return 'ok'; 
+        await this.loadData();
+        return 'ok';
       }
       return 'invalid';
     } catch (e) {
