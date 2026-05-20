@@ -71,11 +71,23 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
           this.noiseSuppression = event.data.noiseSuppression
         }
         if (event.data.isMuted !== undefined) {
-          this.isMuted = event.data.isMuted
-          if (this.isMuted && this.lastVadSent) {
-            this.port.postMessage({ type: 'vad', isSpeaking: false })
-            this.lastVadSent = false
+          const nextMuted = event.data.isMuted
+          if (nextMuted && !this.isMuted) {
+            this.inputBuffer.fill(0)
+            this.outputBuffer.fill(0)
+            this.inputReadIndex = 0
+            this.inputWriteIndex = 0
+            this.outputReadIndex = 0
+            this.outputWriteIndex = 0
+            this.rmsSmoothed = 0
+            this.currentGain = this.TARGET_GAIN_OFF
+            this.framesSinceLastVoice = this.HOLD_FRAMES
+            if (this.lastVadSent) {
+              this.port.postMessage({ type: 'vad', isSpeaking: false })
+              this.lastVadSent = false
+            }
           }
+          this.isMuted = nextMuted
         }
       }
     }

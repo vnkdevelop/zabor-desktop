@@ -31,7 +31,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
       if (!mainWindow.isVisible()) mainWindow.show();
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
@@ -161,19 +161,30 @@ function createTray(): void {
     {
       label: 'Открыть ZABOR',
       click: () => {
-        mainWindow?.show();
-        mainWindow?.focus();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show();
+          mainWindow.focus();
+        } else {
+          createWindow();
+        }
       }
     },
     { type: 'separator' },
     {
       label: 'Выйти',
       click: () => {
-        mainWindow?.webContents.send('before-quit');
-        setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          try {
+            mainWindow.webContents.send('before-quit');
+          } catch {}
+          setTimeout(() => {
+            isQuitting = true;
+            app.quit();
+          }, 800);
+        } else {
           isQuitting = true;
           app.quit();
-        }, 800);
+        }
       }
     }
   ]);
@@ -181,13 +192,15 @@ function createTray(): void {
   tray.setContextMenu(contextMenu);
 
   tray.on('click', () => {
-    if (mainWindow) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isVisible()) {
         mainWindow.focus();
       } else {
         mainWindow.show();
         mainWindow.focus();
       }
+    } else {
+      createWindow();
     }
   });
 }
@@ -294,6 +307,10 @@ function createWindow(): void {
     }
   });
 
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+
   mainWindow.webContents.on('will-navigate', (event) => {
     event.preventDefault();
   });
@@ -332,7 +349,9 @@ app.whenReady().then(() => {
   ipcMain.on('window-close', () => {
     const settings = loadAppSettings();
     if (settings.minimizeToTray) {
-      mainWindow?.hide();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.hide();
+      }
     } else {
       isQuitting = true;
       app.quit();
@@ -366,8 +385,8 @@ app.whenReady().then(() => {
       } catch {}
     }
     try {
-      const ses = mainWindow?.webContents.session;
-      if (ses) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const ses = mainWindow.webContents.session;
         await ses.clearStorageData();
         await ses.clearCache();
       }
@@ -434,17 +453,25 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
 });
 
 app.on('before-quit', (event) => {
   if (!isQuitting) {
-    event.preventDefault();
-    mainWindow?.webContents.send('before-quit');
-    setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      event.preventDefault();
+      try {
+        mainWindow.webContents.send('before-quit');
+      } catch {}
+      setTimeout(() => {
+        isQuitting = true;
+        app.quit();
+      }, 800);
+    } else {
       isQuitting = true;
-      app.quit();
-    }, 800);
+    }
   }
 });
 

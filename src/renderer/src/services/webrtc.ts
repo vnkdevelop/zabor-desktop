@@ -555,17 +555,13 @@ export class WebRTCManager {
   private attemptRenegotiation(userId: string) {
     const count = this.retryCount.get(userId) ?? 0
     if (count >= WebRTCManager.MAX_ICE_RETRIES) {
-      this.retryCount.delete(userId)
+      this.disconnectFromPeer(userId)
       return
     }
-    this.retryCount.set(userId, count + 1)
+    const nextCount = count + 1
 
-    const oldPc = this.peerConnections.get(userId)
-    if (oldPc) {
-      oldPc.ontrack = null; oldPc.onicecandidate = null; oldPc.onconnectionstatechange = null; oldPc.oniceconnectionstatechange = null
-      oldPc.close()
-      this.peerConnections.delete(userId)
-    }
+    this.disconnectFromPeer(userId)
+    this.retryCount.set(userId, nextCount)
 
     const me = useAppStore.getState().currentUser?.id
     if (me && me < userId) {
@@ -604,13 +600,8 @@ export class WebRTCManager {
       const callStatus = store.callStatus
       if (callStatus !== 'connected') return
     }
-    let existingCandidates: RTCIceCandidateInit[] = []
     if (this.peerConnections.has(senderId)) {
-      existingCandidates = this.pendingCandidates.get(senderId) ?? []
       this.disconnectFromPeer(senderId)
-      if (existingCandidates.length > 0) {
-        this.pendingCandidates.set(senderId, existingCandidates)
-      }
     }
 
     const pc = new RTCPeerConnection(this.config)

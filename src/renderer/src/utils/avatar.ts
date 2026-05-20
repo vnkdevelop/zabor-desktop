@@ -37,6 +37,7 @@ export function getDisplaySrc(avatarBase64: string | null | undefined): string |
 
 
 const staticCache = new Map<string, string>();
+const pendingPromises = new Map<string, Promise<string>>();
 
 export function getStaticFrameSync(src: string): string | null {
   return staticCache.get(src.substring(0, 120)) || null;
@@ -46,10 +47,12 @@ export async function getStaticFrame(src: string): Promise<string> {
   const key = src.substring(0, 120);
   if (staticCache.has(key)) return staticCache.get(key)!;
 
-  const packed = unpackGif(src);
-  const imgSrc = packed ? packed.g : src;
+  const existing = pendingPromises.get(key);
+  if (existing) return existing;
 
-  return new Promise((resolve) => {
+  const promise = new Promise<string>((resolve) => {
+    const packed = unpackGif(src);
+    const imgSrc = packed ? packed.g : src;
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -78,6 +81,13 @@ export async function getStaticFrame(src: string): Promise<string> {
     img.onerror = () => resolve('');
     img.src = imgSrc;
   });
+
+  pendingPromises.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    pendingPromises.delete(key);
+  }
 }
 
 export function preloadStaticFrame(src: string | null | undefined): void {

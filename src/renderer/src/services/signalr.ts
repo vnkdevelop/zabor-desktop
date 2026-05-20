@@ -149,6 +149,7 @@ private stopSfx(src: string) {
           ]);
         } catch {}
       }
+      this.listenersAttached = false;
       this.connection = new signalR.HubConnectionBuilder()
         .withUrl(SERVER_URL, {
           skipNegotiation: false,
