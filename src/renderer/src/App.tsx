@@ -952,9 +952,10 @@ export default function App() {
   const handleInviteToChannel = useCallback(async (friendId: string) => {
     const ch = store.selectedChannelForInvite;
     if (!ch) return;
+    if (store.currentChannelId !== ch.id) return;
     await signalRService.sendChannelInvite(friendId, ch.id, ch.name);
     addSentInvite(friendId);
-  }, [store.selectedChannelForInvite, addSentInvite]);
+  }, [store.selectedChannelForInvite, store.currentChannelId, addSentInvite]);
 
   const openChannelMembers = useCallback(async (ch: VoiceChannel) => {
     const currentStore = useAppStore.getState();
@@ -1482,7 +1483,9 @@ export default function App() {
                             <span className="font-medium text-[15px] truncate select-none text-white">{ch.name}</span>
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pr-2 shrink-0">
-                            <div onClick={e => { e.stopPropagation(); e.preventDefault(); store.setSelectedChannelForInvite(ch); store.setModal('inviteToChannel', true); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title="Пригласить"><UserPlus weight="bold" size={16} /></div>
+                            {store.currentChannelId === ch.id && (
+                              <div onClick={e => { e.stopPropagation(); e.preventDefault(); store.setSelectedChannelForInvite(ch); store.setModal('inviteToChannel', true); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title="Пригласить"><UserPlus weight="bold" size={16} /></div>
+                            )}
                             <div onClick={e => { e.stopPropagation(); e.preventDefault(); openChannelMembers(ch); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title="Участники канала"><Users weight="bold" size={16} /></div>
                           </div>
                         </button>
@@ -2319,32 +2322,34 @@ export default function App() {
                 <div className="flex flex-col gap-3">
                   {store.profileSource === 'channelMembers' ? (
                     <>
-                      <button
-                        onClick={() => {
-                          if (store.selectedProfileUser) {
-                            if (sentInvites.has(store.selectedProfileUser.id)) return;
-                            if (!store.selectedProfileUser.isOnline) {
-                              setOfflineToast('Пользователь не в сети');
-                              setTimeout(() => setOfflineToast(null), 3000);
-                            } else if (store.selectedChannelForMembers) {
-                              signalRService.callToChannel(
-                                store.selectedProfileUser.id,
-                                store.selectedChannelForMembers.id,
-                                store.selectedChannelForMembers.name
-                              );
-                              addSentInvite(store.selectedProfileUser!.id);
+                      {store.currentChannelId === store.selectedChannelForMembers?.id && (
+                        <button
+                          onClick={() => {
+                            if (store.selectedProfileUser) {
+                              if (sentInvites.has(store.selectedProfileUser.id)) return;
+                              if (!store.selectedProfileUser.isOnline) {
+                                setOfflineToast('Пользователь не в сети');
+                                setTimeout(() => setOfflineToast(null), 3000);
+                              } else if (store.selectedChannelForMembers) {
+                                signalRService.callToChannel(
+                                  store.selectedProfileUser.id,
+                                  store.selectedChannelForMembers.id,
+                                  store.selectedChannelForMembers.name
+                                );
+                                addSentInvite(store.selectedProfileUser!.id);
+                              }
                             }
-                          }
-                          // We don't close it so the user can see the button state change
-                        }}
-                        disabled={store.selectedProfileUser ? sentInvites.has(store.selectedProfileUser.id) : false}
-                        className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id)
-                          ? 'bg-success/20 text-success cursor-default'
-                          : 'bg-[#c70060] text-white hover:opacity-90 hover:shadow-[0_0_25px_rgba(199,0,96,0.5)] active:shadow-[0_0_15px_rgba(199,0,96,0.8)] active:scale-[0.98]'
-                          }`}
-                      >
-                        <Phone weight="bold" size={18} /> {store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id) ? 'Зовём...' : 'Позвать в канал'}
-                      </button>
+                            // We don't close it so the user can see the button state change
+                          }}
+                          disabled={store.selectedProfileUser ? sentInvites.has(store.selectedProfileUser.id) : false}
+                          className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id)
+                            ? 'bg-success/20 text-success cursor-default'
+                            : 'bg-[#c70060] text-white hover:opacity-90 hover:shadow-[0_0_25px_rgba(199,0,96,0.5)] active:shadow-[0_0_15px_rgba(199,0,96,0.8)] active:scale-[0.98]'
+                            }`}
+                        >
+                          <Phone weight="bold" size={18} /> {store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id) ? 'Зовём...' : 'Позвать в канал'}
+                        </button>
+                      )}
                       {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && (
                         <button
                           onClick={() => {
@@ -2569,7 +2574,7 @@ export default function App() {
           ) : contextMenu.type === 'channelMember' ? (
             <>
               <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'channelMembers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Settings weight="bold" size={16} /> Профиль</button>
-              {contextMenu.item.id !== store.currentUser?.id && (
+              {contextMenu.item.id !== store.currentUser?.id && store.currentChannelId === store.selectedChannelForMembers?.id && (
                 <button onClick={() => {
                   if (sentInvites.has(contextMenu.item.id)) return;
                   if (!contextMenu.item.isOnline) {

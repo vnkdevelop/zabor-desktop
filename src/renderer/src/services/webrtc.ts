@@ -58,9 +58,8 @@ export class WebRTCManager {
       { urls: 'stun:stun.cloudflare.com:3478' },
       { urls: 'stun:stun.twilio.com:3478' },
       // fallbacks
-      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:turn.bistri.com:80', username: 'homeo', credential: 'homeo' }
+      { urls: 'turn:150.241.64.108:3478?transport=udp', username: 'zabor', credential: 'mvtxbJo45sc8_turn' },
+      { urls: 'turn:150.241.64.108:3478?transport=tcp', username: 'zabor', credential: 'mvtxbJo45sc8_turn' }
     ],
     bundlePolicy: 'max-bundle'
   }
