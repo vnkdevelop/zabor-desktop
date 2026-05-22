@@ -29,7 +29,8 @@
       "newPassword": "НОВЫЙ ПАРОЛЬ",
       "passwordHint": "Максимум 25 символов",
       "changePassword": "Сменить пароль",
-      "logout": "Выйти из аккаунта"
+      "logout": "Выйти из аккаунта",
+      "changePasswordFailed": "Не удалось сменить пароль"
     }
   },
   "auth": {
@@ -58,7 +59,8 @@
       "endCall": "Завершить",
       "ping": "ПИНГ",
       "offline": "Офлайн",
-      "voiceChannels": "ГОЛОСОВЫЕ КАНАЛЫ"
+      "voiceChannels": "ГОЛОСОВЫЕ КАНАЛЫ",
+      "pingValue": "{{ping}} мс"
     },
     "notifications": {
       "title": "УВЕДОМЛЕНИЯ",
@@ -75,7 +77,8 @@
     },
     "connection": {
       "noConnection": "Нет соединения с сервером",
-      "reconnecting": "Нет соединения с сервером. Переподключение..."
+      "reconnecting": "Нет соединения с сервером. Переподключение...",
+      "connecting": "ПОДКЛЮЧЕНИЕ"
     }
   },
   "modals": {
@@ -103,6 +106,32 @@
       "title": "Исключить пользователя?",
       "desc": "Вы уверены, что хотите лишить пользователя <1>{{name}}</1> доступа к каналу?",
       "submit": "Исключить"
+    },
+    "switchChannel": {
+      "title": "Сменить канал?",
+      "desc": "Вы покинете текущий канал и перейдёте в другой.",
+      "stay": "Остаться",
+      "switching": "Переход...",
+      "switch": "Перейти"
+    },
+    "inviteToChannel": {
+      "title": "Пригласить в канал",
+      "searchPlaceholder": "Поиск среди друзей...",
+      "noFriends": "Друзья не найдены",
+      "sent": "✓ Отправлено"
+    },
+    "members": {
+      "title": "Участники",
+      "creator": "Создатель"
+    },
+    "channelFull": {
+      "title": "Канал переполнен",
+      "desc": "Максимальное количество участников в канале — 10 человек. Подождите, пока кто-то выйдет.",
+      "gotIt": "Понятно"
+    },
+    "userVolume": {
+      "title": "Громкость пользователя",
+      "label": "ГРОМКОСТЬ"
     }
   },
   "common": {
@@ -113,6 +142,164 @@
     "error": "Ошибка",
     "apply": "Применить",
     "fileTooLarge": "Макс 5 МБ",
-    "onlyImages": "Только изображения"
+    "onlyImages": "Только изображения",
+    "invite": "Пригласить",
+    "channelMembers": "Участники канала",
+    "dismiss": "Сбросить"
+  },
+  "achievements": {
+    "title": "Достижения",
+    "myTitle": "Мои достижения",
+    "toastTitle": "Достижение получено",
+    "empty": "Нет достижений",
+    "hiddenTitle": "Скрытое достижение",
+    "hiddenDesc": "???",
+    "unlocked": "✓ Получено",
+    "hoursUnit": " ч",
+    "summary": "{{unlocked}} / {{total}} получено",
+    "first_channel": {
+      "title": "Первооткрыватель",
+      "description": "Создать свой первый канал"
+    },
+    "soul_1": {
+      "title": "Болтун",
+      "description": "Провести 10 часов в каналах"
+    },
+    "soul_2": {
+      "title": "Душа компании",
+      "description": "Провести 50 часов в каналах"
+    },
+    "soul_3": {
+      "title": "Оратор",
+      "description": "Провести 100 часов в каналах"
+    },
+    "crowd": {
+      "title": "Массовка",
+      "description": "Быть в канале c 10 участниками"
+    },
+    "collector": {
+      "title": "Коллекционер",
+      "description": "Побывать в 10 разных каналах"
+    },
+    "marathon": {
+      "title": "Тюлень",
+      "description": "Сидеть в канале 5 часов"
+    },
+    "modnik": {
+      "title": "Модник",
+      "description": "Загрузить GIF-аватарку"
+    },
+    "victim": {
+      "title": "Жертва",
+      "description": "Быть кикнутым из канала"
+    },
+    "first_call": {
+      "title": "Первый звонок",
+      "description": "Совершить первый звонок"
+    },
+    "same_wave": {
+      "title": "Переговорщики",
+      "description": "Звонок длительностью 2+ часа"
+    },
+    "gossip": {
+      "title": "Мошенник",
+      "description": "Совершить 50 звонков"
+    },
+    "busy": {
+      "title": "Занят",
+      "description": "Отклонить более 5 звонков"
+    },
+    "first_friend": {
+      "title": "Первый друг",
+      "description": "Добавить первого друга"
+    },
+    "magnet": {
+      "title": "Магнит",
+      "description": "Добавить 20 друзей"
+    },
+    "popular": {
+      "title": "Глава захолустья",
+      "description": "Твой профиль просмотрели 100 раз"
+    },
+    "night_owl": {
+      "title": "Ночная сова",
+      "description": "Начать звонок после 2:00 ночи"
+    },
+    "radio_silence": {
+      "title": "Тихоня",
+      "description": "30 минут в канале с выключенным микрофоном"
+    },
+    "early_bird": {
+      "title": "Ранняя пташка",
+      "description": "Зайти в канал до 7 утра"
+    },
+    "introvert": {
+      "title": "Интроверт",
+      "description": "Просидеть в канале 2 часа в полном одиночестве"
+    },
+    "rostelecom": {
+      "title": "Ростелеком",
+      "description": "Потерять соединение с сервером 5 раз за час"
+    },
+    "annoy_admin": {
+      "title": "Душнее душнилы",
+      "description": "Задолбать даже админа"
+    }
+  },
+  "profile": {
+    "editTitle": "Редактировать профиль",
+    "displayName": "Отображаемое имя",
+    "aboutMe": "О себе",
+    "aboutMePlaceholder": "Напишите немного о себе...",
+    "copyLogin": "Скопировать логин",
+    "loginCopied": "Скопировано!",
+    "inviteToChannel": "Позвать в канал",
+    "inviting": "Зовём...",
+    "kick": "Исключить из канала",
+    "call": "Позвонить",
+    "removeFriend": "Удалить из друзей",
+    "userOffline": "Пользователь не в сети"
+  },
+  "contextMenu": {
+    "rename": "Переименовать",
+    "leaveChannel": "Выйти из канала",
+    "profile": "Профиль",
+    "invite": "Позвать в канал",
+    "inviting": "Зовём...",
+    "kick": "Исключить",
+    "volume": "Громкость",
+    "remove": "Удалить"
+  },
+  "toasts": {
+    "calling": "Дозвон...",
+    "missedCall": "Пропущенный звонок от: {{name}}",
+    "missedChannelInvite": "Пропущенный зов в канал: {{name}}",
+    "noAnswer": "Не отвечает",
+    "notification": "Уведомление",
+    "accessRestricted": "Доступ ограничен",
+    "adminRestricted": "Администратор запретил это действие",
+    "micNotHearing": "Вас не слышно, проверьте микрофон",
+    "micNoAccess": "Нет доступа к микрофону. Проверьте разрешения в ОС.",
+    "micBusy": "Микрофон занят другим приложением.",
+    "micNotFound": "Микрофон не найден. Подключите устройство и попробуйте снова.",
+    "audioError": "Ошибка аудио: {{message}}",
+    "incomingCall": "Входящий звонок...",
+    "incomingChannelInvite": "Вас зовут в канал"
+  },
+  "joke": {
+    "title": "ШУТЕЙКА:",
+    "fallback": "Сегодня сервер шутит молча."
+  },
+  "validation": {
+    "minChars": "Минимум 4 символа",
+    "maxChars": "Максимум 25 символов",
+    "latinOnly": "Только латиница и цифры",
+    "emptyName": "Имя не может быть пустым",
+    "maxNameChars": "Максимум 20 символов",
+    "connectionError": "Ошибка подключения к серверу",
+    "invalidPassword": "Неверный пароль!",
+    "networkError": "Ошибка сети, попробуйте ещё раз",
+    "registerError": "Ошибка регистрации",
+    "connectError": "Ошибка подключения"
   }
 }

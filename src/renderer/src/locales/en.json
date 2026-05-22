@@ -29,7 +29,8 @@
       "newPassword": "NEW PASSWORD",
       "passwordHint": "Maximum 25 characters",
       "changePassword": "Change Password",
-      "logout": "Logout"
+      "logout": "Logout",
+      "changePasswordFailed": "Failed to change password"
     }
   },
   "auth": {
@@ -58,7 +59,8 @@
       "endCall": "End Call",
       "ping": "PING",
       "offline": "Offline",
-      "voiceChannels": "VOICE CHANNELS"
+      "voiceChannels": "VOICE CHANNELS",
+      "pingValue": "{{ping}} ms"
     },
     "notifications": {
       "title": "NOTIFICATIONS",
@@ -75,7 +77,8 @@
     },
     "connection": {
       "noConnection": "No server connection",
-      "reconnecting": "No server connection. Reconnecting..."
+      "reconnecting": "No server connection. Reconnecting...",
+      "connecting": "CONNECTING"
     }
   },
   "modals": {
@@ -103,6 +106,32 @@
       "title": "Kick User?",
       "desc": "Are you sure you want to remove <1>{{name}}</1> from the channel?",
       "submit": "Kick"
+    },
+    "switchChannel": {
+      "title": "Switch Channel?",
+      "desc": "You will leave the current channel and move to another one.",
+      "stay": "Stay",
+      "switching": "Switching...",
+      "switch": "Switch"
+    },
+    "inviteToChannel": {
+      "title": "Invite to Channel",
+      "searchPlaceholder": "Search friends...",
+      "noFriends": "No friends found",
+      "sent": "✓ Sent"
+    },
+    "members": {
+      "title": "Members",
+      "creator": "Creator"
+    },
+    "channelFull": {
+      "title": "Channel is Full",
+      "desc": "Maximum number of participants in the channel is 10 people. Please wait until someone leaves.",
+      "gotIt": "Got it"
+    },
+    "userVolume": {
+      "title": "User Volume",
+      "label": "VOLUME"
     }
   },
   "common": {
@@ -113,6 +142,164 @@
     "error": "Error",
     "apply": "Apply",
     "fileTooLarge": "Max 5 MB",
-    "onlyImages": "Images only"
+    "onlyImages": "Images only",
+    "invite": "Invite",
+    "channelMembers": "Channel Members",
+    "dismiss": "Dismiss"
+  },
+  "achievements": {
+    "title": "Achievements",
+    "myTitle": "My Achievements",
+    "toastTitle": "Achievement Unlocked",
+    "empty": "No achievements",
+    "hiddenTitle": "Hidden Achievement",
+    "hiddenDesc": "???",
+    "unlocked": "✓ Unlocked",
+    "hoursUnit": " h",
+    "summary": "{{unlocked}} / {{total}} unlocked",
+    "first_channel": {
+      "title": "Pioneer",
+      "description": "Create your first channel"
+    },
+    "soul_1": {
+      "title": "Chatterbox",
+      "description": "Spend 10 hours in channels"
+    },
+    "soul_2": {
+      "title": "Life of the Party",
+      "description": "Spend 50 hours in channels"
+    },
+    "soul_3": {
+      "title": "Orator",
+      "description": "Spend 100 hours in channels"
+    },
+    "crowd": {
+      "title": "Extra",
+      "description": "Be in a channel with 10 participants"
+    },
+    "collector": {
+      "title": "Collector",
+      "description": "Visit 10 different channels"
+    },
+    "marathon": {
+      "title": "Seal",
+      "description": "Stay in a channel for 5 hours"
+    },
+    "modnik": {
+      "title": "Fashionista",
+      "description": "Upload a GIF avatar"
+    },
+    "victim": {
+      "title": "Victim",
+      "description": "Get kicked from a channel"
+    },
+    "first_call": {
+      "title": "First Call",
+      "description": "Make your first call"
+    },
+    "same_wave": {
+      "title": "Negotiators",
+      "description": "Call duration of 2+ hours"
+    },
+    "gossip": {
+      "title": "Scammer",
+      "description": "Make 50 calls"
+    },
+    "busy": {
+      "title": "Busy",
+      "description": "Decline more than 5 calls"
+    },
+    "first_friend": {
+      "title": "First Friend",
+      "description": "Add your first friend"
+    },
+    "magnet": {
+      "title": "Magnet",
+      "description": "Add 20 friends"
+    },
+    "popular": {
+      "title": "Mayor of Nowhere",
+      "description": "Your profile was viewed 100 times"
+    },
+    "night_owl": {
+      "title": "Night Owl",
+      "description": "Start a call after 2:00 AM"
+    },
+    "radio_silence": {
+      "title": "Quiet One",
+      "description": "Spend 30 minutes in a channel with a muted microphone"
+    },
+    "early_bird": {
+      "title": "Early Bird",
+      "description": "Join a channel before 7:00 AM"
+    },
+    "introvert": {
+      "title": "Introvert",
+      "description": "Spend 2 hours in a channel completely alone"
+    },
+    "rostelecom": {
+      "title": "Rostelecom",
+      "description": "Lose server connection 5 times in an hour"
+    },
+    "annoy_admin": {
+      "title": "Bore of Bores",
+      "description": "Annoy even the admin"
+    }
+  },
+  "profile": {
+    "editTitle": "Edit Profile",
+    "displayName": "Display Name",
+    "aboutMe": "About Me",
+    "aboutMePlaceholder": "Write a little about yourself...",
+    "copyLogin": "Copy login",
+    "loginCopied": "Copied!",
+    "inviteToChannel": "Invite to Channel",
+    "inviting": "Inviting...",
+    "kick": "Kick from Channel",
+    "call": "Call",
+    "removeFriend": "Remove Friend",
+    "userOffline": "User is offline"
+  },
+  "contextMenu": {
+    "rename": "Rename",
+    "leaveChannel": "Leave Channel",
+    "profile": "Profile",
+    "invite": "Invite to Channel",
+    "inviting": "Inviting...",
+    "kick": "Kick",
+    "volume": "Volume",
+    "remove": "Remove"
+  },
+  "toasts": {
+    "calling": "Calling...",
+    "missedCall": "Missed call from: {{name}}",
+    "missedChannelInvite": "Missed channel invite: {{name}}",
+    "noAnswer": "No answer",
+    "notification": "Notification",
+    "accessRestricted": "Access restricted",
+    "adminRestricted": "Administrator restricted this action",
+    "micNotHearing": "You are not heard, check your microphone",
+    "micNoAccess": "No access to microphone. Check OS permissions.",
+    "micBusy": "Microphone is busy with another application.",
+    "micNotFound": "Microphone not found. Connect the device and try again.",
+    "audioError": "Audio error: {{message}}",
+    "incomingCall": "Incoming call...",
+    "incomingChannelInvite": "You are invited to a channel"
+  },
+  "joke": {
+    "title": "JOKE:",
+    "fallback": "Today the server is joking silently."
+  },
+  "validation": {
+    "minChars": "Minimum 4 characters",
+    "maxChars": "Maximum 25 characters",
+    "latinOnly": "Only Latin letters and numbers",
+    "emptyName": "Name cannot be empty",
+    "maxNameChars": "Maximum 20 characters",
+    "connectionError": "Connection error",
+    "invalidPassword": "Incorrect password!",
+    "networkError": "Network error, try again",
+    "registerError": "Registration error",
+    "connectError": "Connection error"
   }
 }

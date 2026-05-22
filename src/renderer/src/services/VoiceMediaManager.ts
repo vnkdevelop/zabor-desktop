@@ -1,5 +1,6 @@
 import { webrtc } from './webrtc';
 import { useAppStore } from '../store/useAppStore';
+import i18n from '../i18n';
 
 class VoiceMediaManager {
   private static instance: VoiceMediaManager;
@@ -42,13 +43,13 @@ class VoiceMediaManager {
     const message = error?.message || 'Неизвестная ошибка микрофона';
 
     if (message.includes('MIC_ACCESS_FAILED') || message.includes('NotAllowedError') || message.includes('PermissionDeniedError')) {
-      store.setSystemToast('Нет доступа к микрофону. Проверьте разрешения в ОС.');
+      store.setSystemToast(i18n.t('toasts.micNoAccess', 'Нет доступа к микрофону. Проверьте разрешения в ОС.'));
     } else if (message.includes('NotReadableError') || message.includes('TrackStartError')) {
-      store.setSystemToast('Микрофон занят другим приложением.');
+      store.setSystemToast(i18n.t('toasts.micBusy', 'Микрофон занят другим приложением.'));
     } else if (message.includes('NotFoundError') || message.includes('DevicesNotFoundError')) {
-      store.setSystemToast('Микрофон не найден. Подключите устройство и попробуйте снова.');
+      store.setSystemToast(i18n.t('toasts.micNotFound', 'Микрофон не найден. Подключите устройство и попробуйте снова.'));
     } else {
-      store.setSystemToast(`Ошибка аудио: ${message}`);
+      store.setSystemToast(i18n.t('toasts.audioError', { message, defaultValue: `Ошибка аудио: ${message}` }));
     }
   }
 }

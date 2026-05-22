@@ -1,3 +1,5 @@
+import i18n from './i18n';
+
 export interface AchievementDef {
   id: string;
   title: string;
@@ -244,7 +246,7 @@ export const formatProgress = (value: number, max: number, unit?: string): strin
   if (unit === 'min') {
     const valH = Math.floor(safeValue / 60);
     const maxH = Math.floor(max / 60);
-    return `${valH} / ${maxH} ч`;
+    return `${valH} / ${maxH}${i18n.t('achievements.hoursUnit', ' ч')}`;
   }
 
   return `${safeValue} / ${max}`;

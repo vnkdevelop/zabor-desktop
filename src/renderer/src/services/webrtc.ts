@@ -1,5 +1,6 @@
 import { signalRService } from './signalr'
 import { useAppStore } from '../store/useAppStore'
+import i18n from '../i18n'
 import processorUrl from './deepfilter-processor?worker&url'
 
 type SpeakingEntry = {
@@ -273,10 +274,11 @@ export class WebRTCManager {
           }
 
           if (silenceFrames > 150 && !hasWarnedSilence) {
-            store.setSystemToast('Вас не слышно, проверьте микрофон')
+            const toastMsg = i18n.t('toasts.micNotHearing', 'Вас не слышно, проверьте микрофон')
+            store.setSystemToast(toastMsg)
             setTimeout(() => {
               const currentStore = useAppStore.getState()
-              if (currentStore.systemToast === 'Вас не слышно, проверьте микрофон') {
+              if (currentStore.systemToast === toastMsg) {
                 currentStore.setSystemToast(null)
               }
             }, 4000)
