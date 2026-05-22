@@ -62,6 +62,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     this.outputBuffer = new Float32Array(this.BUFFER_SIZE)
     this.frameToProcess = new Float32Array(this.FRAME_SIZE)
     this.processedFrame = new Float32Array(this.FRAME_SIZE)
+    this.outputWriteIndex = this.FRAME_SIZE // Pre-fill with 480 samples of silence
 
     this.port.onmessage = (event) => {
       if (event.data.type === 'loadWasm') {
@@ -78,7 +79,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
             this.inputReadIndex = 0
             this.inputWriteIndex = 0
             this.outputReadIndex = 0
-            this.outputWriteIndex = 0
+            this.outputWriteIndex = this.FRAME_SIZE // Pre-fill with 480 samples of silence
             this.rmsSmoothed = 0
             this.currentGain = this.TARGET_GAIN_OFF
             this.framesSinceLastVoice = this.HOLD_FRAMES

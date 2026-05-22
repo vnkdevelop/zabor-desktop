@@ -183,15 +183,17 @@ body {
   background: #c70060;
   margin-top: -8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  transition: box-shadow 0.15s ease;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .md3-range::-webkit-slider-thumb:hover {
   box-shadow: 0 0 0 10px rgba(199, 0, 96, 0.12), 0 1px 3px rgba(0, 0, 0, 0.4);
+  transform: scale(1.15);
 }
 
 .md3-range::-webkit-slider-thumb:active {
   box-shadow: 0 0 0 14px rgba(199, 0, 96, 0.16), 0 1px 4px rgba(0, 0, 0, 0.4);
+  transform: scale(1.25);
 }
 
 
@@ -292,4 +294,34 @@ textarea,
 
 .animate-admin-block-out {
   animation: admin-block-out 0.35s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+/* Premium Interactive Visual Elements */
+#mouse-glow {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0;
+  background: radial-gradient(
+    600px circle at var(--mouse-x, 0px) var(--mouse-y, 0px),
+    rgba(199, 0, 96, 0.05),
+    transparent 80%
+  );
+  transition: opacity 0.5s ease;
+}
+
+@keyframes speaking-ripple {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+.animate-speaking-ripple {
+  animation: speaking-ripple 1.4s cubic-bezier(0.1, 0.8, 0.3, 1) infinite;
 }

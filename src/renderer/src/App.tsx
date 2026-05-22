@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy } from '@phosphor-icons/react';
+import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus } from '@phosphor-icons/react';
 import { useTranslation, Trans } from 'react-i18next';
 
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
@@ -175,6 +175,32 @@ export default function App() {
   useEffect(() => {
     settingsRef.current = { inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language, openAtLogin: autoLaunch, minimizeToTray };
   }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language, autoLaunch, minimizeToTray]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const glow = document.getElementById('mouse-glow');
+      if (glow) {
+        glow.style.setProperty('--mouse-x', `${e.clientX}px`);
+        glow.style.setProperty('--mouse-y', `${e.clientY}px`);
+        glow.style.opacity = '1';
+      }
+    };
+
+    const handleMouseLeave = () => {
+      const glow = document.getElementById('mouse-glow');
+      if (glow) {
+        glow.style.opacity = '0';
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseleave', handleMouseLeave);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseleave', handleMouseLeave);
+    };
+  }, []);
 
   // === Callbacks defined early to avoid TDZ in useEffect deps ===
 
@@ -1227,7 +1253,7 @@ export default function App() {
                 setCropPos({ x: 0, y: 0 });
                 setIsDragging(false);
               }}
-              className="text-textMuted hover:text-white transition-colors"
+              className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"
             >
               <X weight="bold" size={24} />
             </button>
@@ -1298,6 +1324,7 @@ export default function App() {
 
   return (
     <>
+      <div id="mouse-glow" />
       {/* Auth screen — показывается поверх основного UI, когда пользователь не авторизован */}
       {!isAuth && (
         <div className="fixed inset-0 z-[100000] flex flex-col bg-appBg text-textMain animate-fade-in select-none">
@@ -1423,7 +1450,7 @@ export default function App() {
               <div className="absolute inset-0 bg-panelBg z-[60] flex flex-col animate-fade-in">
                 <div className="flex items-center justify-between p-4 border-b border-[#303035]">
                   <span className="text-sm font-bold text-white tracking-wider">{t('main.notifications.title')}</span>
-                  <button onClick={() => setShowInvitesPanel(false)} className="text-textMuted hover:text-white transition-colors"><X weight="bold" size={20} /></button>
+                  <button onClick={() => setShowInvitesPanel(false)} className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"><X weight="bold" size={20} /></button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {store.friendRequests.map(req => (
@@ -1470,16 +1497,22 @@ export default function App() {
                 <div className="animate-fade-in">
                   <div className="flex justify-between items-center mb-4 px-2">
                     <span className="text-xs font-bold text-textMuted tracking-wider">{t('main.voice.voiceChannels')}</span>
-                    <button onClick={() => store.setModal('createChannel', true)} className="text-textMuted hover:text-white text-xl transition-colors">+</button>
+                    <button
+                      onClick={() => store.setModal('createChannel', true)}
+                      className="text-textMuted hover:text-white transition-all duration-200 hover:scale-110 active:scale-95 w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center focus:outline-none"
+                      title="Создать канал"
+                    >
+                      <Plus weight="bold" size={18} />
+                    </button>
                   </div>
                   {store.channels.map(ch => {
                     const channelUsers = store.channelUsersMap[ch.id] || [];
                     return (
                       <div key={ch.id} className="mb-2">
                         <button onClick={() => handleChannelClick(ch.id)} onContextMenu={e => handleContextMenu(e, 'channel', ch)}
-                          className={`w-full text-left px-2 py-3 rounded-xl flex items-center justify-between group transition-colors focus:outline-none ${store.currentChannelId === ch.id ? 'bg-[#333]' : 'hover:bg-surfaceHover'}`}>
+                          className={`w-full text-left px-2 py-3 rounded-xl flex items-center justify-between group transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] focus:outline-none ${store.currentChannelId === ch.id ? 'bg-[#333]' : 'hover:bg-surfaceHover'}`}>
                           <div className="flex items-center gap-3 overflow-hidden">
-                            <div className="w-1.5 h-1.5 rounded-full bg-textMuted shrink-0 ml-2" />
+                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ml-2 transition-all duration-300 ${store.currentChannelId === ch.id ? 'bg-[#c70060] shadow-[0_0_8px_#c70060]' : 'bg-textMuted'}`} />
                             <span className="font-medium text-[15px] truncate select-none text-white">{ch.name}</span>
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pr-2 shrink-0">
@@ -1507,12 +1540,18 @@ export default function App() {
                 <div className="animate-fade-in">
                   <div className="flex justify-between items-center mb-4 px-2">
                     <span className="text-xs font-bold text-textMuted tracking-wider">{t('main.tabs.friends')}</span>
-                    <button onClick={() => store.setModal('addFriend', true)} className="text-textMuted hover:text-white text-xl transition-colors">+</button>
+                    <button
+                      onClick={() => store.setModal('addFriend', true)}
+                      className="text-textMuted hover:text-white transition-all duration-200 hover:scale-110 active:scale-95 w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center focus:outline-none"
+                      title="Добавить друга"
+                    >
+                      <Plus weight="bold" size={18} />
+                    </button>
                   </div>
                   {store.friends.map(f => (
                     <div key={f.id} onContextMenu={e => handleContextMenu(e, 'friend', f)}
                       onClick={() => { store.setSelectedProfileUser(f, 'friends'); setEditProfileDisplayName(f.displayName); setEditProfileAboutMe(f.aboutMe || ''); setIsEditingProfile(false); store.setModal('profile', true); signalRService.viewProfile(f.id); }}
-                      className="px-3 py-2 rounded-xl mb-1 cursor-pointer hover:bg-surfaceHover flex items-center gap-3 transition-colors">
+                      className="px-3 py-2 rounded-xl mb-1 cursor-pointer hover:bg-surfaceHover flex items-center gap-3 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]">
                       <div className="relative w-[47px] h-[47px] shrink-0">
                         <div className="w-full h-full relative">
                           <AvatarImg src={f.avatarBase64} size={47} bgColor={f.avatarColor} />
@@ -1534,8 +1573,8 @@ export default function App() {
             </div>
 
             <div className="bg-surface rounded-full mx-4 my-2 p-1 flex relative shrink-0">
-              <button onClick={() => setActiveTab('channels')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-colors ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.channels')}</button>
-              <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-colors ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.friends')}</button>
+              <button onClick={() => setActiveTab('channels')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.channels')}</button>
+              <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.friends')}</button>
               <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-[#333] rounded-full transition-all duration-300 ease-out ${activeTab === 'channels' ? 'left-1' : 'left-[calc(50%+2px)]'}`} />
             </div>
 
@@ -1561,9 +1600,11 @@ export default function App() {
                     window.windowControls.getAutoLaunch().then(setAutoLaunch).catch(() => { });
                     window.windowControls.getMinimizeToTray().then(setMinimizeToTray).catch(() => { });
                   }}
-                  className="text-textMuted hover:text-white p-2 hover:bg-surface rounded-xl transition-colors"
+                  className="group text-textMuted hover:text-white p-2 hover:bg-surface rounded-xl transition-colors"
                 >
-                  <Settings weight="bold" size={20} />
+                  <div className="transition-transform duration-500 group-hover:rotate-90 group-hover:scale-110 group-active:scale-95">
+                    <Settings weight="bold" size={20} />
+                  </div>
                 </button>
               </div>
             </div>
@@ -1597,6 +1638,9 @@ export default function App() {
                         marginBottom: '16px'
                       }}
                     >
+                      {(store.currentCallUser.isSpeaking && store.callStatus === 'connected' && store.webrtcConnections[store.currentCallUser.id]) && (
+                        <div className="absolute inset-0 rounded-full border border-green-500/50 animate-speaking-ripple scale-125 pointer-events-none" />
+                      )}
                       <AvatarImg src={store.currentCallUser.avatarBase64} size={cardSize.avatarSize} bgColor="transparent" />
                     </div>
 
@@ -1679,6 +1723,9 @@ export default function App() {
                         ${(user.isSpeaking && (store.webrtcConnections[user.id] || user.id === store.currentUser?.id)) ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)] z-10' : 'shadow-xl'}`}
                       style={{ backgroundColor: user.avatarColor, width: `${cardSize.w}px`, height: `${cardSize.h}px`, borderRadius: '24px' }}>
                       <div className="relative" style={{ width: `${cardSize.avatarSize}px`, height: `${cardSize.avatarSize}px`, marginBottom: '16px' }}>
+                        {(user.isSpeaking && (store.webrtcConnections[user.id] || user.id === store.currentUser?.id)) && (
+                          <div className="absolute inset-0 rounded-full border border-green-500/50 animate-speaking-ripple scale-125 pointer-events-none" />
+                        )}
                         <AvatarImg src={user.avatarBase64} size={cardSize.avatarSize} bgColor="transparent" />
                       </div>
                       {(!store.webrtcConnections[user.id] && user.id !== store.currentUser?.id) && (
@@ -1869,7 +1916,7 @@ export default function App() {
         <div className="bg-panelBg rounded-3xl w-[500px] max-h-[80vh] flex flex-col overflow-hidden shadow-2xl">
           <div className="flex items-center justify-between p-6 pb-0">
             <h2 className="text-xl font-bold text-white">Настройки</h2>
-            <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X weight="bold" size={24} /></button>
+            <button onClick={closeAndResetModals} className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"><X weight="bold" size={24} /></button>
           </div>
           <div className="flex gap-2 px-6 pt-4">
             <button onClick={() => setSettingsTab('general')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'general' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>{t('settings.tabs.general')}</button>
@@ -1945,12 +1992,28 @@ export default function App() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.audio.inputVolume')} — {inputVolume}%</label>
-                  <Md3Slider min={0} max={200} step={5} value={inputVolume} onChange={v => { setInputVolume(v); webrtc.setInputVolume(v); }} />
+                  <Md3Slider
+                    min={0}
+                    max={200}
+                    step={5}
+                    value={inputVolume}
+                    label={t('settings.audio.inputVolume')}
+                    showPercentage
+                    onChange={v => webrtc.setInputVolume(v)}
+                    onChangeEnd={setInputVolume}
+                  />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.audio.outputVolume')} — {outputVolume}%</label>
-                  <Md3Slider min={0} max={200} step={5} value={outputVolume} onChange={v => { setOutputVolume(v); webrtc.setOutputVolume(v); }} />
+                  <Md3Slider
+                    min={0}
+                    max={200}
+                    step={5}
+                    value={outputVolume}
+                    label={t('settings.audio.outputVolume')}
+                    showPercentage
+                    onChange={v => webrtc.setOutputVolume(v)}
+                    onChangeEnd={setOutputVolume}
+                  />
                 </div>
                 <div className="flex items-center justify-between bg-surface p-4 rounded-xl">
                   <span className="font-semibold text-white">{t('settings.audio.noiseSuppression')}</span>
@@ -1992,7 +2055,7 @@ export default function App() {
               <h2 className="text-xl font-bold text-white">Сменить канал?</h2>
               <button
                 onClick={() => store.setPendingChannelSwitch(null)}
-                className="text-textMuted hover:text-white transition-colors"
+                className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"
               >
                 <X weight="bold" size={24} />
               </button>
@@ -2056,7 +2119,7 @@ export default function App() {
         <div className="bg-panelBg p-8 rounded-3xl w-[420px] shadow-2xl">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-xl font-bold text-white flex items-center gap-3"><Users weight="bold" size={24} /> Участники</h2>
-            <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X weight="bold" size={24} /></button>
+            <button onClick={closeAndResetModals} className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"><X weight="bold" size={24} /></button>
           </div>
           <p className="text-textMuted text-sm mb-6 truncate">{store.selectedChannelForMembers?.name}</p>
           <div className="max-h-[350px] overflow-y-auto space-y-2 pr-2">
@@ -2117,11 +2180,21 @@ export default function App() {
           <h2 className="text-xl font-bold mb-2 text-white">Громкость пользователя</h2>
           <p className="text-textMuted text-sm mb-6 font-medium">{volumeUser?.displayName}</p>
           <div>
-            <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">ГРОМКОСТЬ — {volumeUserValue}%</label>
-            <Md3Slider min={0} max={200} step={5} value={volumeUserValue} onChange={v => {
-              setVolumeUserValue(v);
-              if (volumeUser) webrtc.setUserVolume(volumeUser.id, v);
-            }} />
+            <Md3Slider
+              min={0}
+              max={200}
+              step={5}
+              value={volumeUserValue}
+              label="ГРОМКОСТЬ"
+              showPercentage
+              onChange={v => {
+                if (volumeUser) webrtc.setUserVolumeRealtime(volumeUser.id, v);
+              }}
+              onChangeEnd={v => {
+                setVolumeUserValue(v);
+                if (volumeUser) webrtc.setUserVolume(volumeUser.id, v);
+              }}
+            />
           </div>
           <button onClick={closeAndResetModals} className="w-full mt-6 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">Закрыть</button>
         </div>
@@ -2178,7 +2251,7 @@ export default function App() {
             >
               <button
                 onClick={() => store.closeProfileOnly()}
-                className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-full backdrop-blur-md transition-all"
+                className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-full backdrop-blur-md transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90"
               >
                 <X weight="bold" size={20} />
               </button>
@@ -2432,7 +2505,7 @@ export default function App() {
               <Trophy weight="bold" size={24} />
               {store.achievementsViewUserId ? 'Достижения' : 'Мои достижения'}
             </h2>
-            <button onClick={closeAndResetModals} className="text-textMuted hover:text-white transition-colors"><X weight="bold" size={24} /></button>
+            <button onClick={closeAndResetModals} className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"><X weight="bold" size={24} /></button>
           </div>
           <div className="px-6 overflow-y-auto flex-1 space-y-3 pb-6">
             {(() => {

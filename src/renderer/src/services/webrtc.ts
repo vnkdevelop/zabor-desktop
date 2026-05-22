@@ -72,6 +72,9 @@ export class WebRTCManager {
     // 1. Частота дискретизации строго 48 кГц
     const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
     this.processedContext = ctx
+    if (ctx.state === 'suspended') {
+      await ctx.resume().catch(() => { })
+    }
     const destination = ctx.createMediaStreamDestination()
 
     let dfNode: AudioWorkletNode | null = null
@@ -190,7 +193,7 @@ export class WebRTCManager {
     const gainNode = this.userGainNodes.get(userId)
     if (!gainNode) return
     const userVol = useAppStore.getState().userVolumes[userId] ?? 100
-    gainNode.gain.value = Math.max(0, Math.min(1, (this.outputVolume / 100) * (userVol / 100)))
+    gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (userVol / 100)))
   }
 
   public setNoiseSuppression(enabled: boolean) {
@@ -382,6 +385,10 @@ export class WebRTCManager {
       const localTrack = this.localStream.getAudioTracks()[0]
       if (localTrack) localTrack.contentHint = 'speech'
 
+      if (this.processedContext && this.processedContext.state === 'suspended') {
+        await this.processedContext.resume().catch(() => { })
+      }
+
       const me = useAppStore.getState().currentUser
       if (me && this.rawStream && !this.dfNode) this.setupVAD(this.rawStream, me.id, true)
 
@@ -436,6 +443,13 @@ export class WebRTCManager {
     this.updateRemoteVolume(userId)
   }
 
+  public setUserVolumeRealtime(userId: string, volume: number) {
+    const gainNode = this.userGainNodes.get(userId)
+    if (gainNode) {
+      gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (volume / 100)))
+    }
+  }
+
   // ── Peer Connections ──────────────────────────────────────────
 
   private initOutputMixer() {
@@ -444,6 +458,9 @@ export class WebRTCManager {
       return
     }
     this.outputMixContext = new AudioContext({ latencyHint: 'playback' })
+    if (this.outputMixContext.state === 'suspended') {
+      this.outputMixContext.resume().catch(() => { })
+    }
     this.outputCompressor = this.outputMixContext.createDynamicsCompressor()
 
     // Лимитер миксера для защиты от перегруза при 10+ спикерах
@@ -463,6 +480,9 @@ export class WebRTCManager {
     if (this.currentOutputDeviceId !== 'default' && typeof (this.mixAudioElement as any).setSinkId === 'function') {
       (this.mixAudioElement as any).setSinkId(this.currentOutputDeviceId).catch(() => { })
     }
+    this.mixAudioElement.play().catch(err => {
+      console.warn('[WebRTC] mixAudioElement play failed:', err)
+    })
   }
 
   private setupPeerHandlers(pc: RTCPeerConnection, userId: string) {
@@ -480,6 +500,9 @@ export class WebRTCManager {
         this.audioElements.set(userId, dummyAudio)
       }
       dummyAudio.srcObject = remote
+      dummyAudio.play().catch(err => {
+        console.warn(`[WebRTC] dummyAudio play failed for user ${userId}:`, err)
+      })
 
       if (this.userSourceNodes.has(userId)) {
         try { this.userSourceNodes.get(userId)?.disconnect() } catch { }
