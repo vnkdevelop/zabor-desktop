@@ -284,6 +284,7 @@ this.sfxElements.clear();
       store().updateUserStatus(user.id, { ...user, currentChannelId: channelId, currentCallUserId: null, isOnline: true });
       store().addUserToChannelMap(channelId, { ...user, currentChannelId: channelId, currentCallUserId: null });
       if (store().currentChannelId === channelId && user.id !== store().currentUser?.id) {
+        webrtc.disconnectFromPeer(user.id);
         webrtc.connectToPeer(user.id);
         this.playSfx(channelJoinSound, 0.3);
       }
@@ -323,24 +324,27 @@ this.sfxElements.clear();
     this.connection.on("ForceLeaveVoice", async () => { await this.leaveChannel(); });
 
     this.connection.on("UserStateChanged", (update: any) => {
+      const uId = update.userId || update.UserId;
+      if (!uId) return;
+
       // Для других пользователей — применяем все поля как обычно
       const nextUpdates: Partial<User> = {
-        isMuted: update.isMuted ?? false,
-        isDeafened: update.isDeafened ?? false,
-        isSpeaking: update.isSpeaking ?? false,
-        isServerMuted: update.isServerMuted ?? false,
-        isServerDeafened: update.isServerDeafened ?? false
+        isMuted: update.isMuted ?? update.IsMuted ?? false,
+        isDeafened: update.isDeafened ?? update.IsDeafened ?? false,
+        isSpeaking: update.isSpeaking ?? update.IsSpeaking ?? false,
+        isServerMuted: update.isServerMuted ?? update.IsServerMuted ?? false,
+        isServerDeafened: update.isServerDeafened ?? update.IsServerDeafened ?? false
       };
-      store().updateUserStatus(update.userId, nextUpdates);
+      store().updateUserStatus(uId, nextUpdates);
 
       const currentUser = store().currentUser;
-      if (currentUser && update.userId === currentUser.id) {
+      if (currentUser && uId === currentUser.id) {
         // Для ТЕКУЩЕГО пользователя локальные isMuted/isDeafened — источник истины.
         // Сервер может только выставить серверный мьют/deaf (права администратора).
         // Мы НЕ перезаписываем isMuted/isDeafened из серверного события,
         // чтобы избежать эффекта «мьют сбрасывается сразу после нажатия».
-        const newServerMuted = update.isServerMuted ?? currentUser.isServerMuted ?? false;
-        const newServerDeafened = update.isServerDeafened ?? currentUser.isServerDeafened ?? false;
+        const newServerMuted = update.isServerMuted ?? update.IsServerMuted ?? currentUser.isServerMuted ?? false;
+        const newServerDeafened = update.isServerDeafened ?? update.IsServerDeafened ?? currentUser.isServerDeafened ?? false;
 
         const effectiveMuted = currentUser.isMuted || newServerMuted;
         const effectiveDeafened = currentUser.isDeafened || newServerDeafened;
@@ -352,7 +356,7 @@ this.sfxElements.clear();
           // isMuted / isDeafened — не трогаем, они управляются только через toggleMute/toggleDeafen
           isServerMuted: newServerMuted,
           isServerDeafened: newServerDeafened,
-          isSpeaking: update.isSpeaking ?? currentUser.isSpeaking
+          isSpeaking: update.isSpeaking ?? update.IsSpeaking ?? currentUser.isSpeaking
         });
       }
     });
@@ -617,6 +621,9 @@ public stopRingtone() {
   }
 
   public async viewProfile(userId: string): Promise<void> { await this.safeInvoke("ViewProfile", userId); }
+  public async getUserByUsername(username: string): Promise<User | null> {
+    return await this.safeInvoke<User>("GetUserByUsername", username);
+  }
   public async getJokeOfTheDay(): Promise<string> { return await this.safeInvoke<string>("GetJokeOfTheDay") ?? ''; }
 
   // ── Data ──────────────────────────────────────────────────────
@@ -632,6 +639,17 @@ public stopRingtone() {
     useAppStore.getState().setFriends(friends || []);
     useAppStore.getState().setFriendRequests(requests || []);
     useAppStore.getState().setChannelInvites(channelInvites || []);
+
+    // Background pre-fetch members of all channels
+    if (channels && Array.isArray(channels)) {
+      channels.forEach(ch => {
+        this.getChannelMembersList(ch.id).then(members => {
+          if (members && Array.isArray(members)) {
+            useAppStore.getState().setChannelMembersCache(ch.id, members);
+          }
+        }).catch(() => {});
+      });
+    }
   }
 
   // ── Channels (optimistic) ─────────────────────────────────────
@@ -689,12 +707,17 @@ public stopRingtone() {
   public async kickFromChannel(channelId: string, userId: string): Promise<void> {
     const store = useAppStore.getState();
     const prevMembers = store.channelMembers;
+    const prevCache = store.channelMembersCache[channelId] || [];
 
-    // Optimistic remove from members
+    // Optimistic remove from members and cache
     store.setChannelMembers(prevMembers.filter(m => m.id !== userId));
+    store.setChannelMembersCache(channelId, prevCache.filter(m => m.id !== userId));
 
     const result = await this.safeInvoke("KickFromChannel", channelId, userId);
-    if (!result) useAppStore.getState().setChannelMembers(prevMembers);
+    if (!result) {
+      useAppStore.getState().setChannelMembers(prevMembers);
+      useAppStore.getState().setChannelMembersCache(channelId, prevCache);
+    }
   }
 
   public async getChannelMembersList(channelId: string): Promise<User[]> {
@@ -769,6 +792,12 @@ public stopRingtone() {
       if (update?.users) {
         store.setVoiceUsers(update.users);
         store.setChannelUsers(channelId, update.users);
+        // Background sync members list for this channel
+        this.getChannelMembersList(channelId).then(members => {
+          if (members && Array.isArray(members)) {
+            store.setChannelMembersCache(channelId, members);
+          }
+        }).catch(() => {});
         return 'ok';
       }
       this.rollbackChannelJoin(prevChannelId, prevVoiceUsers, prevChannelUsersMap);
@@ -947,7 +976,14 @@ public stopRingtone() {
 
   public toggleState(isMuted: boolean, isDeafened: boolean): void {
     webrtc.toggleMute(isMuted);
-    if (this.isConnected()) this.connection?.send("UpdateUserState", isMuted, isDeafened);
+    if (this.isConnected()) {
+      const currentUser = useAppStore.getState().currentUser;
+      this.connection?.send("UpdateUserState", {
+        userId: currentUser?.id || "",
+        isMuted,
+        isDeafened
+      });
+    }
   }
 
   public setSpeakingState(isSpeaking: boolean): void {

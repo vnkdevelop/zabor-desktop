@@ -1,6 +1,6 @@
 {
   "name": "zabor-desktop",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
   "author": "vnk",

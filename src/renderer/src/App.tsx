@@ -56,6 +56,7 @@ export default function App() {
 
   const [friendName, setFriendName] = useState('');
   const [friendRequestStatus, setFriendRequestStatus] = useState<'idle' | 'loading' | 'sent' | 'notfound' | 'alreadyfriend'>('idle');
+  const [profileFriendRequestStatus, setProfileFriendRequestStatus] = useState<'idle' | 'loading' | 'sent'>('idle');
   const [newPassword, setNewPassword] = useState('');
   const [showPrivacyPass, setShowPrivacyPass] = useState(false);
   const [privacyError, setPrivacyError] = useState('');
@@ -80,6 +81,9 @@ export default function App() {
   } | null>(null);
   const [showInvitesPanel, setShowInvitesPanel] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'general' | 'audio' | 'privacy'>('general');
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [calibrationCountdown, setCalibrationCountdown] = useState(10);
+  const [calibrationSuccess, setCalibrationSuccess] = useState(false);
   const [inviteFriendSearch, setInviteFriendSearch] = useState('');
   const [sentInvites, setSentInvites] = useState<Set<string>>(new Set());
 
@@ -123,6 +127,8 @@ export default function App() {
     }, 30000);
     return () => clearTimeout(timer);
   }, [store.incomingCall]);
+
+
 
   useEffect(() => {
     if (store.callStatus !== 'calling') return;
@@ -257,6 +263,11 @@ export default function App() {
     setIsLoginCopied(false);
     webrtc.setInputDevice('default');
     webrtc.setOutputDevice('default');
+    localStorage.removeItem('zabor_mic_calibrated');
+    localStorage.removeItem('zabor_base_noise_floor');
+    localStorage.removeItem('zabor_threshold_on');
+    localStorage.removeItem('zabor_threshold_off');
+    localStorage.removeItem('zabor_attenuation_limit');
   }, []);
 
   const applySettings = useCallback((s: {
@@ -304,6 +315,18 @@ export default function App() {
         webrtc.setUserVolume(userId, volume);
       });
     }
+
+    // Синхронно обновляем settingsRef.current для исключения гонки при вызове saveLocalCache
+    settingsRef.current = {
+      inputVolume: iv,
+      outputVolume: ov,
+      selectedInput: s.selectedInput ?? 'default',
+      selectedOutput: s.selectedOutput ?? 'default',
+      noiseSuppression: s.noiseSuppression ?? true,
+      language: s.language ?? settingsRef.current.language,
+      openAtLogin: s.openAtLogin ?? settingsRef.current.openAtLogin,
+      minimizeToTray: s.minimizeToTray ?? settingsRef.current.minimizeToTray
+    };
   }, []);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -393,8 +416,9 @@ export default function App() {
           if (creds.login && creds.password) {
             signalRService.login(creds.login, creds.password).then(async (result) => {
               if (result === 'ok') {
+                const needsLoadSettings = !isAuth;
                 const [serverSettings, jokeText] = await Promise.all([
-                  signalRService.loadAudioSettings(),
+                  needsLoadSettings ? signalRService.loadAudioSettings() : Promise.resolve(null),
                   signalRService.getJokeOfTheDay().catch(() => '__NO_JOKE__')
                 ]);
                 if (serverSettings) applySettings(serverSettings);
@@ -447,6 +471,12 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
+      // Запускаем калибровку микрофона в фоне (длительность определяется автоматически: 5с в первый раз, 2с в последующие)
+      const calibrationPromise = webrtc.calibrateMic().catch(err => {
+        console.warn('[Calibration] Mic calibration failed on startup:', err);
+        return null;
+      });
+
       // 1. Загружаем сессию с диска
       let cachedCredentials: { login: string; password: string; userId?: string } | null = null;
 
@@ -470,6 +500,7 @@ export default function App() {
 
       // 2. Если нет кредов — сразу показываем экран логина
       if (!cachedCredentials) {
+        await calibrationPromise;
         initCompleteRef.current = true;
         setLoadingFadeOut(true);
         setTimeout(() => setAppLoading(false), 650);
@@ -497,6 +528,7 @@ export default function App() {
       //    onConnectionUpdate(true) сам запустит автологин когда сервер вернётся.
       if (!connected) {
         autoLoginPendingRef.current = true;
+        await calibrationPromise;
         initCompleteRef.current = true;
         setShowInitConnectionError(true);
         return;
@@ -528,19 +560,22 @@ export default function App() {
         setTimeout(() => { settingsLoadedRef.current = true; }, 1000);
 
         initCompleteRef.current = true;
+        await calibrationPromise;
         setTimeout(() => {
           setLoadingFadeOut(true);
           setTimeout(() => setAppLoading(false), 650);
         }, 300);
       } else if (loginResult === 'invalid') {
         // Неверные credentials — очищаем сессию и показываем экран логина
-        await window.windowControls.clearSession().catch(() => {});
+        await window.windowControls.clearSession().catch(() => { });
+        await calibrationPromise;
         initCompleteRef.current = true;
         setLoadingFadeOut(true);
         setTimeout(() => setAppLoading(false), 650);
       } else {
         // 'network' — сеть прервалась во время login(), ждём reconnect
         autoLoginPendingRef.current = true;
+        await calibrationPromise;
         initCompleteRef.current = true;
         setShowErrorText(true);
         setShowReconnectingOverlay(true);
@@ -800,6 +835,53 @@ export default function App() {
     validateInput, validateName, saveLocalCache, softClearCache,
     resetToDefaults, applySettings, t]);
 
+  const handleManualCalibration = useCallback(async () => {
+    if (isCalibrating) return;
+
+    const isStreamActive = store.currentChannelId !== null || store.callStatus !== 'idle';
+    if (isStreamActive) {
+      store.setSystemToast(t('toasts.micBusyCalibration', 'Нельзя калибровать микрофон во время разговора'));
+      setTimeout(() => {
+        const currentStore = useAppStore.getState();
+        if (currentStore.systemToast === t('toasts.micBusyCalibration', 'Нельзя калибровать микрофон во время разговора')) {
+          currentStore.setSystemToast(null);
+        }
+      }, 4000);
+      return;
+    }
+
+    setIsCalibrating(true);
+    setCalibrationSuccess(false);
+    setCalibrationCountdown(10);
+
+    let secondsLeft = 10;
+    const interval = setInterval(() => {
+      secondsLeft--;
+      setCalibrationCountdown(secondsLeft);
+      if (secondsLeft <= 0) {
+        clearInterval(interval);
+      }
+    }, 1000);
+
+    try {
+      await webrtc.calibrateMic(10000);
+      setCalibrationSuccess(true);
+      setTimeout(() => setCalibrationSuccess(false), 4000);
+    } catch (err) {
+      console.warn('Manual calibration failed:', err);
+      store.setSystemToast(t('toasts.calibrationFailed', 'Не удалось получить доступ к микрофону'));
+      setTimeout(() => {
+        const currentStore = useAppStore.getState();
+        if (currentStore.systemToast === t('toasts.calibrationFailed', 'Не удалось получить доступ к микрофону')) {
+          currentStore.setSystemToast(null);
+        }
+      }, 4000);
+    } finally {
+      clearInterval(interval);
+      setIsCalibrating(false);
+    }
+  }, [isCalibrating, store, t]);
+
   const handleLogout = useCallback(async () => {
     settingsLoadedRef.current = false;
 
@@ -947,21 +1029,16 @@ export default function App() {
 
   const handleAddFriend = useCallback(async () => {
     if (!friendName.trim() || friendRequestStatus === 'loading' || friendRequestStatus === 'sent') return;
-    const trimmedName = friendName.trim().toLowerCase();
-    const alreadyFriend = store.friends.some(f => f.username?.toLowerCase() === trimmedName);
-    if (alreadyFriend) { setFriendRequestStatus('alreadyfriend'); return; }
     setFriendRequestStatus('loading');
-    const success = await signalRService.sendFriendRequest(friendName.trim());
-    if (success) {
-      setFriendRequestStatus('sent');
-      setTimeout(() => {
-        closeAndResetModals();
-        setFriendRequestStatus('idle');
-      }, 1000);
+    const user = await signalRService.getUserByUsername(friendName.trim());
+    if (user) {
+      closeAndResetModals();
+      store.setSelectedProfileUser(user, 'none');
+      store.setModal('profile', true);
     } else {
       setFriendRequestStatus('notfound');
     }
-  }, [friendName, friendRequestStatus, store.friends, closeAndResetModals]);
+  }, [friendName, friendRequestStatus, store, closeAndResetModals]);
 
   const handleAcceptChannelInvite = useCallback(async (channelId: string) => {
     signalRService.acceptChannelInvite(channelId);
@@ -1518,14 +1595,36 @@ export default function App() {
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pr-2 shrink-0">
                             {store.currentChannelId === ch.id && (
-                              <div onClick={e => { e.stopPropagation(); e.preventDefault(); store.setSelectedChannelForInvite(ch); store.setModal('inviteToChannel', true); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title={t('common.invite', 'Пригласить')}><UserPlus weight="bold" size={16} /></div>
+                              <div onClick={async e => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                store.setSelectedChannelForInvite(ch);
+                                try {
+                                  const members = await signalRService.getChannelMembersList(ch.id);
+                                  if (members && Array.isArray(members)) {
+                                    store.setChannelMembersCache(ch.id, members);
+                                  }
+                                } catch (err) {
+                                  console.error("Failed to load channel members:", err);
+                                }
+                                store.setModal('inviteToChannel', true);
+                              }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title={t('common.invite', 'Пригласить')}><UserPlus weight="bold" size={16} /></div>
                             )}
                             <div onClick={e => { e.stopPropagation(); e.preventDefault(); openChannelMembers(ch); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title={t('common.channelMembers', 'Участники канала')}><Users weight="bold" size={16} /></div>
                           </div>
                         </button>
                         {channelUsers.length > 0 && (
                           <div className="flex items-center -space-x-2 px-8 mt-1.5 pointer-events-none">
-                            {channelUsers.map((u, i) => (
+                            {[...channelUsers].sort((a, b) => {
+                              const currentUserId = store.currentUser?.id;
+                              if (a.id === currentUserId) return -1;
+                              if (b.id === currentUserId) return 1;
+                              const nameA = a.displayName.toLowerCase();
+                              const nameB = b.displayName.toLowerCase();
+                              if (nameA < nameB) return -1;
+                              if (nameA > nameB) return 1;
+                              return a.id.localeCompare(b.id);
+                            }).map((u, i) => (
                               <div key={u.id} className="w-[31px] h-[31px] rounded-full border-2 border-panelBg relative shrink-0 overflow-hidden" style={{ zIndex: 100 - i }} title={u.displayName}>
                                 <AvatarImg src={u.avatarBase64} size={31} bgColor={u.avatarColor} animate={false} />
                               </div>
@@ -1718,7 +1817,16 @@ export default function App() {
             {!store.currentCallUser && store.currentChannelId && (
               <div className="absolute top-0 left-0 right-0 bottom-[120px] p-6 flex items-center justify-center overflow-hidden">
                 <div ref={containerRef} className="w-full h-full flex flex-wrap items-center justify-center gap-6" style={{ alignContent: 'center' }}>
-                  {store.voiceUsers.map(user => (
+                  {[...store.voiceUsers].sort((a, b) => {
+                    const currentUserId = store.currentUser?.id;
+                    if (a.id === currentUserId) return -1;
+                    if (b.id === currentUserId) return 1;
+                    const nameA = a.displayName.toLowerCase();
+                    const nameB = b.displayName.toLowerCase();
+                    if (nameA < nameB) return -1;
+                    if (nameA > nameB) return 1;
+                    return a.id.localeCompare(b.id);
+                  }).map(user => (
                     <div key={user.id} onContextMenu={e => handleContextMenu(e, 'voiceUser', user)}
                       className={`relative flex flex-col items-center justify-center cursor-pointer transition-all duration-200 overflow-hidden shrink-0 hover:-translate-y-1
                         ${(user.isSpeaking && (store.webrtcConnections[user.id] || user.id === store.currentUser?.id)) ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)] z-10' : 'shadow-xl'}`}
@@ -1766,7 +1874,7 @@ export default function App() {
                 >
                   <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
                     <Mic weight="bold" size={24} />
-                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${ (store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45' }`} />
+                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45'}`} />
                   </div>
                 </button>
                 <button
@@ -1778,7 +1886,7 @@ export default function App() {
                 >
                   <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
                     <Headphones weight="bold" size={24} />
-                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${ (store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45' }`} />
+                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45'}`} />
                   </div>
                 </button>
                 <button onClick={handleEndCall} className="group bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
@@ -1804,7 +1912,7 @@ export default function App() {
                 >
                   <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
                     <Mic weight="bold" size={24} />
-                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${ (store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45' }`} />
+                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45'}`} />
                   </div>
                 </button>
                 <button
@@ -1816,7 +1924,7 @@ export default function App() {
                 >
                   <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
                     <Headphones weight="bold" size={24} />
-                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${ (store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45' }`} />
+                    <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45'}`} />
                   </div>
                 </button>
                 <button onClick={() => signalRService.leaveChannel()} className="group bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
@@ -2024,6 +2132,47 @@ export default function App() {
                     webrtc.updateSettings(selectedInput, v);
                   }} />
                 </div>
+                <div className="bg-surface p-4 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold text-white text-[15px]">{t('settings.audio.calibrateSensitivity', 'Калибровка чувствительности')}</span>
+                      <p className="text-xs text-textMuted mt-1">{t('settings.audio.calibrateDesc', 'Распознавание уровня шума вашего микрофона')}</p>
+                    </div>
+                    {isCalibrating && (
+                      <span className="text-yellow-500 flex items-center gap-1 text-sm font-bold animate-pulse">
+                        {t('settings.audio.doNotSpeak', 'Не говорите!')}
+                      </span>
+                    )}
+                    {calibrationSuccess && (
+                      <span className="text-[#22c55e] flex items-center gap-1 text-sm font-bold animate-pulse">
+                        <Check weight="bold" size={16} />
+                        {t('settings.audio.calibrationComplete', 'Успешно откалибровано!')}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleManualCalibration}
+                    disabled={isCalibrating}
+                    className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-300 ${isCalibrating
+                      ? 'bg-yellow-600 text-white cursor-default'
+                      : calibrationSuccess
+                        ? 'bg-[#22c55e] text-white hover:opacity-90'
+                        : 'bg-[#c70060] text-white hover:opacity-90 active:scale-95'
+                      }`}
+                  >
+                    {isCalibrating ? (
+                      <>
+                        <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
+                        {t('settings.audio.calibrating', { seconds: calibrationCountdown, defaultValue: `Калибровка... ${calibrationCountdown}с` })}
+                      </>
+                    ) : (
+                      <>
+                        <Mic weight="bold" size={18} />
+                        {t('settings.audio.calibrateButton', 'Откалибровать микрофон')}
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             )}
             {settingsTab === 'privacy' && (
@@ -2092,25 +2241,35 @@ export default function App() {
           <p className="text-textMuted text-sm mb-6">{store.selectedChannelForInvite?.name}</p>
           <input type="text" value={inviteFriendSearch} onChange={e => setInviteFriendSearch(e.target.value)} placeholder={t('modals.inviteToChannel.searchPlaceholder', 'Поиск среди друзей...')} className="w-full bg-surface text-white rounded-xl p-3 mb-4 outline-none focus:ring-2 focus:ring-[#c70060]" />
           <div className="max-h-[300px] overflow-y-auto space-y-2">
-            {store.friends.filter(f => f.displayName.toLowerCase().includes(inviteFriendSearch.toLowerCase())).map(f => (
-              <div key={f.id} className="flex items-center gap-3 p-3 bg-surface rounded-xl hover:bg-surfaceHover transition-colors">
-                <div className="w-[47px] h-[47px] shrink-0 relative"><AvatarImg src={f.avatarBase64} size={47} bgColor={f.avatarColor} /></div>
-                <span className="flex-1 font-semibold text-white truncate">{f.displayName}</span>
-                <button
-                  onClick={() => handleInviteToChannel(f.id)}
-                  disabled={sentInvites.has(f.id)}
-                  className={`py-2 px-4 rounded-xl text-sm font-bold transition-all shrink-0 ${sentInvites.has(f.id)
-                    ? 'bg-success/20 text-success cursor-default'
-                    : 'bg-[#c70060] hover:opacity-90 text-white'
-                    }`}
-                >
-                  {sentInvites.has(f.id) ? t('modals.inviteToChannel.sent', '✓ Отправлено') : t('common.invite', 'Пригласить')}
-                </button>
-              </div>
-            ))}
-            {store.friends.filter(f => f.displayName.toLowerCase().includes(inviteFriendSearch.toLowerCase())).length === 0 && (
-              <p className="text-textMuted text-center py-4 font-medium">{t('modals.inviteToChannel.noFriends', 'Друзья не найдены')}</p>
-            )}
+            {(() => {
+              const filteredFriends = store.friends
+                .filter(f => f.displayName.toLowerCase().includes(inviteFriendSearch.toLowerCase()))
+                .filter(f => !store.channelMembersCache[store.selectedChannelForInvite?.id || '']?.some(m => m.id === f.id));
+
+              return (
+                <>
+                  {filteredFriends.map(f => (
+                    <div key={f.id} className="flex items-center gap-3 p-3 bg-surface rounded-xl hover:bg-surfaceHover transition-colors">
+                      <div className="w-[47px] h-[47px] shrink-0 relative"><AvatarImg src={f.avatarBase64} size={47} bgColor={f.avatarColor} /></div>
+                      <span className="flex-1 font-semibold text-white truncate">{f.displayName}</span>
+                      <button
+                        onClick={() => handleInviteToChannel(f.id)}
+                        disabled={sentInvites.has(f.id)}
+                        className={`py-2 px-4 rounded-xl text-sm font-bold transition-all shrink-0 ${sentInvites.has(f.id)
+                          ? 'bg-success/20 text-success cursor-default'
+                          : 'bg-success hover:bg-green-600 text-white hover:opacity-90'
+                          }`}
+                      >
+                        {sentInvites.has(f.id) ? t('modals.inviteToChannel.sent', '✓ Отправлено') : t('common.invite', 'Пригласить')}
+                      </button>
+                    </div>
+                  ))}
+                  {filteredFriends.length === 0 && (
+                    <p className="text-textMuted text-center py-4 font-medium">{t('modals.inviteToChannel.noFriends', 'Друзья не найдены')}</p>
+                  )}
+                </>
+              );
+            })()}
           </div>
           <button onClick={closeAndResetModals} className="w-full mt-4 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">{t('common.close', 'Закрыть')}</button>
         </div>
@@ -2225,7 +2384,7 @@ export default function App() {
             return (
               <>
                 <div className="flex justify-center mb-4">
-                  {displayUsers.slice(0, 4).map((u, i) => (
+                  {displayUsers.slice(0, 3).map((u, i) => (
                     <div key={u.id} className="w-[87px] h-[87px] rounded-full border-[4px] border-panelBg relative shrink-0 shadow-lg" style={{ marginLeft: i === 0 ? 0 : '-1.5rem', zIndex: 10 - i }}>
                       <AvatarImg src={u.avatarBase64 || null} size={87} bgColor={u.avatarColor} />
                     </div>
@@ -2245,7 +2404,7 @@ export default function App() {
 
       {store.modals.profile && store.selectedProfileUser && (
         <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-panelBg w-[380px] rounded-[32px] overflow-hidden shadow-2xl relative border border-[#303035]">
+          <div className="bg-panelBg w-[400px] rounded-[32px] overflow-hidden shadow-2xl relative border border-[#303035]">
             <div
               className="h-32 w-full relative transition-colors duration-500"
               style={{ backgroundColor: editProfileAvatarBase64 ? editProfileAvatarColor : store.selectedProfileUser?.avatarColor }}
@@ -2269,8 +2428,9 @@ export default function App() {
             </div>
 
             <div className="px-8 pb-8 relative mt-[-56px]">
-              <div className="flex justify-between items-end mb-4 relative z-10">
-                <div className="relative group">
+              <div className="flex items-start gap-6 mb-6 relative z-10">
+                {/* Avatar container */}
+                <div className="relative group shrink-0">
                   <div className="w-[112px] h-[112px] rounded-full border-[6px] border-panelBg bg-panelBg relative shadow-xl">
                     <AvatarImg
                       src={isEditingProfile ? (editProfileAvatarBase64 || store.selectedProfileUser?.avatarBase64) : store.selectedProfileUser?.avatarBase64}
@@ -2300,18 +2460,21 @@ export default function App() {
                   )}
                 </div>
 
-                <button
-                  onClick={() => {
-                    const uid = store.selectedProfileUser!.id;
-                    if (uid === store.currentUser?.id) openMyAchievements();
-                    else openUserAchievements(uid);
-                    store.closeProfileOnly();
-                  }}
-                  className="w-12 h-12 rounded-xl bg-surface border border-[#303035] flex items-center justify-center hover:bg-surfaceHover hover:scale-105 transition-all text-[#c70060] hover:shadow-[0_0_15px_rgba(199,0,96,0.3)] active:shadow-[0_0_20px_rgba(199,0,96,0.5)] active:scale-95 -mr-6"
-                  title={t('achievements.title', 'Достижения')}
-                >
-                  <Trophy weight="bold" size={22} />
-                </button>
+                {/* About me thought bubble on the right */}
+                {!isEditingProfile && store.selectedProfileUser?.aboutMe && (
+                  <div className="flex-1 mt-10 relative animate-fade-in">
+                    {/* Little tail circles for the thought bubble */}
+                    <div className="absolute w-1.5 h-1.5 rounded-full bg-[#303035] left-[-18px] top-[-12px] opacity-90" />
+                    <div className="absolute w-2.5 h-2.5 rounded-full bg-[#303035] left-[-8px] top-[-5px] opacity-90" />
+
+                    {/* Thought bubble container */}
+                    <div className="bg-[#2B2D31] border border-[#303035] p-3 rounded-2xl shadow-md min-h-[60px] flex items-center justify-center">
+                      <p className="text-white/90 text-sm font-medium leading-relaxed break-words whitespace-pre-wrap text-center w-full">
+                        {store.selectedProfileUser.aboutMe}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="mb-6">
@@ -2344,10 +2507,10 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div className="animate-fade-in">
-                    <h2 className="text-2xl font-black text-white tracking-tight break-words">{store.selectedProfileUser?.displayName}</h2>
+                  <div className="animate-fade-in text-left">
+                    <h2 className="text-3xl font-black text-white tracking-tight break-words">{store.selectedProfileUser?.displayName}</h2>
                     <p
-                      className={`text-sm mt-1 font-bold cursor-pointer transition-opacity inline-block ${isLoginCopied ? 'text-success' : 'text-[#c70060] hover:underline hover:opacity-80'}`}
+                      className={`text-base mt-1.5 font-bold cursor-pointer transition-opacity inline-block ${isLoginCopied ? 'text-success' : 'text-[#c70060] hover:underline hover:opacity-80'}`}
                       title={isLoginCopied ? "" : t('profile.copyLogin', 'Скопировать логин')}
                       onClick={() => {
                         if (store.selectedProfileUser && !isLoginCopied) {
@@ -2359,17 +2522,55 @@ export default function App() {
                     >
                       {isLoginCopied ? t('profile.loginCopied', 'Скопировано!') : `@${store.selectedProfileUser?.username}`}
                     </p>
-                    {store.selectedProfileUser?.aboutMe && (
-                      <div className="mt-4 bg-surface/50 p-4 rounded-2xl border border-[#303035]/50">
-                        <h3 className="text-[10px] font-bold text-textMuted mb-2 uppercase tracking-wider">{t('profile.aboutMe', 'О себе')}</h3>
-                        <p className="text-white/90 text-sm leading-relaxed break-words whitespace-pre-wrap">
-                          {store.selectedProfileUser.aboutMe}
-                        </p>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
+
+              {!isEditingProfile && store.profileSource === 'channelMembers' && (
+                <div className="flex flex-col gap-2 mb-4">
+                  {store.currentChannelId === store.selectedChannelForMembers?.id && (
+                    <button
+                      onClick={() => {
+                        if (store.selectedProfileUser) {
+                          if (sentInvites.has(store.selectedProfileUser.id)) return;
+                          if (!store.selectedProfileUser.isOnline) {
+                            setOfflineToast(t('profile.userOffline', 'Пользователь не в сети'));
+                            setTimeout(() => setOfflineToast(null), 3000);
+                          } else if (store.selectedChannelForMembers) {
+                            signalRService.callToChannel(
+                              store.selectedProfileUser.id,
+                              store.selectedChannelForMembers.id,
+                              store.selectedChannelForMembers.name
+                            );
+                            addSentInvite(store.selectedProfileUser!.id);
+                          }
+                        }
+                      }}
+                      disabled={store.selectedProfileUser ? sentInvites.has(store.selectedProfileUser.id) : false}
+                      className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id)
+                        ? 'bg-success/20 text-success cursor-default'
+                        : 'bg-success text-white hover:opacity-90 hover:shadow-[0_0_25px_rgba(34,197,94,0.5)] active:shadow-[0_0_15px_rgba(34,197,94,0.8)] active:scale-[0.98]'
+                        }`}
+                    >
+                      <Phone weight="bold" size={18} /> {store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id) ? t('profile.inviting', 'Зовём...') : t('profile.inviteToChannel', 'Позвать в канал')}
+                    </button>
+                  )}
+                  {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && (
+                    <button
+                      onClick={() => {
+                        if (store.selectedProfileUser) {
+                          store.setUserToKick(store.selectedProfileUser);
+                          store.setModal('kickConfirm', true);
+                        }
+                        store.closeProfileOnly();
+                      }}
+                      className="w-full bg-surface text-danger py-3 rounded-xl font-bold hover:bg-[#2B2D31] transition-colors"
+                    >
+                      {t('profile.kick', 'Исключить из канала')}
+                    </button>
+                  )}
+                </div>
+              )}
 
               {isEditingProfile ? (
                 <div className="flex gap-3 pt-4 border-t border-[#303035]">
@@ -2393,81 +2594,96 @@ export default function App() {
                   </button>
                 </div>
               ) : (
-                <div className="flex flex-col gap-3">
-                  {store.profileSource === 'channelMembers' ? (
-                    <>
-                      {store.currentChannelId === store.selectedChannelForMembers?.id && (
-                        <button
-                          onClick={() => {
-                            if (store.selectedProfileUser) {
-                              if (sentInvites.has(store.selectedProfileUser.id)) return;
-                              if (!store.selectedProfileUser.isOnline) {
-                                setOfflineToast(t('profile.userOffline', 'Пользователь не в сети'));
-                                setTimeout(() => setOfflineToast(null), 3000);
-                              } else if (store.selectedChannelForMembers) {
-                                signalRService.callToChannel(
-                                  store.selectedProfileUser.id,
-                                  store.selectedChannelForMembers.id,
-                                  store.selectedChannelForMembers.name
-                                );
-                                addSentInvite(store.selectedProfileUser!.id);
-                              }
+                <div className="flex justify-center items-center gap-4 mt-6">
+                  {store.selectedProfileUser?.id === store.currentUser?.id ? (
+                    <button
+                      onClick={() => {
+                        openMyAchievements();
+                        store.closeProfileOnly();
+                      }}
+                      className="w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-[#c70060] hover:bg-[#c70060]/10 hover:border-[#c70060]/40 hover:shadow-[0_0_15px_rgba(199,0,96,0.25)] hover:scale-105 active:scale-95 transition-all"
+                      title={t('achievements.title', 'Достижения')}
+                    >
+                      <Trophy weight="bold" size={28} />
+                    </button>
+                  ) : store.friends.some(f => f.id === store.selectedProfileUser?.id) ? (
+                    <div className="flex justify-center items-center gap-4 w-full">
+                      {/* Left: Remove Friend */}
+                      <button
+                        onClick={() => {
+                          if (store.selectedProfileUser) signalRService.removeFriend(store.selectedProfileUser.id);
+                          store.closeProfileOnly();
+                        }}
+                        className="w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-textMuted hover:text-danger hover:bg-danger/10 hover:border-danger/40 hover:shadow-[0_0_15px_rgba(239,68,68,0.25)] hover:scale-105 active:scale-95 transition-all"
+                        title={t('profile.removeFriend', 'Удалить из друзей')}
+                      >
+                        <UserMinus weight="bold" size={28} />
+                      </button>
+
+                      {/* Center: Achievements */}
+                      <button
+                        onClick={() => {
+                          if (store.selectedProfileUser) openUserAchievements(store.selectedProfileUser.id);
+                          store.closeProfileOnly();
+                        }}
+                        className="w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-[#c70060] hover:bg-[#c70060]/10 hover:border-[#c70060]/40 hover:shadow-[0_0_15px_rgba(199,0,96,0.25)] hover:scale-105 active:scale-95 transition-all"
+                        title={t('achievements.title', 'Достижения')}
+                      >
+                        <Trophy weight="bold" size={28} />
+                      </button>
+
+                      {/* Right: Call */}
+                      <button
+                        onClick={async () => {
+                          if (store.selectedProfileUser) {
+                            const ok = await signalRService.startCall(store.selectedProfileUser.id);
+                            if (!ok) {
+                              setOfflineToast(t('profile.userOffline', 'Пользователь не в сети'));
+                              setTimeout(() => setOfflineToast(null), 3000);
                             }
-                            // We don't close it so the user can see the button state change
-                          }}
-                          disabled={store.selectedProfileUser ? sentInvites.has(store.selectedProfileUser.id) : false}
-                          className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id)
-                            ? 'bg-success/20 text-success cursor-default'
-                            : 'bg-[#c70060] text-white hover:opacity-90 hover:shadow-[0_0_25px_rgba(199,0,96,0.5)] active:shadow-[0_0_15px_rgba(199,0,96,0.8)] active:scale-[0.98]'
-                            }`}
-                        >
-                          <Phone weight="bold" size={18} /> {store.selectedProfileUser && sentInvites.has(store.selectedProfileUser.id) ? t('profile.inviting', 'Зовём...') : t('profile.inviteToChannel', 'Позвать в канал')}
-                        </button>
-                      )}
-                      {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && (
-                        <button
-                          onClick={() => {
-                            if (store.selectedProfileUser) {
-                              store.setUserToKick(store.selectedProfileUser);
-                              store.setModal('kickConfirm', true);
-                            }
-                            store.closeProfileOnly();
-                          }}
-                          className="w-full bg-surface text-danger py-3.5 rounded-xl font-bold hover:bg-[#2B2D31] transition-colors"
-                        >
-                          {t('profile.kick', 'Исключить из канала')}
-                        </button>
-                      )}
-                    </>
+                          }
+                          store.closeProfileOnly();
+                        }}
+                        className="w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-success hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95 transition-all"
+                        title={t('profile.call', 'Позвонить')}
+                      >
+                        <Phone weight="bold" size={28} />
+                      </button>
+                    </div>
                   ) : (
-                    store.selectedProfileUser?.id !== store.currentUser?.id && (
-                      <>
-                        <button
-                          onClick={async () => {
-                            if (store.selectedProfileUser) {
-                              const ok = await signalRService.startCall(store.selectedProfileUser.id);
-                              if (!ok) {
-                                setOfflineToast(t('profile.userOffline', 'Пользователь не в сети'));
-                                setTimeout(() => setOfflineToast(null), 3000);
-                              }
-                            }
-                            store.closeProfileOnly();
-                          }}
-                          className="w-full bg-success text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-600 transition-all hover:shadow-[0_0_25px_rgba(34,197,94,0.5)] active:shadow-[0_0_15px_rgba(34,197,94,0.8)] active:scale-[0.98]"
-                        >
-                          <Phone weight="bold" size={18} /> {t('profile.call', 'Позвонить')}
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (store.selectedProfileUser) signalRService.removeFriend(store.selectedProfileUser.id);
-                            store.closeProfileOnly();
-                          }}
-                          className="w-full bg-surface text-danger py-3.5 rounded-xl font-bold hover:bg-[#2B2D31] transition-colors"
-                        >
-                          {t('profile.removeFriend', 'Удалить из друзей')}
-                        </button>
-                      </>
-                    )
+                    <div className="flex justify-center items-center gap-4 w-full">
+                      {/* Left: Achievements */}
+                      <button
+                        onClick={() => {
+                          if (store.selectedProfileUser) openUserAchievements(store.selectedProfileUser.id);
+                          store.closeProfileOnly();
+                        }}
+                        className="w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-[#c70060] hover:bg-[#c70060]/10 hover:border-[#c70060]/40 hover:shadow-[0_0_15px_rgba(199,0,96,0.25)] hover:scale-105 active:scale-95 transition-all"
+                        title={t('achievements.title', 'Достижения')}
+                      >
+                        <Trophy weight="bold" size={28} />
+                      </button>
+
+                      {/* Right: Add Friend */}
+                      <button
+                        onClick={async () => {
+                          if (!store.selectedProfileUser || profileFriendRequestStatus === 'loading' || profileFriendRequestStatus === 'sent') return;
+                          setProfileFriendRequestStatus('loading');
+                          const success = await signalRService.sendFriendRequest(store.selectedProfileUser.username);
+                          if (success) {
+                            setProfileFriendRequestStatus('sent');
+                            setTimeout(() => setProfileFriendRequestStatus('idle'), 2000);
+                          } else {
+                            setProfileFriendRequestStatus('idle');
+                          }
+                        }}
+                        disabled={profileFriendRequestStatus === 'loading' || profileFriendRequestStatus === 'sent'}
+                        className="w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-success hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-default"
+                        title={profileFriendRequestStatus === 'sent' ? t('modals.addFriend.sent', 'Отправлено') : t('modals.addFriend.title', 'Добавить друга')}
+                      >
+                        {profileFriendRequestStatus === 'sent' ? <Check weight="bold" size={28} className="text-success animate-bounce" /> : <UserPlus weight="bold" size={28} />}
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
@@ -2655,7 +2871,7 @@ export default function App() {
                     setOfflineToast(t('profile.userOffline', 'Пользователь не в сети'));
                     setTimeout(() => setOfflineToast(null), 3000);
                   } else if (store.selectedChannelForMembers) {
-                    signalRService.sendChannelInvite(contextMenu.item.id, store.selectedChannelForMembers.id, store.selectedChannelForMembers.name);
+                    signalRService.callToChannel(contextMenu.item.id, store.selectedChannelForMembers.id, store.selectedChannelForMembers.name);
                     addSentInvite(contextMenu.item.id);
                   }
                   setContextMenu(null);

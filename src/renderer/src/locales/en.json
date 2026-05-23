@@ -23,7 +23,13 @@
       "noiseSuppression": "Noise Suppression",
       "default": "Default",
       "micFallback": "Microphone",
-      "speakerFallback": "Speakers"
+      "speakerFallback": "Speakers",
+      "calibrateSensitivity": "Sensitivity Calibration",
+      "calibrateDesc": "Recognition of your microphone's noise level",
+      "calibrateButton": "Calibrate Microphone",
+      "calibrating": "Calibrating... {{seconds}}s",
+      "calibrationComplete": "Successfully Calibrated!",
+      "doNotSpeak": "Do not speak!"
     },
     "privacy": {
       "newPassword": "NEW PASSWORD",
@@ -99,7 +105,7 @@
       "placeholder": "Login",
       "errorNotFound": "User not found",
       "errorAlreadyFriend": "They are already your friend ;) ",
-      "submit": "Send",
+      "submit": "Find",
       "sent": "Sent"
     },
     "kick": {
@@ -118,7 +124,8 @@
       "title": "Invite to Channel",
       "searchPlaceholder": "Search friends...",
       "noFriends": "No friends found",
-      "sent": "✓ Sent"
+      "sent": "✓ Sent",
+      "alreadyMember": "Already member"
     },
     "members": {
       "title": "Members",
@@ -281,6 +288,8 @@
     "micNotHearing": "You are not heard, check your microphone",
     "micNoAccess": "No access to microphone. Check OS permissions.",
     "micBusy": "Microphone is busy with another application.",
+    "micBusyCalibration": "Cannot calibrate microphone during a call",
+    "calibrationFailed": "Failed to access microphone for calibration",
     "micNotFound": "Microphone not found. Connect the device and try again.",
     "audioError": "Audio error: {{message}}",
     "incomingCall": "Incoming call...",

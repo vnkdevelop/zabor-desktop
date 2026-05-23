@@ -42,6 +42,16 @@ export class WebRTCManager {
   private inputGainNode: GainNode | null = null
   private dfNode: AudioWorkletNode | null = null
 
+  private calibratedThresholdOn = parseFloat(localStorage.getItem('zabor_threshold_on') || '0.012')
+  private calibratedThresholdOff = parseFloat(localStorage.getItem('zabor_threshold_off') || '0.005')
+  private calibratedAttenuationLimit = parseInt(localStorage.getItem('zabor_attenuation_limit') || '35')
+  private calibratedNoiseFloor = parseFloat(localStorage.getItem('zabor_base_noise_floor') || '0.002')
+
+  private rawAnalyserNode: AnalyserNode | null = null
+  private silenceMonitorInterval: NodeJS.Timeout | null = null
+  private silenceCounterMs = 0
+  private isSilenceWarningActive = false
+
   private vadContext: AudioContext | null = null
   private speakingIntervals: Map<string, SpeakingEntry> = new Map()
 
@@ -130,6 +140,16 @@ export class WebRTCManager {
     inputGain.gain.value = Math.max(0, Math.min(2, this.inputVolume / 100))
     this.inputGainNode = inputGain
 
+    // Analyser node for silence monitoring on raw input
+    try {
+      const rawAnalyser = ctx.createAnalyser()
+      rawAnalyser.fftSize = 256
+      source.connect(rawAnalyser)
+      this.rawAnalyserNode = rawAnalyser
+    } catch (e) {
+      console.warn('[WebRTC] Failed to create raw analyser node for silence monitoring:', e)
+    }
+
     // Сборка графа DSP
     let currentNode: AudioNode = source
 
@@ -141,6 +161,13 @@ export class WebRTCManager {
         type: 'setConfig',
         noiseSuppression: this.noiseSuppression,
         isMuted: isMuted
+      })
+      this.dfNode.port.postMessage({
+        type: 'setCalibratedParams',
+        thresholdOn: this.calibratedThresholdOn,
+        thresholdOff: this.calibratedThresholdOff,
+        attenuationLimit: this.calibratedAttenuationLimit,
+        noiseFloor: this.calibratedNoiseFloor
       })
       currentNode.connect(this.dfNode)
       currentNode = this.dfNode
@@ -157,6 +184,7 @@ export class WebRTCManager {
   }
 
   private cleanupProcessedStream() {
+    this.stopSilenceMonitor()
     if (this.dfNode) {
       this.dfNode.port.close()
       this.dfNode.disconnect()
@@ -347,6 +375,131 @@ export class WebRTCManager {
     }
   }
 
+  public async calibrateMic(durationMs?: number): Promise<{ noiseFloor: number; peakNoise: number }> {
+    if (this.localStream || this.rawStream) {
+      console.log('[Mic Calibration] Active stream exists, skipping calibration to prevent conflicts');
+      return { noiseFloor: this.calibratedNoiseFloor, peakNoise: this.calibratedThresholdOn / 2.8 };
+    }
+
+    const isFirstRun = localStorage.getItem('zabor_mic_calibrated') !== 'true';
+    const actualDurationMs = durationMs !== undefined ? durationMs : (isFirstRun ? 5000 : 2000);
+    console.log(`[Mic Calibration] Starting ${isFirstRun ? 'first (high quality, 5s)' : 'subsequent (quick check, 2s)'} calibration. Duration: ${actualDurationMs}ms`);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
+          sampleRate: 48000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: false,
+          autoGainControl: false
+        },
+        video: false
+      });
+
+      const audioContext = new AudioContext({ sampleRate: 48000 });
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+
+      const bufferLength = analyser.fftSize;
+      const dataArray = new Float32Array(bufferLength);
+      const windowRmsValues: number[] = [];
+
+      const intervalTime = 50; // sample every 50ms
+      const steps = actualDurationMs / intervalTime;
+
+      const checkRms = () => {
+        analyser.getFloatTimeDomainData(dataArray);
+        let sumSquares = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sumSquares += dataArray[i] * dataArray[i];
+        }
+        const rms = Math.sqrt(sumSquares / bufferLength);
+        windowRmsValues.push(rms);
+      };
+
+      for (let i = 0; i < steps; i++) {
+        await new Promise(resolve => setTimeout(resolve, intervalTime));
+        checkRms();
+      }
+
+      source.disconnect();
+      analyser.disconnect();
+      stream.getTracks().forEach(t => t.stop());
+      await audioContext.close();
+
+      if (windowRmsValues.length === 0) {
+        throw new Error('No audio data collected during calibration');
+      }
+
+      const sortedRms = [...windowRmsValues].sort((a, b) => a - b);
+      const noiseFloorIndex = Math.floor(sortedRms.length * 0.3);
+      let noiseFloor = sortedRms[noiseFloorIndex] || 0.002;
+      const peakNoiseIndex = Math.floor(sortedRms.length * 0.75);
+      const peakNoise = sortedRms[peakNoiseIndex] || 0.005;
+
+      if (!isFirstRun) {
+        const savedFloorRaw = localStorage.getItem('zabor_base_noise_floor');
+        if (savedFloorRaw) {
+          const savedFloor = parseFloat(savedFloorRaw);
+          if (!isNaN(savedFloor)) {
+            // Смешиваем: 60% базовый сохраненный, 40% текущий быстрый замер для стабильности
+            noiseFloor = 0.6 * savedFloor + 0.4 * noiseFloor;
+          }
+        }
+      }
+
+      console.log(`[Mic Calibration] Noise Floor: ${noiseFloor.toFixed(5)}, Peak Noise: ${peakNoise.toFixed(5)}`);
+
+      // Чуть-чуть завышаем параметры ВАДа (пороги), добавляя небольшой запас на неточность калибровки
+      this.calibratedThresholdOn = Math.max(0.005, Math.min(0.030, noiseFloor * 3.3 + 0.001));
+      this.calibratedThresholdOff = Math.max(0.0025, Math.min(0.015, noiseFloor * 1.8 + 0.0005));
+
+      // Чуть-чуть завышаем силу шумоподавления (attenuationLimit) для более надежной тишины
+      if (noiseFloor < 0.001) {
+        this.calibratedAttenuationLimit = 25;
+      } else if (noiseFloor < 0.003) {
+        this.calibratedAttenuationLimit = 35;
+      } else if (noiseFloor < 0.008) {
+        this.calibratedAttenuationLimit = 40;
+      } else {
+        this.calibratedAttenuationLimit = 50;
+      }
+
+      this.calibratedNoiseFloor = noiseFloor;
+
+      localStorage.setItem('zabor_mic_calibrated', 'true');
+      localStorage.setItem('zabor_base_noise_floor', noiseFloor.toString());
+      localStorage.setItem('zabor_threshold_on', this.calibratedThresholdOn.toString());
+      localStorage.setItem('zabor_threshold_off', this.calibratedThresholdOff.toString());
+      localStorage.setItem('zabor_attenuation_limit', this.calibratedAttenuationLimit.toString());
+
+      console.log(`[Mic Calibration] Threshold ON: ${this.calibratedThresholdOn.toFixed(5)}, Threshold OFF: ${this.calibratedThresholdOff.toFixed(5)}, Attenuation Limit: ${this.calibratedAttenuationLimit}dB`);
+
+      if (this.dfNode) {
+        this.dfNode.port.postMessage({
+          type: 'setCalibratedParams',
+          thresholdOn: this.calibratedThresholdOn,
+          thresholdOff: this.calibratedThresholdOff,
+          noiseFloor: this.calibratedNoiseFloor,
+          attenuationLimit: this.calibratedAttenuationLimit
+        });
+      }
+
+      return { noiseFloor, peakNoise };
+    } catch (e) {
+      console.warn('[Mic Calibration] Error calibrating mic:', e);
+      this.calibratedThresholdOn = 0.010;
+      this.calibratedThresholdOff = 0.004;
+      this.calibratedAttenuationLimit = 35;
+      this.calibratedNoiseFloor = 0.002;
+      throw e;
+    }
+  }
+
   // ── Local Stream ──────────────────────────────────────────────
 
   public async startLocalStream(deviceId?: string, useNS?: boolean, forceRestart = false): Promise<boolean> {
@@ -364,7 +517,7 @@ export class WebRTCManager {
 
       const raw = await navigator.mediaDevices.getUserMedia({
         audio: {
-          deviceId: this.currentDeviceId !== 'default' ? { exact: this.currentDeviceId } : undefined,
+          deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
           sampleRate: 48000,
           channelCount: 1,
           echoCancellation: true, // WebRTC AEC - строго до нейросети
@@ -390,6 +543,8 @@ export class WebRTCManager {
       if (this.processedContext && this.processedContext.state === 'suspended') {
         await this.processedContext.resume().catch(() => { })
       }
+
+      this.startSilenceMonitor()
 
       const me = useAppStore.getState().currentUser
       if (me && this.rawStream && !this.dfNode) this.setupVAD(this.rawStream, me.id, true)
@@ -425,10 +580,79 @@ export class WebRTCManager {
   public stopLocalStream() {
     const me = useAppStore.getState().currentUser
     if (me) this.clearVAD(me.id)
+    this.stopSilenceMonitor()
     if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null }
     if (this.rawStream) { this.rawStream.getTracks().forEach(t => t.stop()); this.rawStream = null }
     this.cleanupProcessedStream()
     this.leaveAll()
+  }
+
+  private startSilenceMonitor() {
+    this.stopSilenceMonitor();
+    this.silenceCounterMs = 0;
+    this.isSilenceWarningActive = false;
+
+    if (!this.rawAnalyserNode) return;
+
+    const bufferLength = this.rawAnalyserNode.fftSize;
+    const dataArray = new Float32Array(bufferLength);
+
+    this.silenceMonitorInterval = setInterval(() => {
+      const store = useAppStore.getState();
+      const me = store.currentUser;
+      
+      // Если пользователь заглушен (muted) или сервером заглушен, сбрасываем счетчик
+      if (!me || me.isMuted || me.isServerMuted) {
+        this.silenceCounterMs = 0;
+        return;
+      }
+
+      if (this.rawAnalyserNode) {
+        try {
+          this.rawAnalyserNode.getFloatTimeDomainData(dataArray);
+          let sumSquares = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            sumSquares += dataArray[i] * dataArray[i];
+          }
+          const rms = Math.sqrt(sumSquares / bufferLength);
+
+          // Если RMS экстремально низкий (тишина или пустой канал)
+          if (rms < 0.0002) {
+            this.silenceCounterMs += 200;
+          } else {
+            this.silenceCounterMs = 0;
+          }
+
+          if (this.silenceCounterMs >= 15000 && !this.isSilenceWarningActive) {
+            this.isSilenceWarningActive = true;
+            const toastMsg = i18n.t('toasts.micNotHearing', 'Вас не слышно, проверьте микрофон');
+            store.setSystemToast(toastMsg);
+            
+            setTimeout(() => {
+              const currentStore = useAppStore.getState();
+              if (currentStore.systemToast === toastMsg) {
+                currentStore.setSystemToast(null);
+              }
+              this.isSilenceWarningActive = false;
+            }, 4000);
+            
+            this.silenceCounterMs = 0;
+          }
+        } catch (e) {
+          console.warn('[WebRTC] Silence monitor error:', e);
+        }
+      }
+    }, 200);
+  }
+
+  private stopSilenceMonitor() {
+    if (this.silenceMonitorInterval) {
+      clearInterval(this.silenceMonitorInterval);
+      this.silenceMonitorInterval = null;
+    }
+    this.silenceCounterMs = 0;
+    this.isSilenceWarningActive = false;
+    this.rawAnalyserNode = null;
   }
 
   public toggleMute(isMuted: boolean) {

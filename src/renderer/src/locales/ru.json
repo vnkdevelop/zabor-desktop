@@ -23,7 +23,13 @@
       "noiseSuppression": "Шумоподавление",
       "default": "По умолчанию",
       "micFallback": "Микрофон",
-      "speakerFallback": "Динамики"
+      "speakerFallback": "Динамики",
+      "calibrateSensitivity": "Калибровка чувствительности",
+      "calibrateDesc": "Распознавание уровня шума вашего микрофона",
+      "calibrateButton": "Откалибровать микрофон",
+      "calibrating": "Калибровка... {{seconds}}с",
+      "calibrationComplete": "Успешно откалибровано!",
+      "doNotSpeak": "Не говорите!"
     },
     "privacy": {
       "newPassword": "НОВЫЙ ПАРОЛЬ",
@@ -99,7 +105,7 @@
       "placeholder": "Логин",
       "errorNotFound": "Пользователь не найден",
       "errorAlreadyFriend": "Он уже с тобой дружит ;) ",
-      "submit": "Отправить",
+      "submit": "Найти",
       "sent": "Отправлено"
     },
     "kick": {
@@ -118,7 +124,8 @@
       "title": "Пригласить в канал",
       "searchPlaceholder": "Поиск среди друзей...",
       "noFriends": "Друзья не найдены",
-      "sent": "✓ Отправлено"
+      "sent": "✓ Отправлено",
+      "alreadyMember": "Уже состоит"
     },
     "members": {
       "title": "Участники",
@@ -281,6 +288,8 @@
     "micNotHearing": "Вас не слышно, проверьте микрофон",
     "micNoAccess": "Нет доступа к микрофону. Проверьте разрешения в ОС.",
     "micBusy": "Микрофон занят другим приложением.",
+    "micBusyCalibration": "Нельзя калибровать микрофон во время разговора",
+    "calibrationFailed": "Не удалось получить доступ к микрофону для калибровки",
     "micNotFound": "Микрофон не найден. Подключите устройство и попробуйте снова.",
     "audioError": "Ошибка аудио: {{message}}",
     "incomingCall": "Входящий звонок...",
