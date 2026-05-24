@@ -38,8 +38,8 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
   // VAD Thresholds & Smoothing
   private rmsSmoothed = 0
-  private GATE_THRESHOLD_ON = 0.012  // Чувствительный порог включения
-  private GATE_THRESHOLD_OFF = 0.005 // Порог удержания
+  private GATE_THRESHOLD_ON = 0.015  // Было 0.012. Чуть приподнятый дефолтный порог включения
+  private GATE_THRESHOLD_OFF = 0.008 // Было 0.005. Порог удержания
   private lastVadSent = false
 
   private overflowCount = 0
@@ -47,10 +47,10 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private readonly HOLD_FRAMES = 50 // ~500ms удержания гейта после завершения речи
   private framesSinceLastVoice = this.HOLD_FRAMES
 
-  // VCA-эмуляция (Гибридный гейт для суммарных -60dB)
+  // VCA-эмуляция (Гибридный гейт для суммарного подавления)
   private currentGain = 1.0
   private readonly TARGET_GAIN_ON = 1.0
-  private readonly TARGET_GAIN_OFF = 0.0316 // -30 dB. В сумме с DF (-30dB) дает -60 dB
+  private readonly TARGET_GAIN_OFF = 0.01 // Было 0.0316 (-30 дБ). Снизили до -40 дБ для более чистого закрытия гейта
 
   // Экспоненциальные огибающие: Время атаки (15мс) и релиза (600мс)
   private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.015))
@@ -59,7 +59,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   // Медленная автоматическая регулировка усиления (АРУ / AGC)
   private agcGain = 1.0
   private readonly TARGET_SPEECH_RMS = 0.06 // Целевой уровень среднеквадратичного значения речи
-  private readonly MAX_AGC_GAIN = 3.0       // Максимальный буст (+10дБ)
+  private readonly MAX_AGC_GAIN = 1.8       // Было 3.0. Ограничиваем, чтобы избежать клиппинга и «писка»
   private readonly MIN_AGC_GAIN = 0.5       // Минимальный уровень (-6дБ)
   private speechRmsAccumulator = 0
   private speechRmsCount = 0
@@ -127,7 +127,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     try {
       this.denoiser = new StandaloneDeepFilter({
         attenuationLimit: this.attenuationLimit, // Изначальный или уже калиброванный лимит
-        postFilterBeta: 0.09  // Оптимальное сглаживание артефактов (песка)
+        postFilterBeta: 0.03  // Снижено с 0.09 до 0.03 для восстановления естественности голоса и устранения «писка»
       })
       await this.denoiser.initialize()
       this.denoiserReady = true
@@ -194,10 +194,13 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         this.processedFrame.set(this.frameToProcess)
       }
 
-      // Вычисление RMS для определения голоса на RAW фрейме
+      // Вычисление RMS для определения голоса.
+      // Если шумоподавление включено, делаем замер на очищенном (processed) фрейме,
+      // чтобы фоновый шум не приводил к ложным срабатываниям ВАД и перегрузкам АРУ.
       let sumSquares = 0
+      const analysisFrame = this.noiseSuppression ? this.processedFrame : this.frameToProcess
       for (let i = 0; i < this.FRAME_SIZE; i++) {
-        sumSquares += this.frameToProcess[i] * this.frameToProcess[i]
+        sumSquares += analysisFrame[i] * analysisFrame[i]
       }
       const currentRms = Math.sqrt(sumSquares / this.FRAME_SIZE)
 

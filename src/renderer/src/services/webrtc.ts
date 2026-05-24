@@ -42,10 +42,10 @@ export class WebRTCManager {
   private inputGainNode: GainNode | null = null
   private dfNode: AudioWorkletNode | null = null
 
-  private calibratedThresholdOn = parseFloat(localStorage.getItem('zabor_threshold_on') || '0.012')
-  private calibratedThresholdOff = parseFloat(localStorage.getItem('zabor_threshold_off') || '0.005')
-  private calibratedAttenuationLimit = parseInt(localStorage.getItem('zabor_attenuation_limit') || '35')
-  private calibratedNoiseFloor = parseFloat(localStorage.getItem('zabor_base_noise_floor') || '0.002')
+  private calibratedThresholdOn = parseFloat(localStorage.getItem('zabor_threshold_on') || '0.015')
+  private calibratedThresholdOff = parseFloat(localStorage.getItem('zabor_threshold_off') || '0.007')
+  private calibratedAttenuationLimit = parseInt(localStorage.getItem('zabor_attenuation_limit') || '45')
+  private calibratedNoiseFloor = parseFloat(localStorage.getItem('zabor_base_noise_floor') || '0.003')
 
   private rawAnalyserNode: AnalyserNode | null = null
   private silenceMonitorInterval: NodeJS.Timeout | null = null
@@ -437,9 +437,10 @@ export class WebRTCManager {
 
       const sortedRms = [...windowRmsValues].sort((a, b) => a - b);
       const noiseFloorIndex = Math.floor(sortedRms.length * 0.3);
-      let noiseFloor = sortedRms[noiseFloorIndex] || 0.002;
-      const peakNoiseIndex = Math.floor(sortedRms.length * 0.75);
-      const peakNoise = sortedRms[peakNoiseIndex] || 0.005;
+      let noiseFloor = sortedRms[noiseFloorIndex] || 0.003;
+      // Используем 90-й процентиль для более точной оценки пикового фонового шума
+      const peakNoiseIndex = Math.floor(sortedRms.length * 0.90);
+      const peakNoise = sortedRms[peakNoiseIndex] || 0.006;
 
       if (!isFirstRun) {
         const savedFloorRaw = localStorage.getItem('zabor_base_noise_floor');
@@ -454,20 +455,14 @@ export class WebRTCManager {
 
       console.log(`[Mic Calibration] Noise Floor: ${noiseFloor.toFixed(5)}, Peak Noise: ${peakNoise.toFixed(5)}`);
 
-      // Чуть-чуть завышаем параметры ВАДа (пороги), добавляя небольшой запас на неточность калибровки
-      this.calibratedThresholdOn = Math.max(0.005, Math.min(0.030, noiseFloor * 3.3 + 0.001));
-      this.calibratedThresholdOff = Math.max(0.0025, Math.min(0.015, noiseFloor * 1.8 + 0.0005));
+      // Пороги ВАДа настраиваем на базе пикового шума. Поскольку анализ идет по чистому сигналу,
+      // нет необходимости в запредельно высоких порогах, но поднимаем минимум во избежание ложных открытий.
+      this.calibratedThresholdOn = Math.max(0.012, Math.min(0.025, peakNoise * 1.5 + 0.001));
+      this.calibratedThresholdOff = Math.max(0.006, Math.min(0.012, peakNoise * 0.8 + 0.0005));
 
-      // Чуть-чуть завышаем силу шумоподавления (attenuationLimit) для более надежной тишины
-      if (noiseFloor < 0.001) {
-        this.calibratedAttenuationLimit = 25;
-      } else if (noiseFloor < 0.003) {
-        this.calibratedAttenuationLimit = 35;
-      } else if (noiseFloor < 0.008) {
-        this.calibratedAttenuationLimit = 40;
-      } else {
-        this.calibratedAttenuationLimit = 50;
-      }
+      // Динамический расчет силы шумоподавления от 40 дБ (микрофон в идеальной тишине) до 70 дБ (сильный шум)
+      const calculatedLimit = 40 + ((noiseFloor - 0.001) / 0.007) * 30;
+      this.calibratedAttenuationLimit = Math.round(Math.max(40, Math.min(70, calculatedLimit)));
 
       this.calibratedNoiseFloor = noiseFloor;
 
@@ -492,10 +487,10 @@ export class WebRTCManager {
       return { noiseFloor, peakNoise };
     } catch (e) {
       console.warn('[Mic Calibration] Error calibrating mic:', e);
-      this.calibratedThresholdOn = 0.010;
-      this.calibratedThresholdOff = 0.004;
-      this.calibratedAttenuationLimit = 35;
-      this.calibratedNoiseFloor = 0.002;
+      this.calibratedThresholdOn = 0.015;
+      this.calibratedThresholdOff = 0.007;
+      this.calibratedAttenuationLimit = 45;
+      this.calibratedNoiseFloor = 0.003;
       throw e;
     }
   }
