@@ -10,6 +10,49 @@ type SpeakingEntry = {
   nodes: AudioNode[]
 }
 
+function optimizeAudioSDP(sdp: string): string {
+  const opusRegex = /a=rtpmap:(\d+)\s+opus\/48000\/2/i
+  const match = sdp.match(opusRegex)
+  if (!match) return sdp
+
+  const pt = match[1]
+  const lines = sdp.split('\r\n')
+  let fmtpFound = false
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith(`a=fmtp:${pt}`)) {
+      // 96kbps VBR, FEC enabled, DTX disabled, 10ms frame size
+      lines[i] = `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=10;minptime=10`
+      fmtpFound = true
+      break
+    }
+  }
+
+  if (!fmtpFound) {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith(`a=rtpmap:${pt}`)) {
+        lines.splice(i + 1, 0, `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=10;minptime=10`)
+        break
+      }
+    }
+  }
+
+  let audioSectionIdx = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('m=audio')) {
+      audioSectionIdx = i
+      break
+    }
+  }
+
+  if (audioSectionIdx !== -1) {
+    // 96 kbps audio bandwidth limit
+    lines.splice(audioSectionIdx + 1, 0, 'b=AS:96')
+  }
+
+  return lines.join('\r\n')
+}
+
 export class WebRTCManager {
   private localStream: MediaStream | null = null
   private rawStream: MediaStream | null = null
@@ -455,14 +498,13 @@ export class WebRTCManager {
 
       console.log(`[Mic Calibration] Noise Floor: ${noiseFloor.toFixed(5)}, Peak Noise: ${peakNoise.toFixed(5)}`);
 
-      // Пороги ВАДа настраиваем на базе пикового шума. Поскольку анализ идет по чистому сигналу,
-      // нет необходимости в запредельно высоких порогах, но поднимаем минимум во избежание ложных открытий.
-      this.calibratedThresholdOn = Math.max(0.012, Math.min(0.025, peakNoise * 1.5 + 0.001));
-      this.calibratedThresholdOff = Math.max(0.006, Math.min(0.012, peakNoise * 0.8 + 0.0005));
+      // Пороги ВАДа настраиваем на базе пикового шума с запасом без жесткого зажимания сверху,
+      // чтобы гейт надежно закрывался при шумах и писке микрофона в паузах.
+      this.calibratedThresholdOn = Math.max(0.015, Math.min(0.08, peakNoise * 1.8 + 0.002));
+      this.calibratedThresholdOff = Math.max(0.008, Math.min(0.05, peakNoise * 1.2 + 0.001));
 
-      // Динамический расчет силы шумоподавления от 40 дБ (микрофон в идеальной тишине) до 70 дБ (сильный шум)
-      const calculatedLimit = 40 + ((noiseFloor - 0.001) / 0.007) * 30;
-      this.calibratedAttenuationLimit = Math.round(Math.max(40, Math.min(70, calculatedLimit)));
+      // Всегда выставляем максимальное шумоподавление (100 дБ) для 100% изоляции шума
+      this.calibratedAttenuationLimit = 100;
 
       this.calibratedNoiseFloor = noiseFloor;
 
@@ -829,7 +871,8 @@ export class WebRTCManager {
 
     try {
       const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
+      const optimizedSDP = optimizeAudioSDP(offer.sdp!)
+      await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
       signalRService.sendWebRTCOffer(userId, JSON.stringify(pc.localDescription))
     } catch (e) {
       console.error('[WebRTC] connectToPeer failed', e)
@@ -860,9 +903,12 @@ export class WebRTCManager {
     this.startIceTimeout(senderId)
 
     try {
-      await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(offerStr)))
+      const offer = JSON.parse(offerStr)
+      offer.sdp = optimizeAudioSDP(offer.sdp)
+      await pc.setRemoteDescription(new RTCSessionDescription(offer))
       const answer = await pc.createAnswer()
-      await pc.setLocalDescription(answer)
+      const optimizedAnswerSDP = optimizeAudioSDP(answer.sdp!)
+      await pc.setLocalDescription({ type: 'answer', sdp: optimizedAnswerSDP })
       await this.drainPendingCandidates(senderId)
       signalRService.sendWebRTCAnswer(senderId, JSON.stringify(pc.localDescription))
     } catch (e) {
@@ -875,7 +921,9 @@ export class WebRTCManager {
     const pc = this.peerConnections.get(senderId)
     if (pc) {
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(answerStr)))
+        const answer = JSON.parse(answerStr)
+        answer.sdp = optimizeAudioSDP(answer.sdp)
+        await pc.setRemoteDescription(new RTCSessionDescription(answer))
         await this.drainPendingCandidates(senderId)
       } catch (e) {
         console.error('[WebRTC] handleAnswer failed', e)

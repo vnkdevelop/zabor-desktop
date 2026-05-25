@@ -38,32 +38,31 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
   // VAD Thresholds & Smoothing
   private rmsSmoothed = 0
-  private GATE_THRESHOLD_ON = 0.015  // Было 0.012. Чуть приподнятый дефолтный порог включения
-  private GATE_THRESHOLD_OFF = 0.008 // Было 0.005. Порог удержания
+  private GATE_THRESHOLD_ON = 0.015  // Чуть приподнятый дефолтный порог включения
+  private GATE_THRESHOLD_OFF = 0.008 // Порог удержания
   private lastVadSent = false
 
   private overflowCount = 0
 
-  private readonly HOLD_FRAMES = 50 // ~500ms удержания гейта после завершения речи
+  private readonly HOLD_FRAMES = 20 // ~200ms удержания гейта после завершения речи (было 50 / 500ms)
   private framesSinceLastVoice = this.HOLD_FRAMES
 
   // VCA-эмуляция (Гибридный гейт для суммарного подавления)
   private currentGain = 1.0
   private readonly TARGET_GAIN_ON = 1.0
-  private readonly TARGET_GAIN_OFF = 0.01 // Было 0.0316 (-30 дБ). Снизили до -40 дБ для более чистого закрытия гейта
+  private readonly TARGET_GAIN_OFF = 0.0 // Полная тишина при закрытом гейте (было 0.01 / -40 дБ)
 
-  // Экспоненциальные огибающие: Время атаки (15мс) и релиза (600мс)
-  private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.015))
-  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.60))
+  // Экспоненциальные огибающие: Время атаки (10мс) и релиза (30мс)
+  private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.010)) // Было 15мс
+  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.030)) // Было 600мс
 
   // Медленная автоматическая регулировка усиления (АРУ / AGC)
-  private agcGain = 1.0
-  private readonly TARGET_SPEECH_RMS = 0.06 // Целевой уровень среднеквадратичного значения речи
-  private readonly MAX_AGC_GAIN = 1.8       // Было 3.0. Ограничиваем, чтобы избежать клиппинга и «писка»
-  private readonly MIN_AGC_GAIN = 0.5       // Минимальный уровень (-6дБ)
-  private speechRmsAccumulator = 0
-  private speechRmsCount = 0
-  private attenuationLimit = 35
+  private readonly agcGain = 1.0 // Зафиксировано на 1.0 для предотвращения скачков и пампинга
+  private attenuationLimit = 100
+
+  // Буфер lookahead для задержки голоса и качественного открытия гейта
+  private delayBuffer: Array<{ frame: Float32Array; isSpeaking: boolean }> = []
+  private readonly LOOKAHEAD_FRAMES = 3 // 30мс задержки
 
   constructor() {
     super()
@@ -71,7 +70,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     this.outputBuffer = new Float32Array(this.BUFFER_SIZE)
     this.frameToProcess = new Float32Array(this.FRAME_SIZE)
     this.processedFrame = new Float32Array(this.FRAME_SIZE)
-    this.outputWriteIndex = this.FRAME_SIZE // Pre-fill with 480 samples of silence
+    this.outputWriteIndex = this.FRAME_SIZE * (1 + this.LOOKAHEAD_FRAMES) // Предзаполняем тишиной с учетом lookahead задержки
 
     this.port.onmessage = (event) => {
       if (event.data.type === 'loadWasm') {
@@ -88,10 +87,11 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
             this.inputReadIndex = 0
             this.inputWriteIndex = 0
             this.outputReadIndex = 0
-            this.outputWriteIndex = this.FRAME_SIZE // Pre-fill with 480 samples of silence
+            this.outputWriteIndex = this.FRAME_SIZE * (1 + this.LOOKAHEAD_FRAMES)
             this.rmsSmoothed = 0
             this.currentGain = this.TARGET_GAIN_OFF
             this.framesSinceLastVoice = this.HOLD_FRAMES
+            this.delayBuffer = []
             if (this.lastVadSent) {
               this.port.postMessage({ type: 'vad', isSpeaking: false })
               this.lastVadSent = false
@@ -126,8 +126,8 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     if (this.denoiserReady) return
     try {
       this.denoiser = new StandaloneDeepFilter({
-        attenuationLimit: this.attenuationLimit, // Изначальный или уже калиброванный лимит
-        postFilterBeta: 0.03  // Снижено с 0.09 до 0.03 для восстановления естественности голоса и устранения «писка»
+        attenuationLimit: this.attenuationLimit,
+        postFilterBeta: 0.05
       })
       await this.denoiser.initialize()
       this.denoiserReady = true
@@ -196,7 +196,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
       // Вычисление RMS для определения голоса.
       // Если шумоподавление включено, делаем замер на очищенном (processed) фрейме,
-      // чтобы фоновый шум не приводил к ложным срабатываниям ВАД и перегрузкам АРУ.
+      // чтобы фоновый шум не приводил к ложным срабатываниям ВАД.
       let sumSquares = 0
       const analysisFrame = this.noiseSuppression ? this.processedFrame : this.frameToProcess
       for (let i = 0; i < this.FRAME_SIZE; i++) {
@@ -222,55 +222,43 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       }
 
       const isSpeaking = this.framesSinceLastVoice < this.HOLD_FRAMES
-      if (isSpeaking !== this.lastVadSent) {
-        this.port.postMessage({ type: 'vad', isSpeaking })
-        this.lastVadSent = isSpeaking
-      }
 
-      // АРУ (AGC) накопление данных
-      if (isSpeaking) {
-        this.speechRmsAccumulator += currentRms
-        this.speechRmsCount++
+      // Добавляем фрейм во временный буфер задержки
+      this.delayBuffer.push({
+        frame: new Float32Array(this.processedFrame),
+        isSpeaking: isSpeaking
+      })
 
-        if (this.speechRmsCount >= 100) { // Каждую секунду активной речи (100 фреймов по 10мс)
-          const avgSpeechRms = this.speechRmsAccumulator / this.speechRmsCount
-          this.speechRmsAccumulator = 0
-          this.speechRmsCount = 0
+      // Когда буфер заполнен, извлекаем самый старый и применяем гейт с lookahead
+      if (this.delayBuffer.length > this.LOOKAHEAD_FRAMES) {
+        const oldest = this.delayBuffer.shift()!
+        
+        // Lookahead: гейт открыт, если сам старый фрейм или любой из последующих в очереди активен
+        const anySpeakingAhead = oldest.isSpeaking || this.delayBuffer.some(item => item.isSpeaking)
 
-          if (avgSpeechRms > 0.001) {
-            const targetAgc = this.TARGET_SPEECH_RMS / avgSpeechRms
-            const clampedTarget = Math.max(this.MIN_AGC_GAIN, Math.min(this.MAX_AGC_GAIN, targetAgc))
-            // Медленная подстройка
-            this.agcGain = 0.85 * this.agcGain + 0.15 * clampedTarget
+        // Отправляем VAD-сообщение хосту синхронно с выдачей фрейма
+        if (anySpeakingAhead !== this.lastVadSent) {
+          this.port.postMessage({ type: 'vad', isSpeaking: anySpeakingAhead })
+          this.lastVadSent = anySpeakingAhead
+        }
+
+        if (this.noiseSuppression) {
+          const overallTarget = anySpeakingAhead ? this.agcGain : this.TARGET_GAIN_OFF
+
+          for (let i = 0; i < this.FRAME_SIZE; i++) {
+            if (overallTarget > this.currentGain) {
+              // Быстрая атака (10мс)
+              this.currentGain = this.attackCoef * this.currentGain + (1 - this.attackCoef) * overallTarget
+            } else {
+              // Быстрый релиз (30мс)
+              this.currentGain = this.releaseCoef * this.currentGain + (1 - this.releaseCoef) * overallTarget
+            }
+            oldest.frame[i] *= this.currentGain
           }
         }
-      } else {
-        this.speechRmsAccumulator = 0
-        this.speechRmsCount = 0
+
+        this.outputWriteIndex = this.pushToBuffer(this.outputBuffer, oldest.frame, this.outputWriteIndex, this.outputReadIndex)
       }
-
-      // Гибридный VCA-экспандер и автоматическое усиление (AGC)
-      if (this.noiseSuppression) {
-        const overallTarget = isSpeaking ? this.agcGain : this.TARGET_GAIN_OFF
-
-        for (let i = 0; i < this.FRAME_SIZE; i++) {
-          if (overallTarget > this.currentGain) {
-            // Быстрая атака
-            this.currentGain = this.attackCoef * this.currentGain + (1 - this.attackCoef) * overallTarget
-          } else {
-            // Плавный релиз
-            this.currentGain = this.releaseCoef * this.currentGain + (1 - this.releaseCoef) * overallTarget
-          }
-          this.processedFrame[i] *= this.currentGain
-        }
-      } else {
-        // Если шумоподавление выключено, всё равно применяем выравнивание громкости (AGC)
-        for (let i = 0; i < this.FRAME_SIZE; i++) {
-          this.processedFrame[i] *= this.agcGain
-        }
-      }
-
-      this.outputWriteIndex = this.pushToBuffer(this.outputBuffer, this.processedFrame, this.outputWriteIndex, this.outputReadIndex)
     }
 
     const availableOutput = (this.outputWriteIndex - this.outputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE
