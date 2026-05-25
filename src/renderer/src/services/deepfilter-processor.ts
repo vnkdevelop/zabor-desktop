@@ -24,7 +24,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private outputWriteIndex = 0
 
   private readonly FRAME_SIZE = 480
-  private readonly BUFFER_SIZE = 4800
+  private readonly BUFFER_SIZE = 24000
   private readonly SAMPLE_RATE = 48000
 
   private denoiser: StandaloneDeepFilter | null = null
@@ -62,7 +62,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
   // Буфер lookahead для задержки голоса и качественного открытия гейта
   private delayBuffer: Array<{ frame: Float32Array; isSpeaking: boolean }> = []
-  private readonly LOOKAHEAD_FRAMES = 3 // 30мс задержки
+  private readonly LOOKAHEAD_FRAMES = 8 // 80мс задержки
 
   constructor() {
     super()

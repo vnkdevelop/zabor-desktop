@@ -82,7 +82,7 @@ private stopSfx(src: string) {
 
   private getSfxContext(masterGain: number): { ctx: AudioContext; master: GainNode } | null {
     try {
-      if (!this.sfxContext) this.sfxContext = new AudioContext();
+      if (!this.sfxContext) this.sfxContext = new AudioContext({ sampleRate: 48000 });
       if (this.sfxContext.state === 'suspended') this.sfxContext.resume().catch(() => {});
       const ctx = this.sfxContext;
       const master = ctx.createGain();

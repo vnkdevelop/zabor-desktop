@@ -282,7 +282,7 @@ export class WebRTCManager {
 
     try {
       if (!this.vadContext || this.vadContext.state === 'closed') {
-        this.vadContext = new AudioContext({ latencyHint: 'playback' })
+        this.vadContext = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' })
       }
       if (this.vadContext.state === 'suspended') this.vadContext.resume().catch(() => { })
 
@@ -720,7 +720,7 @@ export class WebRTCManager {
       if (this.outputMixContext.state === 'suspended') this.outputMixContext.resume().catch(() => { })
       return
     }
-    this.outputMixContext = new AudioContext({ latencyHint: 'playback' })
+    this.outputMixContext = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' })
     if (this.outputMixContext.state === 'suspended') {
       this.outputMixContext.resume().catch(() => { })
     }
