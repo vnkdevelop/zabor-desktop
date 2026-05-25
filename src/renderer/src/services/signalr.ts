@@ -82,7 +82,14 @@ private stopSfx(src: string) {
 
   private getSfxContext(masterGain: number): { ctx: AudioContext; master: GainNode } | null {
     try {
-      if (!this.sfxContext) this.sfxContext = new AudioContext({ sampleRate: 48000 });
+      if (!this.sfxContext) {
+        try {
+          this.sfxContext = new AudioContext({ sampleRate: 48000 });
+        } catch (e) {
+          console.warn('[SignalR] Failed to create sfxContext at 48000Hz, falling back to default:', e);
+          this.sfxContext = new AudioContext();
+        }
+      }
       if (this.sfxContext.state === 'suspended') this.sfxContext.resume().catch(() => {});
       const ctx = this.sfxContext;
       const master = ctx.createGain();

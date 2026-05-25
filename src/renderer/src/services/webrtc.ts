@@ -282,7 +282,12 @@ export class WebRTCManager {
 
     try {
       if (!this.vadContext || this.vadContext.state === 'closed') {
-        this.vadContext = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' })
+        try {
+          this.vadContext = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' })
+        } catch (e) {
+          console.warn('[WebRTC] Failed to create vadContext at 48000Hz, falling back to default:', e)
+          this.vadContext = new AudioContext({ latencyHint: 'playback' })
+        }
       }
       if (this.vadContext.state === 'suspended') this.vadContext.resume().catch(() => { })
 
@@ -501,7 +506,7 @@ export class WebRTCManager {
       // Пороги ВАДа настраиваем на базе пикового шума с запасом без жесткого зажимания сверху,
       // чтобы гейт надежно закрывался при шумах и писке микрофона в паузах.
       this.calibratedThresholdOn = Math.max(0.015, Math.min(0.08, peakNoise * 1.8 + 0.002));
-      this.calibratedThresholdOff = Math.max(0.008, Math.min(0.05, peakNoise * 1.2 + 0.001));
+      this.calibratedThresholdOff = Math.max(0.004, Math.min(0.05, peakNoise * 1.2 + 0.001));
 
       // Всегда выставляем максимальное шумоподавление (100 дБ) для 100% изоляции шума
       this.calibratedAttenuationLimit = 100;
@@ -720,7 +725,12 @@ export class WebRTCManager {
       if (this.outputMixContext.state === 'suspended') this.outputMixContext.resume().catch(() => { })
       return
     }
-    this.outputMixContext = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' })
+    try {
+      this.outputMixContext = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' })
+    } catch (e) {
+      console.warn('[WebRTC] Failed to create outputMixContext at 48000Hz, falling back to default:', e)
+      this.outputMixContext = new AudioContext({ latencyHint: 'playback' })
+    }
     if (this.outputMixContext.state === 'suspended') {
       this.outputMixContext.resume().catch(() => { })
     }

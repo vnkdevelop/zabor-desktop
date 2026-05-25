@@ -39,12 +39,12 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   // VAD Thresholds & Smoothing
   private rmsSmoothed = 0
   private GATE_THRESHOLD_ON = 0.015  // Чуть приподнятый дефолтный порог включения
-  private GATE_THRESHOLD_OFF = 0.008 // Порог удержания
+  private GATE_THRESHOLD_OFF = 0.004 // Порог удержания
   private lastVadSent = false
 
   private overflowCount = 0
 
-  private readonly HOLD_FRAMES = 20 // ~200ms удержания гейта после завершения речи (было 50 / 500ms)
+  private readonly HOLD_FRAMES = 35 // ~350ms удержания гейта после завершения речи (было 20 / 200ms)
   private framesSinceLastVoice = this.HOLD_FRAMES
 
   // VCA-эмуляция (Гибридный гейт для суммарного подавления)
@@ -52,9 +52,9 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private readonly TARGET_GAIN_ON = 1.0
   private readonly TARGET_GAIN_OFF = 0.0 // Полная тишина при закрытом гейте (было 0.01 / -40 дБ)
 
-  // Экспоненциальные огибающие: Время атаки (10мс) и релиза (30мс)
+  // Экспоненциальные огибающие: Время атаки (10мс) и релиза (200мс)
   private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.010)) // Было 15мс
-  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.030)) // Было 600мс
+  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.200)) // Медленный релиз для плавности
 
   // Медленная автоматическая регулировка усиления (АРУ / AGC)
   private readonly agcGain = 1.0 // Зафиксировано на 1.0 для предотвращения скачков и пампинга
