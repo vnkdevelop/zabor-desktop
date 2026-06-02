@@ -21,8 +21,8 @@ function optimizeAudioSDP(sdp: string): string {
 
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].startsWith(`a=fmtp:${pt}`)) {
-      // 96kbps VBR, FEC enabled, DTX disabled, 10ms frame size
-      lines[i] = `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=10;minptime=10`
+      // 96kbps VBR, FEC enabled, DTX disabled, 20ms frame size
+      lines[i] = `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=20;minptime=10;stereo=0;sprop-maxcapturerate=48000`
       fmtpFound = true
       break
     }
@@ -31,7 +31,7 @@ function optimizeAudioSDP(sdp: string): string {
   if (!fmtpFound) {
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith(`a=rtpmap:${pt}`)) {
-        lines.splice(i + 1, 0, `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=10;minptime=10`)
+        lines.splice(i + 1, 0, `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=20;minptime=10;stereo=0;sprop-maxcapturerate=48000`)
         break
       }
     }
@@ -85,8 +85,8 @@ export class WebRTCManager {
   private inputGainNode: GainNode | null = null
   private dfNode: AudioWorkletNode | null = null
 
-  private calibratedThresholdOn = parseFloat(localStorage.getItem('zabor_threshold_on') || '0.015')
-  private calibratedThresholdOff = parseFloat(localStorage.getItem('zabor_threshold_off') || '0.007')
+  private calibratedThresholdOn = parseFloat(localStorage.getItem('zabor_threshold_on') || '0.008')
+  private calibratedThresholdOff = parseFloat(localStorage.getItem('zabor_threshold_off') || '0.003')
   private calibratedAttenuationLimit = parseInt(localStorage.getItem('zabor_attenuation_limit') || '45')
   private calibratedNoiseFloor = parseFloat(localStorage.getItem('zabor_base_noise_floor') || '0.003')
 
@@ -178,9 +178,10 @@ export class WebRTCManager {
     limiter.attack.value = 0.001
     limiter.release.value = 0.050
 
-    // 7. Output Gain
+    // 7. Input Gain (Pre-amplifier) - placed first to amplify signal before VAD and Denoiser
     const inputGain = ctx.createGain()
-    inputGain.gain.value = Math.max(0, Math.min(2, this.inputVolume / 100))
+    const gainFactor = Math.max(0.01, this.inputVolume / 100)
+    inputGain.gain.value = gainFactor
     this.inputGainNode = inputGain
 
     // Analyser node for silence monitoring on raw input
@@ -196,6 +197,10 @@ export class WebRTCManager {
     // Сборка графа DSP
     let currentNode: AudioNode = source
 
+    // Pre-amplifier connected immediately
+    currentNode.connect(inputGain)
+    currentNode = inputGain
+
     // 2. Ядро DeepFilterNet3 + 3. Шумовой затвор
     if (this.dfNode) {
       const store = useAppStore.getState()
@@ -207,10 +212,10 @@ export class WebRTCManager {
       })
       this.dfNode.port.postMessage({
         type: 'setCalibratedParams',
-        thresholdOn: this.calibratedThresholdOn,
-        thresholdOff: this.calibratedThresholdOff,
+        thresholdOn: this.calibratedThresholdOn * gainFactor,
+        thresholdOff: this.calibratedThresholdOff * gainFactor,
         attenuationLimit: this.calibratedAttenuationLimit,
-        noiseFloor: this.calibratedNoiseFloor
+        noiseFloor: this.calibratedNoiseFloor * gainFactor
       })
       currentNode.connect(this.dfNode)
       currentNode = this.dfNode
@@ -220,8 +225,7 @@ export class WebRTCManager {
     compressor.connect(highpass)
     highpass.connect(peaking)
     peaking.connect(limiter)
-    limiter.connect(inputGain)
-    inputGain.connect(destination)
+    limiter.connect(destination)
 
     return destination.stream
   }
@@ -244,8 +248,18 @@ export class WebRTCManager {
 
   public setInputVolume(volume: number) {
     this.inputVolume = volume
+    const gainFactor = Math.max(0.01, volume / 100)
     if (this.inputGainNode) {
-      this.inputGainNode.gain.value = Math.max(0, Math.min(2, volume / 100))
+      this.inputGainNode.gain.value = gainFactor
+    }
+    if (this.dfNode) {
+      this.dfNode.port.postMessage({
+        type: 'setCalibratedParams',
+        thresholdOn: this.calibratedThresholdOn * gainFactor,
+        thresholdOff: this.calibratedThresholdOff * gainFactor,
+        attenuationLimit: this.calibratedAttenuationLimit,
+        noiseFloor: this.calibratedNoiseFloor * gainFactor
+      })
     }
   }
 
@@ -317,8 +331,8 @@ export class WebRTCManager {
       let vadSilenceFrames = 0
       let hasWarnedSilence = false
 
-      const avgTh = isLocal ? 4 : 2
-      const peakTh = isLocal ? 10 : 8
+      const avgTh = isLocal ? 2.5 : 1.5
+      const peakTh = isLocal ? 7 : 5
 
       const check = () => {
         const store = useAppStore.getState()
@@ -437,7 +451,6 @@ export class WebRTCManager {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
-          sampleRate: 48000,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: false,
@@ -503,10 +516,10 @@ export class WebRTCManager {
 
       console.log(`[Mic Calibration] Noise Floor: ${noiseFloor.toFixed(5)}, Peak Noise: ${peakNoise.toFixed(5)}`);
 
-      // Пороги ВАДа настраиваем на базе пикового шума с запасом без жесткого зажимания сверху,
-      // чтобы гейт надежно закрывался при шумах и писке микрофона в паузах.
-      this.calibratedThresholdOn = Math.max(0.015, Math.min(0.08, peakNoise * 1.8 + 0.002));
-      this.calibratedThresholdOff = Math.max(0.004, Math.min(0.05, peakNoise * 1.2 + 0.001));
+      // Пороги ВАДа настраиваем на базе пикового шума с оптимальным запасом и повышенной чувствительностью,
+      // позволяющей улавливать даже тихие, высокие или низкие голоса.
+      this.calibratedThresholdOn = Math.max(0.004, Math.min(0.05, peakNoise * 1.3 + 0.001));
+      this.calibratedThresholdOff = Math.max(0.0015, Math.min(0.03, peakNoise * 0.9 + 0.0005));
 
       // Всегда выставляем максимальное шумоподавление (100 дБ) для 100% изоляции шума
       this.calibratedAttenuationLimit = 100;
@@ -522,11 +535,12 @@ export class WebRTCManager {
       console.log(`[Mic Calibration] Threshold ON: ${this.calibratedThresholdOn.toFixed(5)}, Threshold OFF: ${this.calibratedThresholdOff.toFixed(5)}, Attenuation Limit: ${this.calibratedAttenuationLimit}dB`);
 
       if (this.dfNode) {
+        const gainFactor = Math.max(0.01, this.inputVolume / 100)
         this.dfNode.port.postMessage({
           type: 'setCalibratedParams',
-          thresholdOn: this.calibratedThresholdOn,
-          thresholdOff: this.calibratedThresholdOff,
-          noiseFloor: this.calibratedNoiseFloor,
+          thresholdOn: this.calibratedThresholdOn * gainFactor,
+          thresholdOff: this.calibratedThresholdOff * gainFactor,
+          noiseFloor: this.calibratedNoiseFloor * gainFactor,
           attenuationLimit: this.calibratedAttenuationLimit
         });
       }
@@ -534,8 +548,8 @@ export class WebRTCManager {
       return { noiseFloor, peakNoise };
     } catch (e) {
       console.warn('[Mic Calibration] Error calibrating mic:', e);
-      this.calibratedThresholdOn = 0.015;
-      this.calibratedThresholdOff = 0.007;
+      this.calibratedThresholdOn = 0.008;
+      this.calibratedThresholdOff = 0.003;
       this.calibratedAttenuationLimit = 45;
       this.calibratedNoiseFloor = 0.003;
       throw e;
@@ -560,7 +574,6 @@ export class WebRTCManager {
       const raw = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
-          sampleRate: 48000,
           channelCount: 1,
           echoCancellation: true, // WebRTC AEC - строго до нейросети
           noiseSuppression: !this.noiseSuppression, // Отключаем браузерный, если включен DF3
@@ -642,7 +655,7 @@ export class WebRTCManager {
     this.silenceMonitorInterval = setInterval(() => {
       const store = useAppStore.getState();
       const me = store.currentUser;
-      
+
       // Если пользователь заглушен (muted) или сервером заглушен, сбрасываем счетчик
       if (!me || me.isMuted || me.isServerMuted) {
         this.silenceCounterMs = 0;
@@ -669,7 +682,7 @@ export class WebRTCManager {
             this.isSilenceWarningActive = true;
             const toastMsg = i18n.t('toasts.micNotHearing', 'Вас не слышно, проверьте микрофон');
             store.setSystemToast(toastMsg);
-            
+
             setTimeout(() => {
               const currentStore = useAppStore.getState();
               if (currentStore.systemToast === toastMsg) {
@@ -677,7 +690,7 @@ export class WebRTCManager {
               }
               this.isSilenceWarningActive = false;
             }, 4000);
-            
+
             this.silenceCounterMs = 0;
           }
         } catch (e) {

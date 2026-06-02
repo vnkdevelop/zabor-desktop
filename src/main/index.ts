@@ -14,6 +14,11 @@ if (app) {
 
 
   app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns');
+
+  if (!app.isPackaged) {
+    const port = process.env.REMOTE_DEBUGGING_PORT || '9222';
+    app.commandLine.appendSwitch('remote-debugging-port', port);
+  }
 }
 
 const isDev = !app.isPackaged;
