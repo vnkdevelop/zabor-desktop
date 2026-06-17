@@ -17,6 +17,32 @@
   RMDir /r "$LOCALAPPDATA\Temp\zabor*"
   RMDir /r "$LOCALAPPDATA\Temp\${PRODUCT_NAME}*"
 
+  ; Удаление данных для всех пользователей на компьютере (полезно при установке от имени администратора)
+  GetFullPathName $R7 "$PROFILE\.."
+  ClearErrors
+  FindFirst $R8 $R9 "$R7\*"
+  _loop:
+    IfErrors _done
+    StrCmp $R9 "." _next
+    StrCmp $R9 ".." _next
+    
+    RMDir /r "$R7\$R9\AppData\Roaming\zabor-desktop"
+    RMDir /r "$R7\$R9\AppData\Local\zabor-desktop"
+    RMDir /r "$R7\$R9\AppData\Roaming\zabor"
+    RMDir /r "$R7\$R9\AppData\Roaming\ZABOR"
+    RMDir /r "$R7\$R9\AppData\Roaming\${PRODUCT_NAME}"
+    RMDir /r "$R7\$R9\AppData\Local\zabor"
+    RMDir /r "$R7\$R9\AppData\Local\ZABOR"
+    RMDir /r "$R7\$R9\AppData\Local\${PRODUCT_NAME}"
+    RMDir /r "$R7\$R9\AppData\Local\Temp\zabor*"
+    RMDir /r "$R7\$R9\AppData\Local\Temp\${PRODUCT_NAME}*"
+
+  _next:
+    FindNext $R8 $R9
+    Goto _loop
+  _done:
+    FindClose $R8
+
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCT_NAME}"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ZABOR"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "zabor-desktop"
@@ -33,36 +59,45 @@
 !macro customInit
   ; === УДАЛЕНИЕ СТАРОЙ ВЕРСИИ (АВТОМАТИЧЕСКИ) ===
 
+  ; Инициализируем переменную для пути установки старой версии
+  StrCpy $R2 ""
+
   ; 1) per-machine
   ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "QuietUninstallString"
   StrCmp $R0 "" _zabor_try_user 0
+  ReadRegStr $R2 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "InstallLocation"
   Goto _zabor_run_uninstall
 
   _zabor_try_user:
   ; 2) per-user
   ReadRegStr $R0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "QuietUninstallString"
   StrCmp $R0 "" _zabor_try_name 0
+  ReadRegStr $R2 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "InstallLocation"
   Goto _zabor_run_uninstall
 
   _zabor_try_name:
   ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "QuietUninstallString"
   StrCmp $R0 "" _zabor_try_name_user 0
+  ReadRegStr $R2 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "InstallLocation"
   Goto _zabor_run_uninstall
 
   _zabor_try_name_user:
   ReadRegStr $R0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "QuietUninstallString"
   StrCmp $R0 "" _zabor_try_us 0
+  ReadRegStr $R2 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "InstallLocation"
   Goto _zabor_run_uninstall
 
   _zabor_try_us:
   ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "UninstallString"
   StrCmp $R0 "" _zabor_try_us_user 0
+  ReadRegStr $R2 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "InstallLocation"
   StrCpy $R0 "$R0 /S"
   Goto _zabor_run_uninstall
 
   _zabor_try_us_user:
   ReadRegStr $R0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "UninstallString"
   StrCmp $R0 "" _zabor_init_done 0
+  ReadRegStr $R2 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "InstallLocation"
   StrCpy $R0 "$R0 /S"
   Goto _zabor_run_uninstall
 
@@ -82,13 +117,18 @@
   Goto _run_now
 
   _run_now:
+  ; Если есть путь установки, запускаем синхронно с помощью _?=
+  StrCmp $R2 "" _run_now_standard
+  StrCpy $R0 "$R0 _?=$R2"
+  _run_now_standard:
+
   ; Тихое удаление
   ExecWait $R0 $R1
   StrCmp $R1 "" 0 _zabor_wait
   nsExec::ExecToLog 'cmd /c $R0'
 
   _zabor_wait:
-  Sleep 3000
+  Sleep 1000
   RMDir /r "$PROGRAMFILES64\${PRODUCT_NAME}"
   RMDir /r "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
 
@@ -130,4 +170,8 @@
   ${If} $shouldDeleteAppData == "1"
     !insertmacro DeleteAppData
   ${EndIf}
+!macroend
+
+!macro customInstall
+  WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "InstallLocation" "$INSTDIR"
 !macroend

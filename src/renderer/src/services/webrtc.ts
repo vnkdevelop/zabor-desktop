@@ -452,6 +452,7 @@ export class WebRTCManager {
         audio: {
           deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
           channelCount: 1,
+          sampleRate: 48000,
           echoCancellation: true,
           noiseSuppression: false,
           autoGainControl: false
@@ -575,6 +576,7 @@ export class WebRTCManager {
         audio: {
           deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
           channelCount: 1,
+          sampleRate: 48000,
           echoCancellation: true, // WebRTC AEC - строго до нейросети
           noiseSuppression: !this.noiseSuppression, // Отключаем браузерный, если включен DF3
           autoGainControl: false,  // ВАЖНО: Выключаем для предотвращения заглатывания звука

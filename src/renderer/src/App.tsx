@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus } from '@phosphor-icons/react';
+import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck } from '@phosphor-icons/react';
 import { useTranslation, Trans } from 'react-i18next';
 
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
@@ -97,6 +97,17 @@ export default function App() {
       });
     }, 30000);
   }, []);
+
+  useEffect(() => {
+    setProfileFriendRequestStatus('idle');
+    if (store.modals.profile && store.selectedProfileUser && store.selectedProfileUser.id !== store.currentUser?.id) {
+      signalRService.getUserByUsername(store.selectedProfileUser.username).then(freshUser => {
+        if (freshUser && store.modals.profile && store.selectedProfileUser?.id === freshUser.id) {
+          store.setSelectedProfileUser(freshUser, store.profileSource);
+        }
+      }).catch(err => console.error("Failed to fetch fresh user profile:", err));
+    }
+  }, [store.modals.profile, store.selectedProfileUser?.id]);
 
   useEffect(() => {
     if (!store.incomingChannelInvite) return;
@@ -959,6 +970,13 @@ export default function App() {
     }
   }, [autoLaunch]);
 
+  const closeChangePasswordModal = useCallback(() => {
+    setNewPassword('');
+    setPrivacyError('');
+    setShowPrivacyPass(false);
+    store.setModal('privacy', false);
+  }, [store]);
+
   const changePassword = useCallback(async () => {
     setPrivacyError('');
     const passErr = validateInput(newPassword);
@@ -969,11 +987,11 @@ export default function App() {
         setPassword(newPassword);
         credentialsRef.current = { ...credentialsRef.current, password: newPassword };
         saveLocalCache();
-        closeAndResetModals();
+        closeChangePasswordModal();
       }
       else setPrivacyError(t('settings.privacy.changePasswordFailed', 'Не удалось сменить пароль'));
     }
-  }, [newPassword, password, validateInput, saveLocalCache, closeAndResetModals, t]);
+  }, [newPassword, password, validateInput, saveLocalCache, closeChangePasswordModal, t]);
 
   const saveProfileChanges = useCallback(async () => {
     const user = store.currentUser;
@@ -2178,13 +2196,13 @@ export default function App() {
             {settingsTab === 'privacy' && (
               <div className="space-y-6">
                 <div>
-                  <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.privacy.newPassword')}</label>
-                  <div className="relative">
-                    <input type={showPrivacyPass ? 'text' : 'password'} value={newPassword} onChange={e => { setNewPassword(e.target.value); setPrivacyError(''); }} maxLength={25} placeholder={t('settings.privacy.passwordHint')} className="w-full bg-surface text-white rounded-xl p-3 outline-none pr-10 focus:ring-2 focus:ring-[#c70060]" />
-                    <button onClick={() => setShowPrivacyPass(!showPrivacyPass)} className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors">{showPrivacyPass ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}</button>
-                  </div>
-                  {privacyError && <p className="text-danger text-sm mt-2 font-medium">{privacyError}</p>}
-                  <button onClick={changePassword} className="mt-3 w-full bg-[#c70060] hover:opacity-90 text-white py-3 rounded-xl font-bold transition-opacity">{t('settings.privacy.changePassword')}</button>
+                  <button
+                    onClick={() => store.setModal('privacy', true)}
+                    className="group w-full bg-[#c70060] hover:opacity-90 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-200 active:scale-98"
+                  >
+                    <Key weight="bold" size={18} />
+                    {t('settings.privacy.changePasswordTitle', 'Сменить пароль')}
+                  </button>
                 </div>
                 <button onClick={handleLogout} className="group w-full bg-danger hover:bg-red-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
                   <div className="transition-transform duration-200 group-hover:-translate-x-1">
@@ -2399,6 +2417,27 @@ export default function App() {
               </>
             );
           })()}
+        </div>
+      )}
+
+      {store.modals.privacy && (
+        <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-panelBg p-8 rounded-3xl w-[400px] shadow-2xl border border-[#303035]">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-white">{t('settings.privacy.changePasswordTitle', 'Сменить пароль')}</h2>
+              <button onClick={closeChangePasswordModal} className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"><X weight="bold" size={24} /></button>
+            </div>
+            <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.privacy.newPassword')}</label>
+            <div className="relative mb-6">
+              <input type={showPrivacyPass ? 'text' : 'password'} value={newPassword} onChange={e => { setNewPassword(e.target.value); setPrivacyError(''); }} maxLength={25} onKeyDown={e => e.key === 'Enter' && changePassword()} placeholder={t('settings.privacy.passwordHint')} className="w-full bg-surface text-white rounded-xl p-3 outline-none pr-10 focus:ring-2 focus:ring-[#c70060]" />
+              <button onClick={() => setShowPrivacyPass(!showPrivacyPass)} className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors">{showPrivacyPass ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}</button>
+            </div>
+            {privacyError && <p className="text-danger text-sm mb-4 font-medium">{privacyError}</p>}
+            <div className="flex gap-4">
+              <button onClick={closeChangePasswordModal} className="flex-1 bg-surface text-white py-3 rounded-xl font-bold hover:bg-surfaceHover transition-colors">{t('common.cancel')}</button>
+              <button onClick={changePassword} className="flex-1 bg-[#c70060] text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity">{t('settings.privacy.changePassword')}</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2635,17 +2674,21 @@ export default function App() {
                       {/* Right: Call */}
                       <button
                         onClick={async () => {
-                          if (store.selectedProfileUser) {
+                          if (store.selectedProfileUser && store.selectedProfileUser.isOnline) {
                             const ok = await signalRService.startCall(store.selectedProfileUser.id);
                             if (!ok) {
                               setOfflineToast(t('profile.userOffline', 'Пользователь не в сети'));
                               setTimeout(() => setOfflineToast(null), 3000);
                             }
+                            store.closeProfileOnly();
                           }
-                          store.closeProfileOnly();
                         }}
-                        className="w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-success hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95 transition-all"
-                        title={t('profile.call', 'Позвонить')}
+                        disabled={!store.selectedProfileUser?.isOnline}
+                        className={`w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center transition-all
+                          ${store.selectedProfileUser?.isOnline 
+                            ? 'text-success hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95' 
+                            : 'text-textMuted/40 cursor-not-allowed opacity-50'}`}
+                        title={store.selectedProfileUser?.isOnline ? t('profile.call', 'Позвонить') : t('profile.userOffline', 'Пользователь не в сети')}
                       >
                         <Phone weight="bold" size={28} />
                       </button>
@@ -2665,24 +2708,53 @@ export default function App() {
                       </button>
 
                       {/* Right: Add Friend */}
-                      <button
-                        onClick={async () => {
-                          if (!store.selectedProfileUser || profileFriendRequestStatus === 'loading' || profileFriendRequestStatus === 'sent') return;
-                          setProfileFriendRequestStatus('loading');
-                          const success = await signalRService.sendFriendRequest(store.selectedProfileUser.username);
-                          if (success) {
-                            setProfileFriendRequestStatus('sent');
-                            setTimeout(() => setProfileFriendRequestStatus('idle'), 2000);
-                          } else {
-                            setProfileFriendRequestStatus('idle');
-                          }
-                        }}
-                        disabled={profileFriendRequestStatus === 'loading' || profileFriendRequestStatus === 'sent'}
-                        className="w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-success hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-default"
-                        title={profileFriendRequestStatus === 'sent' ? t('modals.addFriend.sent', 'Отправлено') : t('modals.addFriend.title', 'Добавить друга')}
-                      >
-                        {profileFriendRequestStatus === 'sent' ? <Check weight="bold" size={28} className="text-success animate-bounce" /> : <UserPlus weight="bold" size={28} />}
-                      </button>
+                      {(() => {
+                        const hasOutgoingRequest = (
+                          store.selectedProfileUser?.friendRequestsReceived ||
+                          (store.selectedProfileUser as any)?.FriendRequestsReceived
+                        )?.includes(store.currentUser?.id || '');
+                        const isRequestSent = profileFriendRequestStatus === 'sent' || hasOutgoingRequest;
+                        const isBtnDisabled = profileFriendRequestStatus === 'loading' || isRequestSent;
+
+                        return (
+                          <button
+                            onClick={async () => {
+                              if (!store.selectedProfileUser || isBtnDisabled) return;
+                              setProfileFriendRequestStatus('loading');
+                              const success = await signalRService.sendFriendRequest(store.selectedProfileUser.username);
+                              if (success) {
+                                setProfileFriendRequestStatus('sent');
+                              } else {
+                                setProfileFriendRequestStatus('idle');
+                              }
+                            }}
+                            disabled={isBtnDisabled}
+                            className={`w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-success transition-all ${
+                              isBtnDisabled
+                                ? 'opacity-50 cursor-default'
+                                : 'hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95'
+                            }`}
+                            title={isRequestSent ? t('modals.addFriend.sent', 'Отправлено') : t('modals.addFriend.title', 'Добавить друга')}
+                          >
+                            <div className="relative w-7 h-7 flex items-center justify-center">
+                              <UserPlus
+                                weight="bold"
+                                size={28}
+                                className={`absolute inset-0 transition-opacity duration-300 ease-in-out ${
+                                  isRequestSent ? 'opacity-0' : 'opacity-100'
+                                }`}
+                              />
+                              <UserCheck
+                                weight="bold"
+                                size={28}
+                                className={`absolute inset-0 transition-opacity duration-300 ease-in-out ${
+                                  isRequestSent ? 'opacity-100' : 'opacity-0'
+                                }`}
+                              />
+                            </div>
+                          </button>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -2796,7 +2868,11 @@ export default function App() {
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000000] animate-toast-in">
           <div className="bg-[#09090B]/90 backdrop-blur-xl border border-danger/40 rounded-3xl px-8 py-5 shadow-[0_0_50px_rgba(239,68,68,0.25)] flex items-center gap-4">
             <div className="w-10 h-10 rounded-full bg-danger/20 flex items-center justify-center shrink-0">
-              <WifiOff weight="bold" size={20} className="text-danger" />
+              {offlineToast === t('toasts.noAnswer', 'Не отвечает') ? (
+                <PhoneOff weight="bold" size={20} className="text-danger" />
+              ) : (
+                <UserCircleMinus weight="bold" size={20} className="text-danger" />
+              )}
             </div>
             <div>
               <p className="text-white font-bold text-base leading-tight">{t('toasts.notification', 'Уведомление')}</p>

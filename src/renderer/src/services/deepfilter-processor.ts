@@ -44,7 +44,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
   private overflowCount = 0
 
-  private readonly HOLD_FRAMES = 16 // ~160ms удержания гейта после завершения речи (было 35 / 350ms)
+  private readonly HOLD_FRAMES = 30 // ~300ms удержания гейта после завершения речи
   private framesSinceLastVoice = this.HOLD_FRAMES
 
   // VCA-эмуляция (Гибридный гейт для суммарного подавления)
@@ -52,9 +52,9 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private readonly TARGET_GAIN_ON = 1.0
   private readonly TARGET_GAIN_OFF = 0.0 // Полная тишина при закрытом гейте (было 0.01 / -40 дБ)
 
-  // Экспоненциальные огибающие: Время атаки (10мс) и релиза (30мс)
-  private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.010)) // Было 15мс
-  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.030)) // Быстрый релиз (30мс) для закрытия гейта в пределах 200мс
+  // Экспоненциальные огибающие: Время атаки (10мс) и релиза (50мс)
+  private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.010))
+  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.050)) // Быстрый и плавный релиз (50мс)
 
   // Медленная автоматическая регулировка усиления (АРУ / AGC)
   private readonly agcGain = 1.0 // Зафиксировано на 1.0 для предотвращения скачков и пампинга
@@ -127,9 +127,10 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     try {
       this.denoiser = new StandaloneDeepFilter({
         attenuationLimit: this.attenuationLimit,
-        postFilterBeta: 0.00
+        postFilterBeta: 0.03
       })
       await this.denoiser.initialize()
+      this.denoiser.startStreaming()
       this.denoiserReady = true
       this.port.postMessage({ type: 'ready' })
       console.log(`[DeepFilterProcessor] Neural net initialized successfully with attenuationLimit: ${this.attenuationLimit}dB`)
@@ -188,7 +189,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       this.inputReadIndex = this.pullFromBuffer(this.inputBuffer, this.frameToProcess, this.inputWriteIndex, this.inputReadIndex)
 
       if (this.noiseSuppression && this.denoiserReady && this.denoiser) {
-        const cleanFrame = this.denoiser.processAudio(this.frameToProcess)
+        const cleanFrame = this.denoiser.processStreaming(this.frameToProcess)
         this.processedFrame.set(cleanFrame)
       } else {
         this.processedFrame.set(this.frameToProcess)

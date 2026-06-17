@@ -28,26 +28,26 @@ class SignalRService {
   /** Таймаут ожидания isReconnecting, чтобы не зависнуть навсегда */
   private static readonly CONNECT_WAIT_TIMEOUT_MS = 15000;
 
-private playSfx(src: string, volume = 0.5) {
-  try {
-    let audio = this.sfxElements.get(src);
-    if (!audio) {
-      audio = new Audio(src);
-      this.sfxElements.set(src, audio);
-    }
-    audio.volume = volume;
-    audio.currentTime = 0;
-    audio.play().catch(() => {});
-  } catch {}
-}
-
-private stopSfx(src: string) {
-  const audio = this.sfxElements.get(src);
-  if (audio) {
-    audio.pause();
-    audio.currentTime = 0;
+  private playSfx(src: string, volume = 0.5) {
+    try {
+      let audio = this.sfxElements.get(src);
+      if (!audio) {
+        audio = new Audio(src);
+        this.sfxElements.set(src, audio);
+      }
+      audio.volume = volume;
+      audio.currentTime = 0;
+      audio.play().catch(() => { });
+    } catch { }
   }
-}
+
+  private stopSfx(src: string) {
+    const audio = this.sfxElements.get(src);
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+  }
 
   private pingCallbacks: Set<(ping: number) => void> = new Set();
   private connectionCallbacks: Set<(isConnected: boolean) => void> = new Set();
@@ -90,7 +90,7 @@ private stopSfx(src: string) {
           this.sfxContext = new AudioContext();
         }
       }
-      if (this.sfxContext.state === 'suspended') this.sfxContext.resume().catch(() => {});
+      if (this.sfxContext.state === 'suspended') this.sfxContext.resume().catch(() => { });
       const ctx = this.sfxContext;
       const master = ctx.createGain();
       master.gain.value = masterGain;
@@ -154,7 +154,7 @@ private stopSfx(src: string) {
             this.connection.stop(),
             new Promise<void>(resolve => setTimeout(resolve, 2000))
           ]);
-        } catch {}
+        } catch { }
       }
       this.listenersAttached = false;
       this.connection = new signalR.HubConnectionBuilder()
@@ -254,11 +254,11 @@ private stopSfx(src: string) {
       const c = this.connection;
       this.connection = null;
       this.listenersAttached = false;
-      Promise.race([c.stop(), new Promise<void>(resolve => setTimeout(resolve, 2000))]).catch(() => {});
+      Promise.race([c.stop(), new Promise<void>(resolve => setTimeout(resolve, 2000))]).catch(() => { });
     }
-    if (this.sfxContext) { this.sfxContext.close().catch(() => {}); this.sfxContext = null; }
+    if (this.sfxContext) { this.sfxContext.close().catch(() => { }); this.sfxContext = null; }
     this.sfxElements.forEach(audio => { audio.pause(); audio.srcObject = null; });
-this.sfxElements.clear();
+    this.sfxElements.clear();
   }
 
   private setupListeners() {
@@ -473,7 +473,7 @@ this.sfxElements.clear();
     this.connection.on("ReceiveIceCandidate", async (sId: string, c: string) => { await webrtc.handleIceCandidate(sId, c); });
 
     this.connection.on("ForceLogout", async () => {
-      try { await window.windowControls.clearSession(); await window.windowControls.wipeAppData(); } catch {}
+      try { await window.windowControls.clearSession(); await window.windowControls.wipeAppData(); } catch { }
       const appStore = useAppStore.getState();
       appStore.setCurrentUser(null); appStore.setChannels([]); appStore.setFriends([]);
       appStore.setFriendRequests([]); appStore.setChannelInvites([]); appStore.setVoiceUsers([]);
@@ -491,8 +491,8 @@ this.sfxElements.clear();
   private ringtoneInterval: NodeJS.Timeout | null = null;
 
   private playNotificationSound() {
-  // this.playSfx(channelJoinSound, 0.4);
-}
+    // this.playSfx(channelJoinSound, 0.4);
+  }
 
   public playRingtone() {
     const audio = this.sfxElements.get(callRingSound);
@@ -503,12 +503,12 @@ this.sfxElements.clear();
     if (newAudio) newAudio.loop = true;
   }
 
-public stopRingtone() {
-  if (this.ringtoneInterval) { clearInterval(this.ringtoneInterval); this.ringtoneInterval = null; }
-  this.stopSfx(callRingSound);
-  const audio = this.sfxElements.get(callRingSound);
-  if (audio) audio.loop = false;
-}
+  public stopRingtone() {
+    if (this.ringtoneInterval) { clearInterval(this.ringtoneInterval); this.ringtoneInterval = null; }
+    this.stopSfx(callRingSound);
+    const audio = this.sfxElements.get(callRingSound);
+    if (audio) audio.loop = false;
+  }
 
   // ── Network helpers ───────────────────────────────────────────
 
@@ -542,7 +542,7 @@ public stopRingtone() {
         const channelToRejoin = this.wasInChannel || user.currentChannelId;
         this.wasInChannel = null;
         if (channelToRejoin) {
-          this.joinChannel(channelToRejoin).catch(() => {});
+          this.joinChannel(channelToRejoin).catch(() => { });
         }
         await this.loadData();
         return 'ok';
@@ -556,13 +556,13 @@ public stopRingtone() {
 
   public async register(username: string, password: string, displayName: string, avatarBase64: string | null, avatarColor: string): Promise<boolean> {
     const user = await this.safeInvoke<User>("Register", username, password, displayName, avatarBase64, avatarColor);
-    if (user) { 
-      useAppStore.getState().setCurrentUser(user); 
+    if (user) {
+      useAppStore.getState().setCurrentUser(user);
       if (user.currentChannelId) {
-        this.joinChannel(user.currentChannelId).catch(() => {});
+        this.joinChannel(user.currentChannelId).catch(() => { });
       }
-      await this.loadData(); 
-      return true; 
+      await this.loadData();
+      return true;
     }
     return false;
   }
@@ -611,7 +611,7 @@ public stopRingtone() {
       try {
         const raw = JSON.parse(json);
         return { stats: raw.Stats || raw.stats || {}, unlockedIds: raw.UnlockedIds || raw.unlockedIds || [], visitedChannelIds: raw.VisitedChannelIds || raw.visitedChannelIds || [] };
-      } catch {}
+      } catch { }
     }
     return { stats: {}, unlockedIds: [], visitedChannelIds: [] };
   }
@@ -622,7 +622,7 @@ public stopRingtone() {
       try {
         const raw = JSON.parse(json);
         return { stats: raw.Stats || raw.stats || {}, unlockedIds: raw.UnlockedIds || raw.unlockedIds || [], visitedChannelIds: raw.VisitedChannelIds || raw.visitedChannelIds || [] };
-      } catch {}
+      } catch { }
     }
     return { stats: {}, unlockedIds: [], visitedChannelIds: [] };
   }
@@ -654,7 +654,7 @@ public stopRingtone() {
           if (members && Array.isArray(members)) {
             useAppStore.getState().setChannelMembersCache(ch.id, members);
           }
-        }).catch(() => {});
+        }).catch(() => { });
       });
     }
   }
@@ -775,7 +775,7 @@ public stopRingtone() {
     const prevChannelUsersMap = { ...store.channelUsersMap };
 
     const optimisticUser: User = { ...currentUser, currentChannelId: channelId, currentCallUserId: null, isSpeaking: false };
-    
+
     store.removeUserFromChannelMap('', currentUser.id);
 
     const existingUsers = store.channelUsersMap[channelId] || [];
@@ -804,7 +804,7 @@ public stopRingtone() {
           if (members && Array.isArray(members)) {
             store.setChannelMembersCache(channelId, members);
           }
-        }).catch(() => {});
+        }).catch(() => { });
         return 'ok';
       }
       this.rollbackChannelJoin(prevChannelId, prevVoiceUsers, prevChannelUsersMap);
@@ -827,14 +827,14 @@ public stopRingtone() {
   public async leaveChannel(): Promise<void> {
     const prevChannelId = useAppStore.getState().currentChannelId;
     const currentUser = useAppStore.getState().currentUser;
-    
+
     if (prevChannelId) {
       this.playSfx(channelLeaveSound, 0.3);
     }
 
     // Optimistic: clear state immediately
     if (currentUser) {
-       useAppStore.getState().removeUserFromChannelMap('', currentUser.id);
+      useAppStore.getState().removeUserFromChannelMap('', currentUser.id);
     }
     webrtc.leaveAll();
     webrtc.stopLocalStream();
@@ -898,11 +898,15 @@ public stopRingtone() {
 
   private async _startCallImpl(targetUserId: string): Promise<boolean> {
     const store = useAppStore.getState();
+    const targetUser = store.friends.find((f: User) => f.id === targetUserId) ||
+      (store.selectedProfileUser?.id === targetUserId ? store.selectedProfileUser : null);
+    if (targetUser && !targetUser.isOnline) {
+      return false;
+    }
 
     // Optimistic
     store.closeProfileOnly();
     store.setCallStatus('calling');
-    const targetUser = store.friends.find((f: User) => f.id === targetUserId);
     if (targetUser) store.setCurrentCallUser(targetUser);
 
     if (store.currentChannelId) await this.leaveChannel();

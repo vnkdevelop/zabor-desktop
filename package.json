@@ -1,6 +1,6 @@
 {
   "name": "zabor-desktop",
-  "version": "3.1.4",
+  "version": "3.1.5",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
   "author": "vnk",
@@ -57,33 +57,32 @@
       "deleteAppDataOnUninstall": false
     }
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/tsconfig": "^1.0.1",
     "@electron-toolkit/utils": "^4.0.0",
     "@microsoft/signalr": "^8.0.7",
     "@phosphor-icons/react": "^2.1.10",
-    "deepfilter-standalone": "^1.0.2",
-    "i18next": "^26.0.8",
-    "i18next-browser-languagedetector": "^8.2.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-i18next": "^17.0.4",
-    "zustand": "^5.0.2"
-  },
-  "devDependencies": {
-    "@electron-toolkit/tsconfig": "^1.0.1",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "cross-env": "^7.0.3",
+    "deepfilter-standalone": "^1.0.2",
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
+    "i18next": "^26.0.8",
+    "i18next-browser-languagedetector": "^8.2.1",
     "postcss": "^8.4.49",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.4",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "zustand": "^5.0.2"
   }
 }

@@ -77,16 +77,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     statKey: 'uniqueChannels',
     category: 'voice'
   },
-  {
-    id: 'marathon',
-    title: 'Тюлень',
-    description: 'Сидеть в канале 5 часов',
-    icon: '🦭',
-    maxValue: 300,
-    statKey: 'longestSessionMinutes',
-    category: 'voice',
-    unit: 'min'
-  },
+
   {
     id: 'modnik',
     title: 'Модник',
@@ -119,9 +110,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   {
     id: 'same_wave',
     title: 'Переговорщики',
-    description: 'Звонок длительностью 2+ часа',
+    description: 'Звонок длительностью 5+ часов',
     icon: '🫂',
-    maxValue: 120,
+    maxValue: 300,
     statKey: 'longestCallMinutes',
     category: 'calls',
     unit: 'min'
@@ -198,12 +189,54 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   {
     id: 'early_bird',
     title: 'Ранняя пташка',
-    description: 'Зайти в канал до 7 утра',
+    description: 'Зайти в канал с 5:00 до 7:00 утра',
     icon: '🌅',
     maxValue: 1,
     statKey: 'earlyJoins',
     category: 'hidden',
     hidden: true
+  },
+  {
+    id: 'malysheva',
+    title: 'Малышева',
+    description: 'Говорить 15 минут без перерыва',
+    icon: '📢',
+    maxValue: 15,
+    statKey: 'continuousSpeakingMinutes',
+    category: 'hidden',
+    hidden: true,
+    unit: 'min'
+  },
+  {
+    id: 'spammer',
+    title: 'Спамер',
+    description: 'Позвонить 10 раз за 10 минут',
+    icon: '📱',
+    maxValue: 10,
+    statKey: 'callsInTenMinutes',
+    category: 'hidden',
+    hidden: true
+  },
+  {
+    id: 'sociable',
+    title: 'Общительное',
+    description: 'Побывать в 100 разных каналах',
+    icon: '🗺️',
+    maxValue: 100,
+    statKey: 'uniqueChannels',
+    category: 'hidden',
+    hidden: true
+  },
+  {
+    id: 'get_a_life',
+    title: 'Может займёшься чем то полезным?',
+    description: 'Просидеть в каналах 1000 часов',
+    icon: '🌿',
+    maxValue: 60000,
+    statKey: 'totalVoiceMinutes',
+    category: 'hidden',
+    hidden: true,
+    unit: 'min'
   },
   {
     id: 'introvert',

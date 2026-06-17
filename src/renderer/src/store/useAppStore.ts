@@ -23,6 +23,8 @@ export interface User {
   currentChannelId?: string | null;
   currentCallUserId?: string | null;
   lastSeen?: string;
+  friendRequestsReceived?: string[];
+  FriendRequestsReceived?: string[];
 }
 
 export interface VoiceChannel {

@@ -36,7 +36,7 @@ npm run dist:win
 ```
 
 ## 📥 Установка для пользователей
-Вы можете скачать последнюю версию инсталлятора со страницы [Releases](https://github.com/poradaise2009-beep/zabor-desktop/releases).
+Вы можете скачать последнюю версию инсталлятора со страницы [Releases](https://github.com/vnkdevelop/zabor-desktop/releases).
 
 > [!NOTE]
 > При установке Windows SmartScreen может выдать предупреждение. Нажмите «Подробнее» -> «Выполнить в любом случае».
