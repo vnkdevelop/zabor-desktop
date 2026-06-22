@@ -293,7 +293,9 @@
     "micNotFound": "Microphone not found. Connect the device and try again.",
     "audioError": "Audio error: {{message}}",
     "incomingCall": "Incoming call...",
-    "incomingChannelInvite": "You are invited to a channel"
+    "incomingChannelInvite": "You are invited to a channel",
+    "startupCalibration": "Microphone calibration... Please remain silent for 2s.",
+    "calibrationComplete": "Microphone successfully calibrated!"
   },
   "joke": {
     "title": "JOKE:",

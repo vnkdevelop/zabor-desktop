@@ -21,11 +21,11 @@ class SignalRService {
   private wasInChannel: string | null = null;
   private sfxContext: AudioContext | null = null;
   private sfxElements: Map<string, HTMLAudioElement> = new Map();
-  /** Защита от параллельных вызовов joinChannel */
+  
   private isJoiningChannel = false;
-  /** Защита от параллельных вызовов startCall */
+  
   private isStartingCall = false;
-  /** Таймаут ожидания isReconnecting, чтобы не зависнуть навсегда */
+  
   private static readonly CONNECT_WAIT_TIMEOUT_MS = 15000;
 
   private playSfx(src: string, volume = 0.5) {
@@ -132,12 +132,12 @@ class SignalRService {
   public async connect(): Promise<boolean> {
     if (this.isConnected()) return true;
     if (this.isReconnecting) {
-      // Ожидаем завершения текущей попытки, но не более CONNECT_WAIT_TIMEOUT_MS
+      
       const deadline = Date.now() + SignalRService.CONNECT_WAIT_TIMEOUT_MS;
       while (this.isReconnecting && Date.now() < deadline) {
         await new Promise<void>(resolve => setTimeout(resolve, 200));
       }
-      // Если флаг так и не сброшен — принудительно сбрасываем (deadlock protection)
+      
       if (this.isReconnecting) {
         this.isReconnecting = false;
       }
@@ -149,7 +149,7 @@ class SignalRService {
     try {
       if (this.connection) {
         try {
-          // Обёртка в Promise.race — защита от зависания stop() на half-open WebSocket
+          
           await Promise.race([
             this.connection.stop(),
             new Promise<void>(resolve => setTimeout(resolve, 2000))
@@ -169,7 +169,7 @@ class SignalRService {
       this.setupListeners();
       this.setupReconnectionHandlers();
 
-      // Таймаут на connection.start(), чтобы не зависнуть навсегда при network-hang
+      
       const startWithTimeout = Promise.race([
         this.connection.start(),
         new Promise<never>((_, reject) =>
@@ -181,8 +181,8 @@ class SignalRService {
       this.reconnectAttempts = 0;
       this.isReconnecting = false;
       this.startPingMeasurement();
-      // Логин выполняется только через App.tsx (autoLoginPendingRef) — единственная точка входа.
-      // connect() только устанавливает транспорт и оповещает слушателей.
+      
+      
       this.notifyConnectionUpdate(true);
       return true;
     } catch (err: any) {
@@ -203,18 +203,18 @@ class SignalRService {
       this.notifyPingUpdate(-1);
       const store = useAppStore.getState();
       if (store.currentChannelId) this.wasInChannel = store.currentChannelId;
-      // Оповещаем НЕМЕДЛЕННО, чтобы App.tsx всегда взводил autoLoginPendingRef ДО
-      // того, как onreconnected вызовет notifyConnectionUpdate(true).
-      // Иначе при быстром реконнекте (<5s) пользователь не перелогинится на новом соединении.
+      
+      
+      
       this.notifyConnectionUpdate(false);
     });
     this.connection.onreconnected(async () => {
       this.reconnectAttempts = 0;
       this.isReconnecting = false;
       this.startPingMeasurement();
-      // НЕ вызываем Login и НЕ восстанавливаем канал здесь — это делает App.tsx
-      // через autoLoginPendingRef → signalRService.login().
-      // login() сам проверит wasInChannel и перезайдёт в канал после аутентификации.
+      
+      
+      
       this.notifyConnectionUpdate(true);
     });
     this.connection.onclose(() => {
@@ -224,8 +224,8 @@ class SignalRService {
       if (!this.intentionalDisconnect) {
         const store = useAppStore.getState();
         if (store.currentChannelId) this.wasInChannel = store.currentChannelId;
-        // Немедленно оповещаем — autoLoginPendingRef должен быть взведён
-        // ДО того, как scheduleReconnect → connect() завершится успехом.
+        
+        
         this.notifyConnectionUpdate(false);
         this.scheduleReconnect();
       }
@@ -308,7 +308,7 @@ class SignalRService {
 
     this.connection.on("ChannelCreated", (channel: VoiceChannel) => {
       const channels = store().channels;
-      // Удаляем optimistic-версию если есть, добавляем реальную
+      
       const withoutOptimistic = channels.filter(c => !c.id.startsWith('__opt_') || c.name !== channel.name);
       if (!withoutOptimistic.find(c => c.id === channel.id)) {
         store().setChannels([...withoutOptimistic, channel]);
@@ -334,7 +334,7 @@ class SignalRService {
       const uId = update.userId || update.UserId;
       if (!uId) return;
 
-      // Для других пользователей — применяем все поля как обычно
+      
       const nextUpdates: Partial<User> = {
         isMuted: update.isMuted ?? update.IsMuted ?? false,
         isDeafened: update.isDeafened ?? update.IsDeafened ?? false,
@@ -346,10 +346,10 @@ class SignalRService {
 
       const currentUser = store().currentUser;
       if (currentUser && uId === currentUser.id) {
-        // Для ТЕКУЩЕГО пользователя локальные isMuted/isDeafened — источник истины.
-        // Сервер может только выставить серверный мьют/deaf (права администратора).
-        // Мы НЕ перезаписываем isMuted/isDeafened из серверного события,
-        // чтобы избежать эффекта «мьют сбрасывается сразу после нажатия».
+        
+        
+        
+        
         const newServerMuted = update.isServerMuted ?? update.IsServerMuted ?? currentUser.isServerMuted ?? false;
         const newServerDeafened = update.isServerDeafened ?? update.IsServerDeafened ?? currentUser.isServerDeafened ?? false;
 
@@ -360,7 +360,7 @@ class SignalRService {
 
         store().setCurrentUser({
           ...currentUser,
-          // isMuted / isDeafened — не трогаем, они управляются только через toggleMute/toggleDeafen
+          
           isServerMuted: newServerMuted,
           isServerDeafened: newServerDeafened,
           isSpeaking: update.isSpeaking ?? update.IsSpeaking ?? currentUser.isSpeaking
@@ -448,16 +448,16 @@ class SignalRService {
     });
 
     this.connection.on("CallStarted", (user: User) => {
-      // CallStarted приходит принимающей стороне (звонок успешно поднят).
-      // Принимающая сторона НЕ создаёт оффер — она ждёт ReceiveWebRTCOffer от вызывающего.
-      // Нам важно установить currentCallUser и callStatus СЕЙЧАС, чтобы handleOffer
-      // не отбросил входящий оффер из-за отсутствия callUser в store.
+      
+      
+      
+      
       store().setCurrentCallUser(user);
       store().setCallStatus('connected');
       store().setIncomingCall(null);
       store().setModal('incomingCall', false);
       this.stopRingtone();
-      // Принимающая сторона НЕ вызывает connectToPeer — ждёт ReceiveWebRTCOffer
+      
       this.playSfx(channelJoinSound, 0.3);
     });
 
@@ -485,7 +485,7 @@ class SignalRService {
     window.windowControls?.onBeforeQuit?.(() => { this.disconnect(); });
   }
 
-  // ── SFX ───────────────────────────────────────────────────────
+  
 
   private notificationAudio: HTMLAudioElement | null = null;
   private ringtoneInterval: NodeJS.Timeout | null = null;
@@ -510,12 +510,12 @@ class SignalRService {
     if (audio) audio.loop = false;
   }
 
-  // ── Network helpers ───────────────────────────────────────────
+  
 
   private async ensureConnected(): Promise<boolean> {
-    // Просто проверяем состояние — НЕ пытаемся переподключиться здесь.
-    // Реконнект управляется собственной машиной (onreconnecting/onclose/scheduleReconnect).
-    // Попытка вызвать connect() из саф-инвок создавала конкуренцию с isReconnecting флагом.
+    
+    
+    
     return this.isConnected();
   }
 
@@ -525,7 +525,7 @@ class SignalRService {
     catch { return null; }
   }
 
-  // ── Auth ──────────────────────────────────────────────────────
+  
 
   public async checkUserExists(username: string): Promise<boolean> {
     return await this.safeInvoke<boolean>("CheckUserExists", username) ?? false;
@@ -537,8 +537,8 @@ class SignalRService {
       const user = await this.connection!.invoke<User | null>("Login", username, password);
       if (user) {
         useAppStore.getState().setCurrentUser(user);
-        // Восстанавливаем канал: сначала локальное состояние (wasInChannel),
-        // потом серверное (user.currentChannelId). Именно здесь, ПОСЛЕ аутентификации.
+        
+        
         const channelToRejoin = this.wasInChannel || user.currentChannelId;
         this.wasInChannel = null;
         if (channelToRejoin) {
@@ -575,7 +575,7 @@ class SignalRService {
     return await this.safeInvoke<boolean>("UpdateUserPassword", newPassword) ?? false;
   }
 
-  // ── Settings ──────────────────────────────────────────────────
+  
 
   public async saveAudioSettings(settings: {
     inputVolume: number;
@@ -603,7 +603,7 @@ class SignalRService {
     try { return JSON.parse(json); } catch { return null; }
   }
 
-  // ── Achievements ──────────────────────────────────────────────
+  
 
   public async getMyAchievements(): Promise<any> {
     const json = await this.safeInvoke<string>("GetMyAchievements");
@@ -633,7 +633,7 @@ class SignalRService {
   }
   public async getJokeOfTheDay(): Promise<string> { return await this.safeInvoke<string>("GetJokeOfTheDay") ?? ''; }
 
-  // ── Data ──────────────────────────────────────────────────────
+  
 
   public async loadData(): Promise<void> {
     const [channels, friends, requests, channelInvites] = await Promise.all([
@@ -647,7 +647,7 @@ class SignalRService {
     useAppStore.getState().setFriendRequests(requests || []);
     useAppStore.getState().setChannelInvites(channelInvites || []);
 
-    // Background pre-fetch members of all channels
+    
     if (channels && Array.isArray(channels)) {
       channels.forEach(ch => {
         this.getChannelMembersList(ch.id).then(members => {
@@ -659,7 +659,7 @@ class SignalRService {
     }
   }
 
-  // ── Channels (optimistic) ─────────────────────────────────────
+  
 
   public async createChannel(name: string): Promise<void> {
     const store = useAppStore.getState();
@@ -673,10 +673,10 @@ class SignalRService {
     const result = await this.safeInvoke<VoiceChannel>("CreateChannel", name);
 
     if (!result) {
-      // Rollback — убираем optimistic-канал
+      
       useAppStore.getState().setChannels(useAppStore.getState().channels.filter(c => c.id !== tempId));
     } else {
-      // ChannelCreated event уже мог добавить реальный канал — убираем optimistic
+      
       const current = useAppStore.getState().channels;
       useAppStore.getState().setChannels(current.filter(c => c.id !== tempId));
     }
@@ -686,7 +686,7 @@ class SignalRService {
     const store = useAppStore.getState();
     const prevChannels = store.channels;
 
-    // Optimistic rename
+    
     store.setChannels(prevChannels.map(c => c.id === id ? { ...c, name: name.trim() } : c));
 
     const result = await this.safeInvoke<boolean>("UpdateChannel", { channelId: id, name });
@@ -697,7 +697,7 @@ class SignalRService {
     const store = useAppStore.getState();
     const prevChannels = store.channels;
 
-    // Optimistic remove
+    
     store.setChannels(prevChannels.filter(c => c.id !== channelId));
 
     if (store.currentChannelId === channelId) {
@@ -716,7 +716,7 @@ class SignalRService {
     const prevMembers = store.channelMembers;
     const prevCache = store.channelMembersCache[channelId] || [];
 
-    // Optimistic remove from members and cache
+    
     store.setChannelMembers(prevMembers.filter(m => m.id !== userId));
     store.setChannelMembersCache(channelId, prevCache.filter(m => m.id !== userId));
 
@@ -751,10 +751,10 @@ class SignalRService {
     await this.safeInvoke("DeclineChannelInvite", channelId);
   }
 
-  // ── Join / Leave (optimistic) ─────────────────────────────────
+  
 
   public async joinChannel(channelId: string): Promise<'ok' | 'network' | 'mic_failed' | 'full'> {
-    // Защита от параллельных/повторных вызовов (двойной клик, быстрые инвайты)
+    
     if (this.isJoiningChannel) return 'network';
     this.isJoiningChannel = true;
     try {
@@ -799,7 +799,7 @@ class SignalRService {
       if (update?.users) {
         store.setVoiceUsers(update.users);
         store.setChannelUsers(channelId, update.users);
-        // Background sync members list for this channel
+        
         this.getChannelMembersList(channelId).then(members => {
           if (members && Array.isArray(members)) {
             store.setChannelMembersCache(channelId, members);
@@ -832,7 +832,7 @@ class SignalRService {
       this.playSfx(channelLeaveSound, 0.3);
     }
 
-    // Optimistic: clear state immediately
+    
     if (currentUser) {
       useAppStore.getState().removeUserFromChannelMap('', currentUser.id);
     }
@@ -844,7 +844,7 @@ class SignalRService {
     this.safeInvoke("LeaveChannel");
   }
 
-  // ── Friends (optimistic) ──────────────────────────────────────
+  
 
   public async sendFriendRequest(username: string): Promise<boolean> {
     return await this.safeInvoke<boolean>("SendFriendRequest", username) ?? false;
@@ -854,7 +854,7 @@ class SignalRService {
     const store = useAppStore.getState();
     const prevRequests = store.friendRequests;
 
-    // Optimistic remove from requests
+    
     store.setFriendRequests(prevRequests.filter((r: User) => r.id !== userId));
 
     const result = await this.safeInvoke("AcceptFriendRequest", userId);
@@ -865,7 +865,7 @@ class SignalRService {
     const store = useAppStore.getState();
     const prevRequests = store.friendRequests;
 
-    // Optimistic
+    
     store.setFriendRequests(prevRequests.filter((r: User) => r.id !== userId));
 
     const result = await this.safeInvoke("DeclineFriendRequest", userId);
@@ -876,17 +876,17 @@ class SignalRService {
     const store = useAppStore.getState();
     const prevFriends = store.friends;
 
-    // Optimistic
+    
     store.setFriends(prevFriends.filter((f: User) => f.id !== userId));
 
     const result = await this.safeInvoke("RemoveFriend", userId);
     if (!result) useAppStore.getState().setFriends(prevFriends);
   }
 
-  // ── Calls (optimistic) ────────────────────────────────────────
+  
 
   public async startCall(targetUserId: string): Promise<boolean> {
-    // Защита от двойного запуска звонка
+    
     if (this.isStartingCall) return false;
     this.isStartingCall = true;
     try {
@@ -904,7 +904,7 @@ class SignalRService {
       return false;
     }
 
-    // Optimistic
+    
     store.closeProfileOnly();
     store.setCallStatus('calling');
     if (targetUser) store.setCurrentCallUser(targetUser);
@@ -924,10 +924,10 @@ class SignalRService {
     const micStarted = await webrtc.startLocalStream();
     if (!micStarted) return;
 
-    // BUGFIX: Устанавливаем callStatus и callUser ДО отправки AcceptCall на сервер.
-    // Иначе после AcceptCall сервер шлёт WebRTC-оффер через ReceiveWebRTCOffer,
-    // а handleOffer проверяет currentCallUser?.id === senderId.
-    // Без этой установки оффер отвергался на устройствах где RTT высок.
+    
+    
+    
+    
     const callerUser = useAppStore.getState().incomingCall;
     if (callerUser) {
       useAppStore.getState().setCurrentCallUser({
@@ -954,7 +954,7 @@ class SignalRService {
   }
 
   public async declineCall(callerId: string): Promise<void> {
-    // Optimistic: clear UI immediately
+    
     useAppStore.getState().setIncomingCall(null);
     useAppStore.getState().setModal('incomingCall', false);
     useAppStore.getState().setCurrentCallUser(null);
@@ -971,7 +971,7 @@ class SignalRService {
     if (callUser) webrtc.disconnectFromPeer(callUser.id);
     webrtc.stopLocalStream();
 
-    // Optimistic: clear UI immediately
+    
     useAppStore.getState().setIncomingCall(null);
     useAppStore.getState().setCurrentCallUser(null);
     useAppStore.getState().setCallStatus('idle');
@@ -983,7 +983,7 @@ class SignalRService {
     this.safeInvoke("EndCall");
   }
 
-  // ── State ─────────────────────────────────────────────────────
+  
 
   public toggleState(isMuted: boolean, isDeafened: boolean): void {
     webrtc.toggleMute(isMuted);
@@ -1003,7 +1003,7 @@ class SignalRService {
     if (this.isConnected()) this.connection?.send("SetSpeakingState", isSpeaking);
   }
 
-  // ── WebRTC signaling ──────────────────────────────────────────
+  
 
   public sendWebRTCOffer(targetId: string, offer: string): void {
     if (this.isConnected()) this.connection?.send("SendWebRTCOffer", targetId, offer);

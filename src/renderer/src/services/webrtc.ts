@@ -6,7 +6,7 @@ import processorUrl from './deepfilter-processor?worker&url'
 type SpeakingEntry = {
   timer: NodeJS.Timeout
   stream: MediaStream
-  /** Аудио-узлы VAD-цепочки для корректного disconnect при очистке */
+  
   nodes: AudioNode[]
 }
 
@@ -21,7 +21,7 @@ function optimizeAudioSDP(sdp: string): string {
 
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].startsWith(`a=fmtp:${pt}`)) {
-      // 96kbps VBR, FEC enabled, DTX disabled, 20ms frame size
+      
       lines[i] = `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=20;minptime=10;stereo=0;sprop-maxcapturerate=48000`
       fmtpFound = true
       break
@@ -46,7 +46,7 @@ function optimizeAudioSDP(sdp: string): string {
   }
 
   if (audioSectionIdx !== -1) {
-    // 96 kbps audio bandwidth limit
+    
     lines.splice(audioSectionIdx + 1, 0, 'b=AS:96')
   }
 
@@ -59,17 +59,17 @@ export class WebRTCManager {
 
   private peerConnections: Map<string, RTCPeerConnection> = new Map()
   private audioElements: Map<string, HTMLAudioElement> = new Map()
-  /** Буфер ICE-кандидатов, пришедших до setRemoteDescription */
+  
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map()
-  /** Таймеры переподключения — хранятся на уровне класса чтобы отменять при явном дисконнекте */
+  
   private dcTimers: Map<string, NodeJS.Timeout> = new Map()
-  /** Таймеры ICE-таймаута для renegotiation */
+  
   private iceTimeoutTimers: Map<string, NodeJS.Timeout> = new Map()
-  /** Счётчик попыток renegotiation на каждого пира */
+  
   private retryCount: Map<string, number> = new Map()
-  /** Максимум попыток renegotiation */
+  
   private static readonly MAX_ICE_RETRIES = 2
-  /** Таймаут ICE-соединения (мс) — если за это время не `connected`, делаем renegotiation */
+  
   private static readonly ICE_TIMEOUT_MS = 15000
 
   private currentDeviceId = 'default'
@@ -98,7 +98,7 @@ export class WebRTCManager {
   private vadContext: AudioContext | null = null
   private speakingIntervals: Map<string, SpeakingEntry> = new Map()
 
-  // ── Output Mixer ──────────────────────────────────────────────
+  
   private outputMixContext: AudioContext | null = null
   private outputCompressor: DynamicsCompressorNode | null = null
   private mixAudioElement: HTMLAudioElement | null = null
@@ -111,19 +111,19 @@ export class WebRTCManager {
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' },
       { urls: 'stun:stun.twilio.com:3478' },
-      // fallbacks
+      
       { urls: 'turn:150.241.64.108:3478?transport=udp', username: 'zabor', credential: 'mvtxbJo45sc8_turn' },
       { urls: 'turn:150.241.64.108:3478?transport=tcp', username: 'zabor', credential: 'mvtxbJo45sc8_turn' }
     ],
     bundlePolicy: 'max-bundle'
   }
 
-  // ── Audio Pipeline (Строгий порядок DSP по ТЗ) ────────────────
+  
 
   private async createProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
     this.cleanupProcessedStream()
 
-    // 1. Частота дискретизации строго 48 кГц
+    
     const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
     this.processedContext = ctx
     if (ctx.state === 'suspended') {
@@ -151,7 +151,7 @@ export class WebRTCManager {
     const source = ctx.createMediaStreamSource(rawStream)
     this.processedSource = source
 
-    // 4. Компрессор динамического диапазона (Строго ПОСЛЕ нейросети)
+    
     const compressor = ctx.createDynamicsCompressor()
     compressor.threshold.value = -24
     compressor.knee.value = 10
@@ -159,18 +159,23 @@ export class WebRTCManager {
     compressor.attack.value = 0.005
     compressor.release.value = 0.150
 
-    // 5. Параметрический эквалайзер
+    
     const highpass = ctx.createBiquadFilter()
     highpass.type = 'highpass'
-    highpass.frequency.value = 80 // Срез гула ниже 80 Гц
+    highpass.frequency.value = 140
+    highpass.Q.value = 0.707
+
+    const lowpass = ctx.createBiquadFilter()
+    lowpass.type = 'lowpass'
+    lowpass.frequency.value = 7500
+    lowpass.Q.value = 0.707
 
     const peaking = ctx.createBiquadFilter()
     peaking.type = 'peaking'
-    peaking.frequency.value = 3000 // Подъем для разборчивости речи
+    peaking.frequency.value = 3000
     peaking.Q.value = 1.0
-    peaking.gain.value = 2 // Легкий подъем
+    peaking.gain.value = 2
 
-    // 6. Brickwall Limiter (Защита канала от клиппинга)
     const limiter = ctx.createDynamicsCompressor()
     limiter.threshold.value = -0.5
     limiter.knee.value = 0
@@ -178,13 +183,11 @@ export class WebRTCManager {
     limiter.attack.value = 0.001
     limiter.release.value = 0.050
 
-    // 7. Input Gain (Pre-amplifier) - placed first to amplify signal before VAD and Denoiser
     const inputGain = ctx.createGain()
     const gainFactor = Math.max(0.01, this.inputVolume / 100)
     inputGain.gain.value = gainFactor
     this.inputGainNode = inputGain
 
-    // Analyser node for silence monitoring on raw input
     try {
       const rawAnalyser = ctx.createAnalyser()
       rawAnalyser.fftSize = 256
@@ -194,14 +197,15 @@ export class WebRTCManager {
       console.warn('[WebRTC] Failed to create raw analyser node for silence monitoring:', e)
     }
 
-    // Сборка графа DSP
     let currentNode: AudioNode = source
 
-    // Pre-amplifier connected immediately
     currentNode.connect(inputGain)
     currentNode = inputGain
 
-    // 2. Ядро DeepFilterNet3 + 3. Шумовой затвор
+    currentNode.connect(highpass)
+    highpass.connect(lowpass)
+    currentNode = lowpass
+
     if (this.dfNode) {
       const store = useAppStore.getState()
       const isMuted = store.currentUser?.isMuted || store.currentUser?.isServerMuted || false
@@ -222,8 +226,7 @@ export class WebRTCManager {
     }
 
     currentNode.connect(compressor)
-    compressor.connect(highpass)
-    highpass.connect(peaking)
+    compressor.connect(peaking)
     peaking.connect(limiter)
     limiter.connect(destination)
 
@@ -289,7 +292,7 @@ export class WebRTCManager {
     }
   }
 
-  // ── VAD (Резервный Fallback) ──────────────────────────────────
+  
 
   private setupVAD(stream: MediaStream, userId: string, isLocal: boolean) {
     this.clearVAD(userId)
@@ -415,7 +418,7 @@ export class WebRTCManager {
     }
   }
 
-  // ── Devices ───────────────────────────────────────────────────
+  
 
   public async getAudioDevices() {
     try {
@@ -470,7 +473,7 @@ export class WebRTCManager {
       const dataArray = new Float32Array(bufferLength);
       const windowRmsValues: number[] = [];
 
-      const intervalTime = 50; // sample every 50ms
+      const intervalTime = 50; 
       const steps = actualDurationMs / intervalTime;
 
       const checkRms = () => {
@@ -497,34 +500,38 @@ export class WebRTCManager {
         throw new Error('No audio data collected during calibration');
       }
 
-      const sortedRms = [...windowRmsValues].sort((a, b) => a - b);
-      const noiseFloorIndex = Math.floor(sortedRms.length * 0.3);
-      let noiseFloor = sortedRms[noiseFloorIndex] || 0.003;
-      // Используем 90-й процентиль для более точной оценки пикового фонового шума
-      const peakNoiseIndex = Math.floor(sortedRms.length * 0.90);
-      const peakNoise = sortedRms[peakNoiseIndex] || 0.006;
+      const rawSorted = [...windowRmsValues].sort((a, b) => a - b);
+      const cleanLength = Math.floor(rawSorted.length * 0.8);
+      if (cleanLength === 0) {
+        throw new Error('Not enough audio data collected during calibration');
+      }
+      const sortedRms = rawSorted.slice(0, cleanLength);
+
+      const halfLength = Math.floor(sortedRms.length * 0.5);
+      let noiseFloorSum = 0;
+      for (let i = 0; i < Math.max(1, halfLength); i++) {
+        noiseFloorSum += sortedRms[i];
+      }
+      let noiseFloor = noiseFloorSum / Math.max(1, halfLength);
+      
+      const peakNoiseIndex = Math.max(0, Math.floor(sortedRms.length * 0.95) - 1);
+      const peakNoise = sortedRms[peakNoiseIndex] || 0.005;
 
       if (!isFirstRun) {
         const savedFloorRaw = localStorage.getItem('zabor_base_noise_floor');
         if (savedFloorRaw) {
           const savedFloor = parseFloat(savedFloorRaw);
           if (!isNaN(savedFloor)) {
-            // Смешиваем: 60% базовый сохраненный, 40% текущий быстрый замер для стабильности
             noiseFloor = 0.6 * savedFloor + 0.4 * noiseFloor;
           }
         }
       }
 
-      console.log(`[Mic Calibration] Noise Floor: ${noiseFloor.toFixed(5)}, Peak Noise: ${peakNoise.toFixed(5)}`);
+      console.log(`[Mic Calibration] Noise Floor (clean): ${noiseFloor.toFixed(5)}, Peak Noise (clean): ${peakNoise.toFixed(5)}`);
 
-      // Пороги ВАДа настраиваем на базе пикового шума с оптимальным запасом и повышенной чувствительностью,
-      // позволяющей улавливать даже тихие, высокие или низкие голоса.
-      this.calibratedThresholdOn = Math.max(0.004, Math.min(0.05, peakNoise * 1.3 + 0.001));
-      this.calibratedThresholdOff = Math.max(0.0015, Math.min(0.03, peakNoise * 0.9 + 0.0005));
-
-      // Всегда выставляем максимальное шумоподавление (100 дБ) для 100% изоляции шума
+      this.calibratedThresholdOn = Math.max(0.008, peakNoise * 2.0 + 0.002);
+      this.calibratedThresholdOff = Math.max(0.004, peakNoise * 1.3 + 0.001);
       this.calibratedAttenuationLimit = 100;
-
       this.calibratedNoiseFloor = noiseFloor;
 
       localStorage.setItem('zabor_mic_calibrated', 'true');
@@ -557,7 +564,7 @@ export class WebRTCManager {
     }
   }
 
-  // ── Local Stream ──────────────────────────────────────────────
+  
 
   public async startLocalStream(deviceId?: string, useNS?: boolean, forceRestart = false): Promise<boolean> {
     if (deviceId !== undefined) this.currentDeviceId = deviceId
@@ -609,7 +616,7 @@ export class WebRTCManager {
       return true
     } catch (e) {
       console.error('[WebRTC] Mic error:', e)
-      // Пробрасываем ошибку для слоя-фасада (Hot-swap отказоустойчивость)
+      
       throw new Error(`MIC_ACCESS_FAILED: ${(e as Error).message}`)
     }
   }
@@ -629,7 +636,7 @@ export class WebRTCManager {
           }
         }
       } catch (e) {
-        throw e // Проброс для обработки в UI
+        throw e 
       }
     }
   }
@@ -658,7 +665,7 @@ export class WebRTCManager {
       const store = useAppStore.getState();
       const me = store.currentUser;
 
-      // Если пользователь заглушен (muted) или сервером заглушен, сбрасываем счетчик
+      
       if (!me || me.isMuted || me.isServerMuted) {
         this.silenceCounterMs = 0;
         return;
@@ -673,7 +680,7 @@ export class WebRTCManager {
           }
           const rms = Math.sqrt(sumSquares / bufferLength);
 
-          // Если RMS экстремально низкий (тишина или пустой канал)
+          
           if (rms < 0.0002) {
             this.silenceCounterMs += 200;
           } else {
@@ -733,7 +740,7 @@ export class WebRTCManager {
     }
   }
 
-  // ── Peer Connections ──────────────────────────────────────────
+  
 
   private initOutputMixer() {
     if (this.outputMixContext) {
@@ -751,7 +758,7 @@ export class WebRTCManager {
     }
     this.outputCompressor = this.outputMixContext.createDynamicsCompressor()
 
-    // Лимитер миксера для защиты от перегруза при 10+ спикерах
+    
     this.outputCompressor.threshold.value = -1.0
     this.outputCompressor.knee.value = 0
     this.outputCompressor.ratio.value = 20

@@ -293,7 +293,9 @@
     "micNotFound": "Микрофон не найден. Подключите устройство и попробуйте снова.",
     "audioError": "Ошибка аудио: {{message}}",
     "incomingCall": "Входящий звонок...",
-    "incomingChannelInvite": "Вас зовут в канал"
+    "incomingChannelInvite": "Вас зовут в канал",
+    "startupCalibration": "Калибровка микрофона... Пожалуйста, помолчите 2 сек.",
+    "calibrationComplete": "Микрофон успешно откалиброван!"
   },
   "joke": {
     "title": "ШУТЕЙКА:",

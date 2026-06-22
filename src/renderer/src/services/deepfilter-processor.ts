@@ -36,33 +36,37 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private isMuted = false
   private noiseSuppression = true
 
-  // VAD Thresholds & Smoothing
+  
   private rmsSmoothed = 0
-  private GATE_THRESHOLD_ON = 0.008  // Оптимизированный порог включения для высокой чувствительности
-  private GATE_THRESHOLD_OFF = 0.003 // Оптимизированный порог удержания
+  private GATE_THRESHOLD_ON = 0.008  
+  private GATE_THRESHOLD_OFF = 0.003 
   private lastVadSent = false
 
   private overflowCount = 0
 
-  private readonly HOLD_FRAMES = 30 // ~300ms удержания гейта после завершения речи
+  private readonly HOLD_FRAMES = 30 
   private framesSinceLastVoice = this.HOLD_FRAMES
 
-  // VCA-эмуляция (Гибридный гейт для суммарного подавления)
+  
   private currentGain = 1.0
   private readonly TARGET_GAIN_ON = 1.0
-  private readonly TARGET_GAIN_OFF = 0.0 // Полная тишина при закрытом гейте (было 0.01 / -40 дБ)
+  private readonly TARGET_GAIN_OFF = 0.0 
 
-  // Экспоненциальные огибающие: Время атаки (10мс) и релиза (50мс)
+  
   private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.010))
-  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.050)) // Быстрый и плавный релиз (50мс)
+  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.050)) 
 
-  // Медленная автоматическая регулировка усиления (АРУ / AGC)
-  private readonly agcGain = 1.0 // Зафиксировано на 1.0 для предотвращения скачков и пампинга
+  
+  private readonly agcGain = 1.0 
   private attenuationLimit = 100
 
-  // Буфер lookahead для задержки голоса и качественного открытия гейта
-  private delayBuffer: Array<{ frame: Float32Array; isSpeaking: boolean }> = []
-  private readonly LOOKAHEAD_FRAMES = 8 // 80мс задержки
+  
+  private delayFrames: Float32Array[] = []
+  private delaySpeaking: boolean[] = []
+  private delayWriteIndex = 0
+  private delayReadIndex = 0
+  private delayCount = 0
+  private readonly LOOKAHEAD_FRAMES = 8 
 
   constructor() {
     super()
@@ -70,7 +74,12 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     this.outputBuffer = new Float32Array(this.BUFFER_SIZE)
     this.frameToProcess = new Float32Array(this.FRAME_SIZE)
     this.processedFrame = new Float32Array(this.FRAME_SIZE)
-    this.outputWriteIndex = this.FRAME_SIZE * (1 + this.LOOKAHEAD_FRAMES) // Предзаполняем тишиной с учетом lookahead задержки
+    this.outputWriteIndex = this.FRAME_SIZE * (1 + this.LOOKAHEAD_FRAMES) 
+
+    for (let i = 0; i <= this.LOOKAHEAD_FRAMES; i++) {
+      this.delayFrames.push(new Float32Array(this.FRAME_SIZE))
+      this.delaySpeaking.push(false)
+    }
 
     this.port.onmessage = (event) => {
       if (event.data.type === 'loadWasm') {
@@ -91,7 +100,10 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
             this.rmsSmoothed = 0
             this.currentGain = this.TARGET_GAIN_OFF
             this.framesSinceLastVoice = this.HOLD_FRAMES
-            this.delayBuffer = []
+            this.delayWriteIndex = 0
+            this.delayReadIndex = 0
+            this.delayCount = 0
+            this.delaySpeaking.fill(false)
             if (this.lastVadSent) {
               this.port.postMessage({ type: 'vad', isSpeaking: false })
               this.lastVadSent = false
@@ -127,7 +139,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     try {
       this.denoiser = new StandaloneDeepFilter({
         attenuationLimit: this.attenuationLimit,
-        postFilterBeta: 0.03
+        postFilterBeta: 0.05
       })
       await this.denoiser.initialize()
       this.denoiser.startStreaming()
@@ -148,9 +160,14 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       }
       return writeIndex
     }
-    for (let i = 0; i < data.length; i++) {
-      buffer[writeIndex] = data[i]
-      writeIndex = (writeIndex + 1) % this.BUFFER_SIZE
+    const part1 = this.BUFFER_SIZE - writeIndex
+    if (part1 >= data.length) {
+      buffer.set(data, writeIndex)
+      writeIndex = (writeIndex + data.length) % this.BUFFER_SIZE
+    } else {
+      buffer.set(data.subarray(0, part1), writeIndex)
+      buffer.set(data.subarray(part1), 0)
+      writeIndex = data.length - part1
     }
     return writeIndex
   }
@@ -161,9 +178,14 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       data.fill(0)
       return readIndex
     }
-    for (let i = 0; i < data.length; i++) {
-      data[i] = buffer[readIndex]
-      readIndex = (readIndex + 1) % this.BUFFER_SIZE
+    const part1 = this.BUFFER_SIZE - readIndex
+    if (part1 >= data.length) {
+      data.set(buffer.subarray(readIndex, readIndex + data.length))
+      readIndex = (readIndex + data.length) % this.BUFFER_SIZE
+    } else {
+      data.set(buffer.subarray(readIndex, this.BUFFER_SIZE), 0)
+      data.set(buffer.subarray(0, data.length - part1), part1)
+      readIndex = data.length - part1
     }
     return readIndex
   }
@@ -177,7 +199,6 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     const inputChannel = input[0]
     const outputChannel = output[0]
 
-    // Полное отсечение аудио при мьюте (Аппаратный гейт)
     if (this.isMuted) {
       outputChannel.fill(0)
       return true
@@ -195,9 +216,6 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         this.processedFrame.set(this.frameToProcess)
       }
 
-      // Вычисление RMS для определения голоса.
-      // Если шумоподавление включено, делаем замер на очищенном (processed) фрейме,
-      // чтобы фоновый шум не приводил к ложным срабатываниям ВАД.
       let sumSquares = 0
       const analysisFrame = this.noiseSuppression ? this.processedFrame : this.frameToProcess
       for (let i = 0; i < this.FRAME_SIZE; i++) {
@@ -205,10 +223,8 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       }
       const currentRms = Math.sqrt(sumSquares / this.FRAME_SIZE)
 
-      // Сглаживание RMS
       this.rmsSmoothed = 0.3 * currentRms + 0.7 * this.rmsSmoothed
 
-      // Гистерезис VAD
       let isVoiceFrame = false
       if (this.framesSinceLastVoice < this.HOLD_FRAMES) {
         isVoiceFrame = this.rmsSmoothed > this.GATE_THRESHOLD_OFF
@@ -224,20 +240,27 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
       const isSpeaking = this.framesSinceLastVoice < this.HOLD_FRAMES
 
-      // Добавляем фрейм во временный буфер задержки
-      this.delayBuffer.push({
-        frame: new Float32Array(this.processedFrame),
-        isSpeaking: isSpeaking
-      })
+      const writeIdx = this.delayWriteIndex
+      this.delayFrames[writeIdx].set(this.processedFrame)
+      this.delaySpeaking[writeIdx] = isSpeaking
+      this.delayWriteIndex = (writeIdx + 1) % 9
+      this.delayCount++
 
-      // Когда буфер заполнен, извлекаем самый старый и применяем гейт с lookahead
-      if (this.delayBuffer.length > this.LOOKAHEAD_FRAMES) {
-        const oldest = this.delayBuffer.shift()!
-        
-        // Lookahead: гейт открыт, если сам старый фрейм или любой из последующих в очереди активен
-        const anySpeakingAhead = oldest.isSpeaking || this.delayBuffer.some(item => item.isSpeaking)
+      if (this.delayCount > 8) {
+        const readIdx = this.delayReadIndex
+        const oldestFrame = this.delayFrames[readIdx]
 
-        // Отправляем VAD-сообщение хосту синхронно с выдачей фрейма
+        let anySpeakingAhead = false
+        for (let k = 0; k < 9; k++) {
+          if (k < this.delayCount) {
+            const idx = (readIdx + k) % 9
+            if (this.delaySpeaking[idx]) {
+              anySpeakingAhead = true
+              break
+            }
+          }
+        }
+
         if (anySpeakingAhead !== this.lastVadSent) {
           this.port.postMessage({ type: 'vad', isSpeaking: anySpeakingAhead })
           this.lastVadSent = anySpeakingAhead
@@ -248,17 +271,17 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
           for (let i = 0; i < this.FRAME_SIZE; i++) {
             if (overallTarget > this.currentGain) {
-              // Быстрая атака (10мс)
               this.currentGain = this.attackCoef * this.currentGain + (1 - this.attackCoef) * overallTarget
             } else {
-              // Быстрый релиз (30мс)
               this.currentGain = this.releaseCoef * this.currentGain + (1 - this.releaseCoef) * overallTarget
             }
-            oldest.frame[i] *= this.currentGain
+            oldestFrame[i] *= this.currentGain
           }
         }
 
-        this.outputWriteIndex = this.pushToBuffer(this.outputBuffer, oldest.frame, this.outputWriteIndex, this.outputReadIndex)
+        this.outputWriteIndex = this.pushToBuffer(this.outputBuffer, oldestFrame, this.outputWriteIndex, this.outputReadIndex)
+        this.delayReadIndex = (readIdx + 1) % 9
+        this.delayCount--
       }
     }
 

@@ -296,7 +296,7 @@ textarea,
   animation: admin-block-out 0.35s cubic-bezier(0.7, 0, 0.84, 0) forwards;
 }
 
-/* Premium Interactive Visual Elements */
+
 #mouse-glow {
   pointer-events: none;
   position: fixed;

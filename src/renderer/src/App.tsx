@@ -1,12 +1,14 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck } from '@phosphor-icons/react';
 import { useTranslation, Trans } from 'react-i18next';
 
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
+import { useSpeakingStore } from './store/useSpeakingStore';
 import { signalRService } from './services/signalr';
 import { webrtc } from './services/webrtc';
 import { isPackedGif, packGif, unpackGif, getDisplaySrc, getStaticFrameSync, preloadStaticFrame } from './utils/avatar';
+import i18n from './i18n';
 
 import { ACHIEVEMENTS, getAchievementDef, formatProgress, AchievementsPayload, getProgressPercent } from './achievements';
 import { translateJoke } from './utils/jokesTranslation';
@@ -16,7 +18,151 @@ import { Md3Slider } from './components/Shared/Md3Slider';
 import { Md3Switch } from './components/Shared/Md3Switch';
 import { AvatarImg } from './components/Shared/AvatarImg';
 
-// === Main App ===
+
+const VoiceUserCard = memo(({ user, cardSize, isIdle, t, handleContextMenu, webrtcConnections, currentUserId }: {
+  user: User;
+  cardSize: any;
+  isIdle: boolean;
+  t: any;
+  handleContextMenu: any;
+  webrtcConnections: any;
+  currentUserId: string | undefined;
+}) => {
+  const isSpeaking = useSpeakingStore(state => state.speaking[user.id] ?? false);
+  const isLocal = user.id === currentUserId;
+  const isConnected = webrtcConnections[user.id] || isLocal;
+
+  return (
+    <div onContextMenu={e => handleContextMenu(e, 'voiceUser', user)}
+      className={`relative flex flex-col items-center justify-center cursor-pointer transition-all duration-200 overflow-hidden shrink-0 hover:-translate-y-1
+        ${(isSpeaking && isConnected) ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)] z-10' : 'shadow-xl'}`}
+      style={{ backgroundColor: user.avatarColor, width: `${cardSize.w}px`, height: `${cardSize.h}px`, borderRadius: '24px' }}>
+      <div className="relative" style={{ width: `${cardSize.avatarSize}px`, height: `${cardSize.avatarSize}px`, marginBottom: '16px' }}>
+        {(isSpeaking && isConnected) && (
+          <div className="absolute inset-0 rounded-full border border-green-500/50 animate-speaking-ripple scale-125 pointer-events-none" />
+        )}
+        <AvatarImg src={user.avatarBase64} size={cardSize.avatarSize} bgColor="transparent" />
+      </div>
+      {(!webrtcConnections[user.id] && !isLocal) && (
+        <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center z-20 backdrop-blur-[2px]" style={{ borderRadius: '24px' }}>
+          <div className="flex gap-2.5 mb-2">
+            <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" />
+            <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" style={{ animationDelay: '0.15s' }} />
+            <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" style={{ animationDelay: '0.3s' }} />
+          </div>
+          <span className="text-white text-xs font-bold tracking-wider">{t('main.connection.connecting', 'ПОДКЛЮЧЕНИЕ')}</span>
+        </div>
+      )}
+      <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 transition-all duration-300 ${isIdle ? 'translate-y-8 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
+        <div className="bg-[#09090B]/80 backdrop-blur-md border border-[#303035]/50 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-lg whitespace-nowrap" style={{ maxWidth: `${cardSize.w - 40}px` }}>
+          <span className="text-white font-bold text-sm truncate">{user.displayName}</span>
+          {(user.isMuted || user.isServerMuted) && <Mic weight="bold" size={14} className="text-danger shrink-0" />}
+          {(user.isDeafened || user.isServerDeafened) && <Headphones weight="bold" size={14} className="text-danger shrink-0" />}
+        </div>
+      </div>
+    </div>
+  );
+});
+VoiceUserCard.displayName = 'VoiceUserCard';
+
+const CallUserCard = memo(({ currentCallUser, callStatus, cardSize, webrtcConnections, handleContextMenu, containerRef, t, isIdle }: {
+  currentCallUser: User;
+  callStatus: string;
+  cardSize: any;
+  webrtcConnections: any;
+  handleContextMenu: any;
+  containerRef: any;
+  t: any;
+  isIdle: boolean;
+}) => {
+  const isSpeaking = useSpeakingStore(state => state.speaking[currentCallUser.id] ?? false);
+  const isConnected = webrtcConnections[currentCallUser.id];
+
+  return (
+    <div ref={containerRef} className="w-full h-full flex items-center justify-center">
+      <div
+        onContextMenu={e => handleContextMenu(e, 'voiceUser', currentCallUser)}
+        className={`relative flex flex-col items-center justify-center overflow-hidden shrink-0 transition-all duration-200
+          ${callStatus === 'calling' ? 'animate-call-pulse' : ''}
+          ${(isSpeaking && callStatus === 'connected' && isConnected)
+            ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)]'
+            : 'shadow-xl'
+          }`}
+        style={{
+          backgroundColor: currentCallUser.avatarColor,
+          width: `${cardSize.w}px`,
+          height: `${cardSize.h}px`,
+          borderRadius: '24px'
+        }}
+      >
+        <div
+          className="relative"
+          style={{
+            width: `${cardSize.avatarSize}px`,
+            height: `${cardSize.avatarSize}px`,
+            marginBottom: '16px'
+          }}
+        >
+          {(isSpeaking && callStatus === 'connected' && isConnected) && (
+            <div className="absolute inset-0 rounded-full border border-green-500/50 animate-speaking-ripple scale-125 pointer-events-none" />
+          )}
+          <AvatarImg src={currentCallUser.avatarBase64} size={cardSize.avatarSize} bgColor="transparent" />
+        </div>
+
+        {(!isConnected && callStatus !== 'calling') && (
+          <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center z-20 backdrop-blur-[2px]" style={{ borderRadius: '24px' }}>
+            <div className="flex gap-2.5 mb-2">
+              <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" />
+              <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" style={{ animationDelay: '0.15s' }} />
+              <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" style={{ animationDelay: '0.3s' }} />
+            </div>
+            <span className="text-white text-xs font-bold tracking-wider">{t('main.connection.connecting', 'ПОДКЛЮЧЕНИЕ')}</span>
+          </div>
+        )}
+
+        {callStatus === 'calling' && (
+          <div
+            className="absolute inset-0 bg-black/25 flex items-center justify-center"
+            style={{ borderRadius: '24px' }}
+          >
+            <div className="flex gap-2.5">
+              <div className="w-3 h-3 bg-white/90 rounded-full animate-bounce" />
+              <div className="w-3 h-3 bg-white/90 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
+              <div className="w-3 h-3 bg-white/90 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+            </div>
+          </div>
+        )}
+
+        <div
+          className={`absolute bottom-4 left-1/2 -translate-x-1/2 transition-all duration-300 ${isIdle && callStatus === 'connected'
+            ? 'translate-y-8 opacity-0 pointer-events-none'
+            : 'translate-y-0 opacity-100'
+            }`}
+        >
+          <div
+            className="bg-[#09090B]/80 backdrop-blur-md border border-[#303035]/50 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-lg whitespace-nowrap"
+            style={{ maxWidth: `${cardSize.w - 40}px` }}
+          >
+            <span className="text-white font-bold text-sm truncate">{currentCallUser.displayName}</span>
+
+            {callStatus === 'calling' && (
+              <span className="text-textMuted text-xs font-medium">{t('toasts.calling', 'Дозвон...')}</span>
+            )}
+
+            {callStatus === 'connected' && (currentCallUser.isMuted || currentCallUser.isServerMuted) && (
+              <Mic weight="bold" size={14} className="text-danger shrink-0" />
+            )}
+            {callStatus === 'connected' && (currentCallUser.isDeafened || currentCallUser.isServerDeafened) && (
+              <Headphones weight="bold" size={14} className="text-danger shrink-0" />
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+CallUserCard.displayName = 'CallUserCard';
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const store = useAppStore();
@@ -173,7 +319,7 @@ export default function App() {
   const settingsLoadedRef = useRef(false);
   const credentialsRef = useRef<{ login: string; password: string }>({ login: '', password: '' });
   const initCompleteRef = useRef(false);
-  /** true когда у нас есть сохранённые креды, но автологин ещё не выполнен (сервер недоступен или вернул ошибку) */
+  
   const autoLoginPendingRef = useRef(false);
   const loginInputRef = useRef<HTMLInputElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
@@ -220,7 +366,7 @@ export default function App() {
     };
   }, []);
 
-  // === Callbacks defined early to avoid TDZ in useEffect deps ===
+  
 
   const saveLocalCache = useCallback(() => {
     try {
@@ -307,7 +453,7 @@ export default function App() {
       i18n.changeLanguage(s.language);
     }
 
-    // Восстанавливаем системные настройки из кэша сессии без лишних IPC-вызовов
+    
     if (s.openAtLogin !== undefined) {
       setAutoLaunch(s.openAtLogin);
       window.windowControls.setAutoLaunch(s.openAtLogin).catch(() => { });
@@ -317,17 +463,17 @@ export default function App() {
       window.windowControls.setMinimizeToTray(s.minimizeToTray).catch(() => { });
     }
 
-    // Восстанавливаем индивидуальные громкости пользователей
+    
     if (s.userVolumes && typeof s.userVolumes === 'object') {
       const store = useAppStore.getState();
       Object.entries(s.userVolumes).forEach(([userId, volume]) => {
         store.setUserVolume(userId, volume);
-        // Применяем к уже существующим аудио-элементам (если пользователь в канале)
+        
         webrtc.setUserVolume(userId, volume);
       });
     }
 
-    // Синхронно обновляем settingsRef.current для исключения гонки при вызове saveLocalCache
+    
     settingsRef.current = {
       inputVolume: iv,
       outputVolume: ov,
@@ -408,10 +554,10 @@ export default function App() {
   useEffect(() => {
     const unsubConnection = signalRService.onConnectionUpdate((isConnected) => {
       setServerConnected(isConnected);
-      if (!initCompleteRef.current) return; // Не мешаем init-потоку
+      if (!initCompleteRef.current) return; 
 
       if (isConnected) {
-        // Соединение восстановлено — отменяем таймер перехода в лоадинг
+        
         if (disconnectTimerRef.current) {
           clearTimeout(disconnectTimerRef.current);
           disconnectTimerRef.current = null;
@@ -421,7 +567,7 @@ export default function App() {
         setShowReconnectingOverlay(false);
 
         if (autoLoginPendingRef.current) {
-          // Автологин ещё не выполнен — пробуем сейчас (сервер только что стал доступен)
+          
           autoLoginPendingRef.current = false;
           const creds = credentialsRef.current;
           if (creds.login && creds.password) {
@@ -441,12 +587,12 @@ export default function App() {
                 setLoadingFadeOut(true);
                 setTimeout(() => setAppLoading(false), 650);
               } else if (result === 'invalid') {
-                // Неверные credentials — не ретраим, показываем экран логина
+                
                 autoLoginPendingRef.current = false;
                 setLoadingFadeOut(true);
                 setTimeout(() => setAppLoading(false), 650);
               } else {
-                // 'network' — сеть упала снова, ждём следующего reconnect
+                
                 autoLoginPendingRef.current = true;
                 setShowErrorText(true);
                 setShowReconnectingOverlay(true);
@@ -454,16 +600,16 @@ export default function App() {
             });
           }
         } else {
-          // Пользователь уже залогинен — просто скрываем лоадинг
+          
           setLoadingFadeOut(true);
           setTimeout(() => setAppLoading(false), 650);
         }
       } else if (isAuth) {
-        // СигналР сам попытается переподключиться и вызовет Login.
-        // Не сбрасываем UI (appLoading), чтобы не было мигания или потери контекста.
+        
+        
         autoLoginPendingRef.current = true;
 
-        // Запускаем 3-секундный таймер перед показом оверлея реконнекта
+        
         if (!disconnectTimerRef.current) {
           disconnectTimerRef.current = setTimeout(() => {
             setShowReconnectingOverlay(true);
@@ -482,13 +628,25 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
-      // Запускаем калибровку микрофона в фоне (длительность определяется автоматически: 5с в первый раз, 2с в последующие)
-      const calibrationPromise = webrtc.calibrateMic().catch(err => {
-        console.warn('[Calibration] Mic calibration failed on startup:', err);
-        return null;
-      });
+      
+      useAppStore.getState().setSystemToast(i18n.t('toasts.startupCalibration', 'Калибровка микрофона... Пожалуйста, помолчите 2 сек.'));
+      const calibrationPromise = webrtc.calibrateMic(2000)
+        .then(() => {
+          useAppStore.getState().setSystemToast(i18n.t('toasts.calibrationComplete', 'Микрофон успешно откалиброван!'));
+          setTimeout(() => {
+            const currentStore = useAppStore.getState();
+            if (currentStore.systemToast === i18n.t('toasts.calibrationComplete', 'Микрофон успешно откалиброван!')) {
+              currentStore.setSystemToast(null);
+            }
+          }, 2000);
+        })
+        .catch(err => {
+          console.warn('[Calibration] Mic calibration failed on startup:', err);
+          useAppStore.getState().setSystemToast(null);
+          return null;
+        });
 
-      // 1. Загружаем сессию с диска
+      
       let cachedCredentials: { login: string; password: string; userId?: string } | null = null;
 
       try {
@@ -509,7 +667,7 @@ export default function App() {
         }
       } catch { }
 
-      // 2. Если нет кредов — сразу показываем экран логина
+      
       if (!cachedCredentials) {
         await calibrationPromise;
         initCompleteRef.current = true;
@@ -518,7 +676,7 @@ export default function App() {
         return;
       }
 
-      // 3. Подключаемся к серверу (с таймером на текст ошибки)
+      
       setShowInitConnectionError(false);
       const errorTimer = setTimeout(() => setShowInitConnectionError(true), 10000);
 
@@ -534,9 +692,9 @@ export default function App() {
       setShowErrorText(false);
       setShowInitConnectionError(false);
 
-      // 4. Если так и не подключились — остаёмся на экране загрузки.
-      //    Сессия НЕ трогается: она валидна, просто сервер недоступен.
-      //    onConnectionUpdate(true) сам запустит автологин когда сервер вернётся.
+      
+      
+      
       if (!connected) {
         autoLoginPendingRef.current = true;
         await calibrationPromise;
@@ -545,7 +703,7 @@ export default function App() {
         return;
       }
 
-      // 5. Автологин
+      
       const loginResult = await signalRService.login(
         cachedCredentials.login,
         cachedCredentials.password
@@ -577,14 +735,14 @@ export default function App() {
           setTimeout(() => setAppLoading(false), 650);
         }, 300);
       } else if (loginResult === 'invalid') {
-        // Неверные credentials — очищаем сессию и показываем экран логина
+        
         await window.windowControls.clearSession().catch(() => { });
         await calibrationPromise;
         initCompleteRef.current = true;
         setLoadingFadeOut(true);
         setTimeout(() => setAppLoading(false), 650);
       } else {
-        // 'network' — сеть прервалась во время login(), ждём reconnect
+        
         autoLoginPendingRef.current = true;
         await calibrationPromise;
         initCompleteRef.current = true;
@@ -637,7 +795,7 @@ export default function App() {
     preloadStaticFrame(store.currentCallUser?.avatarBase64);
   }, [store.channelUsersMap, store.friends, store.voiceUsers, store.currentUser?.avatarBase64, store.currentCallUser?.avatarBase64]);
 
-  // (saveLocalCache, softClearCache, deepWipeOnLogout, resetToDefaults, applySettings moved above — before first useEffect)
+  
 
   const userVolumesSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -660,13 +818,13 @@ export default function App() {
     }, 500);
   }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, isAuth, language]);
 
-  // Сохраняем системные настройки (autoLaunch / minimizeToTray) в локальный кэш сессии при изменении
+  
   useEffect(() => {
     if (!settingsLoadedRef.current || !isAuth) return;
     saveLocalCache();
   }, [autoLaunch, minimizeToTray, isAuth, saveLocalCache]);
 
-  // Сохраняем индивидуальные громкости пользователей на сервере при их изменении
+  
   useEffect(() => {
     if (!settingsLoadedRef.current || !isAuth) return;
 
@@ -962,11 +1120,11 @@ export default function App() {
 
   const handleAutoLaunchToggle = useCallback(async (enabled: boolean) => {
     const prev = autoLaunch;
-    setAutoLaunch(enabled); // Optimistic UI
+    setAutoLaunch(enabled); 
     try {
       await window.windowControls.setAutoLaunch(enabled);
     } catch {
-      setAutoLaunch(prev); // Откат при ошибке
+      setAutoLaunch(prev); 
     }
   }, [autoLaunch]);
 
@@ -1083,13 +1241,13 @@ export default function App() {
     const currentStore = useAppStore.getState();
     currentStore.setSelectedChannelForMembers(ch);
 
-    // Instant cache-hit (fallback to empty array)
+    
     const cached = currentStore.channelMembersCache?.[ch.id] || [];
     currentStore.setChannelMembers(cached);
     currentStore.setModal('channelMembers', true);
 
     try {
-      // Silent background sync
+      
       const members = await signalRService.getChannelMembersList(ch.id);
       if (members && Array.isArray(members)) {
         useAppStore.getState().setChannelMembers(members);
@@ -1165,7 +1323,7 @@ export default function App() {
   }, []);
 
   const openMyAchievements = useCallback(async () => {
-    store.setAchievementsData(null); // Показать "Загрузка..."
+    store.setAchievementsData(null); 
     store.setAchievementsViewUserId(null);
     store.setModal('achievements', true);
     const data = await signalRService.getMyAchievements();
@@ -1269,10 +1427,10 @@ export default function App() {
     let base64: string;
 
     if (cropGifDataUrl) {
-      // GIF: пакуем оригинал + параметры кропа
+      
       base64 = packGif(cropGifDataUrl, cropScale, cropPos.x, cropPos.y);
     } else {
-      // Статичное изображение: рендерим через canvas
+      
       base64 = canvas.toDataURL('image/png');
     }
 
@@ -1414,7 +1572,7 @@ export default function App() {
     );
   };
 
-  // === Screens ===
+  
 
   const hasInvites = store.channelInvites.length > 0 || store.friendRequests.length > 0;
 
@@ -1732,86 +1890,16 @@ export default function App() {
 
             {store.currentCallUser && (
               <div className="absolute top-0 left-0 right-0 bottom-[120px] p-6 flex items-center justify-center overflow-hidden">
-                <div ref={containerRef} className="w-full h-full flex items-center justify-center">
-                  <div
-                    onContextMenu={e => handleContextMenu(e, 'voiceUser', store.currentCallUser)}
-                    className={`relative flex flex-col items-center justify-center overflow-hidden shrink-0 transition-all duration-200
-          ${store.callStatus === 'calling' ? 'animate-call-pulse' : ''}
-          ${(store.currentCallUser.isSpeaking && store.callStatus === 'connected' && store.webrtcConnections[store.currentCallUser.id])
-                        ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)]'
-                        : 'shadow-xl'
-                      }`}
-                    style={{
-                      backgroundColor: store.currentCallUser.avatarColor,
-                      width: `${cardSize.w}px`,
-                      height: `${cardSize.h}px`,
-                      borderRadius: '24px'
-                    }}
-                  >
-                    <div
-                      className="relative"
-                      style={{
-                        width: `${cardSize.avatarSize}px`,
-                        height: `${cardSize.avatarSize}px`,
-                        marginBottom: '16px'
-                      }}
-                    >
-                      {(store.currentCallUser.isSpeaking && store.callStatus === 'connected' && store.webrtcConnections[store.currentCallUser.id]) && (
-                        <div className="absolute inset-0 rounded-full border border-green-500/50 animate-speaking-ripple scale-125 pointer-events-none" />
-                      )}
-                      <AvatarImg src={store.currentCallUser.avatarBase64} size={cardSize.avatarSize} bgColor="transparent" />
-                    </div>
-
-                    {(!store.webrtcConnections[store.currentCallUser.id] && store.callStatus !== 'calling') && (
-                      <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center z-20 backdrop-blur-[2px]" style={{ borderRadius: '24px' }}>
-                        <div className="flex gap-2.5 mb-2">
-                          <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" />
-                          <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" style={{ animationDelay: '0.15s' }} />
-                          <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" style={{ animationDelay: '0.3s' }} />
-                        </div>
-                        <span className="text-white text-xs font-bold tracking-wider">{t('main.connection.connecting', 'ПОДКЛЮЧЕНИЕ')}</span>
-                      </div>
-                    )}
-
-                    {store.callStatus === 'calling' && (
-                      <div
-                        className="absolute inset-0 bg-black/25 flex items-center justify-center"
-                        style={{ borderRadius: '24px' }}
-                      >
-                        <div className="flex gap-2.5">
-                          <div className="w-3 h-3 bg-white/90 rounded-full animate-bounce" />
-                          <div className="w-3 h-3 bg-white/90 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-                          <div className="w-3 h-3 bg-white/90 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
-                        </div>
-                      </div>
-                    )}
-
-                    <div
-                      className={`absolute bottom-4 left-1/2 -translate-x-1/2 transition-all duration-300 ${isIdle && store.callStatus === 'connected'
-                        ? 'translate-y-8 opacity-0 pointer-events-none'
-                        : 'translate-y-0 opacity-100'
-                        }`}
-                    >
-                      <div
-                        className="bg-[#09090B]/80 backdrop-blur-md border border-[#303035]/50 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-lg whitespace-nowrap"
-                        style={{ maxWidth: `${cardSize.w - 40}px` }}
-                      >
-                        <span className="text-white font-bold text-sm truncate">{store.currentCallUser.displayName}</span>
-
-                        {store.callStatus === 'calling' && (
-                          <span className="text-textMuted text-xs font-medium">{t('toasts.calling', 'Дозвон...')}</span>
-                        )}
-
-                        {store.callStatus === 'connected' && (store.currentCallUser.isMuted || store.currentCallUser.isServerMuted) && (
-                          <Mic weight="bold" size={14} className="text-danger shrink-0" />
-                        )}
-                        {store.callStatus === 'connected' && (store.currentCallUser.isDeafened || store.currentCallUser.isServerDeafened) && (
-                          <Headphones weight="bold" size={14} className="text-danger shrink-0" />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <CallUserCard
+                  currentCallUser={store.currentCallUser}
+                  callStatus={store.callStatus}
+                  cardSize={cardSize}
+                  webrtcConnections={store.webrtcConnections}
+                  handleContextMenu={handleContextMenu}
+                  containerRef={containerRef}
+                  t={t}
+                  isIdle={isIdle}
+                />
               </div>
             )}
 
@@ -1845,34 +1933,16 @@ export default function App() {
                     if (nameA > nameB) return 1;
                     return a.id.localeCompare(b.id);
                   }).map(user => (
-                    <div key={user.id} onContextMenu={e => handleContextMenu(e, 'voiceUser', user)}
-                      className={`relative flex flex-col items-center justify-center cursor-pointer transition-all duration-200 overflow-hidden shrink-0 hover:-translate-y-1
-                        ${(user.isSpeaking && (store.webrtcConnections[user.id] || user.id === store.currentUser?.id)) ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)] z-10' : 'shadow-xl'}`}
-                      style={{ backgroundColor: user.avatarColor, width: `${cardSize.w}px`, height: `${cardSize.h}px`, borderRadius: '24px' }}>
-                      <div className="relative" style={{ width: `${cardSize.avatarSize}px`, height: `${cardSize.avatarSize}px`, marginBottom: '16px' }}>
-                        {(user.isSpeaking && (store.webrtcConnections[user.id] || user.id === store.currentUser?.id)) && (
-                          <div className="absolute inset-0 rounded-full border border-green-500/50 animate-speaking-ripple scale-125 pointer-events-none" />
-                        )}
-                        <AvatarImg src={user.avatarBase64} size={cardSize.avatarSize} bgColor="transparent" />
-                      </div>
-                      {(!store.webrtcConnections[user.id] && user.id !== store.currentUser?.id) && (
-                        <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center z-20 backdrop-blur-[2px]" style={{ borderRadius: '24px' }}>
-                          <div className="flex gap-2.5 mb-2">
-                            <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" />
-                            <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" style={{ animationDelay: '0.15s' }} />
-                            <div className="w-3 h-3 bg-[#c70060] rounded-full animate-pulse" style={{ animationDelay: '0.3s' }} />
-                          </div>
-                          <span className="text-white text-xs font-bold tracking-wider">{t('main.connection.connecting', 'ПОДКЛЮЧЕНИЕ')}</span>
-                        </div>
-                      )}
-                      <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 transition-all duration-300 ${isIdle ? 'translate-y-8 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
-                        <div className="bg-[#09090B]/80 backdrop-blur-md border border-[#303035]/50 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-lg whitespace-nowrap" style={{ maxWidth: `${cardSize.w - 40}px` }}>
-                          <span className="text-white font-bold text-sm truncate">{user.displayName}</span>
-                          {(user.isMuted || user.isServerMuted) && <Mic weight="bold" size={14} className="text-danger shrink-0" />}
-                          {(user.isDeafened || user.isServerDeafened) && <Headphones weight="bold" size={14} className="text-danger shrink-0" />}
-                        </div>
-                      </div>
-                    </div>
+                    <VoiceUserCard
+                      key={user.id}
+                      user={user}
+                      cardSize={cardSize}
+                      isIdle={isIdle}
+                      t={t}
+                      handleContextMenu={handleContextMenu}
+                      webrtcConnections={store.webrtcConnections}
+                      currentUserId={store.currentUser?.id}
+                    />
                   ))}
                 </div>
               </div>

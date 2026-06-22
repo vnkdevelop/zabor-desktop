@@ -24,7 +24,7 @@ export function Md3Slider({
   const [localValue, setLocalValue] = useState(value);
   const lastPropsValue = useRef(value);
 
-  // Sync internal state if prop value changes from outside
+  
   useEffect(() => {
     if (value !== lastPropsValue.current) {
       setLocalValue(value);

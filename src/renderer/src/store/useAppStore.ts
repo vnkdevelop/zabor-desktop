@@ -1,6 +1,7 @@
 
 
 import { create } from 'zustand';
+import { useSpeakingStore } from './useSpeakingStore';
 
 export interface User {
   id: string;
@@ -307,39 +308,9 @@ export const useAppStore = create<AppState>((set) => ({
     webrtcConnections: { ...state.webrtcConnections, [userId]: isConnected }
   })),
 
-  setSpeakingStatus: (userId, isSpeaking) => set((state) => {
-  // Только обновляем коллекции, где пользователь реально присутствует
-  const voiceUsers = updateUserInList(state.voiceUsers, userId, { isSpeaking });
-
-  let currentCallUser = state.currentCallUser;
-  if (currentCallUser?.id === userId) {
-    currentCallUser = { ...currentCallUser, isSpeaking };
-  }
-
-  let currentUser = state.currentUser;
-  if (currentUser?.id === userId) {
-    currentUser = { ...currentUser, isSpeaking };
-  }
-
-  // channelUsersMap — обновляем только текущий канал
-  let channelUsersMap = state.channelUsersMap;
-  if (state.currentChannelId) {
-    const channelUsers = state.channelUsersMap[state.currentChannelId];
-    if (channelUsers?.some(u => u.id === userId)) {
-      channelUsersMap = {
-        ...state.channelUsersMap,
-        [state.currentChannelId]: updateUserInList(channelUsers, userId, { isSpeaking })
-      };
-    }
-  }
-
-  return {
-    voiceUsers,
-    currentCallUser,
-    currentUser,
-    channelUsersMap
-  };
-}),
+  setSpeakingStatus: (userId, isSpeaking) => {
+    useSpeakingStore.getState().setSpeaking(userId, isSpeaking);
+  },
 
   updateUserStatus: (userId, updates) => set((state) => {
     const voiceUsers = updateUserInList(state.voiceUsers, userId, updates);
