@@ -95,7 +95,6 @@ export class WebRTCManager {
   private silenceCounterMs = 0
   private isSilenceWarningActive = false
 
-  private vadContext: AudioContext | null = null
   private speakingIntervals: Map<string, SpeakingEntry> = new Map()
 
   
@@ -153,9 +152,9 @@ export class WebRTCManager {
 
     
     const compressor = ctx.createDynamicsCompressor()
-    compressor.threshold.value = -24
+    compressor.threshold.value = -12
     compressor.knee.value = 10
-    compressor.ratio.value = 3
+    compressor.ratio.value = 2
     compressor.attack.value = 0.005
     compressor.release.value = 0.150
 
@@ -298,26 +297,29 @@ export class WebRTCManager {
     this.clearVAD(userId)
 
     try {
-      if (!this.vadContext || this.vadContext.state === 'closed') {
-        try {
-          this.vadContext = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' })
-        } catch (e) {
-          console.warn('[WebRTC] Failed to create vadContext at 48000Hz, falling back to default:', e)
-          this.vadContext = new AudioContext({ latencyHint: 'playback' })
+      let contextToUse: AudioContext | null = null
+      if (isLocal) {
+        if (!this.processedContext || this.processedContext.state === 'closed') {
+          this.processedContext = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
         }
+        contextToUse = this.processedContext
+      } else {
+        this.initOutputMixer()
+        contextToUse = this.outputMixContext
       }
-      if (this.vadContext.state === 'suspended') this.vadContext.resume().catch(() => { })
 
-      const cloned = new MediaStream(stream.getAudioTracks().map(t => t.clone()))
-      const source = this.vadContext.createMediaStreamSource(cloned)
+      if (!contextToUse) return
+      if (contextToUse.state === 'suspended') contextToUse.resume().catch(() => { })
 
-      const bp1 = this.vadContext.createBiquadFilter()
+      const source = contextToUse.createMediaStreamSource(stream)
+
+      const bp1 = contextToUse.createBiquadFilter()
       bp1.type = 'highpass'; bp1.frequency.value = 85; bp1.Q.value = 0.5
 
-      const bp2 = this.vadContext.createBiquadFilter()
+      const bp2 = contextToUse.createBiquadFilter()
       bp2.type = 'lowpass'; bp2.frequency.value = 8000; bp2.Q.value = 0.5
 
-      const analyser = this.vadContext.createAnalyser()
+      const analyser = contextToUse.createAnalyser()
       analyser.fftSize = 512
       analyser.smoothingTimeConstant = 0.6
 
@@ -398,7 +400,7 @@ export class WebRTCManager {
       }
 
       const timer = setInterval(check, 30)
-      this.speakingIntervals.set(userId, { timer, stream: cloned, nodes: vadNodes })
+      this.speakingIntervals.set(userId, { timer, stream, nodes: vadNodes })
     } catch (e) { console.error('[VAD] setup failed', e) }
   }
 
@@ -407,15 +409,9 @@ export class WebRTCManager {
     if (entry) {
       clearInterval(entry.timer)
       entry.nodes.forEach(n => { try { n.disconnect() } catch { } })
-      entry.stream.getTracks().forEach(t => { t.stop(); t.enabled = false })
       this.speakingIntervals.delete(userId)
     }
     useAppStore.getState().setSpeakingStatus(userId, false)
-
-    if (this.speakingIntervals.size === 0 && this.vadContext && this.vadContext.state !== 'closed') {
-      this.vadContext.close().catch(() => { })
-      this.vadContext = null
-    }
   }
 
   
@@ -441,33 +437,52 @@ export class WebRTCManager {
   }
 
   public async calibrateMic(durationMs?: number): Promise<{ noiseFloor: number; peakNoise: number }> {
-    if (this.localStream || this.rawStream) {
-      console.log('[Mic Calibration] Active stream exists, skipping calibration to prevent conflicts');
-      return { noiseFloor: this.calibratedNoiseFloor, peakNoise: this.calibratedThresholdOn / 2.8 };
-    }
-
     const isFirstRun = localStorage.getItem('zabor_mic_calibrated') !== 'true';
     const actualDurationMs = durationMs !== undefined ? durationMs : (isFirstRun ? 5000 : 2000);
-    console.log(`[Mic Calibration] Starting ${isFirstRun ? 'first (high quality, 5s)' : 'subsequent (quick check, 2s)'} calibration. Duration: ${actualDurationMs}ms`);
+    console.log(`[Mic Calibration] Starting calibration. Duration: ${actualDurationMs}ms`);
+
+    let stream: MediaStream;
+    let shouldStopStream = false;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
-          channelCount: 1,
-          sampleRate: 48000,
-          echoCancellation: true,
-          noiseSuppression: false,
-          autoGainControl: false
-        },
-        video: false
-      });
+      if (this.rawStream && this.rawStream.getAudioTracks().length > 0 && this.rawStream.getAudioTracks()[0].readyState === 'live') {
+        stream = this.rawStream;
+        console.log('[Mic Calibration] Reusing active rawStream for calibration');
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
+            channelCount: 1,
+            sampleRate: 48000,
+            echoCancellation: true,
+            noiseSuppression: false,
+            autoGainControl: false
+          },
+          video: false
+        });
+        shouldStopStream = true;
+        console.log('[Mic Calibration] Created temporary stream for calibration');
+      }
 
       const audioContext = new AudioContext({ sampleRate: 48000 });
       const source = audioContext.createMediaStreamSource(stream);
+
+      const highpass = audioContext.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 140;
+      highpass.Q.value = 0.707;
+
+      const lowpass = audioContext.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = 7500;
+      lowpass.Q.value = 0.707;
+
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 512;
-      source.connect(analyser);
+
+      source.connect(highpass);
+      highpass.connect(lowpass);
+      lowpass.connect(analyser);
 
       const bufferLength = analyser.fftSize;
       const dataArray = new Float32Array(bufferLength);
@@ -492,8 +507,13 @@ export class WebRTCManager {
       }
 
       source.disconnect();
+      highpass.disconnect();
+      lowpass.disconnect();
       analyser.disconnect();
-      stream.getTracks().forEach(t => t.stop());
+
+      if (shouldStopStream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
       await audioContext.close();
 
       if (windowRmsValues.length === 0) {
@@ -556,10 +576,6 @@ export class WebRTCManager {
       return { noiseFloor, peakNoise };
     } catch (e) {
       console.warn('[Mic Calibration] Error calibrating mic:', e);
-      this.calibratedThresholdOn = 0.008;
-      this.calibratedThresholdOff = 0.003;
-      this.calibratedAttenuationLimit = 45;
-      this.calibratedNoiseFloor = 0.003;
       throw e;
     }
   }
@@ -748,10 +764,10 @@ export class WebRTCManager {
       return
     }
     try {
-      this.outputMixContext = new AudioContext({ sampleRate: 48000, latencyHint: 'playback' })
+      this.outputMixContext = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
     } catch (e) {
       console.warn('[WebRTC] Failed to create outputMixContext at 48000Hz, falling back to default:', e)
-      this.outputMixContext = new AudioContext({ latencyHint: 'playback' })
+      this.outputMixContext = new AudioContext({ latencyHint: 'interactive' })
     }
     if (this.outputMixContext.state === 'suspended') {
       this.outputMixContext.resume().catch(() => { })

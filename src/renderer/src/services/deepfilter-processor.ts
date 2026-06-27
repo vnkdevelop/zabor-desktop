@@ -41,6 +41,8 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private GATE_THRESHOLD_ON = 0.008  
   private GATE_THRESHOLD_OFF = 0.003 
   private lastVadSent = false
+  private consecutiveVoiceFrames = 0
+  private readonly REQUIRED_VOICE_FRAMES = 3 // Требуется 3 фрейма речи подряд (~30мс) для открытия гейта
 
   private overflowCount = 0
 
@@ -225,14 +227,19 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
       this.rmsSmoothed = 0.3 * currentRms + 0.7 * this.rmsSmoothed
 
-      let isVoiceFrame = false
-      if (this.framesSinceLastVoice < this.HOLD_FRAMES) {
-        isVoiceFrame = this.rmsSmoothed > this.GATE_THRESHOLD_OFF
+      const threshold = this.framesSinceLastVoice < this.HOLD_FRAMES ? this.GATE_THRESHOLD_OFF : this.GATE_THRESHOLD_ON
+      const isAboveThreshold = this.rmsSmoothed > threshold
+
+      if (isAboveThreshold) {
+        this.consecutiveVoiceFrames++
       } else {
-        isVoiceFrame = this.rmsSmoothed > this.GATE_THRESHOLD_ON
+        this.consecutiveVoiceFrames = 0
       }
 
-      if (isVoiceFrame) {
+      const isOpen = this.framesSinceLastVoice < this.HOLD_FRAMES
+      const shouldOpen = (this.consecutiveVoiceFrames >= this.REQUIRED_VOICE_FRAMES) || (isOpen && isAboveThreshold)
+
+      if (shouldOpen) {
         this.framesSinceLastVoice = 0
       } else {
         this.framesSinceLastVoice++

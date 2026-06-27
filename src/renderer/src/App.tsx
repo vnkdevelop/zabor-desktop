@@ -1007,18 +1007,6 @@ export default function App() {
   const handleManualCalibration = useCallback(async () => {
     if (isCalibrating) return;
 
-    const isStreamActive = store.currentChannelId !== null || store.callStatus !== 'idle';
-    if (isStreamActive) {
-      store.setSystemToast(t('toasts.micBusyCalibration', 'Нельзя калибровать микрофон во время разговора'));
-      setTimeout(() => {
-        const currentStore = useAppStore.getState();
-        if (currentStore.systemToast === t('toasts.micBusyCalibration', 'Нельзя калибровать микрофон во время разговора')) {
-          currentStore.setSystemToast(null);
-        }
-      }, 4000);
-      return;
-    }
-
     setIsCalibrating(true);
     setCalibrationSuccess(false);
     setCalibrationCountdown(10);
