@@ -629,22 +629,10 @@ export default function App() {
   useEffect(() => {
     const init = async () => {
       
-      useAppStore.getState().setSystemToast(i18n.t('toasts.startupCalibration', 'Калибровка микрофона... Пожалуйста, помолчите 2 сек.'));
-      const calibrationPromise = webrtc.calibrateMic(2000)
-        .then(() => {
-          useAppStore.getState().setSystemToast(i18n.t('toasts.calibrationComplete', 'Микрофон успешно откалиброван!'));
-          setTimeout(() => {
-            const currentStore = useAppStore.getState();
-            if (currentStore.systemToast === i18n.t('toasts.calibrationComplete', 'Микрофон успешно откалиброван!')) {
-              currentStore.setSystemToast(null);
-            }
-          }, 2000);
-        })
-        .catch(err => {
-          console.warn('[Calibration] Mic calibration failed on startup:', err);
-          useAppStore.getState().setSystemToast(null);
-          return null;
-        });
+      const calibrationPromise = webrtc.calibrateMic(2000).catch(err => {
+        console.warn('[Calibration] Mic calibration failed on startup:', err);
+        return null;
+      });
 
       
       let cachedCredentials: { login: string; password: string; userId?: string } | null = null;

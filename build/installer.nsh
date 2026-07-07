@@ -109,6 +109,15 @@
   _keep_data:
   StrCpy $KeepAppDataOnUpdate "1" 
   StrCpy $R0 "$R0 /S --keep-app-data"
+  nsExec::Exec 'cmd /c "taskkill /F /IM ZABOR.exe /T"'
+  nsExec::Exec 'cmd /c "taskkill /F /IM zabor-desktop.exe /T"'
+  nsExec::Exec 'cmd /c "taskkill /F /IM ${PRODUCT_NAME}.exe /T"'
+  Sleep 1000
+  RMDir /r "$TEMP\zabor_backup"
+  CreateDirectory "$TEMP\zabor_backup\ZABOR"
+  CopyFiles /SILENT "$APPDATA\ZABOR\*.*" "$TEMP\zabor_backup\ZABOR"
+  CreateDirectory "$TEMP\zabor_backup\zabor-desktop"
+  CopyFiles /SILENT "$APPDATA\zabor-desktop\*.*" "$TEMP\zabor_backup\zabor-desktop"
   Goto _run_now
   
   _delete_data:
@@ -117,12 +126,10 @@
   Goto _run_now
 
   _run_now:
-  ; Если есть путь установки, запускаем синхронно с помощью _?=
   StrCmp $R2 "" _run_now_standard
   StrCpy $R0 "$R0 _?=$R2"
   _run_now_standard:
 
-  ; Тихое удаление
   ExecWait $R0 $R1
   StrCmp $R1 "" 0 _zabor_wait
   nsExec::ExecToLog 'cmd /c $R0'
@@ -134,6 +141,14 @@
 
   ${If} $KeepAppDataOnUpdate == "0"
     !insertmacro DeleteAppData
+  ${EndIf}
+
+  ${If} $KeepAppDataOnUpdate == "1"
+    CreateDirectory "$APPDATA\ZABOR"
+    CopyFiles /SILENT "$TEMP\zabor_backup\ZABOR\*.*" "$APPDATA\ZABOR"
+    CreateDirectory "$APPDATA\zabor-desktop"
+    CopyFiles /SILENT "$TEMP\zabor_backup\zabor-desktop\*.*" "$APPDATA\zabor-desktop"
+    RMDir /r "$TEMP\zabor_backup"
   ${EndIf}
 
   _zabor_init_done:
