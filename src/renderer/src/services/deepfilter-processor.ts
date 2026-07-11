@@ -45,7 +45,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
   private overflowCount = 0
 
-  private readonly HOLD_FRAMES = 30 
+  private readonly HOLD_FRAMES = 25
   private framesSinceLastVoice = this.HOLD_FRAMES
 
   private currentGain = 1.0
@@ -231,8 +231,8 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       let thresholdOff = this.GATE_THRESHOLD_OFF
 
       if (this.thresholdMode === 'auto') {
-        const adaptiveOn = this.noiseFloorEstimate * 2.5 + 0.002
-        const adaptiveOff = this.noiseFloorEstimate * 1.5 + 0.001
+        const adaptiveOn = this.noiseFloorEstimate * 3.5 + 0.003
+        const adaptiveOff = this.noiseFloorEstimate * 2.0 + 0.0015
         thresholdOn = Math.max(this.GATE_THRESHOLD_ON, adaptiveOn)
         thresholdOff = Math.max(this.GATE_THRESHOLD_OFF, adaptiveOff)
       }
@@ -277,7 +277,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         }
       }
 
-      const targetAttenuation = Math.min(100, Math.max(30, Math.round(this.noiseFloorEstimate * 4000 + 30)))
+      const targetAttenuation = 100
       if (this.denoiserReady && this.denoiser && Math.abs(this.attenuationLimit - targetAttenuation) > 10) {
         this.attenuationLimit = targetAttenuation
         try {

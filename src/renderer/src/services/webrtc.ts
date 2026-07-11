@@ -311,7 +311,7 @@ export class WebRTCManager {
     const gainNode = this.userGainNodes.get(userId)
     if (!gainNode) return
     const userVol = useAppStore.getState().userVolumes[userId] ?? 100
-    gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (userVol / 100)))
+    gainNode.gain.value = Math.max(0, Math.min(4.0, 1.35 * (this.outputVolume / 100) * (userVol / 100)))
   }
 
   public setNoiseSuppression(enabled: boolean) {
@@ -991,7 +991,9 @@ export class WebRTCManager {
 
   public async handleOffer(senderId: string, offerStr: string) {
     const store = useAppStore.getState()
-    if (!store.currentChannelId && store.currentCallUser?.id !== senderId) {
+    const isIncomingFromSender = store.incomingCall && store.incomingCall.callerId === senderId
+    const isActiveCallWithSender = store.currentCallUser && store.currentCallUser.id === senderId
+    if (!store.currentChannelId && !isIncomingFromSender && !isActiveCallWithSender) {
       const callStatus = store.callStatus
       if (callStatus !== 'connected') return
     }

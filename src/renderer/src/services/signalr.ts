@@ -937,16 +937,17 @@ class SignalRService {
       const activeCallUser = store.currentCallUser;
       if (activeCallUser && activeCallUser.id !== callerId) {
         webrtc.disconnectFromPeer(activeCallUser.id);
+        await this.safeInvoke("EndCall");
+        store.setCallStatus('idle');
+        store.setCurrentCallUser(null);
       }
-      await this.safeInvoke("EndCall");
-      store.setCallStatus('idle');
-      store.setCurrentCallUser(null);
     }
 
     const micStarted = await webrtc.startLocalStream();
     if (!micStarted) return;
 
     const callerUser = store.incomingCall;
+    const targetUser = store.friends.find((f: any) => f.id === callerId) || store.currentCallUser;
     if (callerUser) {
       store.setCurrentCallUser({
         id: callerUser.callerId,
@@ -954,6 +955,22 @@ class SignalRService {
         username: callerUser.callerName,
         avatarBase64: callerUser.callerAvatarBase64 ?? null,
         avatarColor: callerUser.callerAvatarColor ?? '#c70060',
+        isOnline: true,
+        isMuted: false,
+        isDeafened: false,
+        isSpeaking: false,
+        isServerMuted: false,
+        isServerDeafened: false,
+        currentChannelId: null,
+        currentCallUserId: null,
+      });
+    } else if (targetUser) {
+      store.setCurrentCallUser({
+        id: targetUser.id,
+        displayName: targetUser.displayName,
+        username: targetUser.username,
+        avatarBase64: targetUser.avatarBase64 ?? null,
+        avatarColor: targetUser.avatarColor ?? '#c70060',
         isOnline: true,
         isMuted: false,
         isDeafened: false,
