@@ -212,9 +212,12 @@ class SignalRService {
       this.reconnectAttempts = 0;
       this.isReconnecting = false;
       this.startPingMeasurement();
-      
-      
-      
+      await this.loadData();
+      const channelToRejoin = this.wasInChannel;
+      this.wasInChannel = null;
+      if (channelToRejoin) {
+        await this.joinChannel(channelToRejoin).catch(() => { });
+      }
       this.notifyConnectionUpdate(true);
     });
     this.connection.onclose(() => {
@@ -406,9 +409,14 @@ class SignalRService {
       this.playRingtone();
     });
 
-    this.connection.on("IncomingCall", (call: IncomingCall) => {
-      store().setIncomingCall(call);
-      store().setModal('incomingCall', true);
+    this.connection.on("IncomingCall", async (call: IncomingCall) => {
+      const state = store();
+      if (state.callStatus === 'calling' && state.currentCallUser?.id === call.callerId) {
+        await this.acceptCall(call.callerId);
+        return;
+      }
+      state.setIncomingCall(call);
+      state.setModal('incomingCall', true);
       this.playRingtone();
     });
 
@@ -494,11 +502,11 @@ class SignalRService {
     // this.playSfx(channelJoinSound, 0.4);
   }
 
-  public playRingtone() {
+  public playRingtone(volume = 0.3) {
     const audio = this.sfxElements.get(callRingSound);
     if (audio && !audio.paused) return;
     this.stopRingtone();
-    this.playSfx(callRingSound, 0.3);
+    this.playSfx(callRingSound, volume);
     const newAudio = this.sfxElements.get(callRingSound);
     if (newAudio) newAudio.loop = true;
   }
@@ -914,23 +922,33 @@ class SignalRService {
     const micStarted = await webrtc.startLocalStream();
     if (!micStarted) { store.setCallStatus('idle'); store.setCurrentCallUser(null); return false; }
 
+    this.playRingtone(0.1);
+
     const res = await this.safeInvoke<boolean>("StartCall", targetUserId);
-    if (!res) { store.setCallStatus('idle'); store.setCurrentCallUser(null); webrtc.stopLocalStream(); }
+    if (!res) { store.setCallStatus('idle'); store.setCurrentCallUser(null); webrtc.stopLocalStream(); this.stopRingtone(); }
     return res ?? false;
   }
 
   public async acceptCall(callerId: string): Promise<void> {
-    if (useAppStore.getState().currentChannelId) await this.leaveChannel();
+    const store = useAppStore.getState();
+    if (store.currentChannelId) await this.leaveChannel();
+
+    if (store.callStatus !== 'idle') {
+      const activeCallUser = store.currentCallUser;
+      if (activeCallUser && activeCallUser.id !== callerId) {
+        webrtc.disconnectFromPeer(activeCallUser.id);
+      }
+      await this.safeInvoke("EndCall");
+      store.setCallStatus('idle');
+      store.setCurrentCallUser(null);
+    }
+
     const micStarted = await webrtc.startLocalStream();
     if (!micStarted) return;
 
-    
-    
-    
-    
-    const callerUser = useAppStore.getState().incomingCall;
+    const callerUser = store.incomingCall;
     if (callerUser) {
-      useAppStore.getState().setCurrentCallUser({
+      store.setCurrentCallUser({
         id: callerUser.callerId,
         displayName: callerUser.callerName,
         username: callerUser.callerName,
@@ -946,10 +964,17 @@ class SignalRService {
         currentCallUserId: null,
       });
     }
-    useAppStore.getState().setCallStatus('connected');
+    store.setCallStatus('connected');
 
-    await this.safeInvoke('AcceptCall', callerId);
-    useAppStore.getState().setModal('incomingCall', false);
+    const accepted = await this.safeInvoke('AcceptCall', callerId);
+    if (accepted === null) {
+      store.setCallStatus('idle');
+      store.setCurrentCallUser(null);
+      webrtc.stopLocalStream();
+      return;
+    }
+
+    store.setModal('incomingCall', false);
     this.stopRingtone();
   }
 
@@ -970,8 +995,8 @@ class SignalRService {
     const callUser = useAppStore.getState().currentCallUser;
     if (callUser) webrtc.disconnectFromPeer(callUser.id);
     webrtc.stopLocalStream();
+    this.stopRingtone();
 
-    
     useAppStore.getState().setIncomingCall(null);
     useAppStore.getState().setCurrentCallUser(null);
     useAppStore.getState().setCallStatus('idle');

@@ -29,7 +29,9 @@
       "calibrateButton": "Откалибровать микрофон",
       "calibrating": "Калибровка... {{seconds}}с",
       "calibrationComplete": "Успешно откалибровано!",
-      "doNotSpeak": "Не говорите!"
+      "doNotSpeak": "Не говорите!",
+      "micThresholdAuto": "Автоматический порог чувствительности",
+      "micThresholdLabel": "ПОРОГ ЧУВСТВИТЕЛЬНОСТИ МИКРОФОНА"
     },
     "privacy": {
       "newPassword": "НОВЫЙ ПАРОЛЬ",

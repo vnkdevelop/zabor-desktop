@@ -89,6 +89,9 @@ export class WebRTCManager {
   private calibratedThresholdOff = parseFloat(localStorage.getItem('zabor_threshold_off') || '0.003')
   private calibratedAttenuationLimit = parseInt(localStorage.getItem('zabor_attenuation_limit') || '45')
   private calibratedNoiseFloor = parseFloat(localStorage.getItem('zabor_base_noise_floor') || '0.003')
+  private thresholdMode = localStorage.getItem('zabor_threshold_mode') || 'auto'
+  private manualThresholdValue = parseFloat(localStorage.getItem('zabor_manual_threshold_value') || '50')
+  private activeStartPromise: Promise<boolean> | null = null
 
   private rawAnalyserNode: AnalyserNode | null = null
   private silenceMonitorInterval: NodeJS.Timeout | null = null
@@ -119,10 +122,27 @@ export class WebRTCManager {
 
   
 
+  private getThresholdParams(gainFactor: number) {
+    let activeThresholdOn = this.calibratedThresholdOn
+    let activeThresholdOff = this.calibratedThresholdOff
+    if (this.thresholdMode === 'manual') {
+      const mapped = 0.0005 * Math.pow(10, (this.manualThresholdValue / 50))
+      activeThresholdOn = mapped
+      activeThresholdOff = mapped * 0.6
+    }
+    return {
+      thresholdOn: activeThresholdOn * gainFactor,
+      thresholdOff: activeThresholdOff * gainFactor,
+      attenuationLimit: this.calibratedAttenuationLimit,
+      noiseFloor: this.calibratedNoiseFloor * gainFactor,
+      thresholdMode: this.thresholdMode,
+      manualThresholdValue: this.manualThresholdValue
+    }
+  }
+
   private async createProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
     this.cleanupProcessedStream()
 
-    
     const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
     this.processedContext = ctx
     if (ctx.state === 'suspended') {
@@ -150,7 +170,6 @@ export class WebRTCManager {
     const source = ctx.createMediaStreamSource(rawStream)
     this.processedSource = source
 
-    
     const compressor = ctx.createDynamicsCompressor()
     compressor.threshold.value = -12
     compressor.knee.value = 10
@@ -158,7 +177,6 @@ export class WebRTCManager {
     compressor.attack.value = 0.005
     compressor.release.value = 0.150
 
-    
     const highpass = ctx.createBiquadFilter()
     highpass.type = 'highpass'
     highpass.frequency.value = 140
@@ -215,10 +233,7 @@ export class WebRTCManager {
       })
       this.dfNode.port.postMessage({
         type: 'setCalibratedParams',
-        thresholdOn: this.calibratedThresholdOn * gainFactor,
-        thresholdOff: this.calibratedThresholdOff * gainFactor,
-        attenuationLimit: this.calibratedAttenuationLimit,
-        noiseFloor: this.calibratedNoiseFloor * gainFactor
+        ...this.getThresholdParams(gainFactor)
       })
       currentNode.connect(this.dfNode)
       currentNode = this.dfNode
@@ -257,10 +272,25 @@ export class WebRTCManager {
     if (this.dfNode) {
       this.dfNode.port.postMessage({
         type: 'setCalibratedParams',
-        thresholdOn: this.calibratedThresholdOn * gainFactor,
-        thresholdOff: this.calibratedThresholdOff * gainFactor,
-        attenuationLimit: this.calibratedAttenuationLimit,
-        noiseFloor: this.calibratedNoiseFloor * gainFactor
+        ...this.getThresholdParams(gainFactor)
+      })
+    }
+  }
+
+  public setMicThresholdParams(mode: 'auto' | 'manual', manualValue: number) {
+    localStorage.setItem('zabor_threshold_mode', mode)
+    localStorage.setItem('zabor_manual_threshold_value', manualValue.toString())
+    this.thresholdMode = mode
+    this.manualThresholdValue = manualValue
+    this.updateThresholds()
+  }
+
+  private updateThresholds() {
+    const gainFactor = Math.max(0.01, this.inputVolume / 100)
+    if (this.dfNode) {
+      this.dfNode.port.postMessage({
+        type: 'setCalibratedParams',
+        ...this.getThresholdParams(gainFactor)
       })
     }
   }
@@ -439,7 +469,6 @@ export class WebRTCManager {
   public async calibrateMic(durationMs?: number): Promise<{ noiseFloor: number; peakNoise: number }> {
     const isFirstRun = localStorage.getItem('zabor_mic_calibrated') !== 'true';
     const actualDurationMs = durationMs !== undefined ? durationMs : (isFirstRun ? 5000 : 2000);
-    console.log(`[Mic Calibration] Starting calibration. Duration: ${actualDurationMs}ms`);
 
     let stream: MediaStream;
     let shouldStopStream = false;
@@ -447,21 +476,36 @@ export class WebRTCManager {
     try {
       if (this.rawStream && this.rawStream.getAudioTracks().length > 0 && this.rawStream.getAudioTracks()[0].readyState === 'live') {
         stream = this.rawStream;
-        console.log('[Mic Calibration] Reusing active rawStream for calibration');
       } else {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
-            channelCount: 1,
-            sampleRate: 48000,
-            echoCancellation: true,
-            noiseSuppression: false,
-            autoGainControl: false
-          },
-          video: false
-        });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: false,
+              autoGainControl: false
+            },
+            video: false
+          });
+        } catch {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: false,
+                autoGainControl: false
+              },
+              video: false
+            });
+          } catch {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: false
+            });
+          }
+        }
         shouldStopStream = true;
-        console.log('[Mic Calibration] Created temporary stream for calibration');
       }
 
       const audioContext = new AudioContext({ sampleRate: 48000 });
@@ -547,8 +591,6 @@ export class WebRTCManager {
         }
       }
 
-      console.log(`[Mic Calibration] Noise Floor (clean): ${noiseFloor.toFixed(5)}, Peak Noise (clean): ${peakNoise.toFixed(5)}`);
-
       this.calibratedThresholdOn = Math.max(0.008, peakNoise * 2.0 + 0.002);
       this.calibratedThresholdOff = Math.max(0.004, peakNoise * 1.3 + 0.001);
       this.calibratedAttenuationLimit = 100;
@@ -560,80 +602,99 @@ export class WebRTCManager {
       localStorage.setItem('zabor_threshold_off', this.calibratedThresholdOff.toString());
       localStorage.setItem('zabor_attenuation_limit', this.calibratedAttenuationLimit.toString());
 
-      console.log(`[Mic Calibration] Threshold ON: ${this.calibratedThresholdOn.toFixed(5)}, Threshold OFF: ${this.calibratedThresholdOff.toFixed(5)}, Attenuation Limit: ${this.calibratedAttenuationLimit}dB`);
-
-      if (this.dfNode) {
-        const gainFactor = Math.max(0.01, this.inputVolume / 100)
-        this.dfNode.port.postMessage({
-          type: 'setCalibratedParams',
-          thresholdOn: this.calibratedThresholdOn * gainFactor,
-          thresholdOff: this.calibratedThresholdOff * gainFactor,
-          noiseFloor: this.calibratedNoiseFloor * gainFactor,
-          attenuationLimit: this.calibratedAttenuationLimit
-        });
-      }
+      this.updateThresholds();
 
       return { noiseFloor, peakNoise };
     } catch (e) {
-      console.warn('[Mic Calibration] Error calibrating mic:', e);
       throw e;
     }
   }
-
-  
 
   public async startLocalStream(deviceId?: string, useNS?: boolean, forceRestart = false): Promise<boolean> {
     if (deviceId !== undefined) this.currentDeviceId = deviceId
     if (useNS !== undefined) this.noiseSuppression = useNS
 
-    if (!forceRestart && this.localStream && this.localStream.getAudioTracks().length > 0 && this.localStream.getAudioTracks().every(t => t.readyState === 'live')) {
-      return true
+    if (this.activeStartPromise) {
+      return this.activeStartPromise
     }
 
-    try {
-      if (this.rawStream) { this.rawStream.getTracks().forEach(t => t.stop()); this.rawStream = null }
-      if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null }
-      this.cleanupProcessedStream()
-
-      const raw = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
-          channelCount: 1,
-          sampleRate: 48000,
-          echoCancellation: true, // WebRTC AEC - строго до нейросети
-          noiseSuppression: !this.noiseSuppression, // Отключаем браузерный, если включен DF3
-          autoGainControl: false,  // ВАЖНО: Выключаем для предотвращения заглатывания звука
-          // @ts-ignore
-          googHighpassFilter: false,
-          googEchoCancellation2: false, // Агрессивный AEC выключен
-          googAudioMirroring: false
-        },
-        video: false
-      })
-
-      this.rawStream = raw
-      const rawTrack = raw.getAudioTracks()[0]
-      if (rawTrack) rawTrack.contentHint = 'speech'
-
-      this.localStream = await this.createProcessedStream(raw)
-
-      const localTrack = this.localStream.getAudioTracks()[0]
-      if (localTrack) localTrack.contentHint = 'speech'
-
-      if (this.processedContext && this.processedContext.state === 'suspended') {
-        await this.processedContext.resume().catch(() => { })
+    const run = async () => {
+      if (!forceRestart && this.localStream && this.localStream.getAudioTracks().length > 0 && this.localStream.getAudioTracks().every(t => t.readyState === 'live')) {
+        return true
       }
 
-      this.startSilenceMonitor()
+      try {
+        if (this.rawStream) { this.rawStream.getTracks().forEach(t => t.stop()); this.rawStream = null }
+        if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null }
+        this.cleanupProcessedStream()
 
-      const me = useAppStore.getState().currentUser
-      if (me && this.rawStream && !this.dfNode) this.setupVAD(this.rawStream, me.id, true)
+        let raw: MediaStream
+        try {
+          raw = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: !this.noiseSuppression,
+              autoGainControl: false,
+              // @ts-ignore
+              googHighpassFilter: false,
+              googEchoCancellation2: false,
+              googAudioMirroring: false
+            },
+            video: false
+          })
+        } catch {
+          try {
+            raw = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: !this.noiseSuppression,
+                autoGainControl: false,
+                // @ts-ignore
+                googHighpassFilter: false,
+                googEchoCancellation2: false,
+                googAudioMirroring: false
+              },
+              video: false
+            })
+          } catch {
+            raw = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: false
+            })
+          }
+        }
 
-      return true
-    } catch (e) {
-      console.error('[WebRTC] Mic error:', e)
-      
-      throw new Error(`MIC_ACCESS_FAILED: ${(e as Error).message}`)
+        this.rawStream = raw
+        const rawTrack = raw.getAudioTracks()[0]
+        if (rawTrack) rawTrack.contentHint = 'speech'
+
+        this.localStream = await this.createProcessedStream(raw)
+
+        const localTrack = this.localStream.getAudioTracks()[0]
+        if (localTrack) localTrack.contentHint = 'speech'
+
+        if (this.processedContext && this.processedContext.state === 'suspended') {
+          await this.processedContext.resume().catch(() => { })
+        }
+
+        this.startSilenceMonitor()
+
+        const me = useAppStore.getState().currentUser
+        if (me && this.rawStream && !this.dfNode) this.setupVAD(this.rawStream, me.id, true)
+
+        return true
+      } catch (e) {
+        throw new Error(`MIC_ACCESS_FAILED: ${(e as Error).message}`)
+      }
+    }
+
+    this.activeStartPromise = run()
+    try {
+      return await this.activeStartPromise
+    } finally {
+      this.activeStartPromise = null
     }
   }
 
@@ -798,7 +859,7 @@ export class WebRTCManager {
 
   private setupPeerHandlers(pc: RTCPeerConnection, userId: string) {
     pc.ontrack = (event) => {
-      const remote = event.streams[0]
+      const remote = event.streams[0] || new MediaStream([event.track])
       this.setupVAD(remote, userId, false)
 
       this.initOutputMixer()

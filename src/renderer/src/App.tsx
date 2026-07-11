@@ -217,6 +217,8 @@ export default function App() {
   const [selectedInput, setSelectedInput] = useState('default');
   const [selectedOutput, setSelectedOutput] = useState('default');
   const [noiseSuppression, setNoiseSuppression] = useState(true);
+  const [micThresholdMode, setMicThresholdMode] = useState<'auto' | 'manual'>('auto');
+  const [manualThresholdValue, setManualThresholdValue] = useState(50);
   const [isSwitchingChannel, setIsSwitchingChannel] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [minimizeToTray, setMinimizeToTray] = useState(true);
@@ -333,12 +335,17 @@ export default function App() {
     inputVolume: 100, outputVolume: 100,
     selectedInput: 'default', selectedOutput: 'default',
     noiseSuppression: true, language: i18n.language || 'ru',
-    openAtLogin: false, minimizeToTray: true
+    openAtLogin: false, minimizeToTray: true,
+    micThresholdMode: 'auto' as 'auto' | 'manual',
+    manualThresholdValue: 50
   });
 
   useEffect(() => {
-    settingsRef.current = { inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language, openAtLogin: autoLaunch, minimizeToTray };
-  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language, autoLaunch, minimizeToTray]);
+    settingsRef.current = {
+      inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language,
+      openAtLogin: autoLaunch, minimizeToTray, micThresholdMode, manualThresholdValue
+    };
+  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language, autoLaunch, minimizeToTray, micThresholdMode, manualThresholdValue]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -385,7 +392,9 @@ export default function App() {
           noiseSuppression: settingsRef.current.noiseSuppression,
           language: settingsRef.current.language,
           openAtLogin: settingsRef.current.openAtLogin,
-          minimizeToTray: settingsRef.current.minimizeToTray
+          minimizeToTray: settingsRef.current.minimizeToTray,
+          micThresholdMode: settingsRef.current.micThresholdMode,
+          manualThresholdValue: settingsRef.current.manualThresholdValue
         }
       });
       window.windowControls.saveSession(data).catch(() => { });
@@ -409,6 +418,8 @@ export default function App() {
     setSelectedInput('default');
     setSelectedOutput('default');
     setNoiseSuppression(true);
+    setMicThresholdMode('auto');
+    setManualThresholdValue(50);
     setDisplayName('');
     setAvatarBase64(null);
     setAvatarColor('#c70060');
@@ -425,6 +436,8 @@ export default function App() {
     localStorage.removeItem('zabor_threshold_on');
     localStorage.removeItem('zabor_threshold_off');
     localStorage.removeItem('zabor_attenuation_limit');
+    localStorage.removeItem('zabor_threshold_mode');
+    localStorage.removeItem('zabor_manual_threshold_value');
   }, []);
 
   const applySettings = useCallback((s: {
@@ -435,6 +448,8 @@ export default function App() {
     language?: string;
     openAtLogin?: boolean;
     minimizeToTray?: boolean;
+    micThresholdMode?: 'auto' | 'manual';
+    manualThresholdValue?: number;
   }) => {
     const iv = s.inputVolume ?? 100;
     const ov = s.outputVolume ?? 100;
@@ -443,6 +458,13 @@ export default function App() {
     setSelectedInput(s.selectedInput ?? 'default');
     setSelectedOutput(s.selectedOutput ?? 'default');
     setNoiseSuppression(s.noiseSuppression ?? true);
+
+    const mode = s.micThresholdMode ?? 'auto';
+    const val = s.manualThresholdValue ?? 50;
+    setMicThresholdMode(mode);
+    setManualThresholdValue(val);
+    webrtc.setMicThresholdParams(mode, val);
+
     webrtc.setInputDevice(s.selectedInput ?? 'default');
     webrtc.setOutputDevice(s.selectedOutput ?? 'default');
     webrtc.setInputVolume(iv);
@@ -453,7 +475,6 @@ export default function App() {
       i18n.changeLanguage(s.language);
     }
 
-    
     if (s.openAtLogin !== undefined) {
       setAutoLaunch(s.openAtLogin);
       window.windowControls.setAutoLaunch(s.openAtLogin).catch(() => { });
@@ -463,17 +484,14 @@ export default function App() {
       window.windowControls.setMinimizeToTray(s.minimizeToTray).catch(() => { });
     }
 
-    
     if (s.userVolumes && typeof s.userVolumes === 'object') {
       const store = useAppStore.getState();
       Object.entries(s.userVolumes).forEach(([userId, volume]) => {
         store.setUserVolume(userId, volume);
-        
         webrtc.setUserVolume(userId, volume);
       });
     }
 
-    
     settingsRef.current = {
       inputVolume: iv,
       outputVolume: ov,
@@ -482,7 +500,9 @@ export default function App() {
       noiseSuppression: s.noiseSuppression ?? true,
       language: s.language ?? settingsRef.current.language,
       openAtLogin: s.openAtLogin ?? settingsRef.current.openAtLogin,
-      minimizeToTray: s.minimizeToTray ?? settingsRef.current.minimizeToTray
+      minimizeToTray: s.minimizeToTray ?? settingsRef.current.minimizeToTray,
+      micThresholdMode: mode,
+      manualThresholdValue: val
     };
   }, []);
 
@@ -800,11 +820,13 @@ export default function App() {
         selectedOutput: s.selectedOutput,
         noiseSuppression: s.noiseSuppression,
         userVolumes: useAppStore.getState().userVolumes,
-        language: s.language
+        language: s.language,
+        micThresholdMode: s.micThresholdMode,
+        manualThresholdValue: s.manualThresholdValue
       });
       saveLocalCache();
     }, 500);
-  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, isAuth, language]);
+  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, isAuth, language, micThresholdMode, manualThresholdValue]);
 
   
   useEffect(() => {
@@ -825,7 +847,9 @@ export default function App() {
         selectedInput: s.selectedInput,
         selectedOutput: s.selectedOutput,
         noiseSuppression: s.noiseSuppression,
-        userVolumes: useAppStore.getState().userVolumes
+        userVolumes: useAppStore.getState().userVolumes,
+        micThresholdMode: s.micThresholdMode,
+        manualThresholdValue: s.manualThresholdValue
       });
     }, 800);
   }, [store.userVolumes, isAuth]);
@@ -2196,46 +2220,79 @@ export default function App() {
                     webrtc.updateSettings(selectedInput, v);
                   }} />
                 </div>
-                <div className="bg-surface p-4 rounded-xl space-y-3">
+                <div className="bg-surface p-4 rounded-xl space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="font-semibold text-white text-[15px]">{t('settings.audio.calibrateSensitivity', 'Калибровка чувствительности')}</span>
-                      <p className="text-xs text-textMuted mt-1">{t('settings.audio.calibrateDesc', 'Распознавание уровня шума вашего микрофона')}</p>
+                      <span className="font-semibold text-white text-[15px]">{t('settings.audio.micThresholdAuto')}</span>
                     </div>
-                    {isCalibrating && (
-                      <span className="text-yellow-500 flex items-center gap-1 text-sm font-bold animate-pulse">
-                        {t('settings.audio.doNotSpeak', 'Не говорите!')}
-                      </span>
-                    )}
-                    {calibrationSuccess && (
-                      <span className="text-[#22c55e] flex items-center gap-1 text-sm font-bold animate-pulse">
-                        <Check weight="bold" size={16} />
-                        {t('settings.audio.calibrationComplete', 'Успешно откалибровано!')}
-                      </span>
-                    )}
+                    <Md3Switch checked={micThresholdMode === 'auto'} onChange={v => {
+                      const nextMode = v ? 'auto' : 'manual';
+                      setMicThresholdMode(nextMode);
+                      webrtc.setMicThresholdParams(nextMode, manualThresholdValue);
+                      settingsRef.current = { ...settingsRef.current, micThresholdMode: nextMode };
+                    }} />
                   </div>
-                  <button
-                    onClick={handleManualCalibration}
-                    disabled={isCalibrating}
-                    className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-300 ${isCalibrating
-                      ? 'bg-yellow-600 text-white cursor-default'
-                      : calibrationSuccess
-                        ? 'bg-[#22c55e] text-white hover:opacity-90'
-                        : 'bg-[#c70060] text-white hover:opacity-90 active:scale-95'
-                      }`}
-                  >
-                    {isCalibrating ? (
-                      <>
-                        <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
-                        {t('settings.audio.calibrating', { seconds: calibrationCountdown, defaultValue: `Калибровка... ${calibrationCountdown}с` })}
-                      </>
-                    ) : (
-                      <>
-                        <Mic weight="bold" size={18} />
-                        {t('settings.audio.calibrateButton', 'Откалибровать микрофон')}
-                      </>
-                    )}
-                  </button>
+
+                  {micThresholdMode === 'manual' && (
+                    <div>
+                      <Md3Slider
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={manualThresholdValue}
+                        label={t('settings.audio.micThresholdLabel')}
+                        onChange={v => {
+                          setManualThresholdValue(v);
+                          webrtc.setMicThresholdParams('manual', v);
+                          settingsRef.current = { ...settingsRef.current, manualThresholdValue: v };
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {micThresholdMode === 'auto' && (
+                    <div className="space-y-3 pt-2 border-t border-[#303035]/50">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-semibold text-white text-[15px]">{t('settings.audio.calibrateSensitivity', 'Калибровка чувствительности')}</span>
+                          <p className="text-xs text-textMuted mt-1">{t('settings.audio.calibrateDesc', 'Распознавание уровня шума вашего микрофона')}</p>
+                        </div>
+                        {isCalibrating && (
+                          <span className="text-yellow-500 flex items-center gap-1 text-sm font-bold animate-pulse">
+                            {t('settings.audio.doNotSpeak', 'Не говорите!')}
+                          </span>
+                        )}
+                        {calibrationSuccess && (
+                          <span className="text-[#22c55e] flex items-center gap-1 text-sm font-bold animate-pulse">
+                            <Check weight="bold" size={16} />
+                            {t('settings.audio.calibrationComplete', 'Успешно откалибровано!')}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={handleManualCalibration}
+                        disabled={isCalibrating}
+                        className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-300 ${isCalibrating
+                          ? 'bg-yellow-600 text-white cursor-default'
+                          : calibrationSuccess
+                            ? 'bg-[#22c55e] text-white hover:opacity-90'
+                            : 'bg-[#c70060] text-white hover:opacity-90 active:scale-95'
+                          }`}
+                      >
+                        {isCalibrating ? (
+                          <>
+                            <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
+                            {t('settings.audio.calibrating', { seconds: calibrationCountdown, defaultValue: `Калибровка... ${calibrationCountdown}с` })}
+                          </>
+                        ) : (
+                          <>
+                            <Mic weight="bold" size={18} />
+                            {t('settings.audio.calibrateButton', 'Откалибровать микрофон')}
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

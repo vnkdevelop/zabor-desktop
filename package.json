@@ -1,6 +1,6 @@
 {
   "name": "zabor-desktop",
-  "version": "3.1.8",
+  "version": "3.1.9",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
   "author": "vnk",
@@ -71,7 +71,7 @@
     "autoprefixer": "^10.4.20",
     "cross-env": "^7.0.3",
     "deepfilter-standalone": "^1.0.2",
-    "electron": "^33.2.0",
+    "electron": "^33.3.0",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "i18next": "^26.0.8",

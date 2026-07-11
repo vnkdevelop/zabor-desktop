@@ -29,7 +29,9 @@
       "calibrateButton": "Calibrate Microphone",
       "calibrating": "Calibrating... {{seconds}}s",
       "calibrationComplete": "Successfully Calibrated!",
-      "doNotSpeak": "Do not speak!"
+      "doNotSpeak": "Do not speak!",
+      "micThresholdAuto": "Automatic sensitivity threshold",
+      "micThresholdLabel": "MICROPHONE SENSITIVITY THRESHOLD"
     },
     "privacy": {
       "newPassword": "NEW PASSWORD",

@@ -36,39 +36,40 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private isMuted = false
   private noiseSuppression = true
 
-  
   private rmsSmoothed = 0
   private GATE_THRESHOLD_ON = 0.008  
   private GATE_THRESHOLD_OFF = 0.003 
   private lastVadSent = false
   private consecutiveVoiceFrames = 0
-  private readonly REQUIRED_VOICE_FRAMES = 3 // Требуется 3 фрейма речи подряд (~30мс) для открытия гейта
+  private readonly REQUIRED_VOICE_FRAMES = 3
 
   private overflowCount = 0
 
   private readonly HOLD_FRAMES = 30 
   private framesSinceLastVoice = this.HOLD_FRAMES
 
-  
   private currentGain = 1.0
   private readonly TARGET_GAIN_ON = 1.0
   private readonly TARGET_GAIN_OFF = 0.0 
 
-  
   private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.010))
   private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.050)) 
 
-  
   private readonly agcGain = 1.0 
   private attenuationLimit = 100
 
-  
   private delayFrames: Float32Array[] = []
   private delaySpeaking: boolean[] = []
   private delayWriteIndex = 0
   private delayReadIndex = 0
   private delayCount = 0
   private readonly LOOKAHEAD_FRAMES = 8 
+
+  private thresholdMode = 'auto'
+  private manualThresholdValue = 50
+  private noiseFloorEstimate = 0.003
+  private fastNoiseFloorEstimate = 0.003
+  private lastResetTime = 0
 
   constructor() {
     super()
@@ -120,14 +121,18 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         if (event.data.thresholdOff !== undefined) {
           this.GATE_THRESHOLD_OFF = event.data.thresholdOff
         }
+        if (event.data.thresholdMode !== undefined) {
+          this.thresholdMode = event.data.thresholdMode
+        }
+        if (event.data.manualThresholdValue !== undefined) {
+          this.manualThresholdValue = event.data.manualThresholdValue
+        }
         if (event.data.attenuationLimit !== undefined) {
           this.attenuationLimit = event.data.attenuationLimit
           if (this.denoiserReady && this.denoiser) {
             try {
               this.denoiser.setAttenuationLimit(event.data.attenuationLimit)
-              console.log(`[DeepFilterProcessor] Applied calibrated attenuation limit: ${event.data.attenuationLimit}dB`)
             } catch (e) {
-              console.warn('[DeepFilterProcessor] Failed to set attenuation limit:', e)
             }
           }
         }
@@ -147,9 +152,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       this.denoiser.startStreaming()
       this.denoiserReady = true
       this.port.postMessage({ type: 'ready' })
-      console.log(`[DeepFilterProcessor] Neural net initialized successfully with attenuationLimit: ${this.attenuationLimit}dB`)
     } catch (e) {
-      console.error('[DeepFilterProcessor] Failed to load DeepFilterNet:', e)
     }
   }
 
@@ -157,9 +160,6 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     const availableSpace = (readIndex - writeIndex - 1 + this.BUFFER_SIZE) % this.BUFFER_SIZE
     if (availableSpace < data.length) {
       this.overflowCount++
-      if (this.overflowCount % 100 === 1) {
-        console.warn(`DeepFilterProcessor: ring buffer overflow (×${this.overflowCount})`)
-      }
       return writeIndex
     }
     const part1 = this.BUFFER_SIZE - writeIndex
@@ -227,7 +227,17 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
 
       this.rmsSmoothed = 0.3 * currentRms + 0.7 * this.rmsSmoothed
 
-      const threshold = this.framesSinceLastVoice < this.HOLD_FRAMES ? this.GATE_THRESHOLD_OFF : this.GATE_THRESHOLD_ON
+      let thresholdOn = this.GATE_THRESHOLD_ON
+      let thresholdOff = this.GATE_THRESHOLD_OFF
+
+      if (this.thresholdMode === 'auto') {
+        const adaptiveOn = this.noiseFloorEstimate * 2.5 + 0.002
+        const adaptiveOff = this.noiseFloorEstimate * 1.5 + 0.001
+        thresholdOn = Math.max(this.GATE_THRESHOLD_ON, adaptiveOn)
+        thresholdOff = Math.max(this.GATE_THRESHOLD_OFF, adaptiveOff)
+      }
+
+      const threshold = this.framesSinceLastVoice < this.HOLD_FRAMES ? thresholdOff : thresholdOn
       const isAboveThreshold = this.rmsSmoothed > threshold
 
       if (isAboveThreshold) {
@@ -246,6 +256,34 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       }
 
       const isSpeaking = this.framesSinceLastVoice < this.HOLD_FRAMES
+
+      if (!isSpeaking) {
+        this.noiseFloorEstimate = 0.998 * this.noiseFloorEstimate + 0.002 * currentRms
+        this.fastNoiseFloorEstimate = 0.95 * this.fastNoiseFloorEstimate + 0.05 * currentRms
+      } else {
+        if (currentRms < this.noiseFloorEstimate) {
+          this.noiseFloorEstimate = currentRms
+          this.fastNoiseFloorEstimate = currentRms
+        }
+      }
+
+      const now = Date.now()
+      if (!isSpeaking && this.fastNoiseFloorEstimate > this.noiseFloorEstimate * 2.5 && this.fastNoiseFloorEstimate > 0.004 && (now - this.lastResetTime > 5000)) {
+        this.lastResetTime = now
+        if (this.denoiserReady && this.denoiser) {
+          try {
+            this.denoiser.startStreaming()
+          } catch (e) {}
+        }
+      }
+
+      const targetAttenuation = Math.min(100, Math.max(30, Math.round(this.noiseFloorEstimate * 4000 + 30)))
+      if (this.denoiserReady && this.denoiser && Math.abs(this.attenuationLimit - targetAttenuation) > 10) {
+        this.attenuationLimit = targetAttenuation
+        try {
+          this.denoiser.setAttenuationLimit(this.attenuationLimit)
+        } catch (e) {}
+      }
 
       const writeIdx = this.delayWriteIndex
       this.delayFrames[writeIdx].set(this.processedFrame)
@@ -273,17 +311,22 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
           this.lastVadSent = anySpeakingAhead
         }
 
-        if (this.noiseSuppression) {
-          const overallTarget = anySpeakingAhead ? this.agcGain : this.TARGET_GAIN_OFF
+        let overallTarget = anySpeakingAhead ? this.agcGain : this.TARGET_GAIN_OFF
 
-          for (let i = 0; i < this.FRAME_SIZE; i++) {
-            if (overallTarget > this.currentGain) {
-              this.currentGain = this.attackCoef * this.currentGain + (1 - this.attackCoef) * overallTarget
-            } else {
-              this.currentGain = this.releaseCoef * this.currentGain + (1 - this.releaseCoef) * overallTarget
-            }
-            oldestFrame[i] *= this.currentGain
+        if (anySpeakingAhead && this.rmsSmoothed < thresholdOn) {
+          const ratio = 2.5
+          const dbDiff = 20 * Math.log10(Math.max(0.0001, this.rmsSmoothed) / Math.max(0.0001, thresholdOn))
+          const expansionGain = Math.pow(10, (dbDiff * (ratio - 1)) / 20)
+          overallTarget = Math.max(0.01, Math.min(this.agcGain, expansionGain * this.agcGain))
+        }
+
+        for (let i = 0; i < this.FRAME_SIZE; i++) {
+          if (overallTarget > this.currentGain) {
+            this.currentGain = this.attackCoef * this.currentGain + (1 - this.attackCoef) * overallTarget
+          } else {
+            this.currentGain = this.releaseCoef * this.currentGain + (1 - this.releaseCoef) * overallTarget
           }
+          oldestFrame[i] *= this.currentGain
         }
 
         this.outputWriteIndex = this.pushToBuffer(this.outputBuffer, oldestFrame, this.outputWriteIndex, this.outputReadIndex)
