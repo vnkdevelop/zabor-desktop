@@ -449,6 +449,17 @@ app.whenReady().then(() => {
     return true;
   });
 
+  ipcMain.handle('get-desktop-sources', async (_event, options) => {
+    const { desktopCapturer } = require('electron')
+    const sources = await desktopCapturer.getSources(options)
+    return sources.map(src => ({
+      id: src.id,
+      name: src.name,
+      thumbnail: src.thumbnail.toDataURL(),
+      appIcon: src.appIcon ? src.appIcon.toDataURL() : null
+    }))
+  })
+
   createWindow();
   createTray();
 

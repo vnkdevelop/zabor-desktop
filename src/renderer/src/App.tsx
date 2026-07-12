@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck } from '@phosphor-icons/react';
+import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck, Desktop, CornersIn, CornersOut } from '@phosphor-icons/react';
 import { useTranslation, Trans } from 'react-i18next';
 
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
@@ -17,6 +17,8 @@ import { TitleBar } from './components/Layout/TitleBar';
 import { Md3Slider } from './components/Shared/Md3Slider';
 import { Md3Switch } from './components/Shared/Md3Switch';
 import { AvatarImg } from './components/Shared/AvatarImg';
+import { StreamPicker } from './components/Stream/StreamPicker';
+import { StreamCard } from './components/Stream/StreamCard';
 
 
 const VoiceUserCard = memo(({ user, cardSize, isIdle, t, handleContextMenu, webrtcConnections, currentUserId }: {
@@ -37,7 +39,7 @@ const VoiceUserCard = memo(({ user, cardSize, isIdle, t, handleContextMenu, webr
       className={`relative flex flex-col items-center justify-center cursor-pointer transition-all duration-200 overflow-hidden shrink-0 hover:-translate-y-1
         ${(isSpeaking && isConnected) ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)] z-10' : 'shadow-xl'}`}
       style={{ backgroundColor: user.avatarColor, width: `${cardSize.w}px`, height: `${cardSize.h}px`, borderRadius: '24px' }}>
-      <div className="relative" style={{ width: `${cardSize.avatarSize}px`, height: `${cardSize.avatarSize}px`, marginBottom: '16px' }}>
+      <div className="relative" style={{ width: `${cardSize.avatarSize}px`, height: `${cardSize.avatarSize}px`, marginBottom: cardSize.avatarSize <= 48 ? '4px' : '16px' }}>
         {(isSpeaking && isConnected) && (
           <div className="absolute inset-0 rounded-full border border-green-500/50 animate-speaking-ripple scale-125 pointer-events-none" />
         )}
@@ -53,11 +55,13 @@ const VoiceUserCard = memo(({ user, cardSize, isIdle, t, handleContextMenu, webr
           <span className="text-white text-xs font-bold tracking-wider">{t('main.connection.connecting', 'ПОДКЛЮЧЕНИЕ')}</span>
         </div>
       )}
-      <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 transition-all duration-300 ${isIdle ? 'translate-y-8 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
-        <div className="bg-[#09090B]/80 backdrop-blur-md border border-[#303035]/50 px-4 py-1.5 rounded-full flex items-center gap-2 shadow-lg whitespace-nowrap" style={{ maxWidth: `${cardSize.w - 40}px` }}>
-          <span className="text-white font-bold text-sm truncate">{user.displayName}</span>
-          {(user.isMuted || user.isServerMuted) && <Mic weight="bold" size={14} className="text-danger shrink-0" />}
-          {(user.isDeafened || user.isServerDeafened) && <Headphones weight="bold" size={14} className="text-danger shrink-0" />}
+      <div className={`absolute ${cardSize.avatarSize <= 48 ? 'bottom-2' : 'bottom-4'} left-1/2 -translate-x-1/2 transition-all duration-300 ${isIdle ? 'translate-y-8 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
+        <div className={`bg-[#09090B]/80 backdrop-blur-md border border-[#303035]/50 rounded-full flex items-center gap-1.5 shadow-lg whitespace-nowrap ${
+          cardSize.avatarSize <= 48 ? 'px-2 py-0.5' : 'px-4 py-1.5'
+        }`} style={{ maxWidth: `${cardSize.w - 20}px` }}>
+          <span className={`text-white font-bold truncate ${cardSize.avatarSize <= 48 ? 'text-[11px]' : 'text-sm'}`}>{user.displayName}</span>
+          {(user.isMuted || user.isServerMuted) && <Mic weight="bold" size={cardSize.avatarSize <= 48 ? 10 : 14} className="text-danger shrink-0" />}
+          {(user.isDeafened || user.isServerDeafened) && <Headphones weight="bold" size={cardSize.avatarSize <= 48 ? 10 : 14} className="text-danger shrink-0" />}
         </div>
       </div>
     </div>
@@ -171,6 +175,31 @@ export default function App() {
   const [language, setLanguage] = useState(i18n.language || 'ru');
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'channels' | 'friends'>('channels');
+  const [showStreamPicker, setShowStreamPicker] = useState(false);
+  const [volumeType, setVolumeType] = useState<'voice' | 'stream'>('voice');
+  const [showOverlays, setShowOverlays] = useState(true);
+  const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (store.isStreamFullscreen) {
+      setShowOverlays(true);
+      const onMove = () => {
+        setShowOverlays(true);
+        if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current);
+        overlayTimeoutRef.current = setTimeout(() => {
+          setShowOverlays(false);
+        }, 3000);
+      };
+      window.addEventListener('mousemove', onMove);
+      return () => {
+        window.removeEventListener('mousemove', onMove);
+        if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current);
+      };
+    } else {
+      setShowOverlays(true);
+    }
+    return undefined;
+  }, [store.isStreamFullscreen]);
 
   const [serverConnected, setServerConnected] = useState(false);
   const [showErrorText, setShowErrorText] = useState(false);
@@ -225,7 +254,7 @@ export default function App() {
 
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean; x: number; y: number;
-    type: 'channel' | 'friend' | 'voiceUser' | 'channelMember'; item: any;
+    type: 'channel' | 'friend' | 'voiceUser' | 'channelMember' | 'stream'; item: any;
   } | null>(null);
   const [showInvitesPanel, setShowInvitesPanel] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'general' | 'audio' | 'privacy'>('general');
@@ -508,6 +537,34 @@ export default function App() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const [streamRatio, setStreamRatio] = useState(16 / 9);
+
+  useEffect(() => {
+    if (!store.activeStreamId) {
+      setStreamRatio(16 / 9);
+      return;
+    }
+    const activeStream = store.voiceUsers.map(user => {
+      const isStreaming = user.isStreaming || (user.id === store.currentUser?.id && !!webrtc.localVideoStream);
+      if (isStreaming) {
+        const stream = user.id === store.currentUser?.id ? webrtc.localVideoStream : store.remoteVideoStreams[user.id];
+        return { user, stream };
+      }
+      return null;
+    }).find(item => item && store.activeStreamId === item.user.id);
+
+    if (activeStream?.stream) {
+      const videoTrack = activeStream.stream.getVideoTracks()[0];
+      if (videoTrack) {
+        const settings = videoTrack.getSettings();
+        if (settings.width && settings.height) {
+          setStreamRatio(settings.width / settings.height);
+          return;
+        }
+      }
+    }
+    setStreamRatio(16 / 9);
+  }, [store.activeStreamId, store.remoteVideoStreams]);
 
   useEffect(() => {
     credentialsRef.current = { login, password };
@@ -564,7 +621,18 @@ export default function App() {
     return { w: Math.floor(finalW), h: Math.floor(finalH), avatarSize: Math.floor(avatarSize) };
   };
 
-  const activeUserCount = store.currentCallUser ? 1 : store.voiceUsers.length;
+  const activeUserCount = useMemo(() => {
+    if (store.currentCallUser) return 1;
+    let count = store.voiceUsers.length;
+    store.voiceUsers.forEach(u => {
+      const isStreaming = u.isStreaming || (u.id === store.currentUser?.id && !!webrtc.localVideoStream);
+      if (isStreaming) {
+        const stream = u.id === store.currentUser?.id ? webrtc.localVideoStream : store.remoteVideoStreams[u.id];
+        if (stream) count++;
+      }
+    });
+    return count;
+  }, [store.voiceUsers, store.currentCallUser, store.currentUser?.id, store.remoteVideoStreams, showStreamPicker]);
 
   const cardSize = useMemo(() => {
     const { w, h, avatarSize } = getCardSize(activeUserCount, containerSize.width, containerSize.height);
@@ -1322,6 +1390,36 @@ export default function App() {
     await signalRService.endCall();
   }, []);
 
+  const handleStopStream = useCallback(async () => {
+    try {
+      const myId = store.currentUser?.id || '';
+      if (store.activeStreamId === myId) {
+        store.setActiveStreamId(null);
+      }
+      webrtc.stopScreenShare();
+      await signalRService.stopStream();
+      store.updateUserStatus(myId, { isStreaming: false, streamQuality: undefined });
+    } catch (e) {
+      console.error(e);
+    }
+  }, [store]);
+
+  const handleStartStream = useCallback(async (sourceId: string, quality: '1080p' | '720p') => {
+    try {
+      setShowStreamPicker(false);
+      const ok = await signalRService.startStream(quality);
+      if (ok) {
+        await webrtc.startScreenShare(sourceId, quality);
+        store.updateUserStatus(store.currentUser?.id || '', { isStreaming: true, streamQuality: quality });
+      }
+    } catch (e) {
+      console.error(e);
+      webrtc.stopScreenShare();
+      await signalRService.stopStream();
+      store.updateUserStatus(store.currentUser?.id || '', { isStreaming: false, streamQuality: undefined });
+    }
+  }, [store]);
+
   const openMyAchievements = useCallback(async () => {
     store.setAchievementsData(null); 
     store.setAchievementsViewUserId(null);
@@ -1338,9 +1436,9 @@ export default function App() {
     store.setAchievementsData(data);
   }, []);
 
-  const handleContextMenu = useCallback((e: React.MouseEvent, type: 'channel' | 'friend' | 'voiceUser' | 'channelMember', item: any) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent, type: 'channel' | 'friend' | 'voiceUser' | 'channelMember' | 'stream', item: any) => {
     e.preventDefault();
-    if ((type === 'voiceUser' || type === 'channelMember') && item.id === store.currentUser?.id) return;
+    if ((type === 'voiceUser' || type === 'channelMember' || type === 'stream') && item.id === store.currentUser?.id) return;
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY, type, item });
   }, [store.currentUser?.id]);
 
@@ -1698,7 +1796,8 @@ export default function App() {
 
 
 
-          <div className="w-80 bg-panelBg flex flex-col border-r border-[#303035] relative shrink-0">
+          {!store.isStreamFullscreen && (
+            <div className="w-80 bg-panelBg flex flex-col border-r border-[#303035] relative shrink-0">
 
             {showInvitesPanel && (
               <div className="absolute inset-0 bg-panelBg z-[60] flex flex-col animate-fade-in">
@@ -1885,6 +1984,7 @@ export default function App() {
               </div>
             </div>
           </div>
+          )}
 
           <div className="flex-1 flex flex-col relative bg-[#181818]">
 
@@ -1921,9 +2021,9 @@ export default function App() {
             )}
 
             {!store.currentCallUser && store.currentChannelId && (
-              <div className="absolute top-0 left-0 right-0 bottom-[120px] p-6 flex items-center justify-center overflow-hidden">
-                <div ref={containerRef} className="w-full h-full flex flex-wrap items-center justify-center gap-6" style={{ alignContent: 'center' }}>
-                  {[...store.voiceUsers].sort((a, b) => {
+              <div className="absolute top-0 left-0 right-0 bottom-[120px] p-3 flex items-center justify-center overflow-hidden">
+                {(() => {
+                  const sorted = [...store.voiceUsers].sort((a, b) => {
                     const currentUserId = store.currentUser?.id;
                     if (a.id === currentUserId) return -1;
                     if (b.id === currentUserId) return 1;
@@ -1932,19 +2032,239 @@ export default function App() {
                     if (nameA < nameB) return -1;
                     if (nameA > nameB) return 1;
                     return a.id.localeCompare(b.id);
-                  }).map(user => (
-                    <VoiceUserCard
-                      key={user.id}
-                      user={user}
-                      cardSize={cardSize}
-                      isIdle={isIdle}
-                      t={t}
-                      handleContextMenu={handleContextMenu}
-                      webrtcConnections={store.webrtcConnections}
-                      currentUserId={store.currentUser?.id}
-                    />
-                  ))}
-                </div>
+                  });
+                  const items: any[] = [];
+                  sorted.forEach(user => {
+                    items.push({ type: 'user', id: `user-${user.id}`, user });
+                    const isStreaming = user.isStreaming || (user.id === store.currentUser?.id && !!webrtc.localVideoStream);
+                    if (isStreaming) {
+                      const stream = user.id === store.currentUser?.id ? webrtc.localVideoStream : store.remoteVideoStreams[user.id];
+                      if (stream) {
+                        items.push({ type: 'stream', id: `stream-${user.id}`, user, stream });
+                      }
+                    }
+                  });
+
+                  const activeStream = items.find(item => item.type === 'stream' && store.activeStreamId === item.user.id);
+
+                  if (activeStream && store.isStreamFullscreen) {
+                    const fsMaxW = window.innerWidth - 40;
+                    const fsMaxH = window.innerHeight - 140;
+                    let fsW = fsMaxW;
+                    let fsH = fsW / streamRatio;
+                    if (fsH > fsMaxH) {
+                      fsH = fsMaxH;
+                      fsW = fsH * streamRatio;
+                    }
+
+                    const normalH = fsH;
+                    const normalW = fsW;
+                    const normalTop = 40 + (fsMaxH - normalH) / 2;
+                    const normalLeft = 20 + (fsMaxW - normalW) / 2;
+
+                    const expandedH = fsH + 30;
+                    const expandedW = expandedH * streamRatio;
+                    const expandedTop = normalTop - 2;
+                    const expandedLeft = 20 + (fsMaxW - expandedW) / 2;
+
+                    const currentW = showOverlays ? normalW : expandedW;
+                    const currentH = showOverlays ? normalH : expandedH;
+                    const currentTop = showOverlays ? normalTop : expandedTop;
+                    const currentLeft = showOverlays ? normalLeft : expandedLeft;
+
+                    return (
+                      <div className="fixed inset-0 bg-black z-[9999]">
+                        <div
+                          style={{
+                            position: 'absolute',
+                            width: `${currentW}px`,
+                            height: `${currentH}px`,
+                            top: `${currentTop}px`,
+                            left: `${currentLeft}px`,
+                            transition: 'all 300ms cubic-bezier(0.4, 0, 0.2, 1)'
+                          }}
+                          className="rounded-xl overflow-hidden shadow-2xl border border-[#303035]"
+                        >
+                          <StreamCard
+                            user={activeStream.user}
+                            stream={activeStream.stream}
+                            cardSize={{ w: currentW, h: currentH }}
+                            isFocused={true}
+                            isFullscreen={true}
+                            onClick={() => {}}
+                            onContextMenu={e => handleContextMenu(e, 'stream', activeStream.user)}
+                            onRatioChange={setStreamRatio}
+                          />
+                        </div>
+
+                        <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${showOverlays ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
+                          {store.voiceUsers.map(user => {
+                            const isSpeaking = useSpeakingStore.getState().speaking[user.id] ?? false;
+                            return (
+                              <div
+                                key={user.id}
+                                className={`w-12 h-12 rounded-full border-2 transition-all duration-200 overflow-hidden bg-[#121217] relative ${
+                                  isSpeaking ? 'border-[#FF007F] scale-110 shadow-[0_0_12px_rgba(255,0,127,0.5)]' : 'border-[#303035]'
+                                }`}
+                                title={user.displayName}
+                              >
+                                <AvatarImg src={user.avatarBase64} size={48} bgColor={user.avatarColor} animate={false} />
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/95 backdrop-blur-xl px-6 py-4 rounded-full flex gap-4 items-center shadow-2xl border border-[#303035] transition-all duration-300 z-50 ${showOverlays ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}>
+                          <button
+                            onClick={() => store.setStreamFullscreen(false)}
+                            className="group w-14 h-14 rounded-full flex items-center justify-center bg-surface hover:bg-surfaceHover text-white transition-colors"
+                            title="Выйти из полноэкранного режима"
+                          >
+                            <div className="flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
+                              <CornersIn weight="bold" size={24} />
+                            </div>
+                          </button>
+                          <button
+                            onClick={toggleMute}
+                            className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)
+                              ? 'bg-[#2B2D31] text-white'
+                              : 'bg-surface hover:bg-surfaceHover text-white'
+                              }`}
+                          >
+                            <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
+                              <Mic weight="bold" size={24} />
+                              <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45'}`} />
+                            </div>
+                          </button>
+                          <button
+                            onClick={toggleDeafen}
+                            className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened)
+                              ? 'bg-[#2B2D31] text-white'
+                              : 'bg-surface hover:bg-surfaceHover text-white'
+                              }`}
+                          >
+                            <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
+                              <Headphones weight="bold" size={24} />
+                              <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45'}`} />
+                            </div>
+                          </button>
+                          {store.currentUser?.isStreaming && (
+                            <button
+                              onClick={handleStopStream}
+                              className="group w-14 h-14 rounded-full flex items-center justify-center bg-[#FF007F] text-white hover:bg-[#D80073] transition-colors"
+                              title="Остановить трансляцию"
+                            >
+                              <div className="flex items-center justify-center transition-transform duration-200 group-hover:scale-110">
+                                <Desktop weight="bold" size={24} />
+                              </div>
+                            </button>
+                          )}
+                          <button onClick={() => signalRService.leaveChannel()} className="group bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
+                            <div className="transition-transform duration-300 group-hover:-rotate-12 group-hover:scale-110">
+                              <PhoneOff weight="bold" size={20} />
+                            </div>
+                            {t('main.voice.endCall')}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (activeStream) {
+                    const sideItems = items.filter(item => item.id !== activeStream.id);
+                    const maxH = containerSize.height - 150;
+                    const maxW = containerSize.width;
+                    let streamW = maxW;
+                    let streamH = streamW / streamRatio;
+                    if (streamH > maxH) {
+                      streamH = maxH;
+                      streamW = streamH * streamRatio;
+                    }
+
+                    return (
+                      <div ref={containerRef} className="w-full h-full flex flex-col items-center justify-between">
+                        <div
+                          style={{ width: `${streamW}px`, height: `${streamH}px` }}
+                          className="relative overflow-hidden flex items-center justify-center"
+                        >
+                          <StreamCard
+                            user={activeStream.user}
+                            stream={activeStream.stream}
+                            cardSize={{ w: streamW, h: streamH }}
+                            isFocused={true}
+                            onClick={() => store.setActiveStreamId(null)}
+                            onContextMenu={e => handleContextMenu(e, 'stream', activeStream.user)}
+                            onToggleFullscreen={() => store.setStreamFullscreen(true)}
+                            onRatioChange={setStreamRatio}
+                          />
+                        </div>
+                        <div className="w-full h-[120px] shrink-0 flex items-center justify-center gap-4 overflow-x-auto mt-4 px-4 pr-1">
+                          {sideItems.map(item => {
+                            if (item.type === 'user') {
+                              return (
+                                <VoiceUserCard
+                                  key={item.id}
+                                  user={item.user}
+                                  cardSize={{ w: 180, h: 101, avatarSize: 40 }}
+                                  isIdle={isIdle}
+                                  t={t}
+                                  handleContextMenu={handleContextMenu}
+                                  webrtcConnections={store.webrtcConnections}
+                                  currentUserId={store.currentUser?.id}
+                                />
+                              );
+                            } else {
+                              return (
+                                <StreamCard
+                                  key={item.id}
+                                  user={item.user}
+                                  stream={item.stream}
+                                  cardSize={{ w: 180, h: 101 }}
+                                  isFocused={false}
+                                  onClick={() => store.setActiveStreamId(item.user.id)}
+                                  onContextMenu={e => handleContextMenu(e, 'stream', item.user)}
+                                />
+                              );
+                            }
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div ref={containerRef} className="w-full h-full flex flex-wrap items-center justify-center gap-6" style={{ alignContent: 'center' }}>
+                      {items.map(item => {
+                        if (item.type === 'user') {
+                          return (
+                            <VoiceUserCard
+                              key={item.id}
+                              user={item.user}
+                              cardSize={cardSize}
+                              isIdle={isIdle}
+                              t={t}
+                              handleContextMenu={handleContextMenu}
+                              webrtcConnections={store.webrtcConnections}
+                              currentUserId={store.currentUser?.id}
+                            />
+                          );
+                        } else {
+                          return (
+                            <StreamCard
+                              key={item.id}
+                              user={item.user}
+                              stream={item.stream}
+                              cardSize={cardSize}
+                              isFocused={false}
+                              onClick={() => store.setActiveStreamId(item.user.id)}
+                              onContextMenu={e => handleContextMenu(e, 'stream', item.user)}
+                            />
+                          );
+                        }
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1986,7 +2306,7 @@ export default function App() {
               </div>
             )}
 
-            {store.currentChannelId && !store.currentCallUser && (
+            {store.currentChannelId && !store.currentCallUser && !store.isStreamFullscreen && (
               <div className={[
                 "absolute bottom-10 left-1/2 -translate-x-1/2 bg-panelBg px-6 py-4 rounded-full flex gap-4 items-center shadow-2xl border border-[#303035] z-50",
                 controlsShake ? "animate-shake" : ""
@@ -2013,6 +2333,18 @@ export default function App() {
                   <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
                     <Headphones weight="bold" size={24} />
                     <div className={`absolute w-[30px] h-[3px] bg-danger rounded-full transition-all duration-300 origin-center ${(store.currentUser?.isDeafened || store.currentUser?.isServerDeafened) ? 'scale-100 opacity-100 rotate-45' : 'scale-0 opacity-0 rotate-45'}`} />
+                  </div>
+                </button>
+                <button
+                  onClick={store.currentUser?.isStreaming || !!webrtc.localVideoStream ? handleStopStream : () => setShowStreamPicker(true)}
+                  className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${
+                    store.currentUser?.isStreaming || !!webrtc.localVideoStream
+                      ? 'bg-[#FF007F] text-white hover:bg-[#D80073]'
+                      : 'bg-surface hover:bg-surfaceHover text-white'
+                  }`}
+                >
+                  <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
+                    <Desktop weight="bold" size={24} />
                   </div>
                 </button>
                 <button onClick={() => signalRService.leaveChannel()} className="group bg-danger hover:bg-red-600 text-white font-bold py-3.5 px-8 rounded-full flex items-center gap-3 transition-colors text-[15px]">
@@ -2458,8 +2790,12 @@ export default function App() {
 
       {renderModal('userVolume',
         <div className="bg-panelBg p-8 rounded-3xl w-[400px] shadow-2xl">
-          <h2 className="text-xl font-bold mb-2 text-white">{t('modals.userVolume.title', 'Громкость пользователя')}</h2>
-          <p className="text-textMuted text-sm mb-6 font-medium">{volumeUser?.displayName}</p>
+          <h2 className="text-xl font-bold mb-2 text-white">
+            {volumeType === 'stream' ? t('modals.streamVolume.title', 'Громкость трансляции') : t('modals.userVolume.title', 'Громкость пользователя')}
+          </h2>
+          <p className="text-textMuted text-sm mb-6 font-medium">
+            {volumeType === 'stream' ? t('stream.streamLabel', 'Трансляция {{name}}', { name: volumeUser?.displayName }) : volumeUser?.displayName}
+          </p>
           <div>
             <Md3Slider
               min={0}
@@ -2469,11 +2805,24 @@ export default function App() {
               label={t('modals.userVolume.label', 'ГРОМКОСТЬ')}
               showPercentage
               onChange={v => {
-                if (volumeUser) webrtc.setUserVolumeRealtime(volumeUser.id, v);
+                if (volumeUser) {
+                  if (volumeType === 'stream') {
+                    webrtc.setStreamVolumeRealtime(volumeUser.id, v)
+                  } else {
+                    webrtc.setUserVolumeRealtime(volumeUser.id, v)
+                  }
+                }
               }}
               onChangeEnd={v => {
-                setVolumeUserValue(v);
-                if (volumeUser) webrtc.setUserVolume(volumeUser.id, v);
+                setVolumeUserValue(v)
+                if (volumeUser) {
+                  if (volumeType === 'stream') {
+                    store.setStreamVolume(volumeUser.id, v)
+                    webrtc.updateRemoteStreamVolume(volumeUser.id)
+                  } else {
+                    webrtc.setUserVolume(volumeUser.id, v)
+                  }
+                }
               }}
             />
           </div>
@@ -3067,8 +3416,12 @@ export default function App() {
             </>
           ) : contextMenu.type === 'voiceUser' ? (
             <>
-              <button onClick={() => { setVolumeUser(contextMenu.item); setVolumeUserValue(store.userVolumes[contextMenu.item.id] ?? 100); store.setModal('userVolume', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Volume2 weight="bold" size={16} /> {t('contextMenu.volume', 'Громкость')}</button>
+              <button onClick={() => { setVolumeUser(contextMenu.item); setVolumeType('voice'); setVolumeUserValue(store.userVolumes[contextMenu.item.id] ?? 100); store.setModal('userVolume', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Volume2 weight="bold" size={16} /> {t('contextMenu.volume', 'Громкость')}</button>
               <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'voiceUsers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1"><Settings weight="bold" size={16} /> {t('contextMenu.profile', 'Профиль')}</button>
+            </>
+          ) : contextMenu.type === 'stream' ? (
+            <>
+              <button onClick={() => { setVolumeUser(contextMenu.item); setVolumeType('stream'); setVolumeUserValue(store.streamVolumes[contextMenu.item.id] ?? 100); store.setModal('userVolume', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover flex items-center gap-3 font-medium"><Volume2 weight="bold" size={16} /> {t('contextMenu.streamVolume', 'Громкость трансляции')}</button>
             </>
           ) : (
             <>
@@ -3076,6 +3429,15 @@ export default function App() {
               <button onClick={() => { signalRService.removeFriend(contextMenu.item.id); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover flex items-center gap-3 font-medium mt-1"><UserMinus weight="bold" size={16} /> {t('contextMenu.remove', 'Удалить')}</button>
             </>
           )}
+        </div>
+      )}
+
+      {showStreamPicker && (
+        <div className="fixed inset-0 z-[99999] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <StreamPicker
+            onClose={() => setShowStreamPicker(false)}
+            onSelect={handleStartStream}
+          />
         </div>
       )}
     </>

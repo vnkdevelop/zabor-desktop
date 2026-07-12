@@ -25,6 +25,7 @@ declare global {
       clearSession: () => Promise<boolean>;
       onMaximizeChange: (callback: (isMaximized: boolean) => void) => () => void;
       onBeforeQuit: (callback: () => void) => () => void;
+      getDesktopSources: (options?: any) => Promise<any[]>;
     };
   }
 }

@@ -26,6 +26,8 @@ export interface User {
   lastSeen?: string;
   friendRequestsReceived?: string[];
   FriendRequestsReceived?: string[];
+  isStreaming?: boolean;
+  streamQuality?: string;
 }
 
 export interface VoiceChannel {
@@ -84,6 +86,14 @@ interface AppState {
 
   isJoiningChannel: boolean;
   userVolumes: Record<string, number>;
+  streamVolumes: Record<string, number>;
+  activeStreamId: string | null;
+  isStreamFullscreen: boolean;
+  remoteVideoStreams: Record<string, MediaStream>;
+  setActiveStreamId: (id: string | null) => void;
+  setStreamFullscreen: (val: boolean) => void;
+  setRemoteVideoStream: (userId: string, stream: MediaStream | null) => void;
+  setStreamVolume: (userId: string, volume: number) => void;
   noiseSuppression: boolean;
   setNoiseSuppression: (enabled: boolean) => void;
   webrtcConnections: Record<string, boolean>;
@@ -197,6 +207,10 @@ export const useAppStore = create<AppState>((set) => ({
 
   isJoiningChannel: false,
   userVolumes: {},
+  streamVolumes: {},
+  activeStreamId: null,
+  isStreamFullscreen: false,
+  remoteVideoStreams: {},
   noiseSuppression: true,
   setNoiseSuppression: (enabled) => set({ noiseSuppression: enabled }),
   webrtcConnections: {},
@@ -213,6 +227,21 @@ export const useAppStore = create<AppState>((set) => ({
 
   systemToast: null,
   setSystemToast: (msg) => set({ systemToast: msg }),
+
+  setActiveStreamId: (id) => set((state) => ({ activeStreamId: id, isStreamFullscreen: id === null ? false : state.isStreamFullscreen })),
+  setStreamFullscreen: (val) => set({ isStreamFullscreen: val }),
+  setRemoteVideoStream: (userId, stream) => set((state) => {
+    const next = { ...state.remoteVideoStreams };
+    if (stream === null) {
+      delete next[userId];
+    } else {
+      next[userId] = stream;
+    }
+    return { remoteVideoStreams: next };
+  }),
+  setStreamVolume: (userId, volume) => set((state) => ({
+    streamVolumes: { ...state.streamVolumes, [userId]: volume }
+  })),
 
   setCurrentUser: (user) => set({ currentUser: user }),
   setChannels: (channels) => set({ channels }),

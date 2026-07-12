@@ -10,52 +10,124 @@ type SpeakingEntry = {
   nodes: AudioNode[]
 }
 
-function optimizeAudioSDP(sdp: string): string {
+function optimizeSDP(sdp: string): string {
+  let lines = sdp.split('\r\n')
+
   const opusRegex = /a=rtpmap:(\d+)\s+opus\/48000\/2/i
-  const match = sdp.match(opusRegex)
-  if (!match) return sdp
-
-  const pt = match[1]
-  const lines = sdp.split('\r\n')
-  let fmtpFound = false
-
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].startsWith(`a=fmtp:${pt}`)) {
-      
-      lines[i] = `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=20;minptime=10;stereo=0;sprop-maxcapturerate=48000`
-      fmtpFound = true
-      break
-    }
-  }
-
-  if (!fmtpFound) {
+  const audioMatch = sdp.match(opusRegex)
+  if (audioMatch) {
+    const pt = audioMatch[1]
+    let fmtpFound = false
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith(`a=rtpmap:${pt}`)) {
-        lines.splice(i + 1, 0, `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=20;minptime=10;stereo=0;sprop-maxcapturerate=48000`)
+      if (lines[i].startsWith(`a=fmtp:${pt}`)) {
+        lines[i] = `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=20;minptime=10;stereo=0;sprop-maxcapturerate=48000`
+        fmtpFound = true
         break
       }
     }
+    if (!fmtpFound) {
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith(`a=rtpmap:${pt}`)) {
+          lines.splice(i + 1, 0, `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=20;minptime=10;stereo=0;sprop-maxcapturerate=48000`)
+          break
+        }
+      }
+    }
+    let audioSectionIdx = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('m=audio')) {
+        audioSectionIdx = i
+        break
+      }
+    }
+    if (audioSectionIdx !== -1) {
+      lines.splice(audioSectionIdx + 1, 0, 'b=AS:96')
+    }
   }
 
-  let audioSectionIdx = -1
+  let videoSectionIdx = -1
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].startsWith('m=audio')) {
-      audioSectionIdx = i
+    if (lines[i].startsWith('m=video')) {
+      videoSectionIdx = i
       break
     }
   }
 
-  if (audioSectionIdx !== -1) {
-    
-    lines.splice(audioSectionIdx + 1, 0, 'b=AS:96')
+  if (videoSectionIdx !== -1) {
+    let h264Payloads: string[] = []
+    let h264Fmtps: Record<string, string> = {}
+    let h264RtpMaps: Record<string, string> = {}
+
+    for (let i = videoSectionIdx + 1; i < lines.length; i++) {
+      if (lines[i].startsWith('m=')) break
+      const rtpmapMatch = lines[i].match(/^a=rtpmap:(\d+)\s+H264\/90000/i)
+      if (rtpmapMatch) {
+        const pt = rtpmapMatch[1]
+        h264Payloads.push(pt)
+        h264RtpMaps[pt] = lines[i]
+      }
+      const fmtpMatch = lines[i].match(/^a=fmtp:(\d+)\s+(.+)/i)
+      if (fmtpMatch) {
+        const pt = fmtpMatch[1]
+        h264Fmtps[pt] = lines[i]
+      }
+    }
+
+    if (h264Payloads.length > 0) {
+      let filteredLines: string[] = []
+      let skipVideoTracks = false
+
+      for (let i = 0; i < lines.length; i++) {
+        if (i === videoSectionIdx) {
+          const parts = lines[i].split(' ')
+          const newVideoLine = `${parts[0]} ${parts[1]} ${parts[2]} ${h264Payloads.join(' ')}`
+          filteredLines.push(newVideoLine)
+          skipVideoTracks = true
+          continue
+        }
+        if (skipVideoTracks && lines[i].startsWith('m=')) {
+          skipVideoTracks = false
+        }
+        if (skipVideoTracks) {
+          if (lines[i].startsWith('a=rtpmap:') || lines[i].startsWith('a=fmtp:') || lines[i].startsWith('a=rtcp-fb:')) {
+            const ptMatch = lines[i].match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)/i)
+            if (ptMatch && h264Payloads.includes(ptMatch[1])) {
+              filteredLines.push(lines[i])
+            }
+          } else {
+            filteredLines.push(lines[i])
+          }
+        } else {
+          filteredLines.push(lines[i])
+        }
+      }
+      lines = filteredLines
+    }
   }
 
   return lines.join('\r\n')
 }
 
+function createSilentAudioStream(): MediaStream {
+  const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+  const dst = ctx.createMediaStreamDestination()
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  gain.gain.value = 0
+  osc.connect(gain)
+  gain.connect(dst)
+  osc.start()
+  return dst.stream
+}
+
 export class WebRTCManager {
   private localStream: MediaStream | null = null
   private rawStream: MediaStream | null = null
+  public localVideoStream: MediaStream | null = null
+  private statsInterval: NodeJS.Timeout | null = null
+  private streamGainNodes: Map<string, GainNode> = new Map()
+  private streamSourceNodes: Map<string, MediaStreamAudioSourceNode> = new Map()
+  private streamAudioElements: Map<string, HTMLAudioElement> = new Map()
 
   private peerConnections: Map<string, RTCPeerConnection> = new Map()
   private audioElements: Map<string, HTMLAudioElement> = new Map()
@@ -73,6 +145,7 @@ export class WebRTCManager {
   private static readonly ICE_TIMEOUT_MS = 15000
 
   private currentDeviceId = 'default'
+  private currentStreamQuality: '1080p' | '720p' = '720p'
   private currentOutputDeviceId = 'default'
   private noiseSuppression = true
 
@@ -117,7 +190,8 @@ export class WebRTCManager {
       { urls: 'turn:150.241.64.108:3478?transport=udp', username: 'zabor', credential: 'mvtxbJo45sc8_turn' },
       { urls: 'turn:150.241.64.108:3478?transport=tcp', username: 'zabor', credential: 'mvtxbJo45sc8_turn' }
     ],
-    bundlePolicy: 'max-bundle'
+    bundlePolicy: 'max-bundle',
+    iceCandidatePoolSize: 4
   }
 
   
@@ -478,31 +552,58 @@ export class WebRTCManager {
         stream = this.rawStream;
       } else {
         try {
+          const constraints: MediaTrackConstraints = {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+          if (this.currentDeviceId && this.currentDeviceId !== 'default') {
+            constraints.deviceId = { exact: this.currentDeviceId }
+          }
           stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
-              channelCount: 1,
-              echoCancellation: true,
-              noiseSuppression: false,
-              autoGainControl: false
-            },
+            audio: constraints,
             video: false
           });
         } catch {
           try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                echoCancellation: true,
-                noiseSuppression: false,
-                autoGainControl: false
-              },
-              video: false
-            });
+            const devices = await navigator.mediaDevices.enumerateDevices()
+            const audioInputs = devices.filter(d => d.kind === 'audioinput' && d.deviceId)
+            if (audioInputs.length > 0) {
+              const firstDevice = audioInputs.find(d => d.deviceId !== 'default') || audioInputs[0]
+              stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                  deviceId: { exact: firstDevice.deviceId },
+                  channelCount: 1,
+                  echoCancellation: true,
+                  noiseSuppression: false,
+                  autoGainControl: false
+                },
+                video: false
+              });
+            } else {
+              throw new Error('No audio input devices found')
+            }
           } catch {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: true,
-              video: false
-            });
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                  echoCancellation: true,
+                  noiseSuppression: false,
+                  autoGainControl: false
+                },
+                video: false
+              });
+            } catch {
+              try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                  audio: true,
+                  video: false
+                });
+              } catch {
+                stream = createSilentAudioStream();
+              }
+            }
           }
         }
         shouldStopStream = true;
@@ -630,39 +731,66 @@ export class WebRTCManager {
 
         let raw: MediaStream
         try {
+          const constraints: MediaTrackConstraints = {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: !this.noiseSuppression,
+            autoGainControl: false,
+            // @ts-ignore
+            googHighpassFilter: false,
+            googEchoCancellation2: false,
+            googAudioMirroring: false
+          }
+          if (this.currentDeviceId && this.currentDeviceId !== 'default') {
+            constraints.deviceId = { exact: this.currentDeviceId }
+          }
           raw = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              deviceId: this.currentDeviceId === 'default' ? 'default' : (this.currentDeviceId ? { exact: this.currentDeviceId } : undefined),
-              channelCount: 1,
-              echoCancellation: true,
-              noiseSuppression: !this.noiseSuppression,
-              autoGainControl: false,
-              // @ts-ignore
-              googHighpassFilter: false,
-              googEchoCancellation2: false,
-              googAudioMirroring: false
-            },
+            audio: constraints,
             video: false
           })
         } catch {
           try {
-            raw = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                echoCancellation: true,
-                noiseSuppression: !this.noiseSuppression,
-                autoGainControl: false,
-                // @ts-ignore
-                googHighpassFilter: false,
-                googEchoCancellation2: false,
-                googAudioMirroring: false
-              },
-              video: false
-            })
+            const devices = await navigator.mediaDevices.enumerateDevices()
+            const audioInputs = devices.filter(d => d.kind === 'audioinput' && d.deviceId)
+            if (audioInputs.length > 0) {
+              const firstDevice = audioInputs.find(d => d.deviceId !== 'default') || audioInputs[0]
+              raw = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                  deviceId: { exact: firstDevice.deviceId },
+                  channelCount: 1,
+                  echoCancellation: true,
+                  noiseSuppression: !this.noiseSuppression,
+                  autoGainControl: false
+                },
+                video: false
+              })
+            } else {
+              throw new Error('No audio input devices found')
+            }
           } catch {
-            raw = await navigator.mediaDevices.getUserMedia({
-              audio: true,
-              video: false
-            })
+            try {
+              raw = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                  echoCancellation: true,
+                  noiseSuppression: !this.noiseSuppression,
+                  autoGainControl: false,
+                  // @ts-ignore
+                  googHighpassFilter: false,
+                  googEchoCancellation2: false,
+                  googAudioMirroring: false
+                },
+                video: false
+              })
+            } catch {
+              try {
+                raw = await navigator.mediaDevices.getUserMedia({
+                  audio: true,
+                  video: false
+                })
+              } catch {
+                raw = createSilentAudioStream()
+              }
+            }
           }
         }
 
@@ -859,38 +987,67 @@ export class WebRTCManager {
 
   private setupPeerHandlers(pc: RTCPeerConnection, userId: string) {
     pc.ontrack = (event) => {
-      const remote = event.streams[0] || new MediaStream([event.track])
-      this.setupVAD(remote, userId, false)
-
+      const stream = event.streams[0] || new MediaStream([event.track])
       this.initOutputMixer()
 
-      let dummyAudio = this.audioElements.get(userId)
-      if (!dummyAudio) {
-        dummyAudio = new Audio()
-        dummyAudio.autoplay = true
-        dummyAudio.muted = true
-        this.audioElements.set(userId, dummyAudio)
-      }
-      dummyAudio.srcObject = remote
-      dummyAudio.play().catch(err => {
-        console.warn(`[WebRTC] dummyAudio play failed for user ${userId}:`, err)
-      })
-
-      if (this.userSourceNodes.has(userId)) {
-        try { this.userSourceNodes.get(userId)?.disconnect() } catch { }
-        try { this.userGainNodes.get(userId)?.disconnect() } catch { }
+      if (event.track.kind === 'video') {
+        useAppStore.getState().setRemoteVideoStream(userId, stream)
+        return
       }
 
-      const source = this.outputMixContext!.createMediaStreamSource(remote)
-      const gain = this.outputMixContext!.createGain()
+      const hasVideo = stream && stream.getVideoTracks().length > 0
 
-      source.connect(gain)
-      gain.connect(this.outputCompressor!)
+      if (hasVideo) {
+        let dummyAudio = this.streamAudioElements.get(userId)
+        if (!dummyAudio) {
+          dummyAudio = new Audio()
+          dummyAudio.autoplay = true
+          dummyAudio.muted = true
+          this.streamAudioElements.set(userId, dummyAudio)
+        }
+        dummyAudio.srcObject = stream
+        dummyAudio.play().catch(() => { })
 
-      this.userSourceNodes.set(userId, source)
-      this.userGainNodes.set(userId, gain)
+        if (this.streamSourceNodes.has(userId)) {
+          try { this.streamSourceNodes.get(userId)?.disconnect() } catch { }
+          try { this.streamGainNodes.get(userId)?.disconnect() } catch { }
+        }
 
-      this.updateRemoteVolume(userId)
+        const source = this.outputMixContext!.createMediaStreamSource(stream)
+        const gain = this.outputMixContext!.createGain()
+        source.connect(gain)
+        gain.connect(this.outputCompressor!)
+
+        this.streamSourceNodes.set(userId, source)
+        this.streamGainNodes.set(userId, gain)
+        this.updateRemoteStreamVolume(userId)
+      } else {
+        this.setupVAD(stream, userId, false)
+
+        let dummyAudio = this.audioElements.get(userId)
+        if (!dummyAudio) {
+          dummyAudio = new Audio()
+          dummyAudio.autoplay = true
+          dummyAudio.muted = true
+          this.audioElements.set(userId, dummyAudio)
+        }
+        dummyAudio.srcObject = stream
+        dummyAudio.play().catch(() => { })
+
+        if (this.userSourceNodes.has(userId)) {
+          try { this.userSourceNodes.get(userId)?.disconnect() } catch { }
+          try { this.userGainNodes.get(userId)?.disconnect() } catch { }
+        }
+
+        const source = this.outputMixContext!.createMediaStreamSource(stream)
+        const gain = this.outputMixContext!.createGain()
+        source.connect(gain)
+        gain.connect(this.outputCompressor!)
+
+        this.userSourceNodes.set(userId, source)
+        this.userGainNodes.set(userId, gain)
+        this.updateRemoteVolume(userId)
+      }
     }
 
     pc.onicecandidate = (e) => {
@@ -963,6 +1120,201 @@ export class WebRTCManager {
     }
   }
 
+  public updateRemoteStreamVolume(userId: string) {
+    const store = useAppStore.getState()
+    const vol = store.streamVolumes[userId] ?? 100
+    const gainNode = this.streamGainNodes.get(userId)
+    if (gainNode) {
+      gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (vol / 100)))
+    }
+  }
+
+  public setStreamVolumeRealtime(userId: string, volume: number) {
+    const gainNode = this.streamGainNodes.get(userId)
+    if (gainNode) {
+      gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (volume / 100)))
+    }
+  }
+
+  public async startScreenShare(sourceId: string, quality: '1080p' | '720p') {
+    this.currentStreamQuality = quality
+    if (this.localVideoStream) {
+      this.stopScreenShare()
+    }
+    const isScreen = sourceId.startsWith('screen')
+    const width = quality === '1080p' ? 1920 : 1280
+    const height = quality === '1080p' ? 1080 : 720
+    const frameRate = quality === '1080p' ? 45 : 30
+
+    try {
+      const constraints: MediaStreamConstraints = {
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: sourceId,
+            maxWidth: width,
+            maxHeight: height,
+            maxFrameRate: frameRate
+          }
+        } as any
+      }
+
+      if (isScreen) {
+        constraints.audio = {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: sourceId
+          }
+        } as any
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+
+      this.localVideoStream = stream
+      const videoTrack = stream.getVideoTracks()[0]
+      const audioTrack = stream.getAudioTracks()[0]
+
+      if (videoTrack) {
+        videoTrack.contentHint = 'motion'
+      }
+
+      if (audioTrack && this.processedContext) {
+        const screenAudioSource = this.processedContext.createMediaStreamSource(new MediaStream([audioTrack]))
+        const screenGainNode = this.processedContext.createGain()
+        screenGainNode.gain.value = 0.8
+        screenAudioSource.connect(screenGainNode)
+        screenGainNode.connect(this.processedContext.destination)
+      }
+
+      for (const [userId, pc] of this.peerConnections.entries()) {
+        if (videoTrack) pc.addTrack(videoTrack, stream)
+        if (audioTrack) pc.addTrack(audioTrack, stream)
+        await this.renegotiatePeer(pc, userId)
+      }
+
+      this.startStatsMonitoring()
+      return true
+    } catch (e) {
+      this.stopScreenShare()
+      throw e
+    }
+  }
+
+  public stopScreenShare() {
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval)
+      this.statsInterval = null
+    }
+    if (this.localVideoStream) {
+      this.localVideoStream.getTracks().forEach(track => {
+        track.enabled = false
+        track.stop()
+      })
+      this.localVideoStream = null
+    }
+    for (const [userId, pc] of this.peerConnections.entries()) {
+      const senders = pc.getSenders()
+      senders.forEach(sender => {
+        if (sender.track && (sender.track.kind === 'video' || (sender.track.kind === 'audio' && sender.track !== this.localStream?.getAudioTracks()[0]))) {
+          pc.removeTrack(sender)
+        }
+      })
+      this.renegotiatePeer(pc, userId).catch(() => { })
+    }
+  }
+
+  private async renegotiatePeer(pc: RTCPeerConnection, userId: string) {
+    try {
+      const offer = await pc.createOffer()
+      const optimizedSDP = optimizeSDP(offer.sdp!)
+      await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
+      signalRService.sendWebRTCOffer(userId, JSON.stringify(pc.localDescription))
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  private startStatsMonitoring() {
+    if (this.statsInterval) clearInterval(this.statsInterval)
+    this.statsInterval = setInterval(async () => {
+      for (const [userId, pc] of this.peerConnections.entries()) {
+        if (pc.connectionState !== 'connected') continue
+        try {
+          const stats = await pc.getStats()
+          let packetsLost = 0
+          let rtt = 0
+          let framesDropped = 0
+
+          stats.forEach(report => {
+            if (report.type === 'remote-inbound-rtp' && report.kind === 'video') {
+              packetsLost = report.packetsLost || 0
+              rtt = report.roundTripTime || 0
+            }
+            if (report.type === 'outbound-rtp' && report.kind === 'video') {
+              framesDropped = report.framesDropped || 0
+            }
+          })
+
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+          if (sender) {
+            const params = sender.getParameters()
+            if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+            let changed = false
+
+            const is1080p = this.currentStreamQuality === '1080p'
+            const normalBitrate = is1080p ? 4500000 : 2500000
+            const normalFramerate = is1080p ? 45 : 30
+
+            if (params.encodings[0].priority !== 'medium') {
+              params.encodings[0].priority = 'medium'
+              changed = true
+            }
+
+            if (packetsLost > 5 || rtt > 0.25) {
+              if (params.encodings[0].scaleResolutionDownBy !== 3.0) {
+                params.encodings[0].scaleResolutionDownBy = 3.0
+                params.encodings[0].maxBitrate = 600000
+                params.encodings[0].maxFramerate = 15
+                changed = true
+              }
+            } else if (packetsLost > 2 || rtt > 0.15) {
+              if (params.encodings[0].scaleResolutionDownBy !== 2.0) {
+                params.encodings[0].scaleResolutionDownBy = 2.0
+                params.encodings[0].maxBitrate = 1200000
+                params.encodings[0].maxFramerate = 25
+                changed = true
+              }
+            } else {
+              if (params.encodings[0].scaleResolutionDownBy !== 1.0 || params.encodings[0].maxBitrate !== normalBitrate || params.encodings[0].maxFramerate !== normalFramerate) {
+                params.encodings[0].scaleResolutionDownBy = 1.0
+                params.encodings[0].maxBitrate = normalBitrate
+                params.encodings[0].maxFramerate = normalFramerate
+                changed = true
+              }
+            }
+
+            if (changed) {
+              await sender.setParameters(params)
+            }
+          }
+
+          if (framesDropped > 50) {
+            const store = useAppStore.getState()
+            const toastMsg = i18n.t('toasts.streamPerfIssue', 'Проблемы с производительностью, рекомендуется снизить качество')
+            store.setSystemToast(toastMsg)
+            setTimeout(() => {
+              if (store.systemToast === toastMsg) {
+                store.setSystemToast(null)
+              }
+            }, 4000)
+          }
+        } catch (e) {
+          console.warn(e)
+        }
+      }
+    }, 2500)
+  }
+
   public async connectToPeer(userId: string) {
     if (this.peerConnections.has(userId)) return
 
@@ -974,13 +1326,18 @@ export class WebRTCManager {
         pc.addTrack(track, this.localStream!)
       })
     }
+    if (this.localVideoStream) {
+      this.localVideoStream.getTracks().forEach(track => {
+        pc.addTrack(track, this.localVideoStream!)
+      })
+    }
 
     this.setupPeerHandlers(pc, userId)
     this.startIceTimeout(userId)
 
     try {
       const offer = await pc.createOffer()
-      const optimizedSDP = optimizeAudioSDP(offer.sdp!)
+      const optimizedSDP = optimizeSDP(offer.sdp!)
       await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
       signalRService.sendWebRTCOffer(userId, JSON.stringify(pc.localDescription))
     } catch (e) {
@@ -997,28 +1354,33 @@ export class WebRTCManager {
       const callStatus = store.callStatus
       if (callStatus !== 'connected') return
     }
-    if (this.peerConnections.has(senderId)) {
-      this.disconnectFromPeer(senderId)
+
+    let pc = this.peerConnections.get(senderId)
+    if (!pc) {
+      pc = new RTCPeerConnection(this.config)
+      this.peerConnections.set(senderId, pc)
+
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(track => {
+          pc!.addTrack(track, this.localStream!)
+        })
+      }
+      if (this.localVideoStream) {
+        this.localVideoStream.getTracks().forEach(track => {
+          pc!.addTrack(track, this.localVideoStream!)
+        })
+      }
+
+      this.setupPeerHandlers(pc, senderId)
+      this.startIceTimeout(senderId)
     }
-
-    const pc = new RTCPeerConnection(this.config)
-    this.peerConnections.set(senderId, pc)
-
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(track => {
-        pc.addTrack(track, this.localStream!)
-      })
-    }
-
-    this.setupPeerHandlers(pc, senderId)
-    this.startIceTimeout(senderId)
 
     try {
       const offer = JSON.parse(offerStr)
-      offer.sdp = optimizeAudioSDP(offer.sdp)
+      offer.sdp = optimizeSDP(offer.sdp)
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
       const answer = await pc.createAnswer()
-      const optimizedAnswerSDP = optimizeAudioSDP(answer.sdp!)
+      const optimizedAnswerSDP = optimizeSDP(answer.sdp!)
       await pc.setLocalDescription({ type: 'answer', sdp: optimizedAnswerSDP })
       await this.drainPendingCandidates(senderId)
       signalRService.sendWebRTCAnswer(senderId, JSON.stringify(pc.localDescription))
@@ -1033,7 +1395,7 @@ export class WebRTCManager {
     if (pc) {
       try {
         const answer = JSON.parse(answerStr)
-        answer.sdp = optimizeAudioSDP(answer.sdp)
+        answer.sdp = optimizeSDP(answer.sdp)
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
         await this.drainPendingCandidates(senderId)
       } catch (e) {
@@ -1094,8 +1456,32 @@ export class WebRTCManager {
     const gain = this.userGainNodes.get(userId)
     if (gain) { try { gain.disconnect() } catch { }; this.userGainNodes.delete(userId) }
 
+    const streamAudio = this.streamAudioElements.get(userId)
+    if (streamAudio) { streamAudio.pause(); streamAudio.srcObject = null; this.streamAudioElements.delete(userId) }
+
+    const streamSource = this.streamSourceNodes.get(userId)
+    if (streamSource) { try { streamSource.disconnect() } catch { }; this.streamSourceNodes.delete(userId) }
+
+    const streamGain = this.streamGainNodes.get(userId)
+    if (streamGain) { try { streamGain.disconnect() } catch { }; this.streamGainNodes.delete(userId) }
+
+    useAppStore.getState().setRemoteVideoStream(userId, null)
+
     this.pendingCandidates.delete(userId)
     this.clearVAD(userId)
+  }
+
+  public cleanupRemoteStream(userId: string) {
+    const streamAudio = this.streamAudioElements.get(userId)
+    if (streamAudio) { streamAudio.pause(); streamAudio.srcObject = null; this.streamAudioElements.delete(userId) }
+
+    const streamSource = this.streamSourceNodes.get(userId)
+    if (streamSource) { try { streamSource.disconnect() } catch { }; this.streamSourceNodes.delete(userId) }
+
+    const streamGain = this.streamGainNodes.get(userId)
+    if (streamGain) { try { streamGain.disconnect() } catch { }; this.streamGainNodes.delete(userId) }
+
+    useAppStore.getState().setRemoteVideoStream(userId, null)
   }
 
   public leaveAll() {

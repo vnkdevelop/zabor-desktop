@@ -375,6 +375,28 @@ class SignalRService {
       store().setSpeakingStatus(userId, isSpeaking);
     });
 
+    this.connection.on("UserStartedStreaming", (userId: string, streamQuality: string) => {
+      store().updateUserStatus(userId, { isStreaming: true, streamQuality });
+    });
+
+    this.connection.on("UserStoppedStreaming", (userId: string) => {
+      const appStore = store();
+      if (appStore.activeStreamId === userId) {
+        appStore.setActiveStreamId(null);
+      }
+      appStore.updateUserStatus(userId, { isStreaming: false, streamQuality: undefined });
+      webrtc.cleanupRemoteStream(userId);
+    });
+
+    this.connection.on("StreamDropped", (userId: string) => {
+      const appStore = store();
+      if (appStore.activeStreamId === userId) {
+        appStore.setActiveStreamId(null);
+      }
+      appStore.updateUserStatus(userId, { isStreaming: false, streamQuality: undefined });
+      webrtc.cleanupRemoteStream(userId);
+    });
+
     this.connection.on("FriendRequestReceived", (user: User) => {
       if (!store().friendRequests.find((r: User) => r.id === user.id)) {
         store().setFriendRequests([...store().friendRequests, user]);
@@ -846,8 +868,10 @@ class SignalRService {
     }
     webrtc.leaveAll();
     webrtc.stopLocalStream();
-    useAppStore.getState().setCurrentChannelId(null);
-    useAppStore.getState().setVoiceUsers([]);
+    const appStore = useAppStore.getState();
+    appStore.setActiveStreamId(null);
+    appStore.setCurrentChannelId(null);
+    appStore.setVoiceUsers([]);
 
     this.safeInvoke("LeaveChannel");
   }
@@ -1045,7 +1069,14 @@ class SignalRService {
     if (this.isConnected()) this.connection?.send("SetSpeakingState", isSpeaking);
   }
 
-  
+  public async startStream(quality: string): Promise<boolean> {
+    const success = await this.safeInvoke<boolean>('StartStream', quality);
+    return success || false;
+  }
+
+  public async stopStream(): Promise<void> {
+    await this.safeInvoke('StopStream');
+  }
 
   public sendWebRTCOffer(targetId: string, offer: string): void {
     if (this.isConnected()) this.connection?.send("SendWebRTCOffer", targetId, offer);

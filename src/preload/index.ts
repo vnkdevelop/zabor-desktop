@@ -25,7 +25,8 @@ const windowControls = {
       ipcRenderer.removeAllListeners('window-maximized')
       ipcRenderer.removeAllListeners('window-unmaximized')
     }
-  }
+  },
+  getDesktopSources: (options?: any) => ipcRenderer.invoke('get-desktop-sources', options)
 }
 
 contextBridge.exposeInMainWorld('windowControls', windowControls)
