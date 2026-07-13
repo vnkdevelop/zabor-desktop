@@ -101,23 +101,30 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
           )}
         </button>
 
-        <div className="ml-auto flex items-center bg-[#0B0B0F] border border-[#303035] rounded-xl p-0.5">
+        <div className="ml-auto flex items-center bg-[#0B0B0F] border border-[#303035] rounded-xl p-0.5 relative shrink-0">
           <button
             onClick={() => setQuality('720p')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
-              quality === '720p' ? 'bg-[#FF007F] text-white' : 'text-textMuted hover:text-white'
+            className={`px-3 py-1 rounded-lg text-xs font-bold z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${
+              quality === '720p' ? 'text-white' : 'text-textMuted hover:text-white'
             }`}
           >
             720p
           </button>
           <button
             onClick={() => setQuality('1080p')}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
-              quality === '1080p' ? 'bg-[#FF007F] text-white' : 'text-textMuted hover:text-white'
+            className={`px-3 py-1 rounded-lg text-xs font-bold z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${
+              quality === '1080p' ? 'text-white' : 'text-textMuted hover:text-white'
             }`}
           >
             1080p
           </button>
+          <div
+            style={{
+              transform: quality === '720p' ? 'translateX(0)' : 'translateX(calc(100% + 2px))',
+              willChange: 'transform'
+            }}
+            className="absolute top-0.5 bottom-0.5 left-0.5 w-[calc(50%-3px)] bg-[#FF007F] rounded-lg transition-transform duration-300 ease-out"
+          />
         </div>
       </div>
 

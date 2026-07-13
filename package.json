@@ -1,6 +1,6 @@
 {
   "name": "zabor-desktop",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
   "author": "vnk",
@@ -52,8 +52,8 @@
       "shortcutName": "ZABOR",
       "artifactName": "ZABOR-Setup-${version}.${ext}",
       "include": "build/installer.nsh",
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
       "deleteAppDataOnUninstall": false
     }
   },

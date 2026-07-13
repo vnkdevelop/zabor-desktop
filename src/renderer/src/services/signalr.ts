@@ -615,6 +615,8 @@ class SignalRService {
     noiseSuppression: boolean;
     userVolumes?: Record<string, number>;
     language?: string;
+    micThresholdMode?: 'auto' | 'manual';
+    manualThresholdValue?: number;
   }): Promise<void> {
     await this.safeInvoke("SaveAudioSettings", JSON.stringify(settings));
   }
@@ -627,6 +629,8 @@ class SignalRService {
     noiseSuppression: boolean;
     userVolumes?: Record<string, number>;
     language?: string;
+    micThresholdMode?: 'auto' | 'manual';
+    manualThresholdValue?: number;
   } | null> {
     const json = await this.safeInvoke<string>("GetAudioSettings");
     if (!json) return null;

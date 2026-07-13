@@ -131,6 +131,7 @@ export class WebRTCManager {
 
   private peerConnections: Map<string, RTCPeerConnection> = new Map()
   private audioElements: Map<string, HTMLAudioElement> = new Map()
+  private lastPacketsLost: Map<string, number> = new Map()
   
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map()
   
@@ -157,6 +158,7 @@ export class WebRTCManager {
   private processedSource: MediaStreamAudioSourceNode | null = null
   private inputGainNode: GainNode | null = null
   private dfNode: AudioWorkletNode | null = null
+  private dfNodeReady = false
 
   private calibratedThresholdOn = parseFloat(localStorage.getItem('zabor_threshold_on') || '0.008')
   private calibratedThresholdOff = parseFloat(localStorage.getItem('zabor_threshold_off') || '0.003')
@@ -215,30 +217,43 @@ export class WebRTCManager {
   }
 
   private async createProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
-    this.cleanupProcessedStream()
+    this.cleanupProcessedStreamSourceOnly()
 
-    const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
-    this.processedContext = ctx
+    const needNewCtx = !this.processedContext || this.processedContext.state === 'closed'
+
+    let ctx: AudioContext
+    if (needNewCtx) {
+      ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
+      this.processedContext = ctx
+      this.dfNodeReady = false
+      this.dfNode = null
+    } else {
+      ctx = this.processedContext!
+    }
+
     if (ctx.state === 'suspended') {
       await ctx.resume().catch(() => { })
     }
+
     const destination = ctx.createMediaStreamDestination()
 
-    let dfNode: AudioWorkletNode | null = null
-    try {
-      await ctx.audioWorklet.addModule(processorUrl)
-      dfNode = new AudioWorkletNode(ctx, 'deepfilter-processor')
-      this.dfNode = dfNode
+    if (!this.dfNodeReady) {
+      try {
+        await ctx.audioWorklet.addModule(processorUrl)
+        const dfNode = new AudioWorkletNode(ctx, 'deepfilter-processor')
+        this.dfNode = dfNode
+        this.dfNodeReady = true
 
-      const me = useAppStore.getState().currentUser
-      dfNode.port.onmessage = (event) => {
-        if (event.data.type === 'vad' && me) {
-          useAppStore.getState().setSpeakingStatus(me.id, event.data.isSpeaking)
-          signalRService.setSpeakingState(event.data.isSpeaking)
+        const me = useAppStore.getState().currentUser
+        dfNode.port.onmessage = (event) => {
+          if (event.data.type === 'vad' && me) {
+            useAppStore.getState().setSpeakingStatus(me.id, event.data.isSpeaking)
+            signalRService.setSpeakingState(event.data.isSpeaking)
+          }
         }
+      } catch (e) {
+        console.warn('[WebRTC] Failed to load deepfilter-processor.js, running without it.', e)
       }
-    } catch (e) {
-      console.warn('[WebRTC] Failed to load deepfilter-processor.js, running without it.', e)
     }
 
     const source = ctx.createMediaStreamSource(rawStream)
@@ -321,20 +336,33 @@ export class WebRTCManager {
     return destination.stream
   }
 
-  private cleanupProcessedStream() {
+  private cleanupProcessedStreamSourceOnly() {
     this.stopSilenceMonitor()
     if (this.dfNode) {
-      this.dfNode.port.close()
-      this.dfNode.disconnect()
+      try { this.dfNode.disconnect() } catch { }
+    }
+    if (this.processedSource) {
+      try { this.processedSource.disconnect() } catch { }
+      this.processedSource = null
+    }
+    if (this.rawAnalyserNode) {
+      try { this.rawAnalyserNode.disconnect() } catch { }
+      this.rawAnalyserNode = null
+    }
+    this.inputGainNode = null
+  }
+
+  private cleanupProcessedStream() {
+    this.cleanupProcessedStreamSourceOnly()
+    if (this.dfNode) {
+      try { this.dfNode.port.close() } catch { }
       this.dfNode = null
     }
-
+    this.dfNodeReady = false
     if (this.processedContext && this.processedContext.state !== 'closed') {
       this.processedContext.close().catch(() => { })
     }
     this.processedContext = null
-    this.processedSource = null
-    this.inputGainNode = null
   }
 
   public setInputVolume(volume: number) {
@@ -556,7 +584,8 @@ export class WebRTCManager {
             channelCount: 1,
             echoCancellation: true,
             noiseSuppression: false,
-            autoGainControl: false
+            autoGainControl: false,
+            sampleRate: { ideal: 48000 }
           }
           if (this.currentDeviceId && this.currentDeviceId !== 'default') {
             constraints.deviceId = { exact: this.currentDeviceId }
@@ -577,7 +606,8 @@ export class WebRTCManager {
                   channelCount: 1,
                   echoCancellation: true,
                   noiseSuppression: false,
-                  autoGainControl: false
+                  autoGainControl: false,
+                  sampleRate: { ideal: 48000 }
                 },
                 video: false
               });
@@ -590,7 +620,8 @@ export class WebRTCManager {
                 audio: {
                   echoCancellation: true,
                   noiseSuppression: false,
-                  autoGainControl: false
+                  autoGainControl: false,
+                  sampleRate: { ideal: 48000 }
                 },
                 video: false
               });
@@ -736,6 +767,7 @@ export class WebRTCManager {
             echoCancellation: true,
             noiseSuppression: !this.noiseSuppression,
             autoGainControl: false,
+            sampleRate: { ideal: 48000 },
             // @ts-ignore
             googHighpassFilter: false,
             googEchoCancellation2: false,
@@ -760,7 +792,8 @@ export class WebRTCManager {
                   channelCount: 1,
                   echoCancellation: true,
                   noiseSuppression: !this.noiseSuppression,
-                  autoGainControl: false
+                  autoGainControl: false,
+                  sampleRate: { ideal: 48000 }
                 },
                 video: false
               })
@@ -774,6 +807,7 @@ export class WebRTCManager {
                   echoCancellation: true,
                   noiseSuppression: !this.noiseSuppression,
                   autoGainControl: false,
+                  sampleRate: { ideal: 48000 },
                   // @ts-ignore
                   googHighpassFilter: false,
                   googEchoCancellation2: false,
@@ -1159,14 +1193,7 @@ export class WebRTCManager {
         } as any
       }
 
-      if (isScreen) {
-        constraints.audio = {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: sourceId
-          }
-        } as any
-      }
+
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
 
@@ -1221,6 +1248,7 @@ export class WebRTCManager {
       })
       this.renegotiatePeer(pc, userId).catch(() => { })
     }
+    this.lastPacketsLost.clear()
   }
 
   private async renegotiatePeer(pc: RTCPeerConnection, userId: string) {
@@ -1241,19 +1269,23 @@ export class WebRTCManager {
         if (pc.connectionState !== 'connected') continue
         try {
           const stats = await pc.getStats()
-          let packetsLost = 0
+          let rawPacketsLost = 0
           let rtt = 0
           let framesDropped = 0
 
           stats.forEach(report => {
             if (report.type === 'remote-inbound-rtp' && report.kind === 'video') {
-              packetsLost = report.packetsLost || 0
+              rawPacketsLost = report.packetsLost || 0
               rtt = report.roundTripTime || 0
             }
             if (report.type === 'outbound-rtp' && report.kind === 'video') {
               framesDropped = report.framesDropped || 0
             }
           })
+
+          const prevLost = this.lastPacketsLost.get(userId) ?? 0
+          this.lastPacketsLost.set(userId, rawPacketsLost)
+          const packetsLost = Math.max(0, rawPacketsLost - prevLost)
 
           const sender = pc.getSenders().find(s => s.track?.kind === 'video')
           if (sender) {
@@ -1323,7 +1355,17 @@ export class WebRTCManager {
 
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => {
-        pc.addTrack(track, this.localStream!)
+        const sender = pc.addTrack(track, this.localStream!)
+        if (track.kind === 'audio') {
+          try {
+            const params = sender.getParameters()
+            if (params.encodings && params.encodings.length > 0) {
+              params.encodings[0].networkPriority = 'high'
+              params.encodings[0].priority = 'high'
+              sender.setParameters(params).catch(() => {})
+            }
+          } catch {}
+        }
       })
     }
     if (this.localVideoStream) {
@@ -1362,7 +1404,17 @@ export class WebRTCManager {
 
       if (this.localStream) {
         this.localStream.getTracks().forEach(track => {
-          pc!.addTrack(track, this.localStream!)
+          const sender = pc!.addTrack(track, this.localStream!)
+          if (track.kind === 'audio') {
+            try {
+              const params = sender.getParameters()
+              if (params.encodings && params.encodings.length > 0) {
+                params.encodings[0].networkPriority = 'high'
+                params.encodings[0].priority = 'high'
+                sender.setParameters(params).catch(() => {})
+              }
+            } catch {}
+          }
         })
       }
       if (this.localVideoStream) {
@@ -1469,6 +1521,7 @@ export class WebRTCManager {
 
     this.pendingCandidates.delete(userId)
     this.clearVAD(userId)
+    this.lastPacketsLost.delete(userId)
   }
 
   public cleanupRemoteStream(userId: string) {

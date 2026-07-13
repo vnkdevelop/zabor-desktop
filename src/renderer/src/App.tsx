@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck, Desktop, CornersIn, CornersOut } from '@phosphor-icons/react';
+import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, SpeakerSlash, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck, Desktop, CornersIn, CornersOut } from '@phosphor-icons/react';
 import { useTranslation, Trans } from 'react-i18next';
 
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
@@ -20,6 +20,9 @@ import { AvatarImg } from './components/Shared/AvatarImg';
 import { StreamPicker } from './components/Stream/StreamPicker';
 import { StreamCard } from './components/Stream/StreamCard';
 
+
+const lastNonZeroUserVolumes = new Map<string, number>();
+const lastNonZeroVolumes = new Map<string, number>();
 
 const VoiceUserCard = memo(({ user, cardSize, isIdle, t, handleContextMenu, webrtcConnections, currentUserId }: {
   user: User;
@@ -274,6 +277,8 @@ export default function App() {
       });
     }, 30000);
   }, []);
+
+
 
   useEffect(() => {
     setProfileFriendRequestStatus('idle');
@@ -1950,7 +1955,13 @@ export default function App() {
             <div className="bg-surface rounded-full mx-4 my-2 p-1 flex relative shrink-0">
               <button onClick={() => setActiveTab('channels')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.channels')}</button>
               <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.friends')}</button>
-              <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-[#333] rounded-full transition-all duration-300 ease-out ${activeTab === 'channels' ? 'left-1' : 'left-[calc(50%+2px)]'}`} />
+              <div
+                style={{
+                  transform: activeTab === 'channels' ? 'translateX(0)' : 'translateX(calc(100% + 4px))',
+                  willChange: 'transform'
+                }}
+                className="absolute top-1 bottom-1 left-1 w-[calc(50%-6px)] bg-[#333] rounded-full transition-transform duration-300 ease-out"
+              />
             </div>
 
             <div className="h-[75px] bg-[#09090B] rounded-2xl mx-4 mb-4 flex items-center px-4 shrink-0 shadow-lg">
@@ -2447,7 +2458,7 @@ export default function App() {
             <h2 className="text-xl font-bold text-white">{t('settings.title', 'Настройки')}</h2>
             <button onClick={closeAndResetModals} className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"><X weight="bold" size={24} /></button>
           </div>
-          <div className="flex gap-2 px-6 pt-4">
+          <div className="flex gap-2 px-6 pt-4 pb-4 border-b border-[#303035]/30">
             <button onClick={() => setSettingsTab('general')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'general' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>{t('settings.tabs.general')}</button>
             <button onClick={() => setSettingsTab('audio')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'audio' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>{t('settings.tabs.audio')}</button>
             <button onClick={() => setSettingsTab('privacy')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'privacy' ? 'bg-[#c70060] text-white' : 'bg-surface text-textMuted hover:text-white'}`}>{t('settings.tabs.privacy')}</button>
@@ -2804,6 +2815,7 @@ export default function App() {
               value={volumeUserValue}
               label={t('modals.userVolume.label', 'ГРОМКОСТЬ')}
               showPercentage
+              showMuteButton
               onChange={v => {
                 if (volumeUser) {
                   if (volumeType === 'stream') {

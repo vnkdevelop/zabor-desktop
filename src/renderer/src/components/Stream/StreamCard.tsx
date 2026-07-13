@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { CornersOut } from '@phosphor-icons/react'
+import { CornersIn, CornersOut } from '@phosphor-icons/react'
 import { useTranslation } from 'react-i18next'
-import { User } from '../../store/useAppStore'
+import { User, useAppStore } from '../../store/useAppStore'
 
 interface StreamCardProps {
   user: User
@@ -32,6 +32,9 @@ export const StreamCard = ({
   const captureVideoRef = useRef<HTMLVideoElement | null>(null)
   const [snapshot, setSnapshot] = useState<string | null>(null)
   const [isCapturing, setIsCapturing] = useState(false)
+
+  const currentUserId = useAppStore((state) => state.currentUser?.id)
+  const isLocal = user.id === currentUserId
 
   const mode = isFullscreen ? 'fullscreen' : (isFocused ? 'focused' : 'normal')
 
@@ -96,18 +99,20 @@ export const StreamCard = ({
         transition={{ type: 'spring', stiffness: 300, damping: 25 }}
         onContextMenu={onContextMenu}
         onClick={onClick}
-        className="relative flex flex-col overflow-hidden cursor-pointer bg-[#0B0B0F] border border-[#303035] hover:border-[#FF007F] shadow-lg hover:shadow-2xl transition-all duration-300"
+        className="relative flex flex-col overflow-hidden cursor-pointer bg-transparent group transition-all duration-300"
         style={{
           width: `${cardSize.w}px`,
           height: `${cardSize.h}px`,
-          borderRadius: '12px'
+          borderRadius: '12px',
+          WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+          maskImage: 'radial-gradient(white, black)'
         }}
       >
-        <div className="w-full h-full relative overflow-hidden bg-black flex items-center justify-center">
+        <div className="absolute inset-[1.5px] overflow-hidden bg-[#0B0B0F] flex items-center justify-center rounded-[10.5px]">
           {snapshot ? (
             <img
               src={snapshot}
-              className="w-full h-full object-cover filter blur-[20px] scale-[1.15] transition-all duration-500"
+              className="w-full h-full object-cover filter blur-[4px] scale-[1.05] transition-all duration-500"
             />
           ) : (
             <div className="absolute inset-0 bg-[#0B0B0F] flex items-center justify-center text-textMuted text-xs font-bold">
@@ -121,6 +126,8 @@ export const StreamCard = ({
             </span>
           </div>
         </div>
+
+        <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-[#303035] group-hover:ring-2 group-hover:ring-[#FF007F] group-hover:ring-inset pointer-events-none z-20 transition-all duration-300" />
 
         {isCapturing && (
           <video
@@ -141,22 +148,32 @@ export const StreamCard = ({
       animate={isFullscreen ? {} : { scale: 1, opacity: 1 }}
       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
       onContextMenu={onContextMenu}
-      className={`relative overflow-hidden bg-[#0B0B0F] border border-[#303035] group ${
-        isFullscreen ? 'w-full h-full border-none rounded-none' : 'w-full h-full rounded-xl'
-      }`}
+      style={{
+        WebkitMaskImage: '-webkit-radial-gradient(white, black)',
+        maskImage: 'radial-gradient(white, black)'
+      }}
+      className={`relative overflow-hidden group ${isFullscreen ? 'w-full h-full bg-[#0B0B0F] rounded-none' : 'w-full h-full bg-transparent rounded-xl'
+        }`}
     >
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        onLoadedMetadata={(e) => {
-          const video = e.currentTarget
-          if (video.videoWidth && video.videoHeight && onRatioChange) {
-            onRatioChange(video.videoWidth / video.videoHeight)
-          }
-        }}
-        className="w-full h-full object-contain bg-black"
-      />
+      <div className={isFullscreen ? "w-full h-full bg-black" : "absolute inset-[1.5px] overflow-hidden rounded-[10.5px] bg-[#0B0B0F]"}>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={isLocal}
+          onLoadedMetadata={(e) => {
+            const video = e.currentTarget
+            if (video.videoWidth && video.videoHeight && onRatioChange) {
+              onRatioChange(video.videoWidth / video.videoHeight)
+            }
+          }}
+          className="w-full h-full object-contain"
+        />
+      </div>
+
+      {!isFullscreen && (
+        <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-[#303035] group-hover:ring-2 group-hover:ring-[#FF007F] group-hover:ring-inset pointer-events-none z-20 transition-all duration-300" />
+      )}
 
       <div className="absolute inset-x-0 top-0 p-4 bg-gradient-to-b from-black/80 to-transparent pointer-events-none flex items-center justify-between z-10">
         <div className="bg-[#09090B]/85 border border-[#303035]/50 px-3 py-1 rounded-full flex items-center gap-2">
@@ -176,17 +193,34 @@ export const StreamCard = ({
       </div>
 
       {!isFullscreen && (
-        <div className="absolute inset-0 z-10 pointer-events-none flex items-end justify-end p-4">
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              if (onToggleFullscreen) onToggleFullscreen()
-            }}
-            className="bg-[#09090B]/90 border border-[#FF007F]/30 p-2.5 rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all duration-200 cursor-pointer pointer-events-auto opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0"
-          >
-            <CornersOut weight="bold" size={20} className="text-[#FF007F]" />
-          </button>
-        </div>
+        <>
+          <div className="absolute inset-0 z-10 pointer-events-none flex items-end justify-start p-4">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (onClick) onClick()
+              }}
+              style={{ willChange: 'transform, opacity' }}
+              className="w-10 h-10 flex items-center justify-center bg-[#09090B]/90 border border-[#FF007F]/30 rounded-full hover:scale-110 active:scale-95 transition-[transform,opacity] duration-200 ease-out cursor-pointer pointer-events-auto opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0"
+              title={t('stream.minimize', 'Свернуть трансляцию')}
+            >
+              <CornersIn weight="bold" size={20} className="text-[#FF007F] shrink-0" />
+            </button>
+          </div>
+
+          <div className="absolute inset-0 z-10 pointer-events-none flex items-end justify-end p-4">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (onToggleFullscreen) onToggleFullscreen()
+              }}
+              style={{ willChange: 'transform, opacity' }}
+              className="w-10 h-10 flex items-center justify-center bg-[#09090B]/90 border border-[#FF007F]/30 rounded-full hover:scale-110 active:scale-95 transition-[transform,opacity] duration-200 ease-out cursor-pointer pointer-events-auto opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0"
+            >
+              <CornersOut weight="bold" size={20} className="text-[#FF007F] shrink-0" />
+            </button>
+          </div>
+        </>
       )}
     </motion.div>
   )

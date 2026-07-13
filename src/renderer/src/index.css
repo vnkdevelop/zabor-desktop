@@ -325,3 +325,12 @@ textarea,
 .animate-speaking-ripple {
   animation: speaking-ripple 1.4s cubic-bezier(0.1, 0.8, 0.3, 1) infinite;
 }
+
+.shadow,
+[class*="shadow-"]:not([class*="shadow-[inset"]) {
+  box-shadow: none !important;
+}
+
+[class*="drop-shadow-"] {
+  filter: none !important;
+}

@@ -281,6 +281,13 @@ function createWindow(): void {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
+    try {
+      const pid = mainWindow?.webContents.getOSProcessId();
+      if (pid) {
+        const os = require('os');
+        os.setPriority(pid, os.constants.priority.PRIORITY_HIGH);
+      }
+    } catch {}
   });
 
 
@@ -336,6 +343,10 @@ function createWindow(): void {
 
 
 app.whenReady().then(() => {
+  try {
+    const os = require('os');
+    os.setPriority(os.constants.priority.PRIORITY_HIGH);
+  } catch {}
   const settings = loadAppSettings();
   applyAutoLaunch(settings.openAtLogin);
 
