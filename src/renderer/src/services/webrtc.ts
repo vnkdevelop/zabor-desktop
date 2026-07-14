@@ -20,7 +20,7 @@ function optimizeSDP(sdp: string): string {
     let fmtpFound = false
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith(`a=fmtp:${pt}`)) {
-        lines[i] = `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=20;minptime=10;stereo=0;sprop-maxcapturerate=48000`
+        lines[i] = `a=fmtp:${pt} ptime=40;maxptime=60;useinbandfec=1;usedtx=1;maxplaybackrate=48000;sprop-maxcapturerate=48000;stereo=0;cbr=0`
         fmtpFound = true
         break
       }
@@ -28,7 +28,7 @@ function optimizeSDP(sdp: string): string {
     if (!fmtpFound) {
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].startsWith(`a=rtpmap:${pt}`)) {
-          lines.splice(i + 1, 0, `a=fmtp:${pt} maxaveragebitrate=96000;useinbandfec=1;usedtx=0;cbr=0;ptime=20;minptime=10;stereo=0;sprop-maxcapturerate=48000`)
+          lines.splice(i + 1, 0, `a=fmtp:${pt} ptime=40;maxptime=60;useinbandfec=1;usedtx=1;maxplaybackrate=48000;sprop-maxcapturerate=48000;stereo=0;cbr=0`)
           break
         }
       }
@@ -146,7 +146,7 @@ export class WebRTCManager {
   private static readonly ICE_TIMEOUT_MS = 15000
 
   private currentDeviceId = 'default'
-  private currentStreamQuality: '1080p' | '720p' = '720p'
+  private currentStreamQuality: 'high' | 'low' | 'camera' = 'low'
   private currentOutputDeviceId = 'default'
   private noiseSuppression = true
 
@@ -162,8 +162,10 @@ export class WebRTCManager {
 
   private calibratedThresholdOn = parseFloat(localStorage.getItem('zabor_threshold_on') || '0.008')
   private calibratedThresholdOff = parseFloat(localStorage.getItem('zabor_threshold_off') || '0.003')
-  private calibratedAttenuationLimit = parseInt(localStorage.getItem('zabor_attenuation_limit') || '45')
+  private calibratedAttenuationLimit = parseInt(localStorage.getItem('zabor_attenuation_limit') || '100')
   private calibratedNoiseFloor = parseFloat(localStorage.getItem('zabor_base_noise_floor') || '0.003')
+  private calibratedEqGains: number[] = JSON.parse(localStorage.getItem('zabor_eq_gains') || '[0, 0, 0, 0, 0]')
+  private localSpeakingState = false
   private thresholdMode = localStorage.getItem('zabor_threshold_mode') || 'auto'
   private manualThresholdValue = parseFloat(localStorage.getItem('zabor_manual_threshold_value') || '50')
   private activeStartPromise: Promise<boolean> | null = null
@@ -212,24 +214,16 @@ export class WebRTCManager {
       attenuationLimit: this.calibratedAttenuationLimit,
       noiseFloor: this.calibratedNoiseFloor * gainFactor,
       thresholdMode: this.thresholdMode,
-      manualThresholdValue: this.manualThresholdValue
+      manualThresholdValue: this.manualThresholdValue,
+      postFilterBeta: 0.08
     }
   }
 
   private async createProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
-    this.cleanupProcessedStreamSourceOnly()
+    this.cleanupProcessedStream()
 
-    const needNewCtx = !this.processedContext || this.processedContext.state === 'closed'
-
-    let ctx: AudioContext
-    if (needNewCtx) {
-      ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
-      this.processedContext = ctx
-      this.dfNodeReady = false
-      this.dfNode = null
-    } else {
-      ctx = this.processedContext!
-    }
+    const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
+    this.processedContext = ctx
 
     if (ctx.state === 'suspended') {
       await ctx.resume().catch(() => { })
@@ -243,28 +237,38 @@ export class WebRTCManager {
         const dfNode = new AudioWorkletNode(ctx, 'deepfilter-processor')
         this.dfNode = dfNode
         this.dfNodeReady = true
-
-        const me = useAppStore.getState().currentUser
-        dfNode.port.onmessage = (event) => {
-          if (event.data.type === 'vad' && me) {
-            useAppStore.getState().setSpeakingStatus(me.id, event.data.isSpeaking)
-            signalRService.setSpeakingState(event.data.isSpeaking)
-          }
-        }
       } catch (e) {
         console.warn('[WebRTC] Failed to load deepfilter-processor.js, running without it.', e)
       }
+    }
+
+    if (this.dfNode) {
+      this.dfNode.port.onmessage = (event) => {
+        if (event.data.type === 'vad') {
+          const isSpeaking = event.data.isSpeaking
+          if (isSpeaking !== this.localSpeakingState) {
+            this.localSpeakingState = isSpeaking
+            const me = useAppStore.getState().currentUser
+            if (me) {
+              useAppStore.getState().setSpeakingStatus(me.id, isSpeaking)
+              signalRService.setSpeakingState(isSpeaking)
+            }
+          }
+        }
+      }
+
+      this.localSpeakingState = false
     }
 
     const source = ctx.createMediaStreamSource(rawStream)
     this.processedSource = source
 
     const compressor = ctx.createDynamicsCompressor()
-    compressor.threshold.value = -12
-    compressor.knee.value = 10
-    compressor.ratio.value = 2
-    compressor.attack.value = 0.005
-    compressor.release.value = 0.150
+    compressor.threshold.value = -24
+    compressor.knee.value = 30
+    compressor.ratio.value = 5
+    compressor.attack.value = 0.003
+    compressor.release.value = 0.100
 
     const highpass = ctx.createBiquadFilter()
     highpass.type = 'highpass'
@@ -303,14 +307,9 @@ export class WebRTCManager {
       console.warn('[WebRTC] Failed to create raw analyser node for silence monitoring:', e)
     }
 
-    let currentNode: AudioNode = source
-
-    currentNode.connect(inputGain)
-    currentNode = inputGain
-
-    currentNode.connect(highpass)
+    source.connect(inputGain)
+    inputGain.connect(highpass)
     highpass.connect(lowpass)
-    currentNode = lowpass
 
     if (this.dfNode) {
       const store = useAppStore.getState()
@@ -322,13 +321,15 @@ export class WebRTCManager {
       })
       this.dfNode.port.postMessage({
         type: 'setCalibratedParams',
-        ...this.getThresholdParams(gainFactor)
+        ...this.getThresholdParams(gainFactor),
+        eqGains: this.calibratedEqGains
       })
-      currentNode.connect(this.dfNode)
-      currentNode = this.dfNode
+      lowpass.connect(this.dfNode)
+      this.dfNode.connect(compressor)
+    } else {
+      lowpass.connect(compressor)
     }
 
-    currentNode.connect(compressor)
     compressor.connect(peaking)
     peaking.connect(limiter)
     limiter.connect(destination)
@@ -338,6 +339,10 @@ export class WebRTCManager {
 
   private cleanupProcessedStreamSourceOnly() {
     this.stopSilenceMonitor()
+    if (this.inputGainNode) {
+      try { this.inputGainNode.disconnect() } catch { }
+      this.inputGainNode = null
+    }
     if (this.dfNode) {
       try { this.dfNode.disconnect() } catch { }
     }
@@ -349,7 +354,6 @@ export class WebRTCManager {
       try { this.rawAnalyserNode.disconnect() } catch { }
       this.rawAnalyserNode = null
     }
-    this.inputGainNode = null
   }
 
   private cleanupProcessedStream() {
@@ -429,70 +433,63 @@ export class WebRTCManager {
     this.clearVAD(userId)
 
     try {
-      let contextToUse: AudioContext | null = null
       if (isLocal) {
         if (!this.processedContext || this.processedContext.state === 'closed') {
           this.processedContext = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
         }
-        contextToUse = this.processedContext
-      } else {
-        this.initOutputMixer()
-        contextToUse = this.outputMixContext
-      }
+        const contextToUse = this.processedContext
+        if (contextToUse.state === 'suspended') contextToUse.resume().catch(() => { })
 
-      if (!contextToUse) return
-      if (contextToUse.state === 'suspended') contextToUse.resume().catch(() => { })
+        const source = contextToUse.createMediaStreamSource(stream)
+        const bp1 = contextToUse.createBiquadFilter()
+        bp1.type = 'highpass'
+        bp1.frequency.value = 85
+        bp1.Q.value = 0.5
 
-      const source = contextToUse.createMediaStreamSource(stream)
+        const bp2 = contextToUse.createBiquadFilter()
+        bp2.type = 'lowpass'
+        bp2.frequency.value = 8000
+        bp2.Q.value = 0.5
 
-      const bp1 = contextToUse.createBiquadFilter()
-      bp1.type = 'highpass'; bp1.frequency.value = 85; bp1.Q.value = 0.5
+        const analyser = contextToUse.createAnalyser()
+        analyser.fftSize = 512
+        analyser.smoothingTimeConstant = 0.6
 
-      const bp2 = contextToUse.createBiquadFilter()
-      bp2.type = 'lowpass'; bp2.frequency.value = 8000; bp2.Q.value = 0.5
+        source.connect(bp1)
+        bp1.connect(bp2)
+        bp2.connect(analyser)
 
-      const analyser = contextToUse.createAnalyser()
-      analyser.fftSize = 512
-      analyser.smoothingTimeConstant = 0.6
+        const vadNodes: AudioNode[] = [source, bp1, bp2, analyser]
+        const buf = new Uint8Array(analyser.fftSize)
+        let lastVoice = 0
+        let wasSpeaking = false
+        let voiceFrames = 0
+        let silenceFrames = 0
+        let vadSilenceFrames = 0
+        let hasWarnedSilence = false
 
-      source.connect(bp1)
-      bp1.connect(bp2)
-      bp2.connect(analyser)
-      const vadNodes: AudioNode[] = [source, bp1, bp2, analyser]
-
-      const buf = new Uint8Array(analyser.fftSize)
-      let lastVoice = 0
-      let wasSpeaking = false
-      let voiceFrames = 0
-      let silenceFrames = 0
-      let vadSilenceFrames = 0
-      let hasWarnedSilence = false
-
-      const avgTh = isLocal ? 2.5 : 1.5
-      const peakTh = isLocal ? 7 : 5
-
-      const check = () => {
-        const store = useAppStore.getState()
-        if (isLocal && (store.currentUser?.isMuted || store.currentUser?.isServerMuted)) {
-          if (wasSpeaking) {
-            wasSpeaking = false; voiceFrames = 0
-            store.setSpeakingStatus(userId, false)
-            signalRService.setSpeakingState(false)
+        const check = () => {
+          const store = useAppStore.getState()
+          if (store.currentUser?.isMuted || store.currentUser?.isServerMuted) {
+            if (wasSpeaking) {
+              wasSpeaking = false
+              voiceFrames = 0
+              store.setSpeakingStatus(userId, false)
+              signalRService.setSpeakingState(false)
+            }
+            silenceFrames = 0
+            return
           }
-          silenceFrames = 0
-          return
-        }
 
-        analyser.getByteTimeDomainData(buf)
-        let peak = 0, sum = 0
-        for (let i = 0; i < buf.length; i++) {
-          const s = Math.abs(buf[i] - 128)
-          if (s > peak) peak = s
-          sum += s
-        }
-        const avg = sum / buf.length
+          analyser.getByteTimeDomainData(buf)
+          let peak = 0, sum = 0
+          for (let i = 0; i < buf.length; i++) {
+            const s = Math.abs(buf[i] - 128)
+            if (s > peak) peak = s
+            sum += s
+          }
+          const avg = sum / buf.length
 
-        if (isLocal) {
           if (peak === 0) {
             silenceFrames++
           } else {
@@ -511,29 +508,55 @@ export class WebRTCManager {
             }, 4000)
             hasWarnedSilence = true
           }
+
+          const isVoice = avg >= 2.5 || peak >= 7
+          if (isVoice) {
+            voiceFrames++
+            vadSilenceFrames = 0
+          } else {
+            vadSilenceFrames++
+            if (vadSilenceFrames >= 6) voiceFrames = 0
+          }
+          if (voiceFrames >= 2) lastVoice = Date.now()
+
+          const speaking = (Date.now() - lastVoice) < 400
+          if (speaking !== wasSpeaking) {
+            wasSpeaking = speaking
+            store.setSpeakingStatus(userId, speaking)
+            signalRService.setSpeakingState(speaking)
+          }
         }
 
-        const isVoice = avg >= avgTh || peak >= peakTh
-        if (isVoice) {
-          voiceFrames++
-          vadSilenceFrames = 0
-        } else {
-          vadSilenceFrames++
-          if (vadSilenceFrames >= 6) voiceFrames = 0
+        const timer = setInterval(check, 30)
+        this.speakingIntervals.set(userId, { timer, stream, nodes: vadNodes })
+      } else {
+        let wasSpeaking = false
+        const check = () => {
+          const pc = this.peerConnections.get(userId)
+          if (!pc) return
+          const receiver = pc.getReceivers().find(r => r.track && r.track.kind === 'audio')
+          if (!receiver) return
+          try {
+            const syncSources = receiver.getSynchronizationSources()
+            if (syncSources && syncSources.length > 0) {
+              const latestSource = syncSources[0]
+              const currentPlayoutLevel = latestSource.audioLevel
+              if (currentPlayoutLevel !== undefined) {
+                const isRemoteSpeaking = currentPlayoutLevel > 0.01
+                if (isRemoteSpeaking !== wasSpeaking) {
+                  wasSpeaking = isRemoteSpeaking
+                  useAppStore.getState().setSpeakingStatus(userId, isRemoteSpeaking)
+                }
+              }
+            }
+          } catch {}
         }
-        if (voiceFrames >= 2) lastVoice = Date.now()
-
-        const speaking = (Date.now() - lastVoice) < 400
-        if (speaking !== wasSpeaking) {
-          wasSpeaking = speaking
-          store.setSpeakingStatus(userId, speaking)
-          if (isLocal) signalRService.setSpeakingState(speaking)
-        }
+        const timer = setInterval(check, 20)
+        this.speakingIntervals.set(userId, { timer, stream, nodes: [] })
       }
-
-      const timer = setInterval(check, 30)
-      this.speakingIntervals.set(userId, { timer, stream, nodes: vadNodes })
-    } catch (e) { console.error('[VAD] setup failed', e) }
+    } catch (e) {
+      console.error('[VAD] setup failed', e)
+    }
   }
 
   private clearVAD(userId: string) {
@@ -570,7 +593,7 @@ export class WebRTCManager {
 
   public async calibrateMic(durationMs?: number): Promise<{ noiseFloor: number; peakNoise: number }> {
     const isFirstRun = localStorage.getItem('zabor_mic_calibrated') !== 'true';
-    const actualDurationMs = durationMs !== undefined ? durationMs : (isFirstRun ? 5000 : 2000);
+    const actualDurationMs = durationMs !== undefined ? durationMs : (isFirstRun ? 5000 : 3000);
 
     let stream: MediaStream;
     let shouldStopStream = false;
@@ -645,7 +668,7 @@ export class WebRTCManager {
 
       const highpass = audioContext.createBiquadFilter();
       highpass.type = 'highpass';
-      highpass.frequency.value = 140;
+      highpass.frequency.value = 80;
       highpass.Q.value = 0.707;
 
       const lowpass = audioContext.createBiquadFilter();
@@ -662,12 +685,16 @@ export class WebRTCManager {
 
       const bufferLength = analyser.fftSize;
       const dataArray = new Float32Array(bufferLength);
+      const freqData = new Float32Array(analyser.frequencyBinCount);
       const windowRmsValues: number[] = [];
 
-      const intervalTime = 50; 
+      const psdSum = [0, 0, 0, 0, 0];
+      let activeSpeechFrames = 0;
+
+      const intervalTime = 50;
       const steps = actualDurationMs / intervalTime;
 
-      const checkRms = () => {
+      const checkRmsAndFreq = () => {
         analyser.getFloatTimeDomainData(dataArray);
         let sumSquares = 0;
         for (let i = 0; i < bufferLength; i++) {
@@ -675,11 +702,20 @@ export class WebRTCManager {
         }
         const rms = Math.sqrt(sumSquares / bufferLength);
         windowRmsValues.push(rms);
+
+        if (rms > 0.005) {
+          analyser.getFloatFrequencyData(freqData);
+          const bins = [1, 3, 11, 43, 85];
+          for (let k = 0; k < 5; k++) {
+            psdSum[k] += freqData[bins[k]];
+          }
+          activeSpeechFrames++;
+        }
       };
 
       for (let i = 0; i < steps; i++) {
         await new Promise(resolve => setTimeout(resolve, intervalTime));
-        checkRms();
+        checkRmsAndFreq();
       }
 
       source.disconnect();
@@ -709,7 +745,7 @@ export class WebRTCManager {
         noiseFloorSum += sortedRms[i];
       }
       let noiseFloor = noiseFloorSum / Math.max(1, halfLength);
-      
+
       const peakNoiseIndex = Math.max(0, Math.floor(sortedRms.length * 0.95) - 1);
       const peakNoise = sortedRms[peakNoiseIndex] || 0.005;
 
@@ -718,21 +754,35 @@ export class WebRTCManager {
         if (savedFloorRaw) {
           const savedFloor = parseFloat(savedFloorRaw);
           if (!isNaN(savedFloor)) {
-            noiseFloor = 0.6 * savedFloor + 0.4 * noiseFloor;
+            noiseFloor = 0.85 * savedFloor + 0.15 * noiseFloor;
           }
         }
       }
 
-      this.calibratedThresholdOn = Math.max(0.008, peakNoise * 2.0 + 0.002);
-      this.calibratedThresholdOff = Math.max(0.004, peakNoise * 1.3 + 0.001);
+      this.calibratedThresholdOn = Math.max(0.0035, peakNoise * 1.8 + 0.0008);
+      this.calibratedThresholdOff = Math.max(0.0015, peakNoise * 1.1 + 0.0004);
       this.calibratedAttenuationLimit = 100;
       this.calibratedNoiseFloor = noiseFloor;
+
+      const eqGains = [0, 0, 0, 0, 0];
+      if (activeSpeechFrames > 0) {
+        const psdMeasured = psdSum.map(sum => sum / activeSpeechFrames);
+        const refPsd = psdMeasured[1];
+        const ltassTarget = [-15.0, 0.0, -8.0, -20.0, -30.0];
+        for (let k = 0; k < 5; k++) {
+          const relativePsd = psdMeasured[k] - refPsd;
+          const deltaG = ltassTarget[k] - relativePsd;
+          eqGains[k] = Math.max(-6.0, Math.min(6.0, deltaG));
+        }
+      }
+      this.calibratedEqGains = eqGains;
 
       localStorage.setItem('zabor_mic_calibrated', 'true');
       localStorage.setItem('zabor_base_noise_floor', noiseFloor.toString());
       localStorage.setItem('zabor_threshold_on', this.calibratedThresholdOn.toString());
       localStorage.setItem('zabor_threshold_off', this.calibratedThresholdOff.toString());
       localStorage.setItem('zabor_attenuation_limit', this.calibratedAttenuationLimit.toString());
+      localStorage.setItem('zabor_eq_gains', JSON.stringify(eqGains));
 
       this.updateThresholds();
 
@@ -756,6 +806,7 @@ export class WebRTCManager {
       }
 
       try {
+        this.initOutputMixer()
         if (this.rawStream) { this.rawStream.getTracks().forEach(t => t.stop()); this.rawStream = null }
         if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null }
         this.cleanupProcessedStream()
@@ -842,6 +893,13 @@ export class WebRTCManager {
         }
 
         this.startSilenceMonitor()
+
+        const isFirstRun = localStorage.getItem('zabor_mic_calibrated') !== 'true';
+        try {
+          await this.calibrateMic(isFirstRun ? 5000 : 2000);
+        } catch (e) {
+          console.warn('[WebRTC] Background calibration failed, proceeding:', e);
+        }
 
         const me = useAppStore.getState().currentUser
         if (me && this.rawStream && !this.dfNode) this.setupVAD(this.rawStream, me.id, true)
@@ -1029,9 +1087,11 @@ export class WebRTCManager {
         return
       }
 
-      const hasVideo = stream && stream.getVideoTracks().length > 0
+      const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
+      const isScreenShareAudio = (remoteVideoStream && event.streams[0] && event.streams[0].id === remoteVideoStream.id) ||
+                                 (event.streams[0] && event.streams[0].getVideoTracks().length > 0)
 
-      if (hasVideo) {
+      if (isScreenShareAudio) {
         let dummyAudio = this.streamAudioElements.get(userId)
         if (!dummyAudio) {
           dummyAudio = new Audio()
@@ -1047,7 +1107,7 @@ export class WebRTCManager {
           try { this.streamGainNodes.get(userId)?.disconnect() } catch { }
         }
 
-        const source = this.outputMixContext!.createMediaStreamSource(stream)
+        const source = this.outputMixContext!.createMediaStreamSource(new MediaStream([event.track]))
         const gain = this.outputMixContext!.createGain()
         source.connect(gain)
         gain.connect(this.outputCompressor!)
@@ -1073,7 +1133,7 @@ export class WebRTCManager {
           try { this.userGainNodes.get(userId)?.disconnect() } catch { }
         }
 
-        const source = this.outputMixContext!.createMediaStreamSource(stream)
+        const source = this.outputMixContext!.createMediaStreamSource(new MediaStream([event.track]))
         const gain = this.outputMixContext!.createGain()
         source.connect(gain)
         gain.connect(this.outputCompressor!)
@@ -1156,7 +1216,8 @@ export class WebRTCManager {
 
   public updateRemoteStreamVolume(userId: string) {
     const store = useAppStore.getState()
-    const vol = store.streamVolumes[userId] ?? 100
+    const isActive = store.activeStreamId === userId
+    const vol = isActive ? (store.streamVolumes[userId] ?? 100) : 0
     const gainNode = this.streamGainNodes.get(userId)
     if (gainNode) {
       gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (vol / 100)))
@@ -1164,38 +1225,69 @@ export class WebRTCManager {
   }
 
   public setStreamVolumeRealtime(userId: string, volume: number) {
+    const store = useAppStore.getState()
+    const isActive = store.activeStreamId === userId
     const gainNode = this.streamGainNodes.get(userId)
     if (gainNode) {
-      gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (volume / 100)))
+      const vol = isActive ? volume : 0
+      gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (vol / 100)))
     }
   }
 
-  public async startScreenShare(sourceId: string, quality: '1080p' | '720p') {
+  public async startScreenShare(sourceId: string, quality: 'high' | 'low' | 'camera', includeAudio: boolean) {
     this.currentStreamQuality = quality
     if (this.localVideoStream) {
       this.stopScreenShare()
     }
-    const isScreen = sourceId.startsWith('screen')
-    const width = quality === '1080p' ? 1920 : 1280
-    const height = quality === '1080p' ? 1080 : 720
-    const frameRate = quality === '1080p' ? 45 : 30
+    const width = quality === 'high' ? 1920 : 1280
+    const height = quality === 'high' ? 1080 : 720
+    const frameRate = quality === 'high' ? 60 : 30
 
     try {
-      const constraints: MediaStreamConstraints = {
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: sourceId,
-            maxWidth: width,
-            maxHeight: height,
-            maxFrameRate: frameRate
-          }
-        } as any
+      let constraints: MediaStreamConstraints
+      const isCamera = sourceId.startsWith('camera:')
+
+      if (isCamera) {
+        const deviceId = sourceId.slice(7)
+        constraints = {
+          video: {
+            deviceId: deviceId ? { exact: deviceId } : undefined
+          },
+          audio: false
+        }
+      } else {
+        constraints = {
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId,
+              maxWidth: width,
+              maxHeight: height,
+              maxFrameRate: frameRate
+            }
+          } as any
+        }
+        if (includeAudio) {
+          constraints.audio = {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId
+            }
+          } as any
+        }
       }
 
-
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints)
+      } catch (err) {
+        if (constraints.audio) {
+          delete constraints.audio
+          stream = await navigator.mediaDevices.getUserMedia(constraints)
+        } else {
+          throw err
+        }
+      }
 
       this.localVideoStream = stream
       const videoTrack = stream.getVideoTracks()[0]
@@ -1205,16 +1297,23 @@ export class WebRTCManager {
         videoTrack.contentHint = 'motion'
       }
 
-      if (audioTrack && this.processedContext) {
-        const screenAudioSource = this.processedContext.createMediaStreamSource(new MediaStream([audioTrack]))
-        const screenGainNode = this.processedContext.createGain()
-        screenGainNode.gain.value = 0.8
-        screenAudioSource.connect(screenGainNode)
-        screenGainNode.connect(this.processedContext.destination)
-      }
+
 
       for (const [userId, pc] of this.peerConnections.entries()) {
-        if (videoTrack) pc.addTrack(videoTrack, stream)
+        if (videoTrack) {
+          const sender = pc.addTrack(videoTrack, stream)
+          try {
+            if (!isCamera) {
+              (sender as any).degradationPreference = 'maintain-resolution'
+              const params = sender.getParameters()
+              if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+              params.encodings[0].maxBitrate = quality === 'high' ? 6000000 : 2500000
+              params.encodings[0].maxFramerate = quality === 'high' ? 60 : 30
+              params.encodings[0].networkPriority = 'high'
+              sender.setParameters(params).catch(() => {})
+            }
+          } catch {}
+        }
         if (audioTrack) pc.addTrack(audioTrack, stream)
         await this.renegotiatePeer(pc, userId)
       }
@@ -1265,6 +1364,7 @@ export class WebRTCManager {
   private startStatsMonitoring() {
     if (this.statsInterval) clearInterval(this.statsInterval)
     this.statsInterval = setInterval(async () => {
+      if (this.currentStreamQuality === 'camera') return
       for (const [userId, pc] of this.peerConnections.entries()) {
         if (pc.connectionState !== 'connected') continue
         try {
@@ -1293,36 +1393,40 @@ export class WebRTCManager {
             if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
             let changed = false
 
-            const is1080p = this.currentStreamQuality === '1080p'
-            const normalBitrate = is1080p ? 4500000 : 2500000
-            const normalFramerate = is1080p ? 45 : 30
+             const isHigh = this.currentStreamQuality === 'high'
 
             if (params.encodings[0].priority !== 'medium') {
               params.encodings[0].priority = 'medium'
               changed = true
             }
 
-            if (packetsLost > 5 || rtt > 0.25) {
-              if (params.encodings[0].scaleResolutionDownBy !== 3.0) {
-                params.encodings[0].scaleResolutionDownBy = 3.0
-                params.encodings[0].maxBitrate = 600000
-                params.encodings[0].maxFramerate = 15
-                changed = true
-              }
-            } else if (packetsLost > 2 || rtt > 0.15) {
-              if (params.encodings[0].scaleResolutionDownBy !== 2.0) {
-                params.encodings[0].scaleResolutionDownBy = 2.0
-                params.encodings[0].maxBitrate = 1200000
-                params.encodings[0].maxFramerate = 25
-                changed = true
-              }
-            } else {
-              if (params.encodings[0].scaleResolutionDownBy !== 1.0 || params.encodings[0].maxBitrate !== normalBitrate || params.encodings[0].maxFramerate !== normalFramerate) {
-                params.encodings[0].scaleResolutionDownBy = 1.0
-                params.encodings[0].maxBitrate = normalBitrate
-                params.encodings[0].maxFramerate = normalFramerate
-                changed = true
-              }
+            let targetScale = 1.0
+            let targetBitrate = isHigh ? 6000000 : 2500000
+            let targetFramerate = isHigh ? 60 : 30
+
+            if (packetsLost > 6 || rtt > 0.28) {
+              targetScale = 2.0
+              targetBitrate = isHigh ? 800000 : 400000
+              targetFramerate = isHigh ? 20 : 15
+            } else if (packetsLost > 3 || rtt > 0.18) {
+              targetScale = 1.0
+              targetBitrate = isHigh ? 1800000 : 700000
+              targetFramerate = isHigh ? 30 : 20
+            } else if (packetsLost > 1 || rtt > 0.10) {
+              targetScale = 1.0
+              targetBitrate = isHigh ? 3000000 : 1200000
+              targetFramerate = isHigh ? 60 : 30
+            }
+
+            if (
+              params.encodings[0].scaleResolutionDownBy !== targetScale ||
+              params.encodings[0].maxBitrate !== targetBitrate ||
+              params.encodings[0].maxFramerate !== targetFramerate
+            ) {
+              params.encodings[0].scaleResolutionDownBy = targetScale
+              params.encodings[0].maxBitrate = targetBitrate
+              params.encodings[0].maxFramerate = targetFramerate
+              changed = true
             }
 
             if (changed) {
@@ -1370,7 +1474,21 @@ export class WebRTCManager {
     }
     if (this.localVideoStream) {
       this.localVideoStream.getTracks().forEach(track => {
-        pc.addTrack(track, this.localVideoStream!)
+        const sender = pc.addTrack(track, this.localVideoStream!)
+        if (track.kind === 'video') {
+          try {
+            const isCamera = this.currentStreamQuality === 'camera'
+            if (!isCamera) {
+              (sender as any).degradationPreference = 'maintain-resolution'
+              const params = sender.getParameters()
+              if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+              params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
+              params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
+              params.encodings[0].networkPriority = 'high'
+              sender.setParameters(params).catch(() => {})
+            }
+          } catch {}
+        }
       })
     }
 
@@ -1419,7 +1537,21 @@ export class WebRTCManager {
       }
       if (this.localVideoStream) {
         this.localVideoStream.getTracks().forEach(track => {
-          pc!.addTrack(track, this.localVideoStream!)
+          const sender = pc!.addTrack(track, this.localVideoStream!)
+          if (track.kind === 'video') {
+            try {
+              const isCamera = this.currentStreamQuality === 'camera'
+              if (!isCamera) {
+                (sender as any).degradationPreference = 'maintain-resolution'
+                const params = sender.getParameters()
+                if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+                params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
+                params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
+                params.encodings[0].networkPriority = 'high'
+                sender.setParameters(params).catch(() => {})
+              }
+            } catch {}
+          }
         })
       }
 

@@ -173,6 +173,7 @@ CallUserCard.displayName = 'CallUserCard';
 export default function App() {
   const { t, i18n } = useTranslation();
   const store = useAppStore();
+  const speakingMap = useSpeakingStore(state => state.speaking);
 
   const [isAuth, setIsAuth] = useState(false);
   const [language, setLanguage] = useState(i18n.language || 'ru');
@@ -570,6 +571,12 @@ export default function App() {
     }
     setStreamRatio(16 / 9);
   }, [store.activeStreamId, store.remoteVideoStreams]);
+
+  useEffect(() => {
+    store.voiceUsers.forEach(user => {
+      webrtc.updateRemoteStreamVolume(user.id);
+    });
+  }, [store.activeStreamId, store.voiceUsers]);
 
   useEffect(() => {
     credentialsRef.current = { login, password };
@@ -1409,12 +1416,12 @@ export default function App() {
     }
   }, [store]);
 
-  const handleStartStream = useCallback(async (sourceId: string, quality: '1080p' | '720p') => {
+  const handleStartStream = useCallback(async (sourceId: string, quality: 'low' | 'high' | 'camera', includeAudio: boolean) => {
     try {
       setShowStreamPicker(false);
       const ok = await signalRService.startStream(quality);
       if (ok) {
-        await webrtc.startScreenShare(sourceId, quality);
+        await webrtc.startScreenShare(sourceId, quality, includeAudio);
         store.updateUserStatus(store.currentUser?.id || '', { isStreaming: true, streamQuality: quality });
       }
     } catch (e) {
@@ -1587,7 +1594,7 @@ export default function App() {
     if (!store.modals[key]) return null;
 
     return (
-      <div className="fixed inset-0 z-[150] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-[100000] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
         {content}
       </div>
     );
@@ -2110,16 +2117,20 @@ export default function App() {
 
                         <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${showOverlays ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
                           {store.voiceUsers.map(user => {
-                            const isSpeaking = useSpeakingStore.getState().speaking[user.id] ?? false;
+                            const isSpeaking = speakingMap[user.id] ?? false;
                             return (
-                              <div
-                                key={user.id}
-                                className={`w-12 h-12 rounded-full border-2 transition-all duration-200 overflow-hidden bg-[#121217] relative ${
-                                  isSpeaking ? 'border-[#FF007F] scale-110 shadow-[0_0_12px_rgba(255,0,127,0.5)]' : 'border-[#303035]'
-                                }`}
-                                title={user.displayName}
-                              >
-                                <AvatarImg src={user.avatarBase64} size={48} bgColor={user.avatarColor} animate={false} />
+                              <div key={user.id} className="relative group flex items-center">
+                                <div
+                                  onContextMenu={e => handleContextMenu(e, 'voiceUser', user)}
+                                  className={`w-12 h-12 rounded-full border-2 transition-all duration-200 overflow-hidden bg-[#121217] relative cursor-pointer ${
+                                    isSpeaking ? 'border-[#3BA55C] scale-110 shadow-[0_0_12px_rgba(59,165,92,0.5)]' : 'border-[#303035]'
+                                  }`}
+                                >
+                                  <AvatarImg src={user.avatarBase64} size={48} bgColor={user.avatarColor} animate={false} />
+                                </div>
+                                <div className="absolute left-14 bg-[#09090B]/90 backdrop-blur-md border border-[#303035]/80 px-3.5 py-1.5 rounded-full shadow-2xl pointer-events-none opacity-0 -translate-x-3 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 ease-out z-50 whitespace-nowrap">
+                                  <span className="text-white font-bold text-[13px]">{user.displayName}</span>
+                                </div>
                               </div>
                             );
                           })}
@@ -2885,7 +2896,7 @@ export default function App() {
       )}
 
       {store.modals.privacy && (
-        <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100000] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-panelBg p-8 rounded-3xl w-[400px] shadow-2xl border border-[#303035]">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold text-white">{t('settings.privacy.changePasswordTitle', 'Сменить пароль')}</h2>
@@ -2906,7 +2917,7 @@ export default function App() {
       )}
 
       {store.modals.profile && store.selectedProfileUser && (
-        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100000] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-panelBg w-[400px] rounded-[32px] overflow-hidden shadow-2xl relative border border-[#303035]">
             <div
               className="h-32 w-full relative transition-colors duration-500"
@@ -3445,7 +3456,7 @@ export default function App() {
       )}
 
       {showStreamPicker && (
-        <div className="fixed inset-0 z-[99999] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100000] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <StreamPicker
             onClose={() => setShowStreamPicker(false)}
             onSelect={handleStartStream}

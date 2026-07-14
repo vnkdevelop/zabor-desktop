@@ -464,6 +464,14 @@ class SignalRService {
     this.connection.on("CallEnded", () => {
       const callStatus = store().callStatus;
       const callUser = store().currentCallUser;
+      if (store().currentUser?.isStreaming || webrtc.localVideoStream) {
+        webrtc.stopScreenShare();
+        this.safeInvoke("StopStream");
+        const currentUser = store().currentUser;
+        if (currentUser) {
+          store().updateUserStatus(currentUser.id, { isStreaming: false, streamQuality: undefined });
+        }
+      }
       if (callUser) webrtc.disconnectFromPeer(callUser.id);
       webrtc.stopLocalStream();
       store().setIncomingCall(null);
@@ -866,10 +874,18 @@ class SignalRService {
       this.playSfx(channelLeaveSound, 0.3);
     }
 
-    
     if (currentUser) {
       useAppStore.getState().removeUserFromChannelMap('', currentUser.id);
     }
+
+    if (useAppStore.getState().currentUser?.isStreaming || webrtc.localVideoStream) {
+      webrtc.stopScreenShare();
+      this.safeInvoke("StopStream");
+      if (currentUser) {
+        useAppStore.getState().updateUserStatus(currentUser.id, { isStreaming: false, streamQuality: undefined });
+      }
+    }
+
     webrtc.leaveAll();
     webrtc.stopLocalStream();
     const appStore = useAppStore.getState();
@@ -1038,6 +1054,15 @@ class SignalRService {
   public async endCall(): Promise<void> {
     const callStatus = useAppStore.getState().callStatus;
     const callUser = useAppStore.getState().currentCallUser;
+    const store = useAppStore.getState();
+    const currentUser = store.currentUser;
+    if (currentUser?.isStreaming || webrtc.localVideoStream) {
+      webrtc.stopScreenShare();
+      this.safeInvoke("StopStream");
+      if (currentUser) {
+        store.updateUserStatus(currentUser.id, { isStreaming: false, streamQuality: undefined });
+      }
+    }
     if (callUser) webrtc.disconnectFromPeer(callUser.id);
     webrtc.stopLocalStream();
     this.stopRingtone();

@@ -32,11 +32,27 @@ export const StreamCard = ({
   const captureVideoRef = useRef<HTMLVideoElement | null>(null)
   const [snapshot, setSnapshot] = useState<string | null>(null)
   const [isCapturing, setIsCapturing] = useState(false)
+  const retryTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const currentUserId = useAppStore((state) => state.currentUser?.id)
   const isLocal = user.id === currentUserId
 
   const mode = isFullscreen ? 'fullscreen' : (isFocused ? 'focused' : 'normal')
+
+  useEffect(() => {
+    if (isLocal) return
+    const videoTrack = stream.getVideoTracks()[0]
+    if (!videoTrack) return
+    const isWatching = isFocused || isFullscreen
+    if (isWatching) {
+      videoTrack.enabled = true
+    } else {
+      videoTrack.enabled = isCapturing
+    }
+    return () => {
+      videoTrack.enabled = true
+    }
+  }, [stream, isFocused, isFullscreen, isCapturing, isLocal])
 
   useEffect(() => {
     if (mode !== 'normal') return
@@ -47,7 +63,10 @@ export const StreamCard = ({
 
     captureFrame()
     const timer = setInterval(captureFrame, 60000)
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+    }
   }, [mode, stream])
 
   useEffect(() => {
@@ -64,8 +83,23 @@ export const StreamCard = ({
             const ctx = canvas.getContext('2d')
             if (ctx) {
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-              const dataUrl = canvas.toDataURL('image/jpeg', 0.6)
-              setSnapshot(dataUrl)
+              const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+              let isBlack = true
+              for (let i = 0; i < imgData.length; i += 40) {
+                if (imgData[i] > 15 || imgData[i + 1] > 15 || imgData[i + 2] > 15) {
+                  isBlack = false
+                  break
+                }
+              }
+              if (!isBlack) {
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.6)
+                setSnapshot(dataUrl)
+              } else if (!snapshot) {
+                if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+                retryTimerRef.current = setTimeout(() => {
+                  setIsCapturing(true)
+                }, 2000)
+              }
             }
           } catch (e) {
             console.error(e)
@@ -75,7 +109,7 @@ export const StreamCard = ({
               video.srcObject = null
             }
           }
-        }, 1000)
+        }, isLocal ? 150 : 2000)
       }
 
       video.addEventListener('playing', handlePlay, { once: true })
@@ -83,7 +117,7 @@ export const StreamCard = ({
         video.removeEventListener('playing', handlePlay)
       }
     }
-  }, [isCapturing, stream])
+  }, [isCapturing, stream, snapshot])
 
   useEffect(() => {
     if (mode !== 'normal' && videoRef.current) {
@@ -160,7 +194,7 @@ export const StreamCard = ({
           ref={videoRef}
           autoPlay
           playsInline
-          muted={isLocal}
+          muted
           onLoadedMetadata={(e) => {
             const video = e.currentTarget
             if (video.videoWidth && video.videoHeight && onRatioChange) {
@@ -172,7 +206,7 @@ export const StreamCard = ({
       </div>
 
       {!isFullscreen && (
-        <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-[#303035] group-hover:ring-2 group-hover:ring-[#FF007F] group-hover:ring-inset pointer-events-none z-20 transition-all duration-300" />
+        <div className="absolute inset-0 rounded-xl ring-1 ring-inset ring-[#303035] pointer-events-none z-20" />
       )}
 
       <div className="absolute inset-x-0 top-0 p-4 bg-gradient-to-b from-black/80 to-transparent pointer-events-none flex items-center justify-between z-10">
@@ -183,11 +217,8 @@ export const StreamCard = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="bg-[#FF007F] text-white text-[10px] font-black tracking-wider px-2 py-0.5 rounded-md animate-pulse">
-            LIVE
-          </span>
           <span className="bg-[#09090B]/85 border border-[#303035]/50 text-textMuted text-[10px] font-black px-2 py-0.5 rounded-md">
-            {user.streamQuality || '720p'}
+            {user.streamQuality ? (user.streamQuality === 'high' ? 'High' : (user.streamQuality === 'low' ? 'Low' : user.streamQuality)) : 'Low'}
           </span>
         </div>
       </div>
