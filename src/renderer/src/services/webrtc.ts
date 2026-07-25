@@ -160,7 +160,7 @@ export class WebRTCManager {
   private inputGainNode: GainNode | null = null
   private dfNode: AudioWorkletNode | null = null
   private dfNodeReady = false
-    private vadWorker: Worker | null = null
+  private vadWorker: Worker | null = null
 
 
   private calibratedThresholdOn = parseFloat(localStorage.getItem('zabor_threshold_on') || '0.008')
@@ -182,18 +182,6 @@ export class WebRTCManager {
 
   private lastVadLogTime = 0
   private lastLoggedState = false
-
-  private logVadVisual(prob: number) {
-    const percent = Math.round(prob * 100)
-    const activeThreshold = this.thresholdMode === 'manual'
-      ? (0.12 + (100 - this.manualThresholdValue) * 0.003)
-      : 0.30
-    const isSpeech = prob >= activeThreshold
-    const filled = Math.min(10, Math.max(0, Math.floor(prob * 10)))
-    const bar = '█'.repeat(filled) + '░'.repeat(10 - filled)
-    const label = isSpeech ? '🗣️ [РЕЧЬ / SPEECH]' : '🔇 [ТИШИНА / SILENCE]'
-    console.log(`[Silero VAD] [${bar}] ${percent.toString().padStart(3, ' ')}% | ${label}`)
-  }
 
 
   private outputMixContext: AudioContext | null = null
@@ -281,7 +269,6 @@ export class WebRTCManager {
                 sequence: workerEvent.data.sequence
               })
             }
-            this.logVadVisual(prob)
           } else if (workerEvent.data.type === 'error') {
             console.error('[WebRTC] Silero VAD Worker error:', workerEvent.data.error)
           } else if (workerEvent.data.type === 'ready') {
@@ -455,7 +442,7 @@ export class WebRTCManager {
 
   public setInputVolume(volume: number) {
     this.inputVolume = volume
-        const gainFactor = Math.max(0.01, Math.min(4.0, Math.pow(volume / 100, 1.35)))
+    const gainFactor = Math.max(0.01, Math.min(4.0, Math.pow(volume / 100, 1.35)))
 
     if (this.inputGainNode) {
       this.inputGainNode.gain.value = gainFactor
@@ -832,7 +819,7 @@ export class WebRTCManager {
         calculatedPostFilterBeta = 0.04;
       }
 
-      this.calibratedThresholdOn = Math.max(0.0035, headroomNoiseFloor * 2.5 + 0.001);
+      this.calibratedThresholdOn = Math.max(0.0025, headroomNoiseFloor * 2.2 + 0.0008);
       this.calibratedThresholdOff = this.calibratedThresholdOn * 0.65;
       this.calibratedAttenuationLimit = calculatedAttenuationLimit;
       this.calibratedPostFilterBeta = calculatedPostFilterBeta;

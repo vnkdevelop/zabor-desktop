@@ -41,9 +41,9 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private overflowCount = 0
 
   private readonly VAD_FRAME_SIZE = 512
-  private readonly VAD_ON_THRESHOLD = 0.28
-  private readonly VAD_IMMEDIATE_THRESHOLD = 0.38
-  private readonly VAD_OFF_THRESHOLD = 0.16
+  private readonly VAD_ON_THRESHOLD = 0.20
+  private readonly VAD_IMMEDIATE_THRESHOLD = 0.28
+  private readonly VAD_OFF_THRESHOLD = 0.12
   private readonly VAD_HOLD_FRAMES = 30
   private vadOnThreshold = this.VAD_ON_THRESHOLD
   private vadHoldFrames = 0
