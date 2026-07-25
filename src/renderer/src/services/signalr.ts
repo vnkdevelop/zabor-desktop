@@ -19,6 +19,10 @@ class SignalRService {
   private currentPing = 0;
   private lastSpeakingState: boolean | null = null;
   private wasInChannel: string | null = null;
+  private wasMuted = false;
+  private wasDeafened = false;
+  private wasStreaming = false;
+  private wasStreamQuality = 'low';
   private sfxContext: AudioContext | null = null;
   private sfxElements: Map<string, HTMLAudioElement> = new Map();
   
@@ -195,29 +199,32 @@ class SignalRService {
     }
   }
 
+  private saveReconnectionState() {
+    const store = useAppStore.getState();
+    if (store.currentChannelId) {
+      this.wasInChannel = store.currentChannelId;
+    }
+    if (store.currentUser) {
+      this.wasMuted = store.currentUser.isMuted || store.currentUser.isServerMuted || false;
+      this.wasDeafened = store.currentUser.isDeafened || store.currentUser.isServerDeafened || false;
+      this.wasStreaming = webrtc.localVideoStream !== null;
+      this.wasStreamQuality = store.currentUser.streamQuality || 'low';
+    }
+  }
+
   private setupReconnectionHandlers() {
     if (!this.connection) return;
     this.connection.onreconnecting(() => {
       if (this.intentionalDisconnect) return;
       this.isReconnecting = true;
       this.notifyPingUpdate(-1);
-      const store = useAppStore.getState();
-      if (store.currentChannelId) this.wasInChannel = store.currentChannelId;
-      
-      
-      
+      this.saveReconnectionState();
       this.notifyConnectionUpdate(false);
     });
     this.connection.onreconnected(async () => {
       this.reconnectAttempts = 0;
       this.isReconnecting = false;
       this.startPingMeasurement();
-      await this.loadData();
-      const channelToRejoin = this.wasInChannel;
-      this.wasInChannel = null;
-      if (channelToRejoin) {
-        await this.joinChannel(channelToRejoin).catch(() => { });
-      }
       this.notifyConnectionUpdate(true);
     });
     this.connection.onclose(() => {
@@ -225,10 +232,7 @@ class SignalRService {
       this.notifyPingUpdate(-1);
       this.stopPingMeasurement();
       if (!this.intentionalDisconnect) {
-        const store = useAppStore.getState();
-        if (store.currentChannelId) this.wasInChannel = store.currentChannelId;
-        
-        
+        this.saveReconnectionState();
         this.notifyConnectionUpdate(false);
         this.scheduleReconnect();
       }
@@ -251,6 +255,10 @@ class SignalRService {
     this.reconnectAttempts = 0;
     this.lastSpeakingState = null;
     this.wasInChannel = null;
+    this.wasMuted = false;
+    this.wasDeafened = false;
+    this.wasStreaming = false;
+    this.wasStreamQuality = 'low';
     this.stopPingMeasurement();
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.connection) {
@@ -457,7 +465,6 @@ class SignalRService {
       store().setIncomingCall(null);
       store().setModal('incomingCall', false);
       store().setCurrentCallUser(null);
-      webrtc.stopLocalStream();
       this.stopRingtone();
     });
 
@@ -473,7 +480,6 @@ class SignalRService {
         }
       }
       if (callUser) webrtc.disconnectFromPeer(callUser.id);
-      webrtc.stopLocalStream();
       store().setIncomingCall(null);
       store().setModal('incomingCall', false);
       store().setCurrentCallUser(null);
@@ -576,13 +582,41 @@ class SignalRService {
       if (user) {
         useAppStore.getState().setCurrentUser(user);
         
-        
-        const channelToRejoin = this.wasInChannel || user.currentChannelId;
+        const channelToRejoin = this.wasInChannel;
+        const streamToRejoin = this.wasStreaming;
+        const streamQuality = this.wasStreamQuality;
+        const mutedToRestore = this.wasMuted;
+        const deafenedToRestore = this.wasDeafened;
+
         this.wasInChannel = null;
-        if (channelToRejoin) {
-          this.joinChannel(channelToRejoin).catch(() => { });
-        }
+        this.wasStreaming = false;
+        this.wasMuted = false;
+        this.wasDeafened = false;
+
         await this.loadData();
+
+        if (mutedToRestore || deafenedToRestore) {
+          const store = useAppStore.getState();
+          if (store.currentUser) {
+            store.setCurrentUser({
+              ...store.currentUser,
+              isMuted: mutedToRestore,
+              isDeafened: deafenedToRestore
+            });
+            this.toggleState(mutedToRestore, deafenedToRestore);
+          }
+        }
+
+        if (channelToRejoin) {
+          const res = await this.joinChannel(channelToRejoin);
+          if (res === 'ok' && streamToRejoin && webrtc.localVideoStream) {
+            const isStreamActive = webrtc.localVideoStream.getTracks().some(t => t.readyState === 'live');
+            if (isStreamActive) {
+              await this.startStream(streamQuality);
+            }
+          }
+        }
+
         return 'ok';
       }
       return 'invalid';
@@ -887,7 +921,6 @@ class SignalRService {
     }
 
     webrtc.leaveAll();
-    webrtc.stopLocalStream();
     const appStore = useAppStore.getState();
     appStore.setActiveStreamId(null);
     appStore.setCurrentChannelId(null);
@@ -1040,14 +1073,18 @@ class SignalRService {
   }
 
   public async declineCall(callerId: string): Promise<void> {
-    
-    useAppStore.getState().setIncomingCall(null);
-    useAppStore.getState().setModal('incomingCall', false);
-    useAppStore.getState().setCurrentCallUser(null);
-    useAppStore.getState().setCallStatus('idle');
-    webrtc.stopLocalStream();
-    this.stopRingtone();
-
+    const store = useAppStore.getState();
+    store.setIncomingCall(null);
+    store.setModal('incomingCall', false);
+    if (store.callStatus === 'calling') {
+      this.playRingtone(0.1);
+    } else {
+      this.stopRingtone();
+      if (store.callStatus !== 'connected') {
+        store.setCurrentCallUser(null);
+        store.setCallStatus('idle');
+      }
+    }
     this.safeInvoke("DeclineCall", callerId);
   }
 
@@ -1064,7 +1101,6 @@ class SignalRService {
       }
     }
     if (callUser) webrtc.disconnectFromPeer(callUser.id);
-    webrtc.stopLocalStream();
     this.stopRingtone();
 
     useAppStore.getState().setIncomingCall(null);

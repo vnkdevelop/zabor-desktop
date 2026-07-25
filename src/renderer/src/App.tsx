@@ -43,9 +43,6 @@ const VoiceUserCard = memo(({ user, cardSize, isIdle, t, handleContextMenu, webr
         ${(isSpeaking && isConnected) ? 'shadow-[inset_0_0_0_3px_#3BA55C,inset_0_0_0_5px_#181818,0_10px_15px_-3px_rgba(0,0,0,0.5)] z-10' : 'shadow-xl'}`}
       style={{ backgroundColor: user.avatarColor, width: `${cardSize.w}px`, height: `${cardSize.h}px`, borderRadius: '24px' }}>
       <div className="relative" style={{ width: `${cardSize.avatarSize}px`, height: `${cardSize.avatarSize}px`, marginBottom: cardSize.avatarSize <= 48 ? '4px' : '16px' }}>
-        {(isSpeaking && isConnected) && (
-          <div className="absolute inset-0 rounded-full border border-green-500/50 animate-speaking-ripple scale-125 pointer-events-none" />
-        )}
         <AvatarImg src={user.avatarBase64} size={cardSize.avatarSize} bgColor="transparent" />
       </div>
       {(!webrtcConnections[user.id] && !isLocal) && (
@@ -59,9 +56,8 @@ const VoiceUserCard = memo(({ user, cardSize, isIdle, t, handleContextMenu, webr
         </div>
       )}
       <div className={`absolute ${cardSize.avatarSize <= 48 ? 'bottom-2' : 'bottom-4'} left-1/2 -translate-x-1/2 transition-all duration-300 ${isIdle ? 'translate-y-8 opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
-        <div className={`bg-[#09090B]/80 backdrop-blur-md border border-[#303035]/50 rounded-full flex items-center gap-1.5 shadow-lg whitespace-nowrap ${
-          cardSize.avatarSize <= 48 ? 'px-2 py-0.5' : 'px-4 py-1.5'
-        }`} style={{ maxWidth: `${cardSize.w - 20}px` }}>
+        <div className={`bg-[#09090B]/80 backdrop-blur-md border border-[#303035]/50 rounded-full flex items-center gap-1.5 shadow-lg whitespace-nowrap ${cardSize.avatarSize <= 48 ? 'px-2 py-0.5' : 'px-4 py-1.5'
+          }`} style={{ maxWidth: `${cardSize.w - 20}px` }}>
           <span className={`text-white font-bold truncate ${cardSize.avatarSize <= 48 ? 'text-[11px]' : 'text-sm'}`}>{user.displayName}</span>
           {(user.isMuted || user.isServerMuted) && <Mic weight="bold" size={cardSize.avatarSize <= 48 ? 10 : 14} className="text-danger shrink-0" />}
           {(user.isDeafened || user.isServerDeafened) && <Headphones weight="bold" size={cardSize.avatarSize <= 48 ? 10 : 14} className="text-danger shrink-0" />}
@@ -110,9 +106,6 @@ const CallUserCard = memo(({ currentCallUser, callStatus, cardSize, webrtcConnec
             marginBottom: '16px'
           }}
         >
-          {(isSpeaking && callStatus === 'connected' && isConnected) && (
-            <div className="absolute inset-0 rounded-full border border-green-500/50 animate-speaking-ripple scale-125 pointer-events-none" />
-          )}
           <AvatarImg src={currentCallUser.avatarBase64} size={cardSize.avatarSize} bgColor="transparent" />
         </div>
 
@@ -356,7 +349,7 @@ export default function App() {
   const settingsLoadedRef = useRef(false);
   const credentialsRef = useRef<{ login: string; password: string }>({ login: '', password: '' });
   const initCompleteRef = useRef(false);
-  
+
   const autoLoginPendingRef = useRef(false);
   const loginInputRef = useRef<HTMLInputElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
@@ -408,7 +401,7 @@ export default function App() {
     };
   }, []);
 
-  
+
 
   const saveLocalCache = useCallback(() => {
     try {
@@ -654,10 +647,10 @@ export default function App() {
   useEffect(() => {
     const unsubConnection = signalRService.onConnectionUpdate((isConnected) => {
       setServerConnected(isConnected);
-      if (!initCompleteRef.current) return; 
+      if (!initCompleteRef.current) return;
 
       if (isConnected) {
-        
+
         if (disconnectTimerRef.current) {
           clearTimeout(disconnectTimerRef.current);
           disconnectTimerRef.current = null;
@@ -667,7 +660,7 @@ export default function App() {
         setShowReconnectingOverlay(false);
 
         if (autoLoginPendingRef.current) {
-          
+
           autoLoginPendingRef.current = false;
           const creds = credentialsRef.current;
           if (creds.login && creds.password) {
@@ -687,12 +680,12 @@ export default function App() {
                 setLoadingFadeOut(true);
                 setTimeout(() => setAppLoading(false), 650);
               } else if (result === 'invalid') {
-                
+
                 autoLoginPendingRef.current = false;
                 setLoadingFadeOut(true);
                 setTimeout(() => setAppLoading(false), 650);
               } else {
-                
+
                 autoLoginPendingRef.current = true;
                 setShowErrorText(true);
                 setShowReconnectingOverlay(true);
@@ -700,16 +693,16 @@ export default function App() {
             });
           }
         } else {
-          
+
           setLoadingFadeOut(true);
           setTimeout(() => setAppLoading(false), 650);
         }
       } else if (isAuth) {
-        
-        
+
+
         autoLoginPendingRef.current = true;
 
-        
+
         if (!disconnectTimerRef.current) {
           disconnectTimerRef.current = setTimeout(() => {
             setShowReconnectingOverlay(true);
@@ -728,13 +721,13 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
-      
-      const calibrationPromise = webrtc.calibrateMic(2000).catch(err => {
+
+      const micPromise = webrtc.startLocalStream().catch(err => {
         console.warn('[Calibration] Mic calibration failed on startup:', err);
-        return null;
+        return false;
       });
 
-      
+
       let cachedCredentials: { login: string; password: string; userId?: string } | null = null;
 
       try {
@@ -755,16 +748,16 @@ export default function App() {
         }
       } catch { }
 
-      
+
       if (!cachedCredentials) {
-        await calibrationPromise;
+        await micPromise;
         initCompleteRef.current = true;
         setLoadingFadeOut(true);
         setTimeout(() => setAppLoading(false), 650);
         return;
       }
 
-      
+
       setShowInitConnectionError(false);
       const errorTimer = setTimeout(() => setShowInitConnectionError(true), 10000);
 
@@ -780,18 +773,18 @@ export default function App() {
       setShowErrorText(false);
       setShowInitConnectionError(false);
 
-      
-      
-      
+
+
+
       if (!connected) {
         autoLoginPendingRef.current = true;
-        await calibrationPromise;
+        await micPromise;
         initCompleteRef.current = true;
         setShowInitConnectionError(true);
         return;
       }
 
-      
+
       const loginResult = await signalRService.login(
         cachedCredentials.login,
         cachedCredentials.password
@@ -817,22 +810,22 @@ export default function App() {
         setTimeout(() => { settingsLoadedRef.current = true; }, 1000);
 
         initCompleteRef.current = true;
-        await calibrationPromise;
+        await micPromise;
         setTimeout(() => {
           setLoadingFadeOut(true);
           setTimeout(() => setAppLoading(false), 650);
         }, 300);
       } else if (loginResult === 'invalid') {
-        
+
         await window.windowControls.clearSession().catch(() => { });
-        await calibrationPromise;
+        await micPromise;
         initCompleteRef.current = true;
         setLoadingFadeOut(true);
         setTimeout(() => setAppLoading(false), 650);
       } else {
-        
+
         autoLoginPendingRef.current = true;
-        await calibrationPromise;
+        await micPromise;
         initCompleteRef.current = true;
         setShowErrorText(true);
         setShowReconnectingOverlay(true);
@@ -883,7 +876,7 @@ export default function App() {
     preloadStaticFrame(store.currentCallUser?.avatarBase64);
   }, [store.channelUsersMap, store.friends, store.voiceUsers, store.currentUser?.avatarBase64, store.currentCallUser?.avatarBase64]);
 
-  
+
 
   const userVolumesSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -908,13 +901,13 @@ export default function App() {
     }, 500);
   }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, isAuth, language, micThresholdMode, manualThresholdValue]);
 
-  
+
   useEffect(() => {
     if (!settingsLoadedRef.current || !isAuth) return;
     saveLocalCache();
   }, [autoLaunch, minimizeToTray, isAuth, saveLocalCache]);
 
-  
+
   useEffect(() => {
     if (!settingsLoadedRef.current || !isAuth) return;
 
@@ -1200,11 +1193,11 @@ export default function App() {
 
   const handleAutoLaunchToggle = useCallback(async (enabled: boolean) => {
     const prev = autoLaunch;
-    setAutoLaunch(enabled); 
+    setAutoLaunch(enabled);
     try {
       await window.windowControls.setAutoLaunch(enabled);
     } catch {
-      setAutoLaunch(prev); 
+      setAutoLaunch(prev);
     }
   }, [autoLaunch]);
 
@@ -1321,13 +1314,13 @@ export default function App() {
     const currentStore = useAppStore.getState();
     currentStore.setSelectedChannelForMembers(ch);
 
-    
+
     const cached = currentStore.channelMembersCache?.[ch.id] || [];
     currentStore.setChannelMembers(cached);
     currentStore.setModal('channelMembers', true);
 
     try {
-      
+
       const members = await signalRService.getChannelMembersList(ch.id);
       if (members && Array.isArray(members)) {
         useAppStore.getState().setChannelMembers(members);
@@ -1433,7 +1426,7 @@ export default function App() {
   }, [store]);
 
   const openMyAchievements = useCallback(async () => {
-    store.setAchievementsData(null); 
+    store.setAchievementsData(null);
     store.setAchievementsViewUserId(null);
     store.setModal('achievements', true);
     const data = await signalRService.getMyAchievements();
@@ -1537,10 +1530,10 @@ export default function App() {
     let base64: string;
 
     if (cropGifDataUrl) {
-      
+
       base64 = packGif(cropGifDataUrl, cropScale, cropPos.x, cropPos.y);
     } else {
-      
+
       base64 = canvas.toDataURL('image/png');
     }
 
@@ -1682,7 +1675,7 @@ export default function App() {
     );
   };
 
-  
+
 
   const hasInvites = store.channelInvites.length > 0 || store.friendRequests.length > 0;
 
@@ -1811,197 +1804,197 @@ export default function App() {
           {!store.isStreamFullscreen && (
             <div className="w-80 bg-panelBg flex flex-col border-r border-[#303035] relative shrink-0">
 
-            {showInvitesPanel && (
-              <div className="absolute inset-0 bg-panelBg z-[60] flex flex-col animate-fade-in">
-                <div className="flex items-center justify-between p-4 border-b border-[#303035]">
-                  <span className="text-sm font-bold text-white tracking-wider">{t('main.notifications.title')}</span>
-                  <button onClick={() => setShowInvitesPanel(false)} className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"><X weight="bold" size={20} /></button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {store.friendRequests.map(req => (
-                    <div key={req.id} className="bg-surface p-4 rounded-xl">
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="w-[47px] h-[47px] shrink-0 relative">
-                          <AvatarImg src={req.avatarBase64} size={47} bgColor={req.avatarColor} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white font-semibold text-sm truncate">{req.displayName}</p>
-                          <p className="text-textMuted text-xs font-medium">{t('main.notifications.friendRequest')}</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => signalRService.acceptFriendRequest(req.id)} className="flex-1 bg-success/20 text-success py-2 rounded-xl text-sm font-bold hover:bg-success/30 transition-colors">{t('main.notifications.accept')}</button>
-                        <button onClick={() => signalRService.declineFriendRequest(req.id)} className="flex-1 bg-danger/20 text-danger py-2 rounded-xl text-sm font-bold hover:bg-danger/30 transition-colors">{t('main.notifications.decline')}</button>
-                      </div>
-                    </div>
-                  ))}
-                  {store.channelInvites.map(inv => (
-                    <div key={inv.channelId} className="bg-surface p-4 rounded-xl">
-                      <div className="mb-3">
-                        <p className="text-white font-semibold text-sm truncate">{inv.channelName}</p>
-                        <p className="text-textMuted text-xs font-medium">{t('main.notifications.channelInvite', { name: inv.senderName })}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => { handleAcceptChannelInvite(inv.channelId); setShowInvitesPanel(false); }} className="flex-1 bg-success/20 text-success py-2 rounded-xl text-sm font-bold hover:bg-success/30 transition-colors">{t('main.notifications.join')}</button>
-                        <button onClick={() => handleDeclineChannelInvite(inv.channelId)} className="flex-1 bg-danger/20 text-danger py-2 rounded-xl text-sm font-bold hover:bg-danger/30 transition-colors">{t('main.notifications.decline')}</button>
-                      </div>
-                    </div>
-                  ))}
-                  {store.friendRequests.length === 0 && store.channelInvites.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-16 text-textMuted">
-                      <Mail weight="bold" size={40} className="mb-4 opacity-20" />
-                      <p className="font-medium text-sm">{t('main.notifications.none')}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto p-4 pb-20">
-              {activeTab === 'channels' && (
-                <div className="animate-fade-in">
-                  <div className="flex justify-between items-center mb-4 px-2">
-                    <span className="text-xs font-bold text-textMuted tracking-wider">{t('main.voice.voiceChannels')}</span>
-                    <button
-                      onClick={() => store.setModal('createChannel', true)}
-                      className="text-textMuted hover:text-white transition-all duration-200 hover:scale-110 active:scale-95 w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center focus:outline-none"
-                      title={t('modals.createChannel.title', 'Создать канал')}
-                    >
-                      <Plus weight="bold" size={18} />
-                    </button>
+              {showInvitesPanel && (
+                <div className="absolute inset-0 bg-panelBg z-[60] flex flex-col animate-fade-in">
+                  <div className="flex items-center justify-between p-4 border-b border-[#303035]">
+                    <span className="text-sm font-bold text-white tracking-wider">{t('main.notifications.title')}</span>
+                    <button onClick={() => setShowInvitesPanel(false)} className="group text-textMuted hover:text-white transition-all duration-200 hover:rotate-90 hover:scale-110 active:scale-90 p-1.5 rounded-lg hover:bg-surface"><X weight="bold" size={20} /></button>
                   </div>
-                  {store.channels.map(ch => {
-                    const channelUsers = store.channelUsersMap[ch.id] || [];
-                    return (
-                      <div key={ch.id} className="mb-2">
-                        <button onClick={() => handleChannelClick(ch.id)} onContextMenu={e => handleContextMenu(e, 'channel', ch)}
-                          className={`w-full text-left px-2 py-3 rounded-xl flex items-center justify-between group transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] focus:outline-none ${store.currentChannelId === ch.id ? 'bg-[#333]' : 'hover:bg-surfaceHover'}`}>
-                          <div className="flex items-center gap-3 overflow-hidden">
-                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ml-2 transition-all duration-300 ${store.currentChannelId === ch.id ? 'bg-[#c70060] shadow-[0_0_8px_#c70060]' : 'bg-textMuted'}`} />
-                            <span className="font-medium text-[15px] truncate select-none text-white">{ch.name}</span>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {store.friendRequests.map(req => (
+                      <div key={req.id} className="bg-surface p-4 rounded-xl">
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="w-[47px] h-[47px] shrink-0 relative">
+                            <AvatarImg src={req.avatarBase64} size={47} bgColor={req.avatarColor} />
                           </div>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pr-2 shrink-0">
-                            {store.currentChannelId === ch.id && (
-                              <div onClick={async e => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                store.setSelectedChannelForInvite(ch);
-                                try {
-                                  const members = await signalRService.getChannelMembersList(ch.id);
-                                  if (members && Array.isArray(members)) {
-                                    store.setChannelMembersCache(ch.id, members);
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-semibold text-sm truncate">{req.displayName}</p>
+                            <p className="text-textMuted text-xs font-medium">{t('main.notifications.friendRequest')}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => signalRService.acceptFriendRequest(req.id)} className="flex-1 bg-success/20 text-success py-2 rounded-xl text-sm font-bold hover:bg-success/30 transition-colors">{t('main.notifications.accept')}</button>
+                          <button onClick={() => signalRService.declineFriendRequest(req.id)} className="flex-1 bg-danger/20 text-danger py-2 rounded-xl text-sm font-bold hover:bg-danger/30 transition-colors">{t('main.notifications.decline')}</button>
+                        </div>
+                      </div>
+                    ))}
+                    {store.channelInvites.map(inv => (
+                      <div key={inv.channelId} className="bg-surface p-4 rounded-xl">
+                        <div className="mb-3">
+                          <p className="text-white font-semibold text-sm truncate">{inv.channelName}</p>
+                          <p className="text-textMuted text-xs font-medium">{t('main.notifications.channelInvite', { name: inv.senderName })}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => { handleAcceptChannelInvite(inv.channelId); setShowInvitesPanel(false); }} className="flex-1 bg-success/20 text-success py-2 rounded-xl text-sm font-bold hover:bg-success/30 transition-colors">{t('main.notifications.join')}</button>
+                          <button onClick={() => handleDeclineChannelInvite(inv.channelId)} className="flex-1 bg-danger/20 text-danger py-2 rounded-xl text-sm font-bold hover:bg-danger/30 transition-colors">{t('main.notifications.decline')}</button>
+                        </div>
+                      </div>
+                    ))}
+                    {store.friendRequests.length === 0 && store.channelInvites.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-16 text-textMuted">
+                        <Mail weight="bold" size={40} className="mb-4 opacity-20" />
+                        <p className="font-medium text-sm">{t('main.notifications.none')}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex-1 overflow-y-auto p-4 pb-20">
+                {activeTab === 'channels' && (
+                  <div className="animate-fade-in">
+                    <div className="flex justify-between items-center mb-4 px-2">
+                      <span className="text-xs font-bold text-textMuted tracking-wider">{t('main.voice.voiceChannels')}</span>
+                      <button
+                        onClick={() => store.setModal('createChannel', true)}
+                        className="text-textMuted hover:text-white transition-all duration-200 hover:scale-110 active:scale-95 w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center focus:outline-none"
+                        title={t('modals.createChannel.title', 'Создать канал')}
+                      >
+                        <Plus weight="bold" size={18} />
+                      </button>
+                    </div>
+                    {store.channels.map(ch => {
+                      const channelUsers = store.channelUsersMap[ch.id] || [];
+                      return (
+                        <div key={ch.id} className="mb-2">
+                          <button onClick={() => handleChannelClick(ch.id)} onContextMenu={e => handleContextMenu(e, 'channel', ch)}
+                            className={`w-full text-left px-2 py-3 rounded-xl flex items-center justify-between group transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] focus:outline-none ${store.currentChannelId === ch.id ? 'bg-[#333]' : 'hover:bg-surfaceHover'}`}>
+                            <div className="flex items-center gap-3 overflow-hidden">
+                              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ml-2 transition-all duration-300 ${store.currentChannelId === ch.id ? 'bg-[#c70060] shadow-[0_0_8px_#c70060]' : 'bg-textMuted'}`} />
+                              <span className="font-medium text-[15px] truncate select-none text-white">{ch.name}</span>
+                            </div>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pr-2 shrink-0">
+                              {store.currentChannelId === ch.id && (
+                                <div onClick={async e => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  store.setSelectedChannelForInvite(ch);
+                                  try {
+                                    const members = await signalRService.getChannelMembersList(ch.id);
+                                    if (members && Array.isArray(members)) {
+                                      store.setChannelMembersCache(ch.id, members);
+                                    }
+                                  } catch (err) {
+                                    console.error("Failed to load channel members:", err);
                                   }
-                                } catch (err) {
-                                  console.error("Failed to load channel members:", err);
-                                }
-                                store.setModal('inviteToChannel', true);
-                              }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title={t('common.invite', 'Пригласить')}><UserPlus weight="bold" size={16} /></div>
-                            )}
-                            <div onClick={e => { e.stopPropagation(); e.preventDefault(); openChannelMembers(ch); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title={t('common.channelMembers', 'Участники канала')}><Users weight="bold" size={16} /></div>
-                          </div>
-                        </button>
-                        {channelUsers.length > 0 && (
-                          <div className="flex items-center -space-x-2 px-8 mt-1.5 pointer-events-none">
-                            {[...channelUsers].sort((a, b) => {
-                              const currentUserId = store.currentUser?.id;
-                              if (a.id === currentUserId) return -1;
-                              if (b.id === currentUserId) return 1;
-                              const nameA = a.displayName.toLowerCase();
-                              const nameB = b.displayName.toLowerCase();
-                              if (nameA < nameB) return -1;
-                              if (nameA > nameB) return 1;
-                              return a.id.localeCompare(b.id);
-                            }).map((u, i) => (
-                              <div key={u.id} className="w-[31px] h-[31px] rounded-full border-2 border-panelBg relative shrink-0 overflow-hidden" style={{ zIndex: 100 - i }} title={u.displayName}>
-                                <AvatarImg src={u.avatarBase64} size={31} bgColor={u.avatarColor} animate={false} />
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {activeTab === 'friends' && (
-                <div className="animate-fade-in">
-                  <div className="flex justify-between items-center mb-4 px-2">
-                    <span className="text-xs font-bold text-textMuted tracking-wider">{t('main.tabs.friends')}</span>
-                    <button
-                      onClick={() => store.setModal('addFriend', true)}
-                      className="text-textMuted hover:text-white transition-all duration-200 hover:scale-110 active:scale-95 w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center focus:outline-none"
-                      title={t('modals.addFriend.title', 'Добавить друга')}
-                    >
-                      <Plus weight="bold" size={18} />
-                    </button>
-                  </div>
-                  {store.friends.map(f => (
-                    <div key={f.id} onContextMenu={e => handleContextMenu(e, 'friend', f)}
-                      onClick={() => { store.setSelectedProfileUser(f, 'friends'); setEditProfileDisplayName(f.displayName); setEditProfileAboutMe(f.aboutMe || ''); setIsEditingProfile(false); store.setModal('profile', true); signalRService.viewProfile(f.id); }}
-                      className="px-3 py-2 rounded-xl mb-1 cursor-pointer hover:bg-surfaceHover flex items-center gap-3 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]">
-                      <div className="relative w-[47px] h-[47px] shrink-0">
-                        <div className="w-full h-full relative">
-                          <AvatarImg src={f.avatarBase64} size={47} bgColor={f.avatarColor} />
+                                  store.setModal('inviteToChannel', true);
+                                }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title={t('common.invite', 'Пригласить')}><UserPlus weight="bold" size={16} /></div>
+                              )}
+                              <div onClick={e => { e.stopPropagation(); e.preventDefault(); openChannelMembers(ch); }} className="text-textMuted hover:text-white p-1 rounded hover:bg-black/20" title={t('common.channelMembers', 'Участники канала')}><Users weight="bold" size={16} /></div>
+                            </div>
+                          </button>
+                          {channelUsers.length > 0 && (
+                            <div className="flex items-center -space-x-2 px-8 mt-1.5 pointer-events-none">
+                              {[...channelUsers].sort((a, b) => {
+                                const currentUserId = store.currentUser?.id;
+                                if (a.id === currentUserId) return -1;
+                                if (b.id === currentUserId) return 1;
+                                const nameA = a.displayName.toLowerCase();
+                                const nameB = b.displayName.toLowerCase();
+                                if (nameA < nameB) return -1;
+                                if (nameA > nameB) return 1;
+                                return a.id.localeCompare(b.id);
+                              }).map((u, i) => (
+                                <div key={u.id} className="w-[31px] h-[31px] rounded-full border-2 border-panelBg relative shrink-0 overflow-hidden" style={{ zIndex: 100 - i }} title={u.displayName}>
+                                  <AvatarImg src={u.avatarBase64} size={31} bgColor={u.avatarColor} animate={false} />
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] border-panelBg ${f.isOnline ? 'bg-success' : 'bg-gray-500'}`} />
-                      </div>
-                      <span className={`font-semibold text-[15px] truncate ${f.isOnline ? 'text-white' : 'text-textMuted'}`}>{f.displayName}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className={`absolute bottom-[145px] right-6 transition-all duration-500 ${hasInvites ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-[150%] opacity-0 pointer-events-none'}`}>
-              <button onClick={() => setShowInvitesPanel(true)} className="w-14 h-14 bg-[#c70060] rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(199,0,96,0.5)] hover:scale-105 transition-transform relative">
-                <Mail weight="bold" size={24} color="white" />
-                <div className="absolute top-0 right-0 w-4 h-4 bg-danger rounded-full border-2 border-panelBg animate-pulse" />
-              </button>
-            </div>
-
-            <div className="bg-surface rounded-full mx-4 my-2 p-1 flex relative shrink-0">
-              <button onClick={() => setActiveTab('channels')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.channels')}</button>
-              <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.friends')}</button>
-              <div
-                style={{
-                  transform: activeTab === 'channels' ? 'translateX(0)' : 'translateX(calc(100% + 4px))',
-                  willChange: 'transform'
-                }}
-                className="absolute top-1 bottom-1 left-1 w-[calc(50%-6px)] bg-[#333] rounded-full transition-transform duration-300 ease-out"
-              />
-            </div>
-
-            <div className="h-[75px] bg-[#09090B] rounded-2xl mx-4 mb-4 flex items-center px-4 shrink-0 shadow-lg">
-              <div onClick={() => { store.setSelectedProfileUser(store.currentUser, 'none'); setEditProfileDisplayName(store.currentUser!.displayName); setEditProfileAboutMe(store.currentUser!.aboutMe || ''); setEditProfileAvatarBase64(null); setIsEditingProfile(false); store.setModal('profile', true); }}
-                className="relative w-[51px] h-[51px] mr-3 cursor-pointer shrink-0 hover:opacity-80 transition-opacity">
-                <AvatarImg src={store.currentUser?.avatarBase64} size={51} bgColor={store.currentUser?.avatarColor} />
-                <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] border-[#09090B] ${serverConnected ? 'bg-success' : 'bg-gray-500'}`} />
-              </div>
-              <div className="flex-1 min-w-0 flex flex-col justify-center">
-                <div className="font-bold text-sm truncate text-white">{store.currentUser?.displayName}</div>
-                <div onClick={handleCopyUsername} className="text-xs font-semibold text-textMuted truncate cursor-pointer hover:text-white transition-colors mt-0.5" title={t('main.user.copyUsername')}>
-                  {isCopied ? <span className="text-success">{t('main.user.copied')}</span> : store.currentUser?.username}
-                </div>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-
-
-                <button
-                  onClick={() => {
-                    store.setModal('settings', true);
-                    loadDevices();
-                    window.windowControls.getAutoLaunch().then(setAutoLaunch).catch(() => { });
-                    window.windowControls.getMinimizeToTray().then(setMinimizeToTray).catch(() => { });
-                  }}
-                  className="group text-textMuted hover:text-white p-2 hover:bg-surface rounded-xl transition-colors"
-                >
-                  <div className="transition-transform duration-500 group-hover:rotate-90 group-hover:scale-110 group-active:scale-95">
-                    <Settings weight="bold" size={20} />
+                      );
+                    })}
                   </div>
+                )}
+                {activeTab === 'friends' && (
+                  <div className="animate-fade-in">
+                    <div className="flex justify-between items-center mb-4 px-2">
+                      <span className="text-xs font-bold text-textMuted tracking-wider">{t('main.tabs.friends')}</span>
+                      <button
+                        onClick={() => store.setModal('addFriend', true)}
+                        className="text-textMuted hover:text-white transition-all duration-200 hover:scale-110 active:scale-95 w-8 h-8 rounded-lg hover:bg-surface flex items-center justify-center focus:outline-none"
+                        title={t('modals.addFriend.title', 'Добавить друга')}
+                      >
+                        <Plus weight="bold" size={18} />
+                      </button>
+                    </div>
+                    {store.friends.map(f => (
+                      <div key={f.id} onContextMenu={e => handleContextMenu(e, 'friend', f)}
+                        onClick={() => { store.setSelectedProfileUser(f, 'friends'); setEditProfileDisplayName(f.displayName); setEditProfileAboutMe(f.aboutMe || ''); setIsEditingProfile(false); store.setModal('profile', true); signalRService.viewProfile(f.id); }}
+                        className="px-3 py-2 rounded-xl mb-1 cursor-pointer hover:bg-surfaceHover flex items-center gap-3 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]">
+                        <div className="relative w-[47px] h-[47px] shrink-0">
+                          <div className="w-full h-full relative">
+                            <AvatarImg src={f.avatarBase64} size={47} bgColor={f.avatarColor} />
+                          </div>
+                          <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] border-panelBg ${f.isOnline ? 'bg-success' : 'bg-gray-500'}`} />
+                        </div>
+                        <span className={`font-semibold text-[15px] truncate ${f.isOnline ? 'text-white' : 'text-textMuted'}`}>{f.displayName}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className={`absolute bottom-[145px] right-6 transition-all duration-500 ${hasInvites ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-[150%] opacity-0 pointer-events-none'}`}>
+                <button onClick={() => setShowInvitesPanel(true)} className="w-14 h-14 bg-[#c70060] rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(199,0,96,0.5)] hover:scale-105 transition-transform relative">
+                  <Mail weight="bold" size={24} color="white" />
+                  <div className="absolute top-0 right-0 w-4 h-4 bg-danger rounded-full border-2 border-panelBg animate-pulse" />
                 </button>
               </div>
+
+              <div className="bg-surface rounded-full mx-4 my-2 p-1 flex relative shrink-0">
+                <button onClick={() => setActiveTab('channels')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.channels')}</button>
+                <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.friends')}</button>
+                <div
+                  style={{
+                    transform: activeTab === 'channels' ? 'translateX(0)' : 'translateX(calc(100% + 4px))',
+                    willChange: 'transform'
+                  }}
+                  className="absolute top-1 bottom-1 left-1 w-[calc(50%-6px)] bg-[#333] rounded-full transition-transform duration-300 ease-out"
+                />
+              </div>
+
+              <div className="h-[75px] bg-[#09090B] rounded-2xl mx-4 mb-4 flex items-center px-4 shrink-0 shadow-lg">
+                <div onClick={() => { store.setSelectedProfileUser(store.currentUser, 'none'); setEditProfileDisplayName(store.currentUser!.displayName); setEditProfileAboutMe(store.currentUser!.aboutMe || ''); setEditProfileAvatarBase64(null); setIsEditingProfile(false); store.setModal('profile', true); }}
+                  className="relative w-[51px] h-[51px] mr-3 cursor-pointer shrink-0 hover:opacity-80 transition-opacity">
+                  <AvatarImg src={store.currentUser?.avatarBase64} size={51} bgColor={store.currentUser?.avatarColor} />
+                  <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] border-[#09090B] ${serverConnected ? 'bg-success' : 'bg-gray-500'}`} />
+                </div>
+                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                  <div className="font-bold text-sm truncate text-white">{store.currentUser?.displayName}</div>
+                  <div onClick={handleCopyUsername} className="text-xs font-semibold text-textMuted truncate cursor-pointer hover:text-white transition-colors mt-0.5" title={t('main.user.copyUsername')}>
+                    {isCopied ? <span className="text-success">{t('main.user.copied')}</span> : store.currentUser?.username}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+
+
+                  <button
+                    onClick={() => {
+                      store.setModal('settings', true);
+                      loadDevices();
+                      window.windowControls.getAutoLaunch().then(setAutoLaunch).catch(() => { });
+                      window.windowControls.getMinimizeToTray().then(setMinimizeToTray).catch(() => { });
+                    }}
+                    className="group text-textMuted hover:text-white p-2 hover:bg-surface rounded-xl transition-colors"
+                  >
+                    <div className="transition-transform duration-500 group-hover:rotate-90 group-hover:scale-110 group-active:scale-95">
+                      <Settings weight="bold" size={20} />
+                    </div>
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
           )}
 
           <div className="flex-1 flex flex-col relative bg-[#181818]">
@@ -2109,7 +2102,7 @@ export default function App() {
                             cardSize={{ w: currentW, h: currentH }}
                             isFocused={true}
                             isFullscreen={true}
-                            onClick={() => {}}
+                            onClick={() => { }}
                             onContextMenu={e => handleContextMenu(e, 'stream', activeStream.user)}
                             onRatioChange={setStreamRatio}
                           />
@@ -2122,9 +2115,8 @@ export default function App() {
                               <div key={user.id} className="relative group flex items-center">
                                 <div
                                   onContextMenu={e => handleContextMenu(e, 'voiceUser', user)}
-                                  className={`w-12 h-12 rounded-full border-2 transition-all duration-200 overflow-hidden bg-[#121217] relative cursor-pointer ${
-                                    isSpeaking ? 'border-[#3BA55C] scale-110 shadow-[0_0_12px_rgba(59,165,92,0.5)]' : 'border-[#303035]'
-                                  }`}
+                                  className={`w-12 h-12 rounded-full border-2 transition-all duration-200 overflow-hidden bg-[#121217] relative cursor-pointer ${isSpeaking ? 'border-[#3BA55C] scale-110 shadow-[0_0_12px_rgba(59,165,92,0.5)]' : 'border-[#303035]'
+                                    }`}
                                 >
                                   <AvatarImg src={user.avatarBase64} size={48} bgColor={user.avatarColor} animate={false} />
                                 </div>
@@ -2359,11 +2351,10 @@ export default function App() {
                 </button>
                 <button
                   onClick={store.currentUser?.isStreaming || !!webrtc.localVideoStream ? handleStopStream : () => setShowStreamPicker(true)}
-                  className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${
-                    store.currentUser?.isStreaming || !!webrtc.localVideoStream
-                      ? 'bg-[#FF007F] text-white hover:bg-[#D80073]'
-                      : 'bg-surface hover:bg-surfaceHover text-white'
-                  }`}
+                  className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${store.currentUser?.isStreaming || !!webrtc.localVideoStream
+                    ? 'bg-[#FF007F] text-white hover:bg-[#D80073]'
+                    : 'bg-surface hover:bg-surfaceHover text-white'
+                    }`}
                 >
                   <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover:scale-110">
                     <Desktop weight="bold" size={24} />
@@ -3160,8 +3151,8 @@ export default function App() {
                         }}
                         disabled={!store.selectedProfileUser?.isOnline}
                         className={`w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center transition-all
-                          ${store.selectedProfileUser?.isOnline 
-                            ? 'text-success hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95' 
+                          ${store.selectedProfileUser?.isOnline
+                            ? 'text-success hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95'
                             : 'text-textMuted/40 cursor-not-allowed opacity-50'}`}
                         title={store.selectedProfileUser?.isOnline ? t('profile.call', 'Позвонить') : t('profile.userOffline', 'Пользователь не в сети')}
                       >
@@ -3204,27 +3195,24 @@ export default function App() {
                               }
                             }}
                             disabled={isBtnDisabled}
-                            className={`w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-success transition-all ${
-                              isBtnDisabled
-                                ? 'opacity-50 cursor-default'
-                                : 'hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95'
-                            }`}
+                            className={`w-16 h-16 rounded-2xl bg-surface border border-[#303035] flex items-center justify-center text-success transition-all ${isBtnDisabled
+                              ? 'opacity-50 cursor-default'
+                              : 'hover:bg-success/10 hover:border-success/40 hover:shadow-[0_0_15px_rgba(34,197,94,0.25)] hover:scale-105 active:scale-95'
+                              }`}
                             title={isRequestSent ? t('modals.addFriend.sent', 'Отправлено') : t('modals.addFriend.title', 'Добавить друга')}
                           >
                             <div className="relative w-7 h-7 flex items-center justify-center">
                               <UserPlus
                                 weight="bold"
                                 size={28}
-                                className={`absolute inset-0 transition-opacity duration-300 ease-in-out ${
-                                  isRequestSent ? 'opacity-0' : 'opacity-100'
-                                }`}
+                                className={`absolute inset-0 transition-opacity duration-300 ease-in-out ${isRequestSent ? 'opacity-0' : 'opacity-100'
+                                  }`}
                               />
                               <UserCheck
                                 weight="bold"
                                 size={28}
-                                className={`absolute inset-0 transition-opacity duration-300 ease-in-out ${
-                                  isRequestSent ? 'opacity-100' : 'opacity-0'
-                                }`}
+                                className={`absolute inset-0 transition-opacity duration-300 ease-in-out ${isRequestSent ? 'opacity-100' : 'opacity-0'
+                                  }`}
                               />
                             </div>
                           </button>

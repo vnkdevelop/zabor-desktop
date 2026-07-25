@@ -2,11 +2,12 @@ import { signalRService } from './signalr'
 import { useAppStore } from '../store/useAppStore'
 import i18n from '../i18n'
 import processorUrl from './deepfilter-processor?worker&url'
+import VadWorker from './vad.worker?worker'
 
 type SpeakingEntry = {
   timer: NodeJS.Timeout
   stream: MediaStream
-  
+
   nodes: AudioNode[]
 }
 
@@ -132,17 +133,17 @@ export class WebRTCManager {
   private peerConnections: Map<string, RTCPeerConnection> = new Map()
   private audioElements: Map<string, HTMLAudioElement> = new Map()
   private lastPacketsLost: Map<string, number> = new Map()
-  
+
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map()
-  
+
   private dcTimers: Map<string, NodeJS.Timeout> = new Map()
-  
+
   private iceTimeoutTimers: Map<string, NodeJS.Timeout> = new Map()
-  
+
   private retryCount: Map<string, number> = new Map()
-  
+
   private static readonly MAX_ICE_RETRIES = 2
-  
+
   private static readonly ICE_TIMEOUT_MS = 15000
 
   private currentDeviceId = 'default'
@@ -159,11 +160,14 @@ export class WebRTCManager {
   private inputGainNode: GainNode | null = null
   private dfNode: AudioWorkletNode | null = null
   private dfNodeReady = false
+    private vadWorker: Worker | null = null
+
 
   private calibratedThresholdOn = parseFloat(localStorage.getItem('zabor_threshold_on') || '0.008')
   private calibratedThresholdOff = parseFloat(localStorage.getItem('zabor_threshold_off') || '0.003')
-  private calibratedAttenuationLimit = parseInt(localStorage.getItem('zabor_attenuation_limit') || '100')
+  private calibratedAttenuationLimit = Math.max(65, Math.min(100, parseInt(localStorage.getItem('zabor_attenuation_limit') || '65')))
   private calibratedNoiseFloor = parseFloat(localStorage.getItem('zabor_base_noise_floor') || '0.003')
+  private calibratedPostFilterBeta = parseFloat(localStorage.getItem('zabor_post_filter_beta') || '0.05')
   private calibratedEqGains: number[] = JSON.parse(localStorage.getItem('zabor_eq_gains') || '[0, 0, 0, 0, 0]')
   private localSpeakingState = false
   private thresholdMode = localStorage.getItem('zabor_threshold_mode') || 'auto'
@@ -174,10 +178,24 @@ export class WebRTCManager {
   private silenceMonitorInterval: NodeJS.Timeout | null = null
   private silenceCounterMs = 0
   private isSilenceWarningActive = false
-
   private speakingIntervals: Map<string, SpeakingEntry> = new Map()
 
-  
+  private lastVadLogTime = 0
+  private lastLoggedState = false
+
+  private logVadVisual(prob: number) {
+    const percent = Math.round(prob * 100)
+    const activeThreshold = this.thresholdMode === 'manual'
+      ? (0.12 + (100 - this.manualThresholdValue) * 0.003)
+      : 0.30
+    const isSpeech = prob >= activeThreshold
+    const filled = Math.min(10, Math.max(0, Math.floor(prob * 10)))
+    const bar = '█'.repeat(filled) + '░'.repeat(10 - filled)
+    const label = isSpeech ? '🗣️ [РЕЧЬ / SPEECH]' : '🔇 [ТИШИНА / SILENCE]'
+    console.log(`[Silero VAD] [${bar}] ${percent.toString().padStart(3, ' ')}% | ${label}`)
+  }
+
+
   private outputMixContext: AudioContext | null = null
   private outputCompressor: DynamicsCompressorNode | null = null
   private mixAudioElement: HTMLAudioElement | null = null
@@ -190,7 +208,7 @@ export class WebRTCManager {
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' },
       { urls: 'stun:stun.twilio.com:3478' },
-      
+
       { urls: 'turn:150.241.64.108:3478?transport=udp', username: 'zabor', credential: 'mvtxbJo45sc8_turn' },
       { urls: 'turn:150.241.64.108:3478?transport=tcp', username: 'zabor', credential: 'mvtxbJo45sc8_turn' }
     ],
@@ -198,7 +216,7 @@ export class WebRTCManager {
     iceCandidatePoolSize: 4
   }
 
-  
+
 
   private getThresholdParams(gainFactor: number) {
     let activeThresholdOn = this.calibratedThresholdOn
@@ -215,7 +233,7 @@ export class WebRTCManager {
       noiseFloor: this.calibratedNoiseFloor * gainFactor,
       thresholdMode: this.thresholdMode,
       manualThresholdValue: this.manualThresholdValue,
-      postFilterBeta: 0.08
+      postFilterBeta: this.calibratedPostFilterBeta
     }
   }
 
@@ -231,18 +249,55 @@ export class WebRTCManager {
 
     const destination = ctx.createMediaStreamDestination()
 
-    if (!this.dfNodeReady) {
-      try {
-        await ctx.audioWorklet.addModule(processorUrl)
-        const dfNode = new AudioWorkletNode(ctx, 'deepfilter-processor')
-        this.dfNode = dfNode
-        this.dfNodeReady = true
-      } catch (e) {
-        console.warn('[WebRTC] Failed to load deepfilter-processor.js, running without it.', e)
+    try {
+      await ctx.audioWorklet.addModule(processorUrl)
+      this.dfNode = new AudioWorkletNode(ctx, 'deepfilter-processor')
+      this.dfNodeReady = true
+      const me = useAppStore.getState().currentUser
+      if (me) {
+        this.clearVAD(me.id)
       }
+    } catch (e) {
+      console.warn('[WebRTC] Failed to load deepfilter-processor.js', e)
     }
 
     if (this.dfNode) {
+      try {
+        this.vadWorker = new VadWorker()
+        const absoluteModelUrl = new URL('silero_vad.onnx', window.location.href).href
+        const absoluteWasmPath = new URL('./', window.location.href).href
+        this.vadWorker.postMessage({
+          type: 'init',
+          modelUrl: absoluteModelUrl,
+          wasmPath: absoluteWasmPath
+        })
+        this.vadWorker.onmessage = (workerEvent) => {
+          if (workerEvent.data.type === 'probability') {
+            const prob = workerEvent.data.probability
+            if (this.dfNode) {
+              this.dfNode.port.postMessage({
+                type: 'setSileroVadProbability',
+                probability: prob,
+                sequence: workerEvent.data.sequence
+              })
+            }
+            this.logVadVisual(prob)
+          } else if (workerEvent.data.type === 'error') {
+            console.error('[WebRTC] Silero VAD Worker error:', workerEvent.data.error)
+          } else if (workerEvent.data.type === 'ready') {
+            console.log('[WebRTC] Silero VAD Worker is ready')
+            if (this.dfNode) {
+              this.dfNode.port.postMessage({
+                type: 'setConfig',
+                sileroVadEnabled: true
+              })
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[WebRTC] Failed to initialize Silero VAD worker:', e)
+      }
+
       this.dfNode.port.onmessage = (event) => {
         if (event.data.type === 'vad') {
           const isSpeaking = event.data.isSpeaking
@@ -254,6 +309,17 @@ export class WebRTCManager {
               signalRService.setSpeakingState(isSpeaking)
             }
           }
+        } else if (event.data.type === 'audio16k') {
+          if (this.vadWorker) {
+            const audioFrame = event.data.audio as Float32Array
+            this.vadWorker.postMessage({
+              type: 'process',
+              audioFrame,
+              sequence: event.data.sequence
+            }, [audioFrame.buffer])
+          }
+        } else if (event.data.type === 'resetVad') {
+          this.vadWorker?.postMessage({ type: 'reset' })
         }
       }
 
@@ -264,27 +330,32 @@ export class WebRTCManager {
     this.processedSource = source
 
     const compressor = ctx.createDynamicsCompressor()
-    compressor.threshold.value = -24
-    compressor.knee.value = 30
-    compressor.ratio.value = 5
+    compressor.threshold.value = -6
+    compressor.knee.value = 6
+    compressor.ratio.value = 1.2
     compressor.attack.value = 0.003
     compressor.release.value = 0.100
 
-    const highpass = ctx.createBiquadFilter()
-    highpass.type = 'highpass'
-    highpass.frequency.value = 140
-    highpass.Q.value = 0.707
+    const highpass1 = ctx.createBiquadFilter()
+    highpass1.type = 'highpass'
+    highpass1.frequency.value = 85
+    highpass1.Q.value = 0.707
+
+    const highpass2 = ctx.createBiquadFilter()
+    highpass2.type = 'highpass'
+    highpass2.frequency.value = 85
+    highpass2.Q.value = 0.707
 
     const lowpass = ctx.createBiquadFilter()
     lowpass.type = 'lowpass'
-    lowpass.frequency.value = 7500
+    lowpass.frequency.value = 8000
     lowpass.Q.value = 0.707
 
     const peaking = ctx.createBiquadFilter()
     peaking.type = 'peaking'
     peaking.frequency.value = 3000
     peaking.Q.value = 1.0
-    peaking.gain.value = 2
+    peaking.gain.value = 0.0
 
     const limiter = ctx.createDynamicsCompressor()
     limiter.threshold.value = -0.5
@@ -294,7 +365,8 @@ export class WebRTCManager {
     limiter.release.value = 0.050
 
     const inputGain = ctx.createGain()
-    const gainFactor = Math.max(0.01, this.inputVolume / 100)
+    const gainFactor = Math.max(0.01, Math.min(4.0, Math.pow(this.inputVolume / 100, 1.35)))
+
     inputGain.gain.value = gainFactor
     this.inputGainNode = inputGain
 
@@ -308,8 +380,9 @@ export class WebRTCManager {
     }
 
     source.connect(inputGain)
-    inputGain.connect(highpass)
-    highpass.connect(lowpass)
+    inputGain.connect(highpass1)
+    highpass1.connect(highpass2)
+    highpass2.connect(lowpass)
 
     if (this.dfNode) {
       const store = useAppStore.getState()
@@ -317,6 +390,7 @@ export class WebRTCManager {
       this.dfNode.port.postMessage({
         type: 'setConfig',
         noiseSuppression: this.noiseSuppression,
+        sileroVadEnabled: true,
         isMuted: isMuted
       })
       this.dfNode.port.postMessage({
@@ -367,11 +441,22 @@ export class WebRTCManager {
       this.processedContext.close().catch(() => { })
     }
     this.processedContext = null
+    if (this.vadWorker) {
+      try { this.vadWorker.terminate() } catch { }
+      this.vadWorker = null
+    }
+    const me = useAppStore.getState().currentUser
+    if (me) {
+      useAppStore.getState().setSpeakingStatus(me.id, false)
+      signalRService.setSpeakingState(false)
+    }
+    this.localSpeakingState = false
   }
 
   public setInputVolume(volume: number) {
     this.inputVolume = volume
-    const gainFactor = Math.max(0.01, volume / 100)
+        const gainFactor = Math.max(0.01, Math.min(4.0, Math.pow(volume / 100, 1.35)))
+
     if (this.inputGainNode) {
       this.inputGainNode.gain.value = gainFactor
     }
@@ -392,7 +477,8 @@ export class WebRTCManager {
   }
 
   private updateThresholds() {
-    const gainFactor = Math.max(0.01, this.inputVolume / 100)
+    const gainFactor = Math.max(0.01, Math.min(4.0, Math.pow(this.inputVolume / 100, 1.35)))
+
     if (this.dfNode) {
       this.dfNode.port.postMessage({
         type: 'setCalibratedParams',
@@ -417,23 +503,30 @@ export class WebRTCManager {
     const gainNode = this.userGainNodes.get(userId)
     if (!gainNode) return
     const userVol = useAppStore.getState().userVolumes[userId] ?? 100
-    gainNode.gain.value = Math.max(0, Math.min(4.0, 1.35 * (this.outputVolume / 100) * (userVol / 100)))
+    gainNode.gain.value = Math.max(0, Math.min(16.0, 1.35 * Math.pow(this.outputVolume / 100, 2) * Math.pow(userVol / 100, 2)))
   }
 
   public setNoiseSuppression(enabled: boolean) {
     this.noiseSuppression = enabled
     if (this.dfNode) {
-      this.dfNode.port.postMessage({ type: 'setConfig', noiseSuppression: enabled })
+      this.dfNode.port.postMessage({
+        type: 'setConfig',
+        noiseSuppression: enabled
+      })
     }
   }
 
-  
+
+
 
   private setupVAD(stream: MediaStream, userId: string, isLocal: boolean) {
     this.clearVAD(userId)
 
     try {
       if (isLocal) {
+        if (this.dfNode || this.dfNodeReady) {
+          return
+        }
         if (!this.processedContext || this.processedContext.state === 'closed') {
           this.processedContext = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
         }
@@ -549,7 +642,7 @@ export class WebRTCManager {
                 }
               }
             }
-          } catch {}
+          } catch { }
         }
         const timer = setInterval(check, 20)
         this.speakingIntervals.set(userId, { timer, stream, nodes: [] })
@@ -569,7 +662,7 @@ export class WebRTCManager {
     useAppStore.getState().setSpeakingStatus(userId, false)
   }
 
-  
+
 
   public async getAudioDevices() {
     try {
@@ -668,16 +761,16 @@ export class WebRTCManager {
 
       const highpass = audioContext.createBiquadFilter();
       highpass.type = 'highpass';
-      highpass.frequency.value = 80;
+      highpass.frequency.value = 100;
       highpass.Q.value = 0.707;
 
       const lowpass = audioContext.createBiquadFilter();
       lowpass.type = 'lowpass';
-      lowpass.frequency.value = 7500;
+      lowpass.frequency.value = 8000;
       lowpass.Q.value = 0.707;
 
       const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 512;
+      analyser.fftSize = 1024;
 
       source.connect(highpass);
       highpass.connect(lowpass);
@@ -685,37 +778,20 @@ export class WebRTCManager {
 
       const bufferLength = analyser.fftSize;
       const dataArray = new Float32Array(bufferLength);
-      const freqData = new Float32Array(analyser.frequencyBinCount);
-      const windowRmsValues: number[] = [];
-
-      const psdSum = [0, 0, 0, 0, 0];
-      let activeSpeechFrames = 0;
+      const rmsValues: number[] = [];
 
       const intervalTime = 50;
-      const steps = actualDurationMs / intervalTime;
-
-      const checkRmsAndFreq = () => {
-        analyser.getFloatTimeDomainData(dataArray);
-        let sumSquares = 0;
-        for (let i = 0; i < bufferLength; i++) {
-          sumSquares += dataArray[i] * dataArray[i];
-        }
-        const rms = Math.sqrt(sumSquares / bufferLength);
-        windowRmsValues.push(rms);
-
-        if (rms > 0.005) {
-          analyser.getFloatFrequencyData(freqData);
-          const bins = [1, 3, 11, 43, 85];
-          for (let k = 0; k < 5; k++) {
-            psdSum[k] += freqData[bins[k]];
-          }
-          activeSpeechFrames++;
-        }
-      };
+      const steps = Math.floor(actualDurationMs / intervalTime);
 
       for (let i = 0; i < steps; i++) {
         await new Promise(resolve => setTimeout(resolve, intervalTime));
-        checkRmsAndFreq();
+        analyser.getFloatTimeDomainData(dataArray);
+        let sumSquares = 0;
+        for (let j = 0; j < bufferLength; j++) {
+          sumSquares += dataArray[j] * dataArray[j];
+        }
+        const rms = Math.sqrt(sumSquares / bufferLength);
+        rmsValues.push(rms);
       }
 
       source.disconnect();
@@ -728,68 +804,61 @@ export class WebRTCManager {
       }
       await audioContext.close();
 
-      if (windowRmsValues.length === 0) {
+      if (rmsValues.length === 0) {
         throw new Error('No audio data collected during calibration');
       }
 
-      const rawSorted = [...windowRmsValues].sort((a, b) => a - b);
-      const cleanLength = Math.floor(rawSorted.length * 0.8);
-      if (cleanLength === 0) {
-        throw new Error('Not enough audio data collected during calibration');
-      }
-      const sortedRms = rawSorted.slice(0, cleanLength);
+      const sortedRms = [...rmsValues].sort((a, b) => a - b);
+      const p75Index = Math.floor(sortedRms.length * 0.75);
+      const noiseFloor = Math.max(0.0005, sortedRms[p75Index] || 0.003);
+      const peakNoise = sortedRms[Math.floor(sortedRms.length * 0.95)] || noiseFloor * 1.5;
 
-      const halfLength = Math.floor(sortedRms.length * 0.5);
-      let noiseFloorSum = 0;
-      for (let i = 0; i < Math.max(1, halfLength); i++) {
-        noiseFloorSum += sortedRms[i];
-      }
-      let noiseFloor = noiseFloorSum / Math.max(1, halfLength);
+      const headroomNoiseFloor = Math.max(noiseFloor * 1.25, peakNoise * 1.15);
 
-      const peakNoiseIndex = Math.max(0, Math.floor(sortedRms.length * 0.95) - 1);
-      const peakNoise = sortedRms[peakNoiseIndex] || 0.005;
+      let calculatedAttenuationLimit = 65;
+      let calculatedPostFilterBeta = 0.05;
 
-      if (!isFirstRun) {
-        const savedFloorRaw = localStorage.getItem('zabor_base_noise_floor');
-        if (savedFloorRaw) {
-          const savedFloor = parseFloat(savedFloorRaw);
-          if (!isNaN(savedFloor)) {
-            noiseFloor = 0.85 * savedFloor + 0.15 * noiseFloor;
-          }
-        }
+      if (headroomNoiseFloor > 0.020) {
+        calculatedAttenuationLimit = 100;
+        calculatedPostFilterBeta = 0.15;
+      } else if (headroomNoiseFloor > 0.008) {
+        calculatedAttenuationLimit = 88;
+        calculatedPostFilterBeta = 0.10;
+      } else if (headroomNoiseFloor > 0.003) {
+        calculatedAttenuationLimit = 75;
+        calculatedPostFilterBeta = 0.06;
+      } else {
+        calculatedAttenuationLimit = 65;
+        calculatedPostFilterBeta = 0.04;
       }
 
-      this.calibratedThresholdOn = Math.max(0.0035, peakNoise * 1.8 + 0.0008);
-      this.calibratedThresholdOff = Math.max(0.0015, peakNoise * 1.1 + 0.0004);
-      this.calibratedAttenuationLimit = 100;
-      this.calibratedNoiseFloor = noiseFloor;
-
-      const eqGains = [0, 0, 0, 0, 0];
-      if (activeSpeechFrames > 0) {
-        const psdMeasured = psdSum.map(sum => sum / activeSpeechFrames);
-        const refPsd = psdMeasured[1];
-        const ltassTarget = [-15.0, 0.0, -8.0, -20.0, -30.0];
-        for (let k = 0; k < 5; k++) {
-          const relativePsd = psdMeasured[k] - refPsd;
-          const deltaG = ltassTarget[k] - relativePsd;
-          eqGains[k] = Math.max(-6.0, Math.min(6.0, deltaG));
-        }
-      }
-      this.calibratedEqGains = eqGains;
+      this.calibratedThresholdOn = Math.max(0.0035, headroomNoiseFloor * 2.5 + 0.001);
+      this.calibratedThresholdOff = this.calibratedThresholdOn * 0.65;
+      this.calibratedAttenuationLimit = calculatedAttenuationLimit;
+      this.calibratedPostFilterBeta = calculatedPostFilterBeta;
+      this.calibratedNoiseFloor = headroomNoiseFloor;
 
       localStorage.setItem('zabor_mic_calibrated', 'true');
       localStorage.setItem('zabor_base_noise_floor', noiseFloor.toString());
       localStorage.setItem('zabor_threshold_on', this.calibratedThresholdOn.toString());
       localStorage.setItem('zabor_threshold_off', this.calibratedThresholdOff.toString());
-      localStorage.setItem('zabor_attenuation_limit', this.calibratedAttenuationLimit.toString());
-      localStorage.setItem('zabor_eq_gains', JSON.stringify(eqGains));
+      localStorage.setItem('zabor_attenuation_limit', calculatedAttenuationLimit.toString());
+      localStorage.setItem('zabor_post_filter_beta', calculatedPostFilterBeta.toString());
 
       this.updateThresholds();
 
       return { noiseFloor, peakNoise };
-    } catch (e) {
-      throw e;
+    } catch (err) {
+      console.error('[WebRTC] calibrateMic failed:', err);
+      throw err;
     }
+  }
+
+  public async prewarmLocalStream(): Promise<boolean> {
+    if (this.localStream && this.localStream.getAudioTracks().length > 0 && this.localStream.getAudioTracks().every(t => t.readyState === 'live')) {
+      return true
+    }
+    return this.startLocalStream(undefined, undefined, false)
   }
 
   public async startLocalStream(deviceId?: string, useNS?: boolean, forceRestart = false): Promise<boolean> {
@@ -802,6 +871,10 @@ export class WebRTCManager {
 
     const run = async () => {
       if (!forceRestart && this.localStream && this.localStream.getAudioTracks().length > 0 && this.localStream.getAudioTracks().every(t => t.readyState === 'live')) {
+        const me = useAppStore.getState().currentUser
+        if (me && this.rawStream && !this.speakingIntervals.has(me.id)) {
+          this.setupVAD(this.rawStream, me.id, true)
+        }
         return true
       }
 
@@ -895,14 +968,15 @@ export class WebRTCManager {
         this.startSilenceMonitor()
 
         const isFirstRun = localStorage.getItem('zabor_mic_calibrated') !== 'true';
-        try {
-          await this.calibrateMic(isFirstRun ? 5000 : 2000);
-        } catch (e) {
+        this.calibrateMic(isFirstRun ? 5000 : 2000).catch(e => {
           console.warn('[WebRTC] Background calibration failed, proceeding:', e);
-        }
+        });
 
         const me = useAppStore.getState().currentUser
         if (me && this.rawStream && !this.dfNode) this.setupVAD(this.rawStream, me.id, true)
+
+        const isMuted = me?.isMuted || me?.isServerMuted || false
+        this.toggleMute(isMuted)
 
         return true
       } catch (e) {
@@ -933,7 +1007,7 @@ export class WebRTCManager {
           }
         }
       } catch (e) {
-        throw e 
+        throw e
       }
     }
   }
@@ -962,7 +1036,7 @@ export class WebRTCManager {
       const store = useAppStore.getState();
       const me = store.currentUser;
 
-      
+
       if (!me || me.isMuted || me.isServerMuted) {
         this.silenceCounterMs = 0;
         return;
@@ -977,7 +1051,7 @@ export class WebRTCManager {
           }
           const rms = Math.sqrt(sumSquares / bufferLength);
 
-          
+
           if (rms < 0.0002) {
             this.silenceCounterMs += 200;
           } else {
@@ -1033,11 +1107,11 @@ export class WebRTCManager {
   public setUserVolumeRealtime(userId: string, volume: number) {
     const gainNode = this.userGainNodes.get(userId)
     if (gainNode) {
-      gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (volume / 100)))
+      gainNode.gain.value = Math.max(0, Math.min(16.0, 1.35 * Math.pow(this.outputVolume / 100, 2) * Math.pow(volume / 100, 2)))
     }
   }
 
-  
+
 
   private initOutputMixer() {
     if (this.outputMixContext) {
@@ -1055,7 +1129,7 @@ export class WebRTCManager {
     }
     this.outputCompressor = this.outputMixContext.createDynamicsCompressor()
 
-    
+
     this.outputCompressor.threshold.value = -1.0
     this.outputCompressor.knee.value = 0
     this.outputCompressor.ratio.value = 20
@@ -1089,7 +1163,7 @@ export class WebRTCManager {
 
       const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
       const isScreenShareAudio = (remoteVideoStream && event.streams[0] && event.streams[0].id === remoteVideoStream.id) ||
-                                 (event.streams[0] && event.streams[0].getVideoTracks().length > 0)
+        (event.streams[0] && event.streams[0].getVideoTracks().length > 0)
 
       if (isScreenShareAudio) {
         let dummyAudio = this.streamAudioElements.get(userId)
@@ -1220,7 +1294,7 @@ export class WebRTCManager {
     const vol = isActive ? (store.streamVolumes[userId] ?? 100) : 0
     const gainNode = this.streamGainNodes.get(userId)
     if (gainNode) {
-      gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (vol / 100)))
+      gainNode.gain.value = Math.max(0, Math.min(8.0, Math.pow(this.outputVolume / 100, 2) * Math.pow(vol / 100, 2)))
     }
   }
 
@@ -1230,7 +1304,7 @@ export class WebRTCManager {
     const gainNode = this.streamGainNodes.get(userId)
     if (gainNode) {
       const vol = isActive ? volume : 0
-      gainNode.gain.value = Math.max(0, Math.min(2, (this.outputVolume / 100) * (vol / 100)))
+      gainNode.gain.value = Math.max(0, Math.min(8.0, Math.pow(this.outputVolume / 100, 2) * Math.pow(vol / 100, 2)))
     }
   }
 
@@ -1310,9 +1384,9 @@ export class WebRTCManager {
               params.encodings[0].maxBitrate = quality === 'high' ? 6000000 : 2500000
               params.encodings[0].maxFramerate = quality === 'high' ? 60 : 30
               params.encodings[0].networkPriority = 'high'
-              sender.setParameters(params).catch(() => {})
+              sender.setParameters(params).catch(() => { })
             }
-          } catch {}
+          } catch { }
         }
         if (audioTrack) pc.addTrack(audioTrack, stream)
         await this.renegotiatePeer(pc, userId)
@@ -1393,7 +1467,7 @@ export class WebRTCManager {
             if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
             let changed = false
 
-             const isHigh = this.currentStreamQuality === 'high'
+            const isHigh = this.currentStreamQuality === 'high'
 
             if (params.encodings[0].priority !== 'medium') {
               params.encodings[0].priority = 'medium'
@@ -1454,6 +1528,10 @@ export class WebRTCManager {
   public async connectToPeer(userId: string) {
     if (this.peerConnections.has(userId)) return
 
+    if (!this.localStream) {
+      await this.startLocalStream().catch(() => { })
+    }
+
     const pc = new RTCPeerConnection(this.config)
     this.peerConnections.set(userId, pc)
 
@@ -1461,14 +1539,16 @@ export class WebRTCManager {
       this.localStream.getTracks().forEach(track => {
         const sender = pc.addTrack(track, this.localStream!)
         if (track.kind === 'audio') {
+
+
           try {
             const params = sender.getParameters()
             if (params.encodings && params.encodings.length > 0) {
               params.encodings[0].networkPriority = 'high'
               params.encodings[0].priority = 'high'
-              sender.setParameters(params).catch(() => {})
+              sender.setParameters(params).catch(() => { })
             }
-          } catch {}
+          } catch { }
         }
       })
     }
@@ -1485,9 +1565,9 @@ export class WebRTCManager {
               params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
               params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
               params.encodings[0].networkPriority = 'high'
-              sender.setParameters(params).catch(() => {})
+              sender.setParameters(params).catch(() => { })
             }
-          } catch {}
+          } catch { }
         }
       })
     }
@@ -1517,6 +1597,9 @@ export class WebRTCManager {
 
     let pc = this.peerConnections.get(senderId)
     if (!pc) {
+      if (!this.localStream) {
+        await this.startLocalStream().catch(() => { })
+      }
       pc = new RTCPeerConnection(this.config)
       this.peerConnections.set(senderId, pc)
 
@@ -1529,9 +1612,9 @@ export class WebRTCManager {
               if (params.encodings && params.encodings.length > 0) {
                 params.encodings[0].networkPriority = 'high'
                 params.encodings[0].priority = 'high'
-                sender.setParameters(params).catch(() => {})
+                sender.setParameters(params).catch(() => { })
               }
-            } catch {}
+            } catch { }
           }
         })
       }
@@ -1548,9 +1631,9 @@ export class WebRTCManager {
                 params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
                 params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
                 params.encodings[0].networkPriority = 'high'
-                sender.setParameters(params).catch(() => {})
+                sender.setParameters(params).catch(() => { })
               }
-            } catch {}
+            } catch { }
           }
         })
       }

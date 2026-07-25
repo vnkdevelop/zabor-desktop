@@ -2,16 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-*,
-*::before,
-*::after {
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-  -webkit-perspective: 1000;
-  perspective: 1000;
-}
-
-
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -19,7 +9,7 @@ body {
   image-rendering: -webkit-optimize-contrast;
 }
 
-
+.gpu-accelerated,
 .animate-fade-in,
 .animate-toast-in,
 .animate-toast-out,
@@ -28,8 +18,10 @@ body {
 .animate-admin-block-in,
 .animate-admin-block-out {
   will-change: transform, opacity;
-  -webkit-transform: translateZ(0);
-  transform: translateZ(0);
+  -webkit-transform: translate3d(0, 0, 0);
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 
 @keyframes fade-in {

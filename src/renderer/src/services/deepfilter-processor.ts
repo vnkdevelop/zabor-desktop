@@ -37,39 +37,40 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
   private noiseSuppression = true
 
   private rmsSmoothed = 0
-  private GATE_THRESHOLD_ON = 0.008  
-  private GATE_THRESHOLD_OFF = 0.003 
   private lastVadSent = false
-  private consecutiveVoiceFrames = 0
-  private readonly REQUIRED_VOICE_FRAMES = 3
-
   private overflowCount = 0
 
-  private readonly HOLD_FRAMES = 25
-  private framesSinceLastVoice = this.HOLD_FRAMES
+  private readonly VAD_FRAME_SIZE = 512
+  private readonly VAD_ON_THRESHOLD = 0.28
+  private readonly VAD_IMMEDIATE_THRESHOLD = 0.38
+  private readonly VAD_OFF_THRESHOLD = 0.16
+  private readonly VAD_HOLD_FRAMES = 30
+  private vadOnThreshold = this.VAD_ON_THRESHOLD
+  private vadHoldFrames = 0
+  private consecutiveVoiceResults = 0
+  private lastVadSequence = -1
 
-  private currentGain = 1.0
-  private readonly TARGET_GAIN_ON = 1.0
-  private readonly TARGET_GAIN_OFF = 0.0 
-
-  private readonly attackCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.010))
-  private readonly releaseCoef = Math.exp(-1.0 / (this.SAMPLE_RATE * 0.050)) 
-
-  private readonly agcGain = 1.0 
-  private attenuationLimit = 100
+  private attenuationLimit = 65
+  private postFilterBeta = 0.05
 
   private delayFrames: Float32Array[] = []
   private delaySpeaking: boolean[] = []
   private delayWriteIndex = 0
   private delayReadIndex = 0
   private delayCount = 0
-  private readonly LOOKAHEAD_FRAMES = 8 
+  private readonly LOOKAHEAD_FRAMES = 24
+  private currentGain = 0.0
 
   private thresholdMode = 'auto'
-  private manualThresholdValue = 50
   private noiseFloorEstimate = 0.003
-  private fastNoiseFloorEstimate = 0.003
-  private lastResetTime = 0
+  private sileroVadEnabled = false
+  private sileroVadProbability = 0.0
+  private readonly vad16kBuffer = new Float32Array(this.VAD_FRAME_SIZE)
+  private vad16kWriteIndex = 0
+  private vadSequence = 0
+
+  private dsMem0 = 0
+  private dsMem1 = 0
 
   constructor() {
     super()
@@ -77,7 +78,7 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     this.outputBuffer = new Float32Array(this.BUFFER_SIZE)
     this.frameToProcess = new Float32Array(this.FRAME_SIZE)
     this.processedFrame = new Float32Array(this.FRAME_SIZE)
-    this.outputWriteIndex = this.FRAME_SIZE * (1 + this.LOOKAHEAD_FRAMES) 
+    this.outputWriteIndex = this.FRAME_SIZE * (1 + this.LOOKAHEAD_FRAMES)
 
     for (let i = 0; i <= this.LOOKAHEAD_FRAMES; i++) {
       this.delayFrames.push(new Float32Array(this.FRAME_SIZE))
@@ -91,6 +92,9 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
         if (event.data.noiseSuppression !== undefined) {
           this.noiseSuppression = event.data.noiseSuppression
         }
+        if (event.data.sileroVadEnabled !== undefined) {
+          this.sileroVadEnabled = event.data.sileroVadEnabled
+        }
         if (event.data.isMuted !== undefined) {
           const nextMuted = event.data.isMuted
           if (nextMuted && !this.isMuted) {
@@ -101,12 +105,18 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
             this.outputReadIndex = 0
             this.outputWriteIndex = this.FRAME_SIZE * (1 + this.LOOKAHEAD_FRAMES)
             this.rmsSmoothed = 0
-            this.currentGain = this.TARGET_GAIN_OFF
-            this.framesSinceLastVoice = this.HOLD_FRAMES
+            this.currentGain = 0.0
+            this.vadHoldFrames = 0
+            this.consecutiveVoiceResults = 0
+            this.lastVadSequence = -1
             this.delayWriteIndex = 0
             this.delayReadIndex = 0
             this.delayCount = 0
             this.delaySpeaking.fill(false)
+            this.vad16kWriteIndex = 0
+            this.vad16kBuffer.fill(0)
+            this.sileroVadProbability = 0.0
+            this.port.postMessage({ type: 'resetVad' })
             if (this.lastVadSent) {
               this.port.postMessage({ type: 'vad', isSpeaking: false })
               this.lastVadSent = false
@@ -115,26 +125,58 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
           this.isMuted = nextMuted
         }
       } else if (event.data.type === 'setCalibratedParams') {
-        if (event.data.thresholdOn !== undefined) {
-          this.GATE_THRESHOLD_ON = event.data.thresholdOn
-        }
-        if (event.data.thresholdOff !== undefined) {
-          this.GATE_THRESHOLD_OFF = event.data.thresholdOff
-        }
         if (event.data.thresholdMode !== undefined) {
           this.thresholdMode = event.data.thresholdMode
         }
-        if (event.data.manualThresholdValue !== undefined) {
-          this.manualThresholdValue = event.data.manualThresholdValue
+        if (event.data.manualThresholdValue !== undefined && this.thresholdMode === 'manual') {
+          const sensitivity = Math.max(0, Math.min(100, event.data.manualThresholdValue))
+          this.vadOnThreshold = 0.12 + (100 - sensitivity) * 0.003
+        } else if (this.thresholdMode === 'auto') {
+          this.vadOnThreshold = this.VAD_ON_THRESHOLD
         }
         if (event.data.attenuationLimit !== undefined) {
-          this.attenuationLimit = event.data.attenuationLimit
+          this.attenuationLimit = Math.max(65, Math.min(100, event.data.attenuationLimit))
           if (this.denoiserReady && this.denoiser) {
             try {
-              this.denoiser.setAttenuationLimit(event.data.attenuationLimit)
-            } catch (e) {
+              this.denoiser.setAttenuationLimit(this.attenuationLimit)
+            } catch {
             }
           }
+        }
+        if (event.data.postFilterBeta !== undefined) {
+          this.postFilterBeta = Math.max(0.0, Math.min(1.0, event.data.postFilterBeta))
+          if (this.denoiserReady && this.denoiser) {
+            try {
+              (this.denoiser as any).setPostFilterBeta?.(this.postFilterBeta)
+            } catch {
+            }
+          }
+        }
+      } else if (event.data.type === 'setSileroVadProbability') {
+        if (this.isMuted || !this.sileroVadEnabled) return
+        const sequence = Number(event.data.sequence)
+        if (!Number.isFinite(sequence) || sequence <= this.lastVadSequence) return
+
+        this.lastVadSequence = sequence
+        this.sileroVadProbability = Math.max(0, Math.min(1, Number(event.data.probability) || 0))
+
+        if (this.sileroVadProbability >= this.vadOnThreshold) {
+          this.consecutiveVoiceResults++
+        } else if (this.sileroVadProbability < this.VAD_OFF_THRESHOLD) {
+          this.consecutiveVoiceResults = 0
+        }
+
+        const isVoiceOnset = this.sileroVadProbability >= this.VAD_IMMEDIATE_THRESHOLD ||
+          (this.consecutiveVoiceResults >= 2 && this.sileroVadProbability >= this.vadOnThreshold)
+
+        if (isVoiceOnset) {
+          this.vadHoldFrames = this.VAD_HOLD_FRAMES
+          if (!this.lastVadSent) {
+            this.port.postMessage({ type: 'vad', isSpeaking: true })
+            this.lastVadSent = true
+          }
+        } else if (this.vadHoldFrames > 0 && this.sileroVadProbability >= this.VAD_OFF_THRESHOLD) {
+          this.vadHoldFrames = Math.max(this.vadHoldFrames, 18)
         }
       }
     }
@@ -145,11 +187,15 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     if (this.denoiserReady) return
     try {
       this.denoiser = new StandaloneDeepFilter({
-        attenuationLimit: this.attenuationLimit,
+        attenuationLimit: 65,
         postFilterBeta: 0.05
       })
       await this.denoiser.initialize()
       this.denoiser.startStreaming()
+      try {
+        (this.denoiser as any).setPostFilterBeta?.(0.05)
+      } catch {
+      }
       this.denoiserReady = true
       this.port.postMessage({ type: 'ready' })
     } catch (e) {
@@ -211,6 +257,28 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
     while ((this.inputWriteIndex - this.inputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE >= this.FRAME_SIZE) {
       this.inputReadIndex = this.pullFromBuffer(this.inputBuffer, this.frameToProcess, this.inputWriteIndex, this.inputReadIndex)
 
+      for (let i = 0; i < this.FRAME_SIZE; i += 3) {
+        const s0 = this.frameToProcess[i]
+        const s1 = this.frameToProcess[i + 1]
+        const s2 = this.frameToProcess[i + 2]
+
+        this.dsMem0 = 0.5 * this.dsMem0 + 0.25 * s0 + 0.25 * s1
+        this.dsMem1 = 0.5 * this.dsMem1 + 0.25 * s1 + 0.25 * s2
+        const filteredSample = 0.5 * (this.dsMem0 + this.dsMem1)
+
+        const softClamped = filteredSample / (1.0 + Math.abs(filteredSample))
+        this.vad16kBuffer[this.vad16kWriteIndex++] = Math.max(-0.85, Math.min(0.85, softClamped))
+
+        if (this.vad16kWriteIndex === this.VAD_FRAME_SIZE) {
+          const audioFrame = this.vad16kBuffer.slice()
+          this.port.postMessage(
+            { type: 'audio16k', audio: audioFrame, sequence: this.vadSequence++ },
+            [audioFrame.buffer]
+          )
+          this.vad16kWriteIndex = 0
+        }
+      }
+
       if (this.noiseSuppression && this.denoiserReady && this.denoiser) {
         const cleanFrame = this.denoiser.processStreaming(this.frameToProcess)
         this.processedFrame.set(cleanFrame)
@@ -219,86 +287,40 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
       }
 
       let sumSquares = 0
-      const analysisFrame = this.noiseSuppression ? this.processedFrame : this.frameToProcess
       for (let i = 0; i < this.FRAME_SIZE; i++) {
-        sumSquares += analysisFrame[i] * analysisFrame[i]
+        sumSquares += this.frameToProcess[i] * this.frameToProcess[i]
       }
       const currentRms = Math.sqrt(sumSquares / this.FRAME_SIZE)
+      this.rmsSmoothed = 0.2 * currentRms + 0.8 * this.rmsSmoothed
 
-      this.rmsSmoothed = 0.3 * currentRms + 0.7 * this.rmsSmoothed
-
-      let thresholdOn = this.GATE_THRESHOLD_ON
-      let thresholdOff = this.GATE_THRESHOLD_OFF
-
-      if (this.thresholdMode === 'auto') {
-        const adaptiveOn = this.noiseFloorEstimate * 3.5 + 0.003
-        const adaptiveOff = this.noiseFloorEstimate * 2.0 + 0.0015
-        thresholdOn = Math.max(this.GATE_THRESHOLD_ON, adaptiveOn)
-        thresholdOff = Math.max(this.GATE_THRESHOLD_OFF, adaptiveOff)
+      const isSpeaking = this.sileroVadEnabled && this.vadHoldFrames > 0
+      if (this.vadHoldFrames > 0) {
+        this.vadHoldFrames--
+      } else if (this.lastVadSent) {
+        this.port.postMessage({ type: 'vad', isSpeaking: false })
+        this.lastVadSent = false
       }
 
-      const threshold = this.framesSinceLastVoice < this.HOLD_FRAMES ? thresholdOff : thresholdOn
-      const isAboveThreshold = this.rmsSmoothed > threshold
-
-      if (isAboveThreshold) {
-        this.consecutiveVoiceFrames++
-      } else {
-        this.consecutiveVoiceFrames = 0
+      if (!isSpeaking && currentRms < 0.03) {
+        this.noiseFloorEstimate = 0.995 * this.noiseFloorEstimate + 0.005 * currentRms
+        this.noiseFloorEstimate = Math.max(0.0001, Math.min(0.02, this.noiseFloorEstimate))
       }
 
-      const isOpen = this.framesSinceLastVoice < this.HOLD_FRAMES
-      const shouldOpen = (this.consecutiveVoiceFrames >= this.REQUIRED_VOICE_FRAMES) || (isOpen && isAboveThreshold)
-
-      if (shouldOpen) {
-        this.framesSinceLastVoice = 0
-      } else {
-        this.framesSinceLastVoice++
-      }
-
-      const isSpeaking = this.framesSinceLastVoice < this.HOLD_FRAMES
-
-      if (!isSpeaking) {
-        this.noiseFloorEstimate = 0.998 * this.noiseFloorEstimate + 0.002 * currentRms
-        this.fastNoiseFloorEstimate = 0.95 * this.fastNoiseFloorEstimate + 0.05 * currentRms
-      } else {
-        if (currentRms < this.noiseFloorEstimate) {
-          this.noiseFloorEstimate = currentRms
-          this.fastNoiseFloorEstimate = currentRms
-        }
-      }
-
-      const now = Date.now()
-      if (!isSpeaking && this.fastNoiseFloorEstimate > this.noiseFloorEstimate * 2.5 && this.fastNoiseFloorEstimate > 0.004 && (now - this.lastResetTime > 5000)) {
-        this.lastResetTime = now
-        if (this.denoiserReady && this.denoiser) {
-          try {
-            this.denoiser.startStreaming()
-          } catch (e) {}
-        }
-      }
-
-      const targetAttenuation = 100
-      if (this.denoiserReady && this.denoiser && Math.abs(this.attenuationLimit - targetAttenuation) > 10) {
-        this.attenuationLimit = targetAttenuation
-        try {
-          this.denoiser.setAttenuationLimit(this.attenuationLimit)
-        } catch (e) {}
-      }
-
+      const delayBufferSize = this.LOOKAHEAD_FRAMES + 1
       const writeIdx = this.delayWriteIndex
       this.delayFrames[writeIdx].set(this.processedFrame)
       this.delaySpeaking[writeIdx] = isSpeaking
-      this.delayWriteIndex = (writeIdx + 1) % 9
+      this.delayWriteIndex = (writeIdx + 1) % delayBufferSize
       this.delayCount++
 
-      if (this.delayCount > 8) {
+      if (this.delayCount > this.LOOKAHEAD_FRAMES) {
         const readIdx = this.delayReadIndex
         const oldestFrame = this.delayFrames[readIdx]
 
         let anySpeakingAhead = false
-        for (let k = 0; k < 9; k++) {
+        for (let k = 0; k < delayBufferSize; k++) {
           if (k < this.delayCount) {
-            const idx = (readIdx + k) % 9
+            const idx = (readIdx + k) % delayBufferSize
             if (this.delaySpeaking[idx]) {
               anySpeakingAhead = true
               break
@@ -306,31 +328,19 @@ class DeepFilterProcessor extends AudioWorkletProcessor {
           }
         }
 
-        if (anySpeakingAhead !== this.lastVadSent) {
-          this.port.postMessage({ type: 'vad', isSpeaking: anySpeakingAhead })
-          this.lastVadSent = anySpeakingAhead
-        }
+        const targetGain = anySpeakingAhead ? 1.0 : 0.0
+        this.currentGain = 0.82 * this.currentGain + 0.18 * targetGain
 
-        let overallTarget = anySpeakingAhead ? this.agcGain : this.TARGET_GAIN_OFF
-
-        if (anySpeakingAhead && this.rmsSmoothed < thresholdOn) {
-          const ratio = 2.5
-          const dbDiff = 20 * Math.log10(Math.max(0.0001, this.rmsSmoothed) / Math.max(0.0001, thresholdOn))
-          const expansionGain = Math.pow(10, (dbDiff * (ratio - 1)) / 20)
-          overallTarget = Math.max(0.01, Math.min(this.agcGain, expansionGain * this.agcGain))
-        }
-
-        for (let i = 0; i < this.FRAME_SIZE; i++) {
-          if (overallTarget > this.currentGain) {
-            this.currentGain = this.attackCoef * this.currentGain + (1 - this.attackCoef) * overallTarget
-          } else {
-            this.currentGain = this.releaseCoef * this.currentGain + (1 - this.releaseCoef) * overallTarget
+        if (this.currentGain < 0.001) {
+          oldestFrame.fill(0)
+        } else if (this.currentGain < 0.999) {
+          for (let i = 0; i < this.FRAME_SIZE; i++) {
+            oldestFrame[i] *= this.currentGain
           }
-          oldestFrame[i] *= this.currentGain
         }
 
         this.outputWriteIndex = this.pushToBuffer(this.outputBuffer, oldestFrame, this.outputWriteIndex, this.outputReadIndex)
-        this.delayReadIndex = (readIdx + 1) % 9
+        this.delayReadIndex = (readIdx + 1) % delayBufferSize
         this.delayCount--
       }
     }
