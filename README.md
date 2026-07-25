@@ -30,7 +30,7 @@ npm install
 npm run dev
 ```
 
-### Сборка приложения (Windows)
+### Сборка приложения
 ```bash
 npm run dist:win
 ```
