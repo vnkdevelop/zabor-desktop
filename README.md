@@ -8,14 +8,14 @@
 - **Геймификация:** Скрытые достижения и система ачивок.
 - **Премиальный дизайн:** Современный интерфейс с элементами Glassmorphism и Material Design 3.
 
-## 🛠 Технологический стек
+##  Технологический стек
 - **Frontend:** React 18, TypeScript, Tailwind CSS.
 - **Desktop:** Electron (сборка через electron-vite).
 - **Backend:** C# / .NET 10.0, SignalR.
 - **Media:** WebRTC + WebAssembly (DeepFilterNet 3, Silero VAD).
 
 
-## 📦 Установка для пользователей
+##  Установка для пользователей
 Вы можете скачать последнюю версию инсталлятора со страницы [Releases](https://github.com/vnkdevelop/zabor-desktop/releases).
 
 > [!NOTE]
