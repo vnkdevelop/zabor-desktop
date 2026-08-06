@@ -1,0 +1,40 @@
+name: Запрос новой функции
+description: Предложите улучшение для ZABOR Desktop
+title: '[Feature]: '
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: Опишите проблему пользователя и ожидаемую ценность функции.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую проблему решает предложение?
+      placeholder: Сейчас сложно ... потому что ...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Предлагаемое решение
+      placeholder: Опишите желаемое поведение и пользовательский сценарий.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы
+      description: Какие обходные пути или другие решения вы рассматривали?
+  - type: textarea
+    id: context
+    attributes:
+      label: Дополнительные материалы
+      description: Добавьте макеты, скриншоты, ссылки или другие пояснения.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Проверка перед отправкой
+      options:
+        - label: Я проверил существующие issues и не нашел похожее предложение.
+          required: true

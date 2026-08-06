@@ -1,0 +1,55 @@
+name: Сообщение об ошибке
+description: Сообщите о воспроизводимой проблеме в ZABOR Desktop
+title: '[Bug]: '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Спасибо за сообщение. Заполните поля ниже, чтобы проблему можно было воспроизвести.
+  - type: textarea
+    id: description
+    attributes:
+      label: Описание проблемы
+      description: Что произошло и какого результата вы ожидали?
+      placeholder: Опишите фактическое и ожидаемое поведение.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги для воспроизведения
+      placeholder: |
+        1. Открыть ...
+        2. Нажать ...
+        3. Увидеть ошибку ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Версия приложения
+      placeholder: Например, 3.2.2
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Версия Windows
+      placeholder: Например, Windows 11 24H2
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Логи и материалы
+      description: Добавьте логи, скриншоты или видео. Не публикуйте токены, пароли и другие секреты.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Проверка перед отправкой
+      options:
+        - label: Я проверил существующие issues и не нашел дубликат.
+          required: true
+        - label: В приложенных материалах нет секретов и персональных данных.
+          required: true
