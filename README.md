@@ -2,6 +2,7 @@
 
 [![Build](https://github.com/vnkdevelop/zabor-desktop/actions/workflows/build.yml/badge.svg)](https://github.com/vnkdevelop/zabor-desktop/actions/workflows/build.yml)
 [![Version](https://img.shields.io/github/package-json/v/vnkdevelop/zabor-desktop?label=version)](https://github.com/vnkdevelop/zabor-desktop/releases)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-33-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=111827)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -62,3 +63,7 @@ Backend не входит в этот репозиторий.
 ## Участие в разработке
 
 Сообщения об ошибках и предложения можно создавать через подготовленные [GitHub Issue Templates](https://github.com/vnkdevelop/zabor-desktop/issues/new/choose).
+
+## Лицензия
+
+Copyright (C) 2026 vnkdevelop. Проект распространяется по лицензии [GNU General Public License v3.0](LICENSE).

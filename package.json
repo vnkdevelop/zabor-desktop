@@ -3,8 +3,8 @@
   "version": "3.2.2",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
-  "author": "vnk",
-  "license": "MIT",
+  "author": "vnkdevelop",
+  "license": "GPL-3.0-only",
   "scripts": {
     "start": "cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite dev",
     "dev": "cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite dev",
