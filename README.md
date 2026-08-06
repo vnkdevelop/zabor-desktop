@@ -1,4 +1,4 @@
-# ZABOR Desktop
+# ZABOR 
 
 [![Build](https://github.com/vnkdevelop/zabor-desktop/actions/workflows/build.yml/badge.svg)](https://github.com/vnkdevelop/zabor-desktop/actions/workflows/build.yml)
 [![Version](https://img.shields.io/github/package-json/v/vnkdevelop/zabor-desktop?label=version)](https://github.com/vnkdevelop/zabor-desktop/releases)
