@@ -1,44 +1,34 @@
-# Зависимости
 node_modules/
-
-# Сборка
 out/
 dist/
 release/
 
-# Electron
 *.asar
-
-# Системные
 .DS_Store
 Thumbs.db
-
-# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Env / секреты
 .env
 .env.*
 *.pfx
 *.p12
-
-# Логи
 *.log
 npm-debug.log*
-
-# Кэш
 .cache/
 .temp/
 push.bat
 release.bat
 build.cmd
-
 TECHNICAL_DOCUMENTATION.md
-
 *.tsbuildinfo
 dist-electron/
 electron.vite.config.*.mjs
 graphify-out/
+/sandbox/
+/GEMINI.md
+/.agents/
+/.continue/rules/
+/build/
+skills-lock.json
