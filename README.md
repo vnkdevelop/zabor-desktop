@@ -42,7 +42,7 @@ npm run dev
 | Медиа                   | Web Audio API, WebAssembly, ONNX Runtime Web, DeepFilterNet |
 | Backend                 | C# / .NET 10, SQLite, Entity Framework Core                 |
 
-Backend разрабатывается отдельно; этот репозиторий содержит desktop-клиент.
+Backend не входит в этот репозиторий.
 
 ## Команды
 
