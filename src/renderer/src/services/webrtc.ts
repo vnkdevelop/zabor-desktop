@@ -3086,7 +3086,8 @@ export class WebRTCManager {
       }
 
       const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
-      const isScreenShareAudio = (remoteVideoStream && event.streams[0] && event.streams[0].id === remoteVideoStream.id) ||
+      const isScreenShareAudio = event.track.contentHint === 'music' ||
+        (remoteVideoStream && event.streams[0] && event.streams[0].id === remoteVideoStream.id) ||
         (event.streams[0] && event.streams[0].getVideoTracks().length > 0)
 
       if (isScreenShareAudio) {
@@ -3349,18 +3350,31 @@ export class WebRTCManager {
 
   private stopIsolatedStreamAudio() {
     const wasCapturing = this.removeStreamAudioListener !== null
-    this.removeStreamAudioListener?.()
-    this.removeStreamAudioListener = null
+    if (this.removeStreamAudioListener) {
+      try { this.removeStreamAudioListener() } catch { }
+      this.removeStreamAudioListener = null
+    }
 
-    if (wasCapturing) void window.windowControls.stopStreamAudioCapture().catch(() => { })
+    if (wasCapturing) {
+      try { void window.windowControls.stopStreamAudioCapture().catch(() => { }) } catch { }
+    }
     if (this.streamCaptureNode) {
       try { this.streamCaptureNode.disconnect() } catch { }
+      this.streamCaptureNode = null
     }
-    this.streamCaptureNode = null
-    this.streamCaptureDestination?.stream.getTracks().forEach(track => track.stop())
-    this.streamCaptureDestination = null
+    if (this.streamCaptureDestination) {
+      try {
+        this.streamCaptureDestination.stream.getTracks().forEach(track => {
+          try {
+            track.enabled = false
+            track.stop()
+          } catch { }
+        })
+      } catch { }
+      this.streamCaptureDestination = null
+    }
     if (this.streamCaptureContext && this.streamCaptureContext.state !== 'closed') {
-      this.streamCaptureContext.close().catch(() => { })
+      try { this.streamCaptureContext.close().catch(() => { }) } catch { }
     }
     this.streamCaptureContext = null
   }
@@ -3452,27 +3466,44 @@ export class WebRTCManager {
   }
 
   public stopScreenShare() {
-    this.stopIsolatedStreamAudio()
     if (this.statsInterval) {
       clearInterval(this.statsInterval)
       this.statsInterval = null
     }
+
+    const localVideo = this.localVideoStream
+    const videoTracks = localVideo ? localVideo.getVideoTracks() : []
+    const screenAudioTracks = localVideo ? localVideo.getAudioTracks().filter(t => t !== this.localStream?.getAudioTracks()[0]) : []
+
+    for (const [userId, pc] of this.peerConnections.entries()) {
+      try {
+        const senders = pc.getSenders()
+        for (const sender of senders) {
+          const track = sender.track
+          const isScreenVideo = (track && track.kind === 'video') || (track && videoTracks.includes(track))
+          const isScreenAudio = (track && track.kind === 'audio' && track !== this.localStream?.getAudioTracks()[0]) || (track && screenAudioTracks.includes(track))
+          if (isScreenVideo || isScreenAudio) {
+            try { pc.removeTrack(sender) } catch { }
+          }
+        }
+        void this.renegotiatePeer(pc, userId)
+      } catch { }
+    }
+
     if (this.localVideoStream) {
-      this.localVideoStream.getTracks().forEach(track => {
-        track.enabled = false
-        track.stop()
-      })
+      try {
+        this.localVideoStream.getTracks().forEach(track => {
+          try {
+            track.enabled = false
+            track.stop()
+          } catch { }
+        })
+      } catch { }
       this.localVideoStream = null
     }
-    for (const [userId, pc] of this.peerConnections.entries()) {
-      const senders = pc.getSenders()
-      senders.forEach(sender => {
-        if (sender.track && (sender.track.kind === 'video' || (sender.track.kind === 'audio' && sender.track !== this.localStream?.getAudioTracks()[0]))) {
-          pc.removeTrack(sender)
-        }
-      })
-      this.renegotiatePeer(pc, userId).catch(() => { })
-    }
+
+    this.stopIsolatedStreamAudio()
+
     this.lastPacketsLost.clear()
     this.lastPacketsSent.clear()
     this.lossLadderStep.clear()
@@ -3578,6 +3609,7 @@ export class WebRTCManager {
 
       try {
         const stats = await pc.getStats()
+        if (!this.streamGainNodes.has(userId) || this.streamDelayNodes.get(userId) !== delayNode) continue
         const rawOffset = this.measureAudioVideoOffset(stats)
         if (rawOffset === null || !Number.isFinite(rawOffset)) continue
 
@@ -3889,6 +3921,11 @@ export class WebRTCManager {
           this.configureAudioSender(sender)
         }
       })
+    } else {
+      try {
+        pc.addTransceiver('video', { direction: 'recvonly' })
+        pc.addTransceiver('audio', { direction: 'recvonly' })
+      } catch { }
     }
 
     this.setupPeerHandlers(pc, userId)
@@ -3921,6 +3958,10 @@ export class WebRTCManager {
     if (!await this.awaitPeerRelevance(senderId)) return
 
     let pc = this.peerConnections.get(senderId)
+    if (pc && (pc.connectionState === 'closed' || pc.connectionState === 'failed' || pc.connectionState === 'disconnected')) {
+      this.disconnectFromPeer(senderId, { preserveRemoteVideo: true })
+      pc = undefined
+    }
     if (!pc) {
       if (!this.peerConnectStartedAt.has(senderId)) this.peerConnectStartedAt.set(senderId, performance.now())
       if (!this.localStream) {
@@ -3959,6 +4000,11 @@ export class WebRTCManager {
             this.configureAudioSender(sender)
           }
         })
+      } else {
+        try {
+          pc.addTransceiver('video', { direction: 'recvonly' })
+          pc.addTransceiver('audio', { direction: 'recvonly' })
+        } catch { }
       }
 
       this.setupPeerHandlers(pc, senderId)
@@ -3987,6 +4033,18 @@ export class WebRTCManager {
       }
       signalRService.sendWebRTCAnswer(senderId, JSON.stringify(pc.localDescription))
       this.flushPendingRenegotiation(senderId)
+
+      if (this.localVideoStream) {
+        const senders = pc.getSenders()
+        const tracks = this.localVideoStream.getTracks()
+        const hasUnnegotiated = tracks.some(t => {
+          const s = senders.find(sender => sender.track === t)
+          return !s || !s.transport
+        })
+        if (hasUnnegotiated) {
+          void this.renegotiatePeer(pc, senderId)
+        }
+      }
     } catch (e) {
       console.error('[WebRTC] handleOffer failed', e)
       this.disconnectFromPeer(senderId, { preserveRemoteVideo: true })

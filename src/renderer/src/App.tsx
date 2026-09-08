@@ -723,6 +723,9 @@ export default function App() {
           return;
         }
       }
+    } else {
+      if (store.isStreamFullscreen) store.setStreamFullscreen(false);
+      store.setActiveStreamId(null);
     }
     setStreamRatio(16 / 9);
   }, [store.activeStreamId, store.remoteVideoStreams, store.voiceUsers, store.currentCallUser, store.currentUser]);
@@ -1847,6 +1850,7 @@ export default function App() {
       const myId = store.currentUser?.id || '';
       if (store.activeStreamId === myId) {
         store.setActiveStreamId(null);
+        if (store.isStreamFullscreen) store.setStreamFullscreen(false);
       }
       webrtc.stopScreenShare();
       await signalRService.stopStream();

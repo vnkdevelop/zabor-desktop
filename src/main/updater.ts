@@ -136,16 +136,22 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
   });
 
   ipcMain.handle('open-external-url', async (_event, url: string) => {
-    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
-      await shell.openExternal(url);
-      return true;
+    if (typeof url === 'string') {
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+          await shell.openExternal(url);
+          return true;
+        }
+      } catch {}
     }
     return false;
   });
 
   ipcMain.handle('start-update-download', async (_event, downloadUrl: string, version: string) => {
     if (isDownloading) return { success: false, message: 'Already downloading' };
-    if (!downloadUrl || !downloadUrl.startsWith('https://')) {
+    const allowedPrefix = `https://github.com/${GITHUB_REPO}/releases/download/`;
+    if (!downloadUrl || typeof downloadUrl !== 'string' || !downloadUrl.startsWith(allowedPrefix)) {
       return { success: false, message: 'Invalid download url' };
     }
 
@@ -159,7 +165,12 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
       }
     } catch {}
 
-    const fileName = `ZABOR-Setup-${version}.exe`;
+    const safeVersion = version ? String(version).replace(/[^a-zA-Z0-9.-]/g, '') : '';
+    if (!safeVersion) {
+      return { success: false, message: 'Invalid version identifier' };
+    }
+
+    const fileName = `ZABOR-Setup-${safeVersion}.exe`;
     const targetPath = join(tempDir, fileName);
 
     isDownloading = true;
@@ -299,16 +310,4 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
       }
     }
   }, 4000);
-
-  setInterval(async () => {
-    const window = getMainWindow();
-    if (!window || window.isDestroyed()) return;
-
-    const result = await checkGitHubRelease();
-    if (result.updateAvailable && result.updateInfo) {
-      if (window && !window.isDestroyed()) {
-        window.webContents.send('update-available', result.updateInfo);
-      }
-    }
-  }, 4 * 60 * 60 * 1000);
 }

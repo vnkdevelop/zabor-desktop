@@ -609,8 +609,7 @@ app.whenReady().then(() => {
         if (existsSync(SESSION_PATH)) await fsPromises.rm(SESSION_PATH, { force: true });
         return true;
       }
-      await fsPromises.writeFile(SESSION_PATH, data, 'utf-8');
-      return true;
+      return false;
     } catch { return false; }
   });
 

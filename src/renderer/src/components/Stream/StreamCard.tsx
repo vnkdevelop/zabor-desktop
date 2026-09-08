@@ -67,6 +67,7 @@ export const StreamCard = ({
   const [isCapturing, setIsCapturing] = useState(false)
   const [hasFirstFrame, setHasFirstFrame] = useState(false)
   const retryTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const captureTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const currentUserId = useAppStore((state) => state.currentUser?.id)
   const isLocal = user.id === currentUserId
@@ -77,7 +78,7 @@ export const StreamCard = ({
   useEffect(() => {
     if (isLocal) return
     const videoTrack = stream.getVideoTracks()[0]
-    if (!videoTrack) return
+    if (!videoTrack || videoTrack.readyState === 'ended') return
     const isWatching = isFocused || isFullscreen
     if (isWatching) {
       videoTrack.enabled = true
@@ -85,12 +86,25 @@ export const StreamCard = ({
       videoTrack.enabled = isCapturing
     }
     return () => {
-      videoTrack.enabled = true
+      if (videoTrack.readyState !== 'ended') {
+        videoTrack.enabled = true
+      }
     }
   }, [stream, isFocused, isFullscreen, isCapturing, isLocal])
 
   useEffect(() => {
-    if (mode !== 'normal') return
+    if (mode !== 'normal') {
+      if (captureTimeoutRef.current) {
+        clearTimeout(captureTimeoutRef.current)
+        captureTimeoutRef.current = null
+      }
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current)
+        retryTimerRef.current = null
+      }
+      setIsCapturing(false)
+      return
+    }
 
     const captureFrame = () => {
       setIsCapturing(true)
@@ -100,7 +114,14 @@ export const StreamCard = ({
     const timer = setInterval(captureFrame, 60000)
     return () => {
       clearInterval(timer)
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current)
+        retryTimerRef.current = null
+      }
+      if (captureTimeoutRef.current) {
+        clearTimeout(captureTimeoutRef.current)
+        captureTimeoutRef.current = null
+      }
     }
   }, [mode, stream])
 
@@ -110,8 +131,15 @@ export const StreamCard = ({
       video.srcObject = stream
 
       const handlePlay = () => {
-        setTimeout(() => {
+        if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current)
+        captureTimeoutRef.current = setTimeout(() => {
+          captureTimeoutRef.current = null
           try {
+            if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+              setIsCapturing(false)
+              if (video?.srcObject) video.srcObject = null
+              return
+            }
             const canvas = document.createElement('canvas')
             canvas.width = 320
             canvas.height = 180
@@ -140,7 +168,7 @@ export const StreamCard = ({
             console.error(e)
           } finally {
             setIsCapturing(false)
-            if (video.srcObject) {
+            if (video?.srcObject) {
               video.srcObject = null
             }
           }
@@ -150,19 +178,33 @@ export const StreamCard = ({
       video.addEventListener('playing', handlePlay, { once: true })
       return () => {
         video.removeEventListener('playing', handlePlay)
+        if (captureTimeoutRef.current) {
+          clearTimeout(captureTimeoutRef.current)
+          captureTimeoutRef.current = null
+        }
+        if (video.srcObject) {
+          video.srcObject = null
+        }
       }
     }
-  }, [isCapturing, stream, snapshot])
+  }, [isCapturing, stream, snapshot, isLocal])
 
   useEffect(() => {
     setHasFirstFrame(false)
   }, [stream])
 
-  const videoOnlyStream = useMemo(() => new MediaStream(stream.getVideoTracks()), [stream])
+  const videoOnlyStream = useMemo(() => {
+    const tracks = stream.getVideoTracks()
+    return tracks.length > 0 ? new MediaStream(tracks) : null
+  }, [stream])
 
   useEffect(() => {
     if (mode === 'normal' || !videoRef.current) return
     const video = videoRef.current
+    if (!videoOnlyStream) {
+      video.srcObject = null
+      return
+    }
     if (video.srcObject !== videoOnlyStream) video.srcObject = videoOnlyStream
 
     let cancelled = false
@@ -188,6 +230,10 @@ export const StreamCard = ({
         cancelled = true
         video.removeEventListener('playing', onPlaying)
         video.removeEventListener('loadeddata', onPlaying)
+        if (video) {
+          try { video.pause() } catch { }
+          video.srcObject = null
+        }
       }
     }
 
@@ -195,6 +241,10 @@ export const StreamCard = ({
       cancelled = true
       if (frameHandle && typeof anyVideo.cancelVideoFrameCallback === 'function') {
         anyVideo.cancelVideoFrameCallback(frameHandle)
+      }
+      if (video) {
+        try { video.pause() } catch { }
+        video.srcObject = null
       }
     }
   }, [mode, videoOnlyStream])
