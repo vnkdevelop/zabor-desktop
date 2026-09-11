@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, SpeakerSlash, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck, Desktop, CornersIn, CornersOut, Sparkle, Trash, ArrowsClockwise } from '@phosphor-icons/react';
+import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, SpeakerSlash, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck, Desktop, CornersIn, CornersOut, Sparkle, Trash, ArrowsClockwise, ChatCircle } from '@phosphor-icons/react';
 import { useTranslation, Trans } from 'react-i18next';
 
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
@@ -23,6 +23,10 @@ import { StreamCard } from './components/Stream/StreamCard';
 import { NoiseSuppressionSettings, type CalibrationPhase, type SmartNoiseModel } from './components/Settings/NoiseSuppressionSettings';
 import { MIC_TEST_PANEL_GAP_PX, MicTestPanel } from './components/Settings/MicTestPanel';
 import { UpdateModal } from './components/Modals/UpdateModal';
+import { ChatPanel } from './components/Chat/ChatPanel';
+import { ActiveSessionPip } from './components/Chat/ActiveSessionPip';
+import { chatPeer } from './services/chatPeer';
+import { useChatStore } from './store/useChatStore';
 
 const lastNonZeroUserVolumes = new Map<string, number>();
 const lastNonZeroVolumes = new Map<string, number>();
@@ -176,6 +180,12 @@ export default function App() {
   const [showStreamPicker, setShowStreamPicker] = useState(false);
   const [volumeType, setVolumeType] = useState<'voice' | 'stream'>('voice');
   const [showOverlays, setShowOverlays] = useState(true);
+  const [callView, setCallView] = useState<'full' | 'chat'>('full');
+  const previousCallUserIdRef = useRef<string | null>(null);
+  const selectedChatFriendId = useChatStore(state => state.selectedFriendId);
+  const selectChatFriend = useChatStore(state => state.selectFriend);
+  const unreadChats = useChatStore(state => state.unread);
+  const hasUnreadChats = Object.values(unreadChats).some(Boolean);
   const overlayTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [windowSize, setWindowSize] = useState({
     width: typeof window !== 'undefined' ? window.innerWidth : 1280,
@@ -2183,6 +2193,36 @@ export default function App() {
   };
 
   const hasInvites = store.channelInvites.length > 0 || store.friendRequests.length > 0;
+  const selectedChatFriend = activeTab === 'friends' ? store.friends.find(friend => friend.id === selectedChatFriendId) ?? null : null;
+  const chatVisible = Boolean(selectedChatFriend && store.currentUser);
+  const callHidden = Boolean(store.currentCallUser && activeTab === 'friends' && callView === 'chat' && chatVisible);
+
+  useEffect(() => {
+    const currentCallUserId = store.currentCallUser?.id ?? null;
+    if (currentCallUserId && previousCallUserIdRef.current !== currentCallUserId) {
+      setCallView('full');
+    } else if (!currentCallUserId && previousCallUserIdRef.current) {
+      setCallView('full');
+    }
+    previousCallUserIdRef.current = currentCallUserId;
+  }, [store.currentCallUser?.id]);
+
+  const openCallChat = useCallback(() => {
+    const callUser = store.currentCallUser;
+    if (!callUser) return;
+    selectChatFriend(callUser.id);
+    setActiveTab('friends');
+    setCallView('chat');
+  }, [store.currentCallUser, selectChatFriend]);
+
+  useEffect(() => {
+    if (store.currentUser?.id && isAuth) void chatPeer.initialize();
+  }, [store.currentUser?.id, isAuth]);
+
+  useEffect(() => {
+    if (!isAuth) return;
+    chatPeer.preconnect(store.friends.filter(friend => friend.isOnline).map(friend => friend.id));
+  }, [isAuth, store.friends]);
 
   return (
     <>
@@ -2486,15 +2526,16 @@ export default function App() {
                       </div>
                       {store.friends.map(f => (
                         <div key={f.id} onContextMenu={e => handleContextMenu(e, 'friend', f)}
-                          onClick={() => { store.setSelectedProfileUser(f, 'friends'); setEditProfileDisplayName(f.displayName); setEditProfileAboutMe(f.aboutMe || ''); setIsEditingProfile(false); store.setModal('profile', true); signalRService.viewProfile(f.id); }}
-                          className="px-3 py-2 rounded-xl mb-1 cursor-pointer hover:bg-surfaceHover/80 flex items-center gap-3 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]">
+                          onClick={() => { selectChatFriend(f.id); void chatPeer.open(f.id); }}
+                          className={`px-3 py-2 rounded-xl mb-1 cursor-pointer flex items-center gap-3 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${selectedChatFriendId === f.id ? 'bg-surfaceHover/80' : 'hover:bg-surfaceHover/80'}`}>
                           <div className="relative w-[47px] h-[47px] shrink-0">
                             <div className="w-full h-full relative">
                               <AvatarImg src={f.avatarBase64} size={47} bgColor={f.avatarColor} />
                             </div>
                             <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] border-panelBg ${f.isOnline ? 'bg-success' : 'bg-gray-500'}`} />
                           </div>
-                          <span className={`font-semibold text-[15px] truncate ${f.isOnline ? 'text-white' : 'text-textMuted'}`}>{f.displayName}</span>
+                          <span className={`font-semibold text-[15px] truncate flex-1 ${f.isOnline ? 'text-white' : 'text-textMuted'}`}>{f.displayName}</span>
+                          {unreadChats[f.id] && <span className="w-2 h-2 rounded-full bg-primary shrink-0" />}
                         </div>
                       ))}
                     </div>
@@ -2502,8 +2543,11 @@ export default function App() {
                 </div>
 
                 <div className="bg-white/[0.045] rounded-full mx-4 my-2 p-1 flex relative shrink-0">
-                  <button onClick={() => setActiveTab('channels')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.channels')}</button>
-                  <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.friends')}</button>
+                  <button onClick={() => { selectChatFriend(null); setActiveTab('channels'); }} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.channels')}</button>
+                  <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>
+                    <span>{t('main.tabs.friends')}</span>
+                    {hasUnreadChats && <span className="w-2 h-2 rounded-full bg-primary shrink-0" />}
+                  </button>
                   <div
                     style={{
                       transform: activeTab === 'channels' ? 'translateX(0)' : 'translateX(calc(100% + 4px))',
@@ -2554,9 +2598,22 @@ export default function App() {
           )}
 
           <div className="flex-1 flex flex-col relative">
+            {chatVisible && store.currentUser && selectedChatFriend && (!store.currentCallUser || callHidden) && (
+              <ChatPanel currentUser={store.currentUser} friend={selectedChatFriend} onCall={async () => {
+                setCallView('full');
+                const started = await signalRService.startCall(selectedChatFriend.id);
+                if (!started) setCallView('chat');
+              }} />
+            )}
+            {callHidden && store.currentCallUser && (
+              <ActiveSessionPip
+                callUser={store.currentCallUser}
+                onOpen={() => setCallView('full')}
+              />
+            )}
 
             {store.currentCallUser && (
-              <div className="absolute top-0 left-0 right-0 bottom-[120px] p-3 flex items-center justify-center overflow-hidden">
+              <div className={`absolute top-0 left-0 right-0 bottom-[120px] p-3 flex items-center justify-center overflow-hidden ${callHidden ? 'invisible pointer-events-none' : ''}`}>
                 {(() => {
                   const callUser = store.currentCallUser!;
                   const currentUser = store.currentUser;
@@ -2834,7 +2891,7 @@ export default function App() {
               </div>
             )}
 
-            {!store.currentCallUser && !store.currentChannelId && (
+            {!store.currentCallUser && !store.currentChannelId && !chatVisible && (
               <div className="flex-1 flex flex-col items-center justify-center px-16">
                 <div className="max-w-lg text-center">
                   {joke ? (
@@ -2851,7 +2908,7 @@ export default function App() {
               </div>
             )}
 
-            {!store.currentCallUser && store.currentChannelId && (
+            {!store.currentCallUser && store.currentChannelId && activeTab === 'channels' && (
               <div className="absolute top-0 left-0 right-0 bottom-[120px] p-3 flex items-center justify-center overflow-hidden">
                 {(() => {
                   const sorted = [...store.voiceUsers].sort((a, b) => {
@@ -3117,11 +3174,12 @@ export default function App() {
               </div>
             )}
 
-            {store.currentCallUser && !store.isStreamFullscreen && (
+            {store.currentCallUser && !store.isStreamFullscreen && !callHidden && (
               <div className={[
                 "absolute bottom-10 left-1/2 -translate-x-1/2 bg-panelBg/70 backdrop-blur-xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] z-50",
                 controlsShake ? "animate-shake" : ""
               ].join(" ")}>
+                <button onClick={openCallChat} className="group w-14 h-14 rounded-full flex items-center justify-center bg-surface/70 hover:bg-surfaceHover/80 text-white transition-colors active:scale-95" title={t('chat.open')}><ChatCircle weight="bold" size={24} /></button>
                 <button
                   onClick={toggleMute}
                   className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)
@@ -3167,7 +3225,7 @@ export default function App() {
               </div>
             )}
 
-            {store.currentChannelId && !store.currentCallUser && !store.isStreamFullscreen && (
+            {store.currentChannelId && activeTab === 'channels' && !store.currentCallUser && !store.isStreamFullscreen && (
               <div className={[
                 "absolute bottom-10 left-1/2 -translate-x-1/2 bg-panelBg/70 backdrop-blur-xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] z-50",
                 controlsShake ? "animate-shake" : ""

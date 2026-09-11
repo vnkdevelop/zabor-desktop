@@ -291,6 +291,14 @@ body {
   background: transparent;
 }
 
+.chat-scroll {
+  scrollbar-width: none;
+}
+
+.chat-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 
 .md3-range {
   -webkit-appearance: none;

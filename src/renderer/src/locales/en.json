@@ -88,6 +88,31 @@
       "deleteAccountFailed": "failed to delete account"
     }
   },
+  "chat": {
+    "empty": "no messages yet",
+    "connected": "connected",
+    "connecting": "connecting...",
+    "offline": "offline",
+    "call": "call",
+    "activeCall": "active call",
+    "activeChannel": "active channel",
+    "participants": "participants: {{count}}",
+    "minimize": "minimize",
+    "open": "open chat",
+    "returnToCall": "return to call",
+    "attach": "attach file",
+    "dropToSend": "drop file to send",
+    "sendFileConfirm": "send file?",
+    "sendFile": "send",
+    "placeholder": "write a message",
+    "download": "download",
+    "saveFile": "save file",
+    "copy": "copy",
+    "clearFile": "clear file",
+    "deleteMessage": "delete message",
+    "delivery": { "pending": "pending", "sent": "sent", "delivered": "delivered", "read": "read", "failed": "failed" },
+    "units": { "b": "b", "kb": "kb", "mb": "mb", "gb": "gb" }
+  },
   "auth": {
     "login": "login",
     "password": "password",

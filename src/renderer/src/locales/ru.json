@@ -88,6 +88,31 @@
       "deleteAccountFailed": "не удалось удалить аккаунт"
     }
   },
+  "chat": {
+    "empty": "сообщений пока нет",
+    "connected": "на связи",
+    "connecting": "подключение...",
+    "offline": "не в сети",
+    "call": "позвонить",
+    "activeCall": "активный звонок",
+    "activeChannel": "активный канал",
+    "participants": "участников: {{count}}",
+    "minimize": "свернуть",
+    "open": "открыть чат",
+    "returnToCall": "вернуться к звонку",
+    "attach": "прикрепить файл",
+    "dropToSend": "отпустите файл для отправки",
+    "sendFileConfirm": "отправить файл?",
+    "sendFile": "отправить",
+    "placeholder": "написать сообщение",
+    "download": "скачать",
+    "saveFile": "сохранить файл",
+    "copy": "копировать",
+    "clearFile": "очистить файл",
+    "deleteMessage": "удалить сообщение",
+    "delivery": { "pending": "ожидает", "sent": "отправлено", "delivered": "доставлено", "read": "прочитано", "failed": "ошибка" },
+    "units": { "b": "б", "kb": "кб", "mb": "мб", "gb": "гб" }
+  },
   "auth": {
     "login": "логин",
     "password": "пароль",

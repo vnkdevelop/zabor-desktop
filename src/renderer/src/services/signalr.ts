@@ -1,6 +1,7 @@
 import * as signalR from '@microsoft/signalr';
 import { useAppStore, User, VoiceChannel, ChannelUpdate, IncomingCall, ChannelInvite } from '../store/useAppStore';
 import { webrtc } from './webrtc';
+import { chatPeer, configureChatSignaling } from './chatPeer';
 import i18n from '../i18n';
 import callRingSound from '../assets/sounds/call.mp3';
 import channelJoinSound from '../assets/sounds/join.mp3';
@@ -517,9 +518,11 @@ class SignalRService {
 
     on("UserJoined", (user: User) => {
       store().updateUserStatus(user.id, { ...user, isOnline: true });
+      void chatPeer.handleOnline(user.id);
     });
 
     on("UserLeft", (userId: string) => {
+      chatPeer.handleOffline(userId);
       this.clearStreamDropTimer(userId);
       store().updateUserStatus(userId, { isOnline: false, currentChannelId: null, currentCallUserId: null, isSpeaking: false });
       store().removeUserFromChannelMap('', userId);
@@ -769,9 +772,21 @@ class SignalRService {
       this.playSfx(achievementSound, 0.4);
     });
 
-    on("ReceiveWebRTCOffer", async (sId: string, o: string) => { await webrtc.handleOffer(sId, o); });
-    on("ReceiveWebRTCAnswer", async (sId: string, a: string) => { await webrtc.handleAnswer(sId, a); });
-    on("ReceiveIceCandidate", async (sId: string, c: string) => { await webrtc.handleIceCandidate(sId, c); });
+    on("ReceiveWebRTCOffer", async (sId: string, o: string) => {
+      if (chatPeer.isChatSignal(o)) { try { await chatPeer.handleOffer(sId, o); } catch { } }
+      else await webrtc.handleOffer(sId, o);
+    });
+    on("ReceiveWebRTCAnswer", async (sId: string, a: string) => {
+      if (chatPeer.isChatSignal(a)) { try { await chatPeer.handleAnswer(sId, a); } catch { } }
+      else await webrtc.handleAnswer(sId, a);
+    });
+    on("ReceiveIceCandidate", async (sId: string, c: string) => {
+      if (chatPeer.isChatSignal(c)) { try { await chatPeer.handleIceCandidate(sId, c); } catch { } }
+      else await webrtc.handleIceCandidate(sId, c);
+    });
+    on("ReceiveChatRelay", async (sId: string, packet: string) => {
+      try { await chatPeer.handleFallback(sId, packet); } catch { }
+    });
     on("ReceiveStreamViewState", (sId: string, state: string) => {
       webrtc.applyViewerState(sId, state === 'preview' ? 'preview' : 'watching');
     });
@@ -1757,6 +1772,7 @@ class SignalRService {
         await this.invokeCommand("LeaveChannel");
       }
     } finally {
+      chatPeer.close();
       webrtc.leaveAll();
       this.disconnect();
     }
@@ -1814,9 +1830,26 @@ class SignalRService {
   public sendIceCandidate(targetId: string, candidate: string): void {
     if (this.sessionReady && this.isConnected()) this.connection?.send("SendIceCandidate", targetId, candidate);
   }
+  public async sendChatRelay(targetId: string, packet: string): Promise<boolean> {
+    if (!this.sessionReady || !this.isConnected() || packet.length > 64 * 1024) return false;
+    try {
+      await this.connection?.send("SendChatRelay", targetId, packet);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   public sendStreamViewState(targetId: string, state: 'watching' | 'preview'): void {
     if (this.sessionReady && this.isConnected()) this.connection?.send("SendStreamViewState", targetId, state).catch(() => { });
   }
 }
 
 export const signalRService = new SignalRService();
+
+configureChatSignaling({
+  fetchIceServers: () => signalRService.fetchIceServers(),
+  sendOffer: (targetId, offer) => signalRService.sendWebRTCOffer(targetId, offer),
+  sendAnswer: (targetId, answer) => signalRService.sendWebRTCAnswer(targetId, answer),
+  sendIceCandidate: (targetId, candidate) => signalRService.sendIceCandidate(targetId, candidate),
+  sendFallback: (targetId, packet) => signalRService.sendChatRelay(targetId, packet)
+});

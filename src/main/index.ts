@@ -3,6 +3,7 @@ import { join } from 'path';
 import { existsSync, rmSync, readFileSync, writeFileSync, promises as fsPromises } from 'fs';
 import { createHmac, randomBytes } from 'crypto';
 import { setupUpdater } from './updater';
+import { disposeChatFileWriters, registerChatFileHandlers } from './chatFiles';
 
 declare const __ZABOR_CLIENT_SECRET__: string;
 declare const __ZABOR_CLIENT_CHANNEL__: string;
@@ -542,6 +543,7 @@ app.whenReady().then(() => {
   reportGpuStatus();
   const settings = loadAppSettings();
   applyAutoLaunch(settings.openAtLogin);
+  registerChatFileHandlers();
 
   ipcMain.on('window-minimize', () => {
     BrowserWindow.getFocusedWindow()?.minimize();
@@ -590,6 +592,10 @@ app.whenReady().then(() => {
       } catch {}
     }
     try {
+      const chatFilesPath = join(userDataPath, 'chat-files');
+      if (existsSync(chatFilesPath)) rmSync(chatFilesPath, { recursive: true, force: true });
+    } catch {}
+    try {
       if (mainWindow && !mainWindow.isDestroyed()) {
         const ses = mainWindow.webContents.session;
         await ses.clearStorageData();
@@ -601,6 +607,7 @@ app.whenReady().then(() => {
 
   const SESSION_PATH = join(app.getPath('userData'), 'session.json');
   const SESSION_ENC_PATH = join(app.getPath('userData'), 'session.enc');
+  const CHAT_IDENTITY_PATH = join(app.getPath('userData'), 'chat-identity.enc');
 
   ipcMain.handle('save-session', async (_event, data: string) => {
     try {
@@ -638,6 +645,19 @@ app.whenReady().then(() => {
     try { if (existsSync(SESSION_PATH)) await fsPromises.rm(SESSION_PATH, { force: true }); } catch {}
     try { if (existsSync(SESSION_ENC_PATH)) await fsPromises.rm(SESSION_ENC_PATH, { force: true }); } catch {}
     return true;
+  });
+  ipcMain.handle('chat-identity-load', async () => {
+    try {
+      if (!safeStorage.isEncryptionAvailable() || !existsSync(CHAT_IDENTITY_PATH)) return null;
+      return safeStorage.decryptString(await fsPromises.readFile(CHAT_IDENTITY_PATH));
+    } catch { return null; }
+  });
+  ipcMain.handle('chat-identity-save', async (_event, data: unknown) => {
+    if (typeof data !== 'string' || data.length > 16 * 1024 || !safeStorage.isEncryptionAvailable()) return false;
+    try {
+      await fsPromises.writeFile(CHAT_IDENTITY_PATH, safeStorage.encryptString(data));
+      return true;
+    } catch { return false; }
   });
 
   ipcMain.handle('get-client-attestation', () => {
@@ -761,6 +781,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   stopStreamAudioCapture();
+  disposeChatFileWriters();
   if (!isQuitting) {
     event.preventDefault();
     requestQuit();

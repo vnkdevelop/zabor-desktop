@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 interface StreamAudioMetadata {
   sampleRate: number
@@ -24,6 +24,24 @@ const windowControls = {
   saveSession: (data: string): Promise<boolean> => ipcRenderer.invoke('save-session', data),
   loadSession: (): Promise<string | null> => ipcRenderer.invoke('load-session'),
   clearSession: (): Promise<boolean> => ipcRenderer.invoke('clear-session'),
+  loadChatIdentity: (): Promise<string | null> => ipcRenderer.invoke('chat-identity-load'),
+  saveChatIdentity: (data: string): Promise<boolean> => ipcRenderer.invoke('chat-identity-save', data),
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+  chatFilePick: () => ipcRenderer.invoke('chat-file-pick'),
+  chatFileImport: (filePaths: string[]) => ipcRenderer.invoke('chat-file-import', filePaths),
+  chatFileBegin: (transferId: string, fileName: string, size: number) => ipcRenderer.invoke('chat-file-begin', transferId, fileName, size),
+  chatFileChunk: (transferId: string, chunk: Uint8Array) => ipcRenderer.invoke('chat-file-chunk', transferId, chunk),
+  chatFileCommit: (transferId: string) => ipcRenderer.invoke('chat-file-commit', transferId),
+  chatFileAbort: (transferId: string): Promise<boolean> => ipcRenderer.invoke('chat-file-abort', transferId),
+  chatFileDelete: (storedName: string): Promise<boolean> => ipcRenderer.invoke('chat-file-delete', storedName),
+  chatFileDeleteMany: (storedNames: string[]): Promise<number> => ipcRenderer.invoke('chat-file-delete-many', storedNames),
+  chatFileStat: (storedName: string) => ipcRenderer.invoke('chat-file-stat', storedName),
+  chatFileHash: (storedName: string): Promise<string | null> => ipcRenderer.invoke('chat-file-hash', storedName),
+  chatFileReadSlice: (storedName: string, offset: number, length: number): Promise<Uint8Array | null> => ipcRenderer.invoke('chat-file-read-slice', storedName, offset, length),
+  chatFileSaveAs: (storedName: string, suggestedName: string): Promise<boolean> => ipcRenderer.invoke('chat-file-save-as', storedName, suggestedName),
+  chatFileReveal: (storedName: string): Promise<boolean> => ipcRenderer.invoke('chat-file-reveal', storedName),
+  chatFilesPrune: (keepNames: string[]): Promise<number> => ipcRenderer.invoke('chat-files-prune', keepNames),
+  chatFilesWipe: (): Promise<boolean> => ipcRenderer.invoke('chat-files-wipe'),
   getClientAttestation: (): Promise<string | null> => ipcRenderer.invoke('get-client-attestation'),
   onBeforeQuit: (callback: () => void) => {
     ipcRenderer.on('before-quit', callback)

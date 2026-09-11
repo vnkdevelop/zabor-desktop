@@ -20,6 +20,7 @@ npm-debug.log*
 .temp/
 push.bat
 release.bat
+release-beta.bat
 build.cmd
 TECHNICAL_DOCUMENTATION.md
 *.tsbuildinfo

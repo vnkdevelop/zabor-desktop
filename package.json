@@ -13,6 +13,7 @@
     "dist:win": "node scripts/fetch-deepfilter-assets.cjs && cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite build && electron-builder --win",
     "postinstall": "node scripts/rebuild-native-audio.cjs && node scripts/fetch-deepfilter-assets.cjs --allow-missing",
     "release": "release.bat",
+    "release:beta": "release-beta.bat",
     "sandbox": "cd sandbox && npm run dev"
   },
   "build": {
