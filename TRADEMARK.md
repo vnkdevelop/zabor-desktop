@@ -16,7 +16,7 @@
 - словесное обозначение **ZABOR** в любом написании, регистре и транслитерации (ZABOR, Zabor, zabor, ЗАБОР, Забор);
 - логотип и иконка приложения, в том числе файлы `build/icon.ico` и `resources/icon.png`;
 - оформленные брендингом изображения интерфейса в каталоге `docs/images/`;
-- идентификатор приложения `com.zabor.app`, имя исполняемого файла `ZABOR.exe`, имена ярлыков и установщика;
+- идентификатор приложения: действующий — `com.zabor.desktop` (задаётся в `package.json`, секция `build`, которая является активной конфигурацией сборки); исторический — `com.zabor.app`, указанный в [electron-builder.yml](electron-builder.yml), который в текущей сборке не применяется; имя исполняемого файла `ZABOR.exe`, имена ярлыков и установщика;
 - доменные имена и сетевые адреса официального сервиса ZABOR.
 
 Получение копии кода по GPL-3.0 **не даёт** права выпускать продукт под Знаками.
@@ -45,8 +45,8 @@
 
 Форк допустим — этого требует GPL-3.0 — но он обязан быть однозначно отличим от официального продукта. Перед публикацией производной версии необходимо:
 
-1. заменить `productName`, `executableName` и `shortcutName` в [electron-builder.yml](electron-builder.yml);
-2. заменить `appId` на собственный идентификатор, отличный от `com.zabor.app`;
+1. заменить `productName`, `executableName` и `shortcutName` в активной конфигурации сборки — секция `build` файла [package.json](package.json), а также в [electron-builder.yml](electron-builder.yml), если он используется;
+2. заменить `appId` на собственный идентификатор, отличный от действующего `com.zabor.desktop` и исторического `com.zabor.app`;
 3. заменить `name` в [package.json](package.json);
 4. заменить файлы `build/icon.ico` и `resources/icon.png` собственными изображениями;
 5. убрать Знаки из интерфейса, заголовка окна, экрана загрузки и текстов локализации;
@@ -79,7 +79,7 @@ The following are owned by the copyright holder (vnkdevelop) and are **outside t
 - the word mark **ZABOR** in any spelling, case or transliteration (ZABOR, Zabor, zabor, ЗАБОР, Забор);
 - the application logo and icon, including `build/icon.ico` and `resources/icon.png`;
 - branded interface imagery in the `docs/images/` directory;
-- the application identifier `com.zabor.app`, the executable name `ZABOR.exe`, and shortcut and installer names;
+- the application identifier: the effective one is `com.zabor.desktop` (set in `package.json`, section `build`, which is the active build configuration); the historical one is `com.zabor.app`, set in [electron-builder.yml](electron-builder.yml), which is not applied by the current build; the executable name `ZABOR.exe`, and shortcut and installer names;
 - domain names and network addresses of the official ZABOR service.
 
 Receiving a copy of the code under GPL-3.0 does **not** grant permission to ship a product under the Marks.
@@ -108,8 +108,8 @@ Without prior written consent of the copyright holder, you may not:
 
 Forking is permitted — GPL-3.0 requires it — but a fork must be unambiguously distinguishable from the official product. Before publishing a derivative you must:
 
-1. replace `productName`, `executableName` and `shortcutName` in [electron-builder.yml](electron-builder.yml);
-2. replace `appId` with your own identifier, different from `com.zabor.app`;
+1. replace `productName`, `executableName` and `shortcutName` in the active build configuration — the `build` section of [package.json](package.json) — and also in [electron-builder.yml](electron-builder.yml) if that file is used;
+2. replace `appId` with your own identifier, different from the effective `com.zabor.desktop` and the historical `com.zabor.app`;
 3. replace `name` in [package.json](package.json);
 4. replace `build/icon.ico` and `resources/icon.png` with your own artwork;
 5. remove the Marks from the interface, window title, splash screen and localization files;

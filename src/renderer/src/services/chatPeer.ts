@@ -1,7 +1,7 @@
 import { useAppStore } from '../store/useAppStore';
 import { useChatStore } from '../store/useChatStore';
 import { loadPending } from '../chat/chatDb';
-import type { ChatChunkHeader, ChatControlPacket, ChatMessage, PickedChatFile } from '../chat/types';
+import type { ChatChunkHeader, ChatControlPacket, ChatMessage, ChatWireMessage, PickedChatFile } from '../chat/types';
 import { chatPublicKey, decryptChatPayload, deriveChatKey, encryptChatPayload } from '../chat/chatCrypto';
 
 const CHAT_SDP_PREFIX = 'zabor-chat:';
@@ -321,7 +321,7 @@ class ChatPeerManager {
   private async createPeer(friendId: string, initiator: boolean): Promise<RTCPeerConnection> {
     this.disconnect(friendId);
     await this.refreshIce();
-    const pc = new RTCPeerConnection({ ...this.iceConfig, iceCandidatePoolSize: 4 });
+    const pc = new RTCPeerConnection({ ...this.iceConfig, bundlePolicy: 'max-bundle', iceCandidatePoolSize: 4 });
     this.peers.set(friendId, pc);
     pc.onicecandidate = event => {
       if (!event.candidate) return;
@@ -468,7 +468,8 @@ class ChatPeerManager {
       return;
     }
     if (packet.type === 'ack-through' && packet.sequence) {
-      const ids = (useChatStore.getState().messages[friendId] ?? []).filter(message => message.senderId === ownerId && message.sequence <= packet.sequence && message.delivery !== 'read').map(message => message.id);
+      const throughSequence = packet.sequence;
+      const ids = (useChatStore.getState().messages[friendId] ?? []).filter(message => message.senderId === ownerId && message.sequence <= throughSequence && message.delivery !== 'read').map(message => message.id);
       ids.forEach(messageId => this.clearDeliveryRetry(messageId));
       await useChatStore.getState().updateDeliveries(ownerId, friendId, ids, 'delivered');
       return;
@@ -478,7 +479,8 @@ class ChatPeerManager {
       return;
     }
     if (packet.type === 'read-through' && packet.sequence) {
-      const ids = (useChatStore.getState().messages[friendId] ?? []).filter(message => message.senderId === ownerId && message.sequence <= packet.sequence).map(message => message.id);
+      const throughSequence = packet.sequence;
+      const ids = (useChatStore.getState().messages[friendId] ?? []).filter(message => message.senderId === ownerId && message.sequence <= throughSequence).map(message => message.id);
       await useChatStore.getState().updateDeliveries(ownerId, friendId, ids, 'read');
       return;
     }
@@ -608,20 +610,24 @@ class ChatPeerManager {
     await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: committed.storedName, transferState: 'available', progress: 1 } });
   }
 
+  private toWire(message: ChatMessage): ChatWireMessage {
+    return {
+      id: message.id,
+      senderId: message.senderId,
+      targetId: message.targetId,
+      kind: message.kind,
+      text: message.text,
+      createdAt: message.createdAt,
+      sequence: message.sequence,
+      file: message.file ? { name: message.file.name, size: message.file.size, sha256: message.file.sha256 } : null
+    };
+  }
+
   private async sendMessage(message: ChatMessage): Promise<void> {
     if (!this.isFriend(message.targetId)) return;
     const packet = {
       type: 'message',
-      message: {
-        id: message.id,
-        senderId: message.senderId,
-        targetId: message.targetId,
-        kind: message.kind,
-        text: message.text,
-        createdAt: message.createdAt,
-        sequence: message.sequence,
-        file: message.file ? { name: message.file.name, size: message.file.size, sha256: message.file.sha256 } : null
-      }
+      message: this.toWire(message)
     } satisfies Omit<ChatControlPacket, 'version' | 'senderId' | 'targetId'>;
     const fallbackTimer = message.kind === 'text' ? setTimeout(() => void this.sendFallback(message.targetId, packet, message.id), FALLBACK_DELAY_MS) : null;
     const sent = await this.sendControl(message.targetId, packet);

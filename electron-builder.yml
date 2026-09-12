@@ -13,6 +13,30 @@ files:
   - '!{.eslintignore,.eslintrc.*,.prettierrc.*,dev-app-update.yml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 
+extraResources:
+  - from: LICENSE
+    to: legal/LICENSE
+  - from: THIRD-PARTY-NOTICES.md
+    to: legal/THIRD-PARTY-NOTICES.md
+  - from: TERMS.md
+    to: legal/TERMS.md
+  - from: PRIVACY.md
+    to: legal/PRIVACY.md
+  - from: ACCEPTABLE-USE.md
+    to: legal/ACCEPTABLE-USE.md
+  - from: CRYPTO-NOTICE.md
+    to: legal/CRYPTO-NOTICE.md
+  - from: SECURITY.md
+    to: legal/SECURITY.md
+  - from: TRADEMARK.md
+    to: legal/TRADEMARK.md
+  - from: docs/chat-data-flow.md
+    to: legal/docs/chat-data-flow.md
+  - from: docs/legal-requests.md
+    to: legal/docs/legal-requests.md
+  - from: docs/content-complaints.md
+    to: legal/docs/content-complaints.md
+
 win:
   executableName: ZABOR
   icon: build/icon.ico

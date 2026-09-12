@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { DownloadSimple, File, Paperclip, PaperPlaneRight, Trash, Copy, Broom, PhoneCall, X } from '@phosphor-icons/react';
+import { DownloadSimple, File, Paperclip, PaperPlaneRight, Trash, Copy, Broom, PhoneCall, X, Info } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { User } from '../../store/useAppStore';
 import { useChatStore } from '../../store/useChatStore';
@@ -13,6 +13,8 @@ interface ChatPanelProps {
   onCall: () => void;
 }
 
+const EMPTY_MESSAGES: ChatMessage[] = [];
+
 function formatSize(bytes: number, unit: (key: string) => string): string {
   if (bytes < 1024) return `${bytes} ${unit('chat.units.b')}`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} ${unit('chat.units.kb')}`;
@@ -23,7 +25,7 @@ function formatSize(bytes: number, unit: (key: string) => string): string {
 export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
   const { t } = useTranslation();
   const storedMessages = useChatStore(state => state.messages[friend.id]);
-  const messages = storedMessages ?? [];
+  const messages = storedMessages ?? EMPTY_MESSAGES;
   const connected = useChatStore(state => state.connections[friend.id] ?? false);
   const [value, setValue] = useState('');
   const [dragging, setDragging] = useState(false);
@@ -45,7 +47,7 @@ export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
       document.removeEventListener('visibilitychange', markRead);
       window.removeEventListener('focus', markRead);
     };
-  }, [friend.id, messages]);
+  }, [friend.id, storedMessages]);
   useEffect(() => {
     if (!menu) return;
     const safeMargin = 32;
@@ -118,7 +120,13 @@ export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
   return (
     <div className="absolute inset-3 z-[80] bg-panelBg border border-white/[0.07] border-t-white/[0.14] rounded-panel flex flex-col overflow-hidden animate-fade-in" onDragEnter={handleDragEnter} onDragOver={event => event.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}>
       <div className="h-16 px-4 grid grid-cols-[40px_minmax(0,1fr)_40px] items-center gap-3 border-b border-white/[0.07] shrink-0">
-        <div />
+        <div className="group relative flex items-center justify-center" aria-label={t('chat.information')}>
+          <Info weight="bold" size={18} className="text-white/30 transition-colors group-hover:text-white/70" />
+          <div role="tooltip" className="pointer-events-none absolute left-0 top-[calc(100%+12px)] z-[100] w-64 rounded-[14px] border border-white/[0.07] border-t-white/[0.14] bg-panelBg/95 p-3 text-left opacity-0 backdrop-blur-xl transition-opacity group-hover:opacity-100">
+            <div className="text-sm font-medium text-white">{t('chat.retentionHint')}</div>
+            <div className="mt-2 text-xs text-textMuted">{t('chat.encryptionHint')}</div>
+          </div>
+        </div>
         <div className="min-w-0 text-center">
           <div className="font-bold text-white truncate">{friend.displayName}</div>
           <div className="text-xs text-textMuted truncate">{status}</div>

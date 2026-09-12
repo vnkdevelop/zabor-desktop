@@ -418,9 +418,11 @@ export class WebRTCManager {
   private audioElements: Map<string, HTMLAudioElement> = new Map()
   private lastPacketsLost: Map<string, number> = new Map()
   private lastPacketsSent: Map<string, number> = new Map()
+  private lastFramesDropped: Map<string, number> = new Map()
   private lossLadderStep: Map<string, number> = new Map()
   private lossBreachCount: Map<string, number> = new Map()
   private lossCleanCount: Map<string, number> = new Map()
+  private lossBaselineRtt: Map<string, number> = new Map()
   private appliedVideoProfiles: Map<string, string> = new Map()
 
   private pendingCandidates: Map<string, RTCIceCandidateInit[]> = new Map()
@@ -3445,7 +3447,7 @@ export class WebRTCManager {
             if (!isCamera) {
               const params = sender.getParameters()
               if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
-              params.degradationPreference = 'maintain-resolution'
+              params.degradationPreference = 'maintain-framerate'
               params.encodings[0].maxBitrate = quality === 'high' ? 6000000 : 2500000
               params.encodings[0].maxFramerate = quality === 'high' ? 60 : 30
               params.encodings[0].networkPriority = 'high'
@@ -3506,9 +3508,11 @@ export class WebRTCManager {
 
     this.lastPacketsLost.clear()
     this.lastPacketsSent.clear()
+    this.lastFramesDropped.clear()
     this.lossLadderStep.clear()
     this.lossBreachCount.clear()
     this.lossCleanCount.clear()
+    this.lossBaselineRtt.clear()
     this.appliedVideoProfiles.clear()
     this.viewerStates.clear()
   }
@@ -3692,14 +3696,14 @@ export class WebRTCManager {
 
   private static readonly VIDEO_LADDER = [
     { scale: 1.0, bitrateHigh: 6000000, bitrateLow: 2500000, fpsHigh: 60, fpsLow: 30 },
-    { scale: 1.0, bitrateHigh: 3000000, bitrateLow: 1200000, fpsHigh: 60, fpsLow: 30 },
-    { scale: 1.0, bitrateHigh: 1800000, bitrateLow: 700000, fpsHigh: 30, fpsLow: 20 },
-    { scale: 2.0, bitrateHigh: 800000, bitrateLow: 400000, fpsHigh: 20, fpsLow: 15 }
+    { scale: 1.0, bitrateHigh: 3500000, bitrateLow: 1500000, fpsHigh: 60, fpsLow: 30 },
+    { scale: 1.5, bitrateHigh: 2000000, bitrateLow: 1000000, fpsHigh: 60, fpsLow: 30 },
+    { scale: 2.0, bitrateHigh: 1200000, bitrateLow: 600000, fpsHigh: 30, fpsLow: 24 }
   ]
 
   private static readonly PREVIEW_VIDEO_PROFILE = { scale: 4.0, bitrate: 150000, framerate: 2 }
   private static readonly LADDER_BREACHES_TO_DROP = 2
-  private static readonly LADDER_CLEAN_TO_RECOVER = 4
+  private static readonly LADDER_CLEAN_TO_RECOVER = 3
 
   private videoProfileFor(userId: string) {
     if (this.viewerStates.get(userId) === 'preview') return WebRTCManager.PREVIEW_VIDEO_PROFILE
@@ -3727,7 +3731,7 @@ export class WebRTCManager {
     try {
       const params = sender.getParameters()
       if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
-      params.degradationPreference = 'maintain-resolution'
+      params.degradationPreference = 'maintain-framerate'
       params.encodings[0].priority = 'medium'
       params.encodings[0].networkPriority = 'high'
       params.encodings[0].scaleResolutionDownBy = profile.scale
@@ -3739,10 +3743,17 @@ export class WebRTCManager {
   }
 
   private updateLossLadder(userId: string, fractionLost: number, rtt: number) {
+    const previousBaseline = this.lossBaselineRtt.get(userId)
+    const baseline = previousBaseline === undefined || (rtt > 0 && rtt < previousBaseline)
+      ? rtt
+      : previousBaseline * 0.98 + rtt * 0.02
+    if (rtt > 0) this.lossBaselineRtt.set(userId, baseline)
+    const rttExcess = rtt > 0 && baseline > 0 ? Math.max(0, rtt - baseline) : 0
+
     const desiredStep =
-      fractionLost > 0.05 || rtt > 0.28 ? 3
-        : fractionLost > 0.02 || rtt > 0.18 ? 2
-          : fractionLost > 0.008 || rtt > 0.10 ? 1
+      fractionLost > 0.05 || rttExcess > 0.20 ? 3
+        : fractionLost > 0.02 || rttExcess > 0.12 ? 2
+          : fractionLost > 0.008 || rttExcess > 0.06 ? 1
             : 0
     const currentStep = this.lossLadderStep.get(userId) ?? 0
 
@@ -3815,7 +3826,10 @@ export class WebRTCManager {
           this.updateLossLadder(userId, fractionLost, rtt)
           await this.applyVideoProfile(userId, pc)
 
-          if (framesDropped > 50) {
+          const previousDropped = this.lastFramesDropped.get(userId) ?? framesDropped
+          this.lastFramesDropped.set(userId, framesDropped)
+          const droppedDelta = Math.max(0, framesDropped - previousDropped)
+          if (droppedDelta > 30) {
             const store = useAppStore.getState()
             const toastMsg = i18n.t('toasts.streamPerfIssue', 'проблемы с производительностью, рекомендуется снизить качество')
             store.setSystemToast(toastMsg)
@@ -3910,7 +3924,7 @@ export class WebRTCManager {
             if (!isCamera) {
               const params = sender.getParameters()
               if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
-              params.degradationPreference = 'maintain-resolution'
+              params.degradationPreference = 'maintain-framerate'
               params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
               params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
               params.encodings[0].networkPriority = 'high'
@@ -3989,7 +4003,7 @@ export class WebRTCManager {
               if (!isCamera) {
                 const params = sender.getParameters()
                 if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
-                params.degradationPreference = 'maintain-resolution'
+                params.degradationPreference = 'maintain-framerate'
                 params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
                 params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
                 params.encodings[0].networkPriority = 'high'
@@ -4166,9 +4180,11 @@ export class WebRTCManager {
     this.clearVAD(userId)
     this.lastPacketsLost.delete(userId)
     this.lastPacketsSent.delete(userId)
+    this.lastFramesDropped.delete(userId)
     this.lossLadderStep.delete(userId)
     this.lossBreachCount.delete(userId)
     this.lossCleanCount.delete(userId)
+    this.lossBaselineRtt.delete(userId)
     this.appliedVideoProfiles.delete(userId)
     this.viewerStates.delete(userId)
     this.reportedViewStates.delete(userId)

@@ -12,6 +12,7 @@ Thumbs.db
 *.swo
 .env
 .env.*
+!.env.example
 *.pfx
 *.p12
 *.log

@@ -61,16 +61,18 @@ export async function loadPending(ownerId: string): Promise<ChatMessage[]> {
 
 export async function pruneExpired(ownerId: string): Promise<void> {
   const db = await openDb();
-  const tx = db.transaction(STORE_NAME, 'readwrite');
-  const store = tx.objectStore(STORE_NAME);
-  const index = store.index('ownerCreatedAt');
+  const readTx = db.transaction(STORE_NAME, 'readonly');
+  const index = readTx.objectStore(STORE_NAME).index('ownerCreatedAt');
   const range = IDBKeyRange.bound([ownerId, 0], [ownerId, Date.now() - RETENTION_MS]);
   const expired = await requestValue(index.getAll(range));
+  if (expired.length === 0) return;
   const storedNames = expired.flatMap(message => message.file?.storedName ? [message.file.storedName] : []);
   const uniqueStoredNames = [...new Set(storedNames)];
   if (uniqueStoredNames.length) {
     const removed = await window.windowControls.chatFileDeleteMany(uniqueStoredNames);
     if (removed !== uniqueStoredNames.length) throw new Error('chat-file-cleanup-failed');
   }
-  await Promise.all(expired.map(message => requestValue(store.delete([ownerId, message.id]))));
+  const deleteTx = db.transaction(STORE_NAME, 'readwrite');
+  const deleteStore = deleteTx.objectStore(STORE_NAME);
+  await Promise.all(expired.map(message => requestValue(deleteStore.delete([ownerId, message.id]))));
 }

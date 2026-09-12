@@ -1,6 +1,6 @@
 {
   "name": "zabor-desktop",
-  "version": "3.5.7",
+  "version": "3.5.8",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
   "author": "vnkdevelop",
@@ -28,6 +28,46 @@
       {
         "from": "THIRD-PARTY-NOTICES.md",
         "to": "THIRD-PARTY-NOTICES.md"
+      },
+      {
+        "from": "LICENSE",
+        "to": "legal/LICENSE"
+      },
+      {
+        "from": "TERMS.md",
+        "to": "legal/TERMS.md"
+      },
+      {
+        "from": "PRIVACY.md",
+        "to": "legal/PRIVACY.md"
+      },
+      {
+        "from": "ACCEPTABLE-USE.md",
+        "to": "legal/ACCEPTABLE-USE.md"
+      },
+      {
+        "from": "CRYPTO-NOTICE.md",
+        "to": "legal/CRYPTO-NOTICE.md"
+      },
+      {
+        "from": "SECURITY.md",
+        "to": "legal/SECURITY.md"
+      },
+      {
+        "from": "TRADEMARK.md",
+        "to": "legal/TRADEMARK.md"
+      },
+      {
+        "from": "docs/chat-data-flow.md",
+        "to": "legal/docs/chat-data-flow.md"
+      },
+      {
+        "from": "docs/legal-requests.md",
+        "to": "legal/docs/legal-requests.md"
+      },
+      {
+        "from": "docs/content-complaints.md",
+        "to": "legal/docs/content-complaints.md"
       }
     ],
     "copyright": "Copyright © 2026 ZABOR",

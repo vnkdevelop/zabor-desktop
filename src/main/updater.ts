@@ -261,7 +261,7 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
         const elevatePath = existsSync(prodElevate) ? prodElevate : existsSync(devElevate) ? devElevate : null;
 
         if (elevatePath) {
-          const child = spawn(elevatePath, [installerPath, '--updated'], {
+          const child = spawn(elevatePath, [installerPath, '/S', '--updated'], {
             detached: true,
             stdio: 'ignore',
             windowsHide: true
@@ -269,7 +269,7 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
           child.on('error', () => {});
           child.unref();
         } else {
-          const psScript = `Start-Process -FilePath "${installerPath.replace(/"/g, '`"')}" -ArgumentList '--updated' -Verb RunAs`;
+          const psScript = `Start-Process -FilePath "${installerPath.replace(/"/g, '`"')}" -ArgumentList '/S','--updated' -Verb RunAs`;
           const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psScript], {
             detached: true,
             stdio: 'ignore',

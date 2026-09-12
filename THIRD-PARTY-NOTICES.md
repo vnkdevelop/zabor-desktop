@@ -62,6 +62,29 @@ refuses to build if the bytes change.
 - Licence: MIT, copyright (c) Microsoft Corporation
 - Upstream: <https://github.com/microsoft/onnxruntime>
 
+## External services used at runtime
+
+These are not bundled with the application; they are contacted over the network when
+connections are established. They are listed here because they receive participants'
+network addresses, which is disclosed in [PRIVACY.md](PRIVACY.md) section 7.
+
+## STUN
+
+- Default STUN servers configured in the client: `stun.l.google.com:19302`,
+  `stun1.l.google.com:19302`, and `stun.cloudflare.com:3478`
+- Operated by Google LLC and Cloudflare, Inc. respectively
+- Purpose: discovering the public network address of a peer in order to establish a
+  direct WebRTC connection
+- The client also derives additional STUN servers from the TURN servers issued by the
+  ZABOR server, when available
+
+## TURN
+
+- TURN credentials and server addresses are issued at runtime by the ZABOR backend
+  server; no TURN provider is hard-coded in this repository
+- Purpose: relaying encrypted traffic when a direct connection cannot be established
+- The relaying node necessarily sees participants' network addresses
+
 ## MIT licence text
 
 Applies to every component above that is listed as MIT, with the copyright notice given in

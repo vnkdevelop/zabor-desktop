@@ -111,7 +111,11 @@
     "clearFile": "clear file",
     "deleteMessage": "delete message",
     "delivery": { "pending": "pending", "sent": "sent", "delivered": "delivered", "read": "read", "failed": "failed" },
-    "units": { "b": "b", "kb": "kb", "mb": "mb", "gb": "gb" }
+    "units": { "b": "b", "kb": "kb", "mb": "mb", "gb": "gb" },
+    "encryption": "encryption",
+    "information": "chat information",
+    "retentionHint": "chats are cleared every 14 days",
+    "encryptionHint": "protected with end-to-end encryption"
   },
   "auth": {
     "login": "login",
