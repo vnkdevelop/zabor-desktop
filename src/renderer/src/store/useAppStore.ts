@@ -154,6 +154,7 @@ interface AppState {
     userVolume: boolean;
     incomingCall: boolean;
     channelFull: boolean;
+    channelInviteFull: boolean;
     channelMembers: boolean;
     kickConfirm: boolean;
     channelSwitch: boolean;
@@ -469,6 +470,7 @@ export const useAppStore = create<AppState>((set) => ({
     userVolume: false,
     incomingCall: false,
     channelFull: false,
+    channelInviteFull: false,
     channelMembers: false,
     kickConfirm: false,
     channelSwitch: false,
@@ -504,6 +506,7 @@ export const useAppStore = create<AppState>((set) => ({
       userVolume: false,
       incomingCall: false,
       channelFull: false,
+      channelInviteFull: false,
       channelMembers: false,
       kickConfirm: false,
       channelSwitch: false,

@@ -404,6 +404,7 @@ class ChatPeerManager {
   private async receiveControl(friendId: string, packet: ChatControlPacket): Promise<void> {
     const ownerId = this.ownerId();
     if (!ownerId) return;
+    await this.ensureLoaded(friendId);
     if (packet.type === 'key' && packet.publicKey) {
       try {
         const fingerprint = JSON.stringify({ kty: packet.publicKey.kty, crv: packet.publicKey.crv, x: packet.publicKey.x, y: packet.publicKey.y });
@@ -822,6 +823,14 @@ class ChatPeerManager {
 
   private findMessage(friendId: string, messageId: string): ChatMessage | undefined {
     return (useChatStore.getState().messages[friendId] ?? []).find(message => message.id === messageId);
+  }
+
+  private async ensureLoaded(friendId: string): Promise<void> {
+    const ownerId = this.ownerId();
+    if (!ownerId) return;
+    try {
+      await useChatStore.getState().load(ownerId, friendId);
+    } catch { }
   }
 
   private ownerId(): string | null {

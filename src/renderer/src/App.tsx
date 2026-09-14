@@ -31,6 +31,13 @@ import { useChatStore } from './store/useChatStore';
 const lastNonZeroUserVolumes = new Map<string, number>();
 const lastNonZeroVolumes = new Map<string, number>();
 
+const DEFAULT_CHANNEL_MAX_USERS = 8;
+
+const getChannelMaxUsers = (ch?: VoiceChannel | null): number => {
+  const max = ch?.maxUsers;
+  return typeof max === 'number' && max > 0 ? max : DEFAULT_CHANNEL_MAX_USERS;
+};
+
 const VoiceUserCard = memo(({ user, cardSize, isIdle, t, handleContextMenu, webrtcConnections, currentUserId }: {
   user: User;
   cardSize: any;
@@ -384,6 +391,7 @@ export default function App() {
   const [sentInvites, setSentInvites] = useState<Set<string>>(new Set());
   const [inviteLoadingChannelId, setInviteLoadingChannelId] = useState<string | null>(null);
   const [isChannelMembersLoading, setIsChannelMembersLoading] = useState(false);
+  const [channelFullMax, setChannelFullMax] = useState(DEFAULT_CHANNEL_MAX_USERS);
   const inviteRequestIdRef = useRef(0);
   const membersRequestIdRef = useRef(0);
 
@@ -595,9 +603,10 @@ export default function App() {
   }, []);
 
   const deepWipeOnLogout = useCallback(async () => {
+    try { chatPeer.close(); } catch { }
     try {
       await window.windowControls.clearSession();
-      await window.windowControls.wipeAppData();
+      await window.windowControls.wipeAppData({ preserveChat: true });
     } catch { }
     await new Promise(r => setTimeout(r, 300));
   }, []);
@@ -841,6 +850,18 @@ export default function App() {
       (!query || f.displayName.toLowerCase().includes(query))
     );
   }, [inviteChannelId, store.channelMembersCache, store.friends, inviteFriendSearch]);
+
+  const membersCapacity = useMemo(() => {
+    const max = getChannelMaxUsers(store.selectedChannelForMembers);
+    const count = store.channelMembers.length;
+    return { count, max, isFull: count >= max };
+  }, [store.selectedChannelForMembers, store.channelMembers.length]);
+
+  const inviteCapacity = useMemo(() => {
+    const max = getChannelMaxUsers(store.selectedChannelForInvite);
+    const count = inviteChannelId ? (store.channelMembersCache[inviteChannelId] || []).length : 0;
+    return { count, max, isFull: count >= max };
+  }, [store.selectedChannelForInvite, inviteChannelId, store.channelMembersCache]);
 
   const attemptAutoLogin = useCallback(async () => {
     if (autoLoginInFlightRef.current) return;
@@ -1668,9 +1689,14 @@ export default function App() {
     signalRService.updateChannel(id, name);
   }, [editChannelId, editChannelName, validateName, closeAndResetModals]);
 
-  const reportChannelJoinStatus = useCallback((status: 'ok' | 'network' | 'mic_failed' | 'full') => {
+  const reportChannelJoinStatus = useCallback((status: 'ok' | 'network' | 'mic_failed' | 'full', channelId?: string) => {
     if (status === 'ok' || status === 'mic_failed') return;
-    if (status === 'full') { store.setModal('channelFull', true); return; }
+    if (status === 'full') {
+      const ch = useAppStore.getState().channels.find(c => c.id === channelId);
+      setChannelFullMax(getChannelMaxUsers(ch));
+      store.setModal('channelFull', true);
+      return;
+    }
     if (useAppStore.getState().isJoiningChannel) return;
     const message = t('toasts.channelJoinFailed', 'не удалось войти в канал: сервер не ответил. попробуйте снова.');
     store.setSystemToast(message);
@@ -1686,7 +1712,7 @@ export default function App() {
       store.setPendingChannelSwitch(channelId); store.setModal('channelSwitch', true); return;
     }
     const status = await signalRService.joinChannel(channelId);
-    reportChannelJoinStatus(status);
+    reportChannelJoinStatus(status, channelId);
   }, [store.currentChannelId, store.currentCallUser, reportChannelJoinStatus]);
 
   const confirmChannelSwitch = useCallback(async () => {
@@ -1703,7 +1729,7 @@ export default function App() {
       } else {
         status = await signalRService.switchChannel(targetId);
       }
-      reportChannelJoinStatus(status);
+      reportChannelJoinStatus(status, targetId);
     } finally {
       setIsSwitchingChannel(false);
     }
@@ -1734,7 +1760,7 @@ export default function App() {
       store.setPendingChannelSwitch(channelId); store.setModal('channelSwitch', true); return;
     }
     const status = await signalRService.joinChannel(channelId);
-    reportChannelJoinStatus(status);
+    reportChannelJoinStatus(status, channelId);
   }, [store.currentChannelId, store.currentCallUser, reportChannelJoinStatus]);
 
   const handleDeclineChannelInvite = useCallback((channelId: string) => {
@@ -1745,6 +1771,12 @@ export default function App() {
     const ch = store.selectedChannelForInvite;
     if (!ch) return;
     if (store.currentChannelId !== ch.id) return;
+    const members = useAppStore.getState().channelMembersCache[ch.id] || [];
+    if (members.length >= getChannelMaxUsers(ch)) {
+      store.setModal('inviteToChannel', false);
+      store.setModal('channelInviteFull', true);
+      return;
+    }
     addSentInvite(friendId);
     const sent = await signalRService.sendChannelInvite(friendId, ch.id, ch.name);
     if (!sent) removeSentInvite(friendId);
@@ -1784,6 +1816,10 @@ export default function App() {
       const latestStore = useAppStore.getState();
       if (latestStore.currentChannelId !== ch.id) return;
       latestStore.setChannelMembersCache(ch.id, members);
+      if (members.length >= getChannelMaxUsers(ch)) {
+        latestStore.setModal('channelInviteFull', true);
+        return;
+      }
       latestStore.setModal('inviteToChannel', true);
     } catch (error) {
       console.error('Failed to prepare channel invite list', error);
@@ -3648,13 +3684,19 @@ export default function App() {
                 <span className="flex-1 font-semibold text-white truncate">{f.displayName}</span>
                 <button
                   onClick={() => handleInviteToChannel(f.id)}
-                  disabled={sentInvites.has(f.id)}
+                  disabled={sentInvites.has(f.id) || inviteCapacity.isFull}
                   className={`py-2 px-4 rounded-xl text-sm font-bold transition-all shrink-0 ${sentInvites.has(f.id)
                     ? 'bg-success/20 text-success cursor-default'
-                    : 'bg-success hover:bg-green-600 text-white hover:opacity-90'
+                    : inviteCapacity.isFull
+                      ? 'bg-surface/70 text-textMuted cursor-not-allowed'
+                      : 'bg-success hover:bg-green-600 text-white hover:opacity-90'
                     }`}
                 >
-                  {sentInvites.has(f.id) ? t('modals.inviteToChannel.sent', '✓ отправлено') : t('common.invite', 'пригласить')}
+                  {sentInvites.has(f.id)
+                    ? t('modals.inviteToChannel.sent', '✓ отправлено')
+                    : inviteCapacity.isFull
+                      ? t('modals.inviteToChannel.full', 'канал заполнен')
+                      : t('common.invite', 'пригласить')}
                 </button>
               </div>
             ))}
@@ -3669,7 +3711,13 @@ export default function App() {
       {renderModal('channelMembers',
         <div className="glass-modal p-8 w-[420px]">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-white flex items-center gap-3"><Users weight="bold" size={24} /> {t('modals.members.title', 'участники')}</h2>
+            <div className="flex items-center gap-3 min-w-0">
+              <h2 className="text-xl font-bold text-white flex items-center gap-3"><Users weight="bold" size={24} /> {t('modals.members.title', 'участники')}</h2>
+              <span className="text-xs font-bold bg-surface/70 px-2.5 py-1 rounded-full shrink-0">
+                <span className="text-white">{membersCapacity.count}</span>
+                <span className="text-textMuted"> / {membersCapacity.max}</span>
+              </span>
+            </div>
             <button onClick={closeAndResetModals} className="group text-textMuted hover:text-white transition-colors duration-200 p-1.5 rounded-lg hover:bg-surface/70"><X weight="bold" size={24} /></button>
           </div>
           <p className="text-textMuted text-sm mb-6 truncate">{store.selectedChannelForMembers?.name}</p>
@@ -3721,8 +3769,17 @@ export default function App() {
         <div className="glass-modal p-8 w-[400px] text-center border-danger/30">
           <div className="w-20 h-20 bg-danger/20 rounded-full flex items-center justify-center mx-auto mb-4"><Users weight="bold" size={40} className="text-danger" /></div>
           <h2 className="text-xl font-bold mb-4 text-white">{t('modals.channelFull.title', 'канал переполнен')}</h2>
-          <p className="text-textMuted mb-8">{t('modals.channelFull.desc', 'максимальное количество участников в канале — 10 человек. подождите, пока кто-то выйдет.')}</p>
+          <p className="text-textMuted mb-8">{t('modals.channelFull.desc', { max: channelFullMax })}</p>
           <button onClick={closeAndResetModals} className="w-full bg-surface/70 text-white py-3 rounded-xl font-bold hover:bg-surfaceHover/80 transition-colors">{t('modals.channelFull.gotIt', 'понятно')}</button>
+        </div>
+      )}
+
+      {renderModal('channelInviteFull',
+        <div className="glass-modal p-8 w-[400px] text-center border-warning/30">
+          <div className="w-20 h-20 bg-warning/20 rounded-full flex items-center justify-center mx-auto mb-4"><UserPlus weight="bold" size={40} className="text-warning" /></div>
+          <h2 className="text-xl font-bold mb-4 text-white">{t('modals.channelInviteFull.title', 'нельзя пригласить')}</h2>
+          <p className="text-textMuted mb-8">{t('modals.channelInviteFull.desc', { count: inviteCapacity.count, max: inviteCapacity.max })}</p>
+          <button onClick={closeAndResetModals} className="w-full bg-surface/70 text-white py-3 rounded-xl font-bold hover:bg-surfaceHover/80 transition-colors">{t('modals.channelInviteFull.gotIt', 'понятно')}</button>
         </div>
       )}
 

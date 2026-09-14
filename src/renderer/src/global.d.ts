@@ -45,7 +45,7 @@ declare global {
       maximize: () => void;
       close: () => void;
       quit: () => void;
-      wipeAppData: () => Promise<boolean>;
+      wipeAppData: (options?: { preserveChat?: boolean }) => Promise<boolean>;
       getUserDataPath: () => Promise<string>;
       loadSileroModel: () => Promise<Uint8Array>;
       loadDeepFilterAsset: (assetPath: string) => Promise<Uint8Array | null>;

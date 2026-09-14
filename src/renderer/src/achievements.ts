@@ -64,9 +64,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   {
     id: 'crowd',
     title: 'массовка',
-    description: 'быть в канале c 10 участниками',
+    description: 'быть в канале c 8 участниками',
     icon: '👥',
-    maxValue: 10,
+    maxValue: 8,
     statKey: 'maxUsersInChannel',
     category: 'voice'
   },

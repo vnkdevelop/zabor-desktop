@@ -217,7 +217,8 @@
       "searchPlaceholder": "search friends...",
       "noFriends": "no friends found",
       "sent": "✓ sent",
-      "alreadyMember": "already member"
+      "alreadyMember": "already member",
+      "full": "channel is full"
     },
     "members": {
       "title": "members",
@@ -225,7 +226,12 @@
     },
     "channelFull": {
       "title": "channel is full",
-      "desc": "maximum number of participants in the channel is 10 people. please wait until someone leaves.",
+      "desc": "maximum number of participants in the channel is {{max}}. please wait until someone leaves.",
+      "gotIt": "got it"
+    },
+    "channelInviteFull": {
+      "title": "can't invite",
+      "desc": "the channel already has {{count}} of {{max}} participants. free up a slot to invite someone else.",
       "gotIt": "got it"
     },
     "streamVolume": {
@@ -293,7 +299,7 @@
     },
     "crowd": {
       "title": "extra",
-      "description": "be in a channel with 10 participants"
+      "description": "be in a channel with 8 participants"
     },
     "collector": {
       "title": "collector",

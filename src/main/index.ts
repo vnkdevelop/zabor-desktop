@@ -571,7 +571,8 @@ app.whenReady().then(() => {
     requestQuit();
   });
 
-  ipcMain.handle('wipe-app-data', async () => {
+  ipcMain.handle('wipe-app-data', async (_event, options?: unknown) => {
+    const preserveChat = typeof options === 'object' && options !== null && (options as { preserveChat?: unknown }).preserveChat === true;
     const userDataPath = app.getPath('userData');
     const dirsToKill = [
       'Local Storage',
@@ -584,6 +585,7 @@ app.whenReady().then(() => {
       'blob_storage'
     ];
     for (const dir of dirsToKill) {
+      if (preserveChat && dir === 'IndexedDB') continue;
       const fullPath = join(userDataPath, dir);
       try {
         if (existsSync(fullPath)) {
@@ -591,14 +593,16 @@ app.whenReady().then(() => {
         }
       } catch {}
     }
-    try {
-      const chatFilesPath = join(userDataPath, 'chat-files');
-      if (existsSync(chatFilesPath)) rmSync(chatFilesPath, { recursive: true, force: true });
-    } catch {}
+    if (!preserveChat) {
+      try {
+        const chatFilesPath = join(userDataPath, 'chat-files');
+        if (existsSync(chatFilesPath)) rmSync(chatFilesPath, { recursive: true, force: true });
+      } catch {}
+    }
     try {
       if (mainWindow && !mainWindow.isDestroyed()) {
         const ses = mainWindow.webContents.session;
-        await ses.clearStorageData();
+        if (!preserveChat) await ses.clearStorageData();
         await ses.clearCache();
       }
     } catch {}
