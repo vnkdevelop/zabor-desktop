@@ -711,8 +711,56 @@ export default function App() {
     };
   }, []);
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerElRef = useRef<HTMLDivElement | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+
+  const updateContainerSize = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setContainerSize(prev => {
+        if (Math.abs(prev.width - rect.width) < 2 && Math.abs(prev.height - rect.height) < 2) return prev;
+        return { width: rect.width, height: rect.height };
+      });
+    }
+  }, []);
+
+  const containerRef = useCallback((el: HTMLDivElement | null) => {
+    containerElRef.current = el;
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+    if (!el) return;
+
+    updateContainerSize(el);
+
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(() => {
+        if (containerElRef.current) updateContainerSize(containerElRef.current);
+      });
+    });
+    observer.observe(el);
+    observerRef.current = observer;
+  }, [updateContainerSize]);
+
+  useEffect(() => {
+    const handleWinResize = () => {
+      if (containerElRef.current) {
+        updateContainerSize(containerElRef.current);
+      }
+    };
+    window.addEventListener('resize', handleWinResize);
+    return () => {
+      window.removeEventListener('resize', handleWinResize);
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+    };
+  }, [updateContainerSize]);
+
   const [streamRatio, setStreamRatio] = useState(16 / 9);
 
   useEffect(() => {
@@ -764,36 +812,7 @@ export default function App() {
     credentialsRef.current = { login, password };
   }, [login, password]);
 
-  useEffect(() => {
-    if (!containerRef.current) return;
 
-    let rafId: number | null = null;
-    const el = containerRef.current;
-
-    const measure = () => {
-      const rect = el.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        setContainerSize(prev => {
-          if (Math.abs(prev.width - rect.width) < 2 && Math.abs(prev.height - rect.height) < 2) return prev;
-          return { width: rect.width, height: rect.height };
-        });
-      }
-    };
-
-    measure();
-
-    const observer = new ResizeObserver(() => {
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(measure);
-    });
-
-    observer.observe(el);
-
-    return () => {
-      observer.disconnect();
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, [store.currentChannelId, store.currentCallUser?.id]);
 
   const getCardSize = (count: number, cw: number, ch: number) => {
     if (count === 0 || cw === 0 || ch === 0) return { w: 320, h: 180, avatarSize: 96 };
@@ -835,9 +854,11 @@ export default function App() {
   }, [store.voiceUsers, store.currentCallUser, store.currentUser?.id, store.currentUser?.isStreaming, store.remoteVideoStreams, showStreamPicker]);
 
   const cardSize = useMemo(() => {
-    const { w, h, avatarSize } = getCardSize(activeUserCount, containerSize.width, containerSize.height);
+    const effW = containerSize.width > 0 ? containerSize.width : Math.max(300, windowSize.width - 344 - 24);
+    const effH = containerSize.height > 0 ? containerSize.height : Math.max(200, windowSize.height - 36 - 120 - 24);
+    const { w, h, avatarSize } = getCardSize(activeUserCount, effW, effH);
     return { w, h, avatarSize };
-  }, [activeUserCount, containerSize.width, containerSize.height]);
+  }, [activeUserCount, containerSize.width, containerSize.height, windowSize.width, windowSize.height]);
 
   const inviteChannelId = store.selectedChannelForInvite?.id;
 
@@ -2831,8 +2852,12 @@ export default function App() {
 
                   if (activeStream) {
                     const sideItems = items.filter(item => item.id !== activeStream.id);
-                    const maxH = containerSize.height - 150;
-                    const maxW = containerSize.width;
+                    const hasSideItems = sideItems.length > 0;
+                    const bottomReserve = hasSideItems ? 122 : 0;
+                    const effW = containerSize.width > 0 ? containerSize.width : Math.max(300, windowSize.width - 344 - 24);
+                    const effH = containerSize.height > 0 ? containerSize.height : Math.max(200, windowSize.height - 36 - 120 - 24);
+                    const maxH = Math.max(100, effH - bottomReserve);
+                    const maxW = effW;
                     let streamW = maxW;
                     let streamH = streamW / streamRatio;
                     if (streamH > maxH) {
@@ -2841,10 +2866,10 @@ export default function App() {
                     }
 
                     return (
-                      <div ref={containerRef} className="w-full h-full flex flex-col items-center justify-between">
+                      <div ref={containerRef} className="w-full h-full flex flex-col items-center justify-center gap-3">
                         <div
                           style={{ width: `${streamW}px`, height: `${streamH}px` }}
-                          className="relative overflow-hidden flex items-center justify-center"
+                          className="relative overflow-hidden flex items-center justify-center shrink-0"
                         >
                           <StreamCard
                             user={activeStream.user}
@@ -2857,36 +2882,38 @@ export default function App() {
                             onRatioChange={setStreamRatio}
                           />
                         </div>
-                        <div className="w-full h-[120px] shrink-0 flex items-center justify-center gap-4 overflow-x-auto mt-4 px-4 pr-1">
-                          {sideItems.map(item => {
-                            if (item.type === 'user') {
-                              return (
-                                <CallUserCard
-                                  key={`call-${item.id}`}
-                                  currentCallUser={item.user}
-                                  callStatus={store.callStatus}
-                                  cardSize={{ w: 180, h: 101, avatarSize: 40 }}
-                                  webrtcConnections={store.webrtcConnections}
-                                  handleContextMenu={handleContextMenu}
-                                  t={t}
-                                  isIdle={isIdle}
-                                />
-                              );
-                            } else {
-                              return (
-                                <StreamCard
-                                  key={item.id}
-                                  user={item.user}
-                                  stream={item.stream}
-                                  cardSize={{ w: 180, h: 101 }}
-                                  isFocused={false}
-                                  onClick={() => store.setActiveStreamId(item.user.id)}
-                                  onContextMenu={e => handleContextMenu(e, 'stream', item.user)}
-                                />
-                              );
-                            }
-                          })}
-                        </div>
+                        {hasSideItems && (
+                          <div className="w-full h-[105px] shrink-0 flex items-center justify-center gap-4 overflow-x-auto px-4 pr-1">
+                            {sideItems.map(item => {
+                              if (item.type === 'user') {
+                                return (
+                                  <CallUserCard
+                                    key={`call-${item.id}`}
+                                    currentCallUser={item.user}
+                                    callStatus={store.callStatus}
+                                    cardSize={{ w: 180, h: 101, avatarSize: 40 }}
+                                    webrtcConnections={store.webrtcConnections}
+                                    handleContextMenu={handleContextMenu}
+                                    t={t}
+                                    isIdle={isIdle}
+                                  />
+                                );
+                              } else {
+                                return (
+                                  <StreamCard
+                                    key={item.id}
+                                    user={item.user}
+                                    stream={item.stream}
+                                    cardSize={{ w: 180, h: 101 }}
+                                    isFocused={false}
+                                    onClick={() => store.setActiveStreamId(item.user.id)}
+                                    onContextMenu={e => handleContextMenu(e, 'stream', item.user)}
+                                  />
+                                );
+                              }
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   }
@@ -3114,8 +3141,12 @@ export default function App() {
 
                   if (activeStream) {
                     const sideItems = items.filter(item => item.id !== activeStream.id);
-                    const maxH = containerSize.height - 150;
-                    const maxW = containerSize.width;
+                    const hasSideItems = sideItems.length > 0;
+                    const bottomReserve = hasSideItems ? 122 : 0;
+                    const effW = containerSize.width > 0 ? containerSize.width : Math.max(300, windowSize.width - 344 - 24);
+                    const effH = containerSize.height > 0 ? containerSize.height : Math.max(200, windowSize.height - 36 - 120 - 24);
+                    const maxH = Math.max(100, effH - bottomReserve);
+                    const maxW = effW;
                     let streamW = maxW;
                     let streamH = streamW / streamRatio;
                     if (streamH > maxH) {
@@ -3124,10 +3155,10 @@ export default function App() {
                     }
 
                     return (
-                      <div ref={containerRef} className="w-full h-full flex flex-col items-center justify-between">
+                      <div ref={containerRef} className="w-full h-full flex flex-col items-center justify-center gap-3">
                         <div
                           style={{ width: `${streamW}px`, height: `${streamH}px` }}
-                          className="relative overflow-hidden flex items-center justify-center"
+                          className="relative overflow-hidden flex items-center justify-center shrink-0"
                         >
                           <StreamCard
                             user={activeStream.user}
@@ -3140,36 +3171,38 @@ export default function App() {
                             onRatioChange={setStreamRatio}
                           />
                         </div>
-                        <div className="w-full h-[120px] shrink-0 flex items-center justify-center gap-4 overflow-x-auto mt-4 px-4 pr-1">
-                          {sideItems.map(item => {
-                            if (item.type === 'user') {
-                              return (
-                                <VoiceUserCard
-                                  key={`${store.currentChannelId}-${item.id}`}
-                                  user={item.user}
-                                  cardSize={{ w: 180, h: 101, avatarSize: 40 }}
-                                  isIdle={isIdle}
-                                  t={t}
-                                  handleContextMenu={handleContextMenu}
-                                  webrtcConnections={store.webrtcConnections}
-                                  currentUserId={store.currentUser?.id}
-                                />
-                              );
-                            } else {
-                              return (
-                                <StreamCard
-                                  key={item.id}
-                                  user={item.user}
-                                  stream={item.stream}
-                                  cardSize={{ w: 180, h: 101 }}
-                                  isFocused={false}
-                                  onClick={() => store.setActiveStreamId(item.user.id)}
-                                  onContextMenu={e => handleContextMenu(e, 'stream', item.user)}
-                                />
-                              );
-                            }
-                          })}
-                        </div>
+                        {hasSideItems && (
+                          <div className="w-full h-[105px] shrink-0 flex items-center justify-center gap-4 overflow-x-auto px-4 pr-1">
+                            {sideItems.map(item => {
+                              if (item.type === 'user') {
+                                return (
+                                  <VoiceUserCard
+                                    key={`${store.currentChannelId}-${item.id}`}
+                                    user={item.user}
+                                    cardSize={{ w: 180, h: 101, avatarSize: 40 }}
+                                    isIdle={isIdle}
+                                    t={t}
+                                    handleContextMenu={handleContextMenu}
+                                    webrtcConnections={store.webrtcConnections}
+                                    currentUserId={store.currentUser?.id}
+                                  />
+                                );
+                              } else {
+                                return (
+                                  <StreamCard
+                                    key={item.id}
+                                    user={item.user}
+                                    stream={item.stream}
+                                    cardSize={{ w: 180, h: 101 }}
+                                    isFocused={false}
+                                    onClick={() => store.setActiveStreamId(item.user.id)}
+                                    onContextMenu={e => handleContextMenu(e, 'stream', item.user)}
+                                  />
+                                );
+                              }
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   }
