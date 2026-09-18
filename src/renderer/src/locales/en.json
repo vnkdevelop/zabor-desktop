@@ -67,7 +67,11 @@
       "micTestSeek": "playback position",
       "micTestSilent": "no sound captured",
       "micTestFailed": "recording failed",
-      "calibrationPhrase": "\"the quick brown fox jumps over the lazy dog\""
+      "calibrationPhrase": "\"the quick brown fox jumps over the lazy dog\"",
+      "ultraLowLatency": "ultra-low latency",
+      "ultraLowLatencyDesc": "minimum possible voice latency without heavy filters and processing.",
+      "ultraLowLatencyActive": "ultra-low latency mode is active",
+      "ultraLowLatencyActiveDesc": "neural networks and delay buffers are disabled for minimal latency"
     },
     "privacy": {
       "newPassword": "new password",

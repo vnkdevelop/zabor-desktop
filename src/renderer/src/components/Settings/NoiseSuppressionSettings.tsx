@@ -35,6 +35,8 @@ export interface NoiseSuppressionSettingsProps {
   calibrationPhase?: CalibrationPhase;
   calibrationSuccess?: boolean;
   liveMicLevel?: number;
+  ultraLowLatency?: boolean;
+  onUltraLowLatencyChange?: (enabled: boolean) => void;
   className?: string;
 }
 
@@ -63,6 +65,8 @@ export function NoiseSuppressionSettings({
   calibrationPhase = 'idle',
   calibrationSuccess = false,
   liveMicLevel: externalMicLevel,
+  ultraLowLatency = false,
+  onUltraLowLatencyChange,
   className = ''
 }: NoiseSuppressionSettingsProps) {
   const { t } = useTranslation();
@@ -112,6 +116,24 @@ export function NoiseSuppressionSettings({
 
   return (
     <div className={`space-y-3 ${className}`}>
+      <section
+        className={`rounded-2xl border glass-row transition-[border-color,background-color] duration-300 ${ultraLowLatency ? 'border-primary/50' : 'border-white/[0.07] hover:border-white/[0.13]'
+          }`}
+      >
+        <div className="flex min-h-[66px] items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0">
+            <div className="text-[15px] font-bold tracking-wide text-white">
+              {t('settings.audio.ultraLowLatency', 'ультранизкая задержка')}
+            </div>
+            <p className="mt-1 text-xs leading-snug text-textMuted">
+              {t('settings.audio.ultraLowLatencyDesc', 'минимально возможная задержка голоса без тяжёлых фильтров и обработок.')}
+            </p>
+          </div>
+          <Md3Switch checked={ultraLowLatency} onChange={onUltraLowLatencyChange} />
+        </div>
+      </section>
+
+      <div className={ultraLowLatency ? 'pointer-events-none opacity-40 space-y-3' : 'space-y-3'}>
       <section
         aria-disabled={!analyzerAvailable}
         className={`rounded-2xl border glass-row transition-[border-color,background-color,opacity] duration-300 ${speechAnalyzer && analyzerAvailable ? 'border-white/[0.13]' : 'border-white/[0.07]'
@@ -345,6 +367,7 @@ export function NoiseSuppressionSettings({
           </div>
         </div>
       </section>
+      </div>
     </div>
   );
 }

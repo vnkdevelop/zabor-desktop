@@ -67,7 +67,11 @@
       "micTestSeek": "позиция воспроизведения",
       "micTestSilent": "микрофон молчит",
       "micTestFailed": "не удалось записать",
-      "calibrationPhrase": "«съешь ещё этих мягких французских булок»"
+      "calibrationPhrase": "«съешь ещё этих мягких французских булок»",
+      "ultraLowLatency": "ультранизкая задержка",
+      "ultraLowLatencyDesc": "минимально возможная задержка голоса без тяжёлых фильтров и обработок.",
+      "ultraLowLatencyActive": "активен режим ультранизкой задержки",
+      "ultraLowLatencyActiveDesc": "нейросети и буферы ожидания отключены для минимальной задержки"
     },
     "privacy": {
       "newPassword": "новый пароль",

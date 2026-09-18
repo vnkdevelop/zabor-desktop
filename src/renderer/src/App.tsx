@@ -357,13 +357,23 @@ export default function App() {
   const [audioDevices, setAudioDevices] = useState<{ inputs: MediaDeviceInfo[], outputs: MediaDeviceInfo[] }>({ inputs: [], outputs: [] });
   const [selectedInput, setSelectedInput] = useState('default');
   const [selectedOutput, setSelectedOutput] = useState('default');
-  const [noiseSuppression, setNoiseSuppression] = useState(true);
+  const [noiseSuppression, setNoiseSuppression] = useState(() => {
+    if (webrtc.isUltraLowLatency()) return false;
+    return webrtc.isNoiseSuppressionEnabled();
+  });
   const [micThresholdMode, setMicThresholdMode] = useState<'auto' | 'manual'>('auto');
   const [manualThresholdValue, setManualThresholdValue] = useState(-42);
   const [smartNoiseModel, setSmartNoiseModel] = useState<SmartNoiseModel>(() => webrtc.getSmartNoiseModel());
   const [suppressionStrength, setSuppressionStrength] = useState(() => webrtc.getSuppressionStrength());
-  const [speechAnalyzerEnabled, setSpeechAnalyzerEnabled] = useState(() => webrtc.isSpeechAnalyzerEnabled());
-  const [echoCancellationEnabled, setEchoCancellationEnabled] = useState(() => webrtc.isEchoCancellationEnabled());
+  const [speechAnalyzerEnabled, setSpeechAnalyzerEnabled] = useState(() => {
+    if (webrtc.isUltraLowLatency()) return false;
+    return webrtc.isSpeechAnalyzerEnabled();
+  });
+  const [echoCancellationEnabled, setEchoCancellationEnabled] = useState(() => {
+    if (webrtc.isUltraLowLatency()) return false;
+    return webrtc.isEchoCancellationEnabled();
+  });
+  const [ultraLowLatency, setUltraLowLatency] = useState(() => webrtc.isUltraLowLatency());
   const [isSwitchingChannel, setIsSwitchingChannel] = useState(false);
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [minimizeToTray, setMinimizeToTray] = useState(true);
@@ -617,8 +627,16 @@ export default function App() {
     setSelectedInput('default');
     setSelectedOutput('default');
     setNoiseSuppression(true);
+    setEchoCancellationEnabled(true);
+    setSpeechAnalyzerEnabled(false);
+    webrtc.setNoiseSuppression(true);
+    webrtc.setEchoCancellationEnabled(true);
+    webrtc.setSpeechAnalyzerEnabled(false);
     setMicThresholdMode('auto');
     setManualThresholdValue(-42);
+    setUltraLowLatency(false);
+    webrtc.setUltraLowLatency(false);
+    try { localStorage.removeItem('zabor_pre_ultra_low_settings'); } catch { }
     setDisplayName('');
     setAvatarBase64(null);
     setAvatarColor('#C81E70');
@@ -659,8 +677,17 @@ export default function App() {
     const normalizedInput = rawInput === 'communications' ? 'default' : rawInput;
     const normalizedOutput = rawOutput === 'communications' ? 'default' : rawOutput;
     setSelectedInput(normalizedInput);
-    setSelectedOutput(normalizedOutput);
-    setNoiseSuppression(s.noiseSuppression ?? true);
+    if (webrtc.isUltraLowLatency()) {
+      setNoiseSuppression(false);
+      try {
+        const raw = localStorage.getItem('zabor_pre_ultra_low_settings');
+        const prev = raw ? JSON.parse(raw) : {};
+        if (s.noiseSuppression !== undefined) prev.noiseSuppression = s.noiseSuppression;
+        localStorage.setItem('zabor_pre_ultra_low_settings', JSON.stringify(prev));
+      } catch { }
+    } else {
+      setNoiseSuppression(s.noiseSuppression ?? true);
+    }
 
     const mode = s.micThresholdMode ?? 'auto';
     const savedThreshold = s.manualThresholdValue ?? -42;
@@ -772,17 +799,21 @@ export default function App() {
       ? (store.currentUser ? [store.currentCallUser, store.currentUser] : [store.currentCallUser])
       : store.voiceUsers;
 
-    const activeStream = relevantUsers.map(user => {
-      const isStreaming = user.isStreaming || (user.id === store.currentUser?.id && !!webrtc.localVideoStream);
-      if (isStreaming) {
-        const stream = user.id === store.currentUser?.id ? webrtc.localVideoStream : store.remoteVideoStreams[user.id];
-        return { user, stream };
-      }
-      return null;
-    }).find(item => item && store.activeStreamId === item.user.id);
+    const streamer = relevantUsers.find(user => user.id === store.activeStreamId);
+    const isStreaming = streamer && (
+      streamer.isStreaming || (streamer.id === store.currentUser?.id && !!webrtc.localVideoStream)
+    );
 
-    if (activeStream?.stream) {
-      const videoTrack = activeStream.stream.getVideoTracks()[0];
+    if (!isStreaming) {
+      if (store.isStreamFullscreen) store.setStreamFullscreen(false);
+      store.setActiveStreamId(null);
+      setStreamRatio(16 / 9);
+      return;
+    }
+
+    const stream = streamer.id === store.currentUser?.id ? webrtc.localVideoStream : store.remoteVideoStreams[streamer.id];
+    if (stream) {
+      const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
         const settings = videoTrack.getSettings();
         if (settings.width && settings.height) {
@@ -790,9 +821,6 @@ export default function App() {
           return;
         }
       }
-    } else {
-      if (store.isStreamFullscreen) store.setStreamFullscreen(false);
-      store.setActiveStreamId(null);
     }
     setStreamRatio(16 / 9);
   }, [store.activeStreamId, store.remoteVideoStreams, store.voiceUsers, store.currentCallUser, store.currentUser]);
@@ -1628,6 +1656,42 @@ export default function App() {
       setAutoLaunch(prev);
     }
   }, [autoLaunch]);
+
+  const handleUltraLowLatencyToggle = useCallback((enabled: boolean) => {
+    setUltraLowLatency(enabled);
+    if (enabled) {
+      const prevSettings = {
+        noiseSuppression,
+        echoCancellation: echoCancellationEnabled,
+        speechAnalyzer: speechAnalyzerEnabled
+      };
+      try {
+        localStorage.setItem('zabor_pre_ultra_low_settings', JSON.stringify(prevSettings));
+      } catch { }
+      setNoiseSuppression(false);
+      webrtc.setNoiseSuppression(false);
+      setEchoCancellationEnabled(false);
+      webrtc.setEchoCancellationEnabled(false);
+      setSpeechAnalyzerEnabled(false);
+      webrtc.setSpeechAnalyzerEnabled(false);
+    } else {
+      let restored = { noiseSuppression: true, echoCancellation: true, speechAnalyzer: false };
+      try {
+        const raw = localStorage.getItem('zabor_pre_ultra_low_settings');
+        if (raw) restored = { ...restored, ...JSON.parse(raw) };
+      } catch { }
+      try {
+        localStorage.removeItem('zabor_pre_ultra_low_settings');
+      } catch { }
+      setNoiseSuppression(restored.noiseSuppression);
+      webrtc.setNoiseSuppression(restored.noiseSuppression);
+      setEchoCancellationEnabled(restored.echoCancellation);
+      webrtc.setEchoCancellationEnabled(restored.echoCancellation);
+      setSpeechAnalyzerEnabled(restored.speechAnalyzer);
+      webrtc.setSpeechAnalyzerEnabled(restored.speechAnalyzer);
+    }
+    webrtc.setUltraLowLatency(enabled);
+  }, [noiseSuppression, echoCancellationEnabled, speechAnalyzerEnabled]);
 
   const closeChangePasswordModal = useCallback(() => {
     setNewPassword('');
@@ -2558,7 +2622,7 @@ export default function App() {
                                   if (nameA > nameB) return 1;
                                   return a.id.localeCompare(b.id);
                                 }).map((u, i) => (
-                                  <div key={`${ch.id}-${u.id}`} className="w-[31px] h-[31px] rounded-full border-2 border-panelBg relative shrink-0 overflow-hidden animate-avatar-in" style={{ zIndex: 100 - i }} title={u.displayName}>
+                                  <div key={`${ch.id}-${u.id}`} className="w-[31px] h-[31px] rounded-full border-2 border-panelBg bg-panelBg relative shrink-0 overflow-hidden animate-avatar-in" style={{ zIndex: 100 - i }} title={u.displayName}>
                                     <AvatarImg src={u.avatarBase64} size={31} bgColor={u.avatarColor} animate={false} />
                                   </div>
                                 ))}
@@ -3580,6 +3644,8 @@ export default function App() {
                     setNoiseSuppression(v);
                     webrtc.setNoiseSuppression(v);
                   }}
+                  ultraLowLatency={ultraLowLatency}
+                  onUltraLowLatencyChange={handleUltraLowLatencyToggle}
                   mode={micThresholdMode === 'auto' ? 'smart' : 'manual'}
                   onModeChange={m => {
                     const nextMode = m === 'smart' ? 'auto' : 'manual';
@@ -3639,18 +3705,12 @@ export default function App() {
                 <div>
                   <button
                     onClick={() => store.setModal('privacy', true)}
-                    className="group w-full bg-primary/90 hover:opacity-90 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-200 active:scale-98"
+                    className="group w-full bg-primary/20 hover:bg-primary/30 text-white border border-primary/30 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-200 active:scale-98"
                   >
                     <Key weight="bold" size={18} />
                     {t('settings.privacy.changePasswordTitle', 'сменить пароль')}
                   </button>
                 </div>
-                <button onClick={handleLogout} className="group w-full bg-danger hover:bg-red-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
-                  <div className="transition-transform duration-200 group-hover:-translate-x-1">
-                    <LogOut weight="bold" size={18} />
-                  </div>
-                  {t('settings.privacy.logout')}
-                </button>
                 <button
                   onClick={() => {
                     setDeleteConfirmText('');
@@ -3661,6 +3721,12 @@ export default function App() {
                 >
                   <Trash weight="bold" size={18} />
                   {t('settings.privacy.deleteAccount', 'удалить аккаунт')}
+                </button>
+                <button onClick={handleLogout} className="group w-full bg-danger hover:bg-red-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
+                  <div className="transition-transform duration-200 group-hover:-translate-x-1">
+                    <LogOut weight="bold" size={18} />
+                  </div>
+                  {t('settings.privacy.logout')}
                 </button>
               </div>
             )}

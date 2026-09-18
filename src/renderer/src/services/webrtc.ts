@@ -39,6 +39,7 @@ const SUPPRESSION_STRENGTH_STORAGE_KEY = 'zabor_suppression_strength_db'
 const SPEECH_ANALYZER_STORAGE_KEY = 'zabor_speech_analyzer_enabled'
 const ECHO_CANCELLATION_STORAGE_KEY = 'zabor_echo_cancellation_enabled'
 const RELAY_ONLY_STORAGE_KEY = 'zabor_relay_only_ice'
+const ULTRA_LOW_LATENCY_STORAGE_KEY = 'zabor_ultra_low_latency'
 
 export const MIN_SUPPRESSION_STRENGTH_DB = 5
 export const MAX_SUPPRESSION_STRENGTH_DB = 30
@@ -214,7 +215,7 @@ const SILENCE_SUPPRESSION_OFF_WITH_ICE_RESTART = {
   voiceActivityDetection: false
 } as RTCOfferOptions
 
-function optimizeSDP(sdp: string, isRelayOnly = false): string {
+function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false): string {
   let lines = sdp.split('\r\n')
 
   if (isRelayOnly) {
@@ -230,7 +231,9 @@ function optimizeSDP(sdp: string, isRelayOnly = false): string {
   const audioMatch = sdp.match(opusRegex)
   if (audioMatch) {
     const pt = audioMatch[1]
-    const opusFmtp = `useinbandfec=1;usedtx=0;maxaveragebitrate=${OPUS_AUDIO_BITRATE};maxplaybackrate=48000;sprop-maxcapturerate=48000;stereo=0;sprop-stereo=0;cbr=0;minptime=10`
+    const ptime = isUltraLowLatency ? 10 : 20
+    const maxPtime = isUltraLowLatency ? 10 : 60
+    const opusFmtp = `useinbandfec=1;usedtx=0;maxaveragebitrate=${OPUS_AUDIO_BITRATE};maxplaybackrate=48000;sprop-maxcapturerate=48000;stereo=0;sprop-stereo=0;cbr=0;ptime=${ptime};minptime=${ptime};maxptime=${maxPtime}`
     let fmtpFound = false
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith(`a=fmtp:${pt}`)) {
@@ -243,6 +246,15 @@ function optimizeSDP(sdp: string, isRelayOnly = false): string {
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].startsWith(`a=rtpmap:${pt}`)) {
           lines.splice(i + 1, 0, `a=fmtp:${pt} ${opusFmtp}`)
+          break
+        }
+      }
+    }
+    const hasNack = lines.some(l => l.startsWith(`a=rtcp-fb:${pt} nack`))
+    if (!hasNack) {
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith(`a=fmtp:${pt}`) || lines[i].startsWith(`a=rtpmap:${pt}`)) {
+          lines.splice(i + 1, 0, `a=rtcp-fb:${pt} nack`)
           break
         }
       }
@@ -278,7 +290,7 @@ function optimizeSDP(sdp: string, isRelayOnly = false): string {
         }
       }
       for (let i = audioSectionEnd - 1; i > audioSectionIdx; i--) {
-        if (/^b=(AS|TIAS):/i.test(lines[i]) || /^a=ptime:/i.test(lines[i])) lines.splice(i, 1)
+        if (/^b=(AS|TIAS):/i.test(lines[i]) || /^a=(?:ptime|maxptime):/i.test(lines[i])) lines.splice(i, 1)
       }
       audioSectionEnd = lines.length
       for (let i = audioSectionIdx + 1; i < lines.length; i++) {
@@ -299,7 +311,8 @@ function optimizeSDP(sdp: string, isRelayOnly = false): string {
         0,
         `b=AS:${Math.ceil(OPUS_AUDIO_BITRATE / 1000)}`,
         `b=TIAS:${OPUS_AUDIO_BITRATE}`,
-        'a=ptime:20'
+        isUltraLowLatency ? 'a=ptime:10' : 'a=ptime:20',
+        ...(isUltraLowLatency ? ['a=maxptime:10'] : ['a=maxptime:60'])
       )
     }
   }
@@ -436,11 +449,33 @@ export class WebRTCManager {
   private iceRestartInFlight: Set<string> = new Set()
 
   private pendingRenegotiation: Set<string> = new Set()
+  private peerSignalingQueues: Map<string, Promise<void>> = new Map()
+  private isMakingOffer: Map<string, boolean> = new Map()
+  private isSettingRemoteAnswerPending: Map<string, boolean> = new Map()
+  private userVoiceTrackIds: Map<string, string> = new Map()
+  private userStreamAudioTrackIds: Map<string, string> = new Map()
+  private audioHealthInterval: NodeJS.Timeout | null = null
+  private lastAudioPacketTimes: Map<string, number> = new Map()
+  private lastAudioConcealment: Map<string, number> = new Map()
+
+  private enqueueSignalingTask(userId: string, task: () => Promise<void>): Promise<void> {
+    const currentQueue = this.peerSignalingQueues.get(userId) || Promise.resolve()
+    const nextQueue = currentQueue
+      .then(async () => {
+        await task()
+      })
+      .catch(err => {
+        console.error(`[WebRTC] Signaling task error for peer ${userId}:`, err)
+      })
+    this.peerSignalingQueues.set(userId, nextQueue)
+    return nextQueue
+  }
 
   private static readonly MAX_ICE_RETRIES = 4
 
   private static readonly ICE_TIMEOUT_MS = 15000
-  private static readonly DISCONNECTED_GRACE_MS = 10000
+  private static readonly DISCONNECTED_GRACE_MS = 2500
+  private static readonly FAST_ICE_TIE_BREAK_MS = 2000
   private static readonly PEER_RELEVANCE_WAIT_MS = 5000
   private static readonly PENDING_CANDIDATES_PER_PEER = 64
 
@@ -551,10 +586,12 @@ export class WebRTCManager {
     bundlePolicy: 'max-bundle',
     iceCandidatePoolSize: 4
   }
+  private static readonly PC_CONSTRAINTS = { optional: [{ googDscp: true }] }
 
   private turnServers: RTCIceServer[] = []
   private ownStunServers: RTCIceServer[] = []
   private relayOnlyIce = localStorage.getItem(RELAY_ONLY_STORAGE_KEY) === 'true'
+  private ultraLowLatency = localStorage.getItem(ULTRA_LOW_LATENCY_STORAGE_KEY) === 'true'
   private relayWarningShownAt = 0
   private turnExpiresAt = 0
   private turnUserId: string | null = null
@@ -662,6 +699,44 @@ export class WebRTCManager {
     if (enabled) void this.ensureIceServers()
   }
 
+  public isUltraLowLatency(): boolean {
+    return this.ultraLowLatency
+  }
+
+  public setUltraLowLatency(enabled: boolean) {
+    if (this.ultraLowLatency === enabled) return
+    this.ultraLowLatency = enabled
+    localStorage.setItem(ULTRA_LOW_LATENCY_STORAGE_KEY, enabled ? 'true' : 'false')
+
+    if (enabled) {
+      this.terminateVadWorker()
+    } else {
+      this.warmUpSmartNoiseSuppression()
+    }
+
+    if (this.localStream || this.rawStream) {
+      void this.updateSettings(this.currentDeviceId, this.noiseSuppression)
+    }
+
+    this.applyPlayoutDelayHints()
+
+    for (const [userId, pc] of this.peerConnections.entries()) {
+      void this.renegotiatePeer(pc, userId)
+    }
+  }
+
+  private applyPlayoutDelayHints() {
+    for (const pc of this.peerConnections.values()) {
+      try {
+        for (const receiver of pc.getReceivers()) {
+          if (receiver.track && receiver.track.kind === 'audio' && 'playoutDelayHint' in receiver) {
+            (receiver as any).playoutDelayHint = null
+          }
+        }
+      } catch { }
+    }
+  }
+
   private getSmartGateParams(gainFactor: number) {
     return {
       thresholdMode: 'auto',
@@ -723,6 +798,9 @@ export class WebRTCManager {
   }
 
   private micGraphSignature(): string {
+    if (this.ultraLowLatency) {
+      return 'ultra-low-latency'
+    }
     if (this.noiseSuppression) {
       return this.thresholdMode === 'auto' ? `smart-${this.smartModel}` : 'manual-gate'
     }
@@ -1041,7 +1119,7 @@ export class WebRTCManager {
       .catch(error => console.warn('[WebRTC] ICE server warm-up failed:', error))
   }
 
-  private createPeakGuard(ctx: AudioContext): WaveShaperNode {
+  private createPeakGuard(ctx: AudioContext, oversample: OverSampleType = '4x'): WaveShaperNode {
     const peakGuard = ctx.createWaveShaper()
     const peakCurve = new Float32Array(65_536)
     const linearLimit = 0.98
@@ -1061,7 +1139,7 @@ export class WebRTCManager {
         )
     }
     peakGuard.curve = peakCurve
-    peakGuard.oversample = '4x'
+    peakGuard.oversample = oversample
     return peakGuard
   }
 
@@ -1097,8 +1175,56 @@ export class WebRTCManager {
   }
 
   private async createProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
+    if (this.ultraLowLatency) return this.createUltraLowLatencyProcessedStream(rawStream)
     if (!this.usesSmartWorklet()) return this.createManualProcessedStream(rawStream)
     return this.createSmartProcessedStream(rawStream, this.smartModel)
+  }
+
+  private async createUltraLowLatencyProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
+    this.cleanupProcessedStream()
+    this.audioProcessorError = null
+    this.micEngineError = null
+
+    const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 0 })
+    this.processedContext = ctx
+    if (ctx.sampleRate !== 48000) {
+      const detail = `AudioContext runs at ${ctx.sampleRate}Hz, 48000Hz required`
+      console.error(`[WebRTC] Audio processing requires 48000Hz, got ${ctx.sampleRate}Hz`)
+      this.audioProcessorError = detail
+      await ctx.close().catch(() => { })
+      this.processedContext = null
+      return createSilentAudioStream()
+    }
+    if (ctx.state === 'suspended') await ctx.resume().catch(() => { })
+
+    const destination = ctx.createMediaStreamDestination()
+    const track = destination.stream.getAudioTracks()[0]
+    if (track) track.contentHint = 'speech'
+    const source = ctx.createMediaStreamSource(rawStream)
+    this.processedSource = source
+
+    const inputGain = ctx.createGain()
+    inputGain.gain.value = this.effectiveInputGain()
+    this.inputGainNode = inputGain
+
+    const peakGuard = this.createPeakGuard(ctx, 'none')
+    this.micOutputTap = peakGuard
+
+    try {
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 256
+      source.connect(analyser)
+      this.rawAnalyserNode = analyser
+    } catch (error) {
+      console.warn('[WebRTC] Failed to create raw analyser node:', error)
+    }
+
+    source.connect(inputGain)
+    inputGain.connect(peakGuard)
+    peakGuard.connect(destination)
+
+    this.localSpeakingState = false
+    return destination.stream
   }
 
   private async createManualProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
@@ -1566,6 +1692,10 @@ export class WebRTCManager {
     }
   }
 
+  public isNoiseSuppressionEnabled(): boolean {
+    return this.noiseSuppression
+  }
+
   public setNoiseSuppression(enabled: boolean) {
     if (this.noiseSuppression === enabled) return
     this.noiseSuppression = enabled
@@ -1928,10 +2058,11 @@ export class WebRTCManager {
   }
 
   private buildMicConstraints(deviceId?: string, echoCancellation = true): MediaTrackConstraints {
-    const useWebRtcNoiseSuppression = this.noiseSuppression && this.thresholdMode === 'manual'
+    const useWebRtcNoiseSuppression = !this.ultraLowLatency && this.noiseSuppression && this.thresholdMode === 'manual'
+    const useEchoCancellation = !this.ultraLowLatency && echoCancellation
     const constraints: MediaTrackConstraints = {
       channelCount: 1,
-      echoCancellation,
+      echoCancellation: useEchoCancellation,
       noiseSuppression: useWebRtcNoiseSuppression,
       autoGainControl: false,
       sampleRate: { ideal: 48000 },
@@ -1942,8 +2073,8 @@ export class WebRTCManager {
       googNoiseSuppression2: useWebRtcNoiseSuppression,
       googTypingNoiseDetection: false,
       googHighpassFilter: false,
-      googEchoCancellation: echoCancellation,
-      googEchoCancellation2: echoCancellation,
+      googEchoCancellation: useEchoCancellation,
+      googEchoCancellation2: useEchoCancellation,
       googAudioMirroring: false
     }
     if (deviceId && deviceId !== 'default') constraints.deviceId = { exact: deviceId }
@@ -2209,6 +2340,7 @@ export class WebRTCManager {
       outputDeviceId: this.currentOutputDeviceId,
       calibrationProfileKey: this.calibrationDeviceId,
       noiseSuppression: this.noiseSuppression,
+      ultraLowLatency: this.ultraLowLatency,
       thresholdMode: this.thresholdMode,
       smartModel: this.smartModel,
       suppressionStrengthDb: this.suppressionStrengthDb,
@@ -2248,7 +2380,7 @@ export class WebRTCManager {
   }
 
   public isCalibrationAvailable(): boolean {
-    return VAD_CALIBRATION_ENABLED
+    return VAD_CALIBRATION_ENABLED && !this.ultraLowLatency
   }
 
   public async calibrateMic(durationMs = 4500, onStarted?: () => void): Promise<CalibrationResult> {
@@ -3004,21 +3136,23 @@ export class WebRTCManager {
   private initOutputMixer() {
     if (this.outputMixContext) {
       if (this.outputMixContext.state === 'suspended') this.outputMixContext.resume().catch(() => { })
+      this.startAudioHealthMonitoring()
       return
     }
     try {
-      this.outputMixContext = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
+      this.outputMixContext = new AudioContext({ sampleRate: 48000, latencyHint: this.ultraLowLatency ? 0 : 'interactive' })
     } catch (e) {
       console.warn('[WebRTC] Failed to create outputMixContext at 48000Hz, falling back to default:', e)
-      this.outputMixContext = new AudioContext({ latencyHint: 'interactive' })
+      this.outputMixContext = new AudioContext({ latencyHint: this.ultraLowLatency ? 0 : 'interactive' })
     }
     if (this.outputMixContext.state === 'suspended') {
       this.outputMixContext.resume().catch(() => { })
     }
+    this.startAudioHealthMonitoring()
     this.outputBusGain = this.outputMixContext.createGain()
     this.outputBusGain.gain.value = this.isDeafened ? 0 : Math.pow(10, PLAYBACK_MAKEUP_GAIN_DB / 20)
 
-    this.outputPeakGuard = this.createPeakGuard(this.outputMixContext)
+    this.outputPeakGuard = this.createPeakGuard(this.outputMixContext, this.ultraLowLatency ? 'none' : '4x')
     this.outputBusGain.connect(this.outputPeakGuard)
 
     const ctx = this.outputMixContext
@@ -3072,6 +3206,82 @@ export class WebRTCManager {
     })
   }
 
+  public softRefreshRemoteAudio(userId: string) {
+    if (!this.outputMixContext || this.outputMixContext.state === 'closed') return
+    if (this.outputMixContext.state === 'suspended') {
+      void this.outputMixContext.resume().catch(() => { })
+    }
+
+    const pc = this.peerConnections.get(userId)
+    if (!pc || (pc.connectionState !== 'connected' && pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed')) {
+      return
+    }
+
+    const voiceTrackId = this.userVoiceTrackIds.get(userId)
+    const receiver = pc.getReceivers().find(r => r.track && r.track.kind === 'audio' && (!voiceTrackId || r.track.id === voiceTrackId))
+    const track = receiver?.track
+    if (!track || track.readyState !== 'live') return
+
+    const limiter = this.userLimiterNodes.get(userId)
+    if (!limiter) return
+
+    const oldSource = this.userSourceNodes.get(userId)
+    if (oldSource) {
+      try { oldSource.disconnect() } catch { }
+    }
+
+    try {
+      const newSource = this.outputMixContext.createMediaStreamSource(new MediaStream([track]))
+      newSource.connect(limiter)
+      this.userSourceNodes.set(userId, newSource)
+    } catch (e) {
+      console.warn(`[WebRTC] Failed to soft-refresh remote audio for peer ${userId}`, e)
+    }
+  }
+
+  private startAudioHealthMonitoring() {
+    if (this.audioHealthInterval) return
+    this.audioHealthInterval = setInterval(async () => {
+      if (this.peerConnections.size === 0) return
+      if (this.outputMixContext?.state === 'suspended') {
+        void this.outputMixContext.resume().catch(() => { })
+      }
+
+      for (const [userId, pc] of this.peerConnections.entries()) {
+        if (pc.connectionState !== 'connected') continue
+        try {
+          const stats = await pc.getStats()
+          stats.forEach(report => {
+            if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+              const concealed = report.concealedSamples || 0
+              const prevConcealed = this.lastAudioConcealment.get(userId) ?? concealed
+              this.lastAudioConcealment.set(userId, concealed)
+
+              const lastPacketTime = report.lastPacketReceivedTimestamp || 0
+              const prevPacketTime = this.lastAudioPacketTimes.get(userId) ?? lastPacketTime
+              this.lastAudioPacketTimes.set(userId, lastPacketTime)
+
+              if (lastPacketTime > 0 && prevPacketTime > 0 && (lastPacketTime - prevPacketTime > 3000)) {
+                this.softRefreshRemoteAudio(userId)
+              } else if (!this.ultraLowLatency && (concealed - prevConcealed > 4800)) {
+                this.softRefreshRemoteAudio(userId)
+              }
+            }
+          })
+        } catch { }
+      }
+    }, 2500)
+  }
+
+  private stopAudioHealthMonitoring() {
+    if (this.audioHealthInterval) {
+      clearInterval(this.audioHealthInterval)
+      this.audioHealthInterval = null
+    }
+    this.lastAudioPacketTimes.clear()
+    this.lastAudioConcealment.clear()
+  }
+
   private setupPeerHandlers(pc: RTCPeerConnection, userId: string) {
     pc.ontrack = (event) => {
       if (userId === useAppStore.getState().currentUser?.id) {
@@ -3080,19 +3290,44 @@ export class WebRTCManager {
         return
       }
       const stream = event.streams[0] || new MediaStream([event.track])
+      if (event.track.kind === 'audio' && 'playoutDelayHint' in event.receiver) {
+        (event.receiver as any).playoutDelayHint = null
+      }
       this.initOutputMixer()
 
       if (event.track.kind === 'video') {
         useAppStore.getState().setRemoteVideoStream(userId, stream)
+        event.track.onended = () => {
+          this.cleanupRemoteStream(userId)
+        }
         return
       }
 
+      const knownVoiceTrackId = this.userVoiceTrackIds.get(userId)
+      const knownStreamAudioTrackId = this.userStreamAudioTrackIds.get(userId)
+
       const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
-      const isScreenShareAudio = event.track.contentHint === 'music' ||
+      const matchesVideoStream = Boolean(
         (remoteVideoStream && event.streams[0] && event.streams[0].id === remoteVideoStream.id) ||
         (event.streams[0] && event.streams[0].getVideoTracks().length > 0)
+      )
+
+      let isScreenShareAudio = false
+      if (knownStreamAudioTrackId && event.track.id === knownStreamAudioTrackId) {
+        isScreenShareAudio = true
+      } else if (knownVoiceTrackId && event.track.id === knownVoiceTrackId) {
+        isScreenShareAudio = false
+      } else if (matchesVideoStream) {
+        isScreenShareAudio = true
+      } else if (this.userVoiceTrackIds.has(userId) && this.userSourceNodes.has(userId)) {
+        isScreenShareAudio = true
+      }
 
       if (isScreenShareAudio) {
+        this.userStreamAudioTrackIds.set(userId, event.track.id)
+        event.track.onended = () => {
+          this.cleanupRemoteStreamAudio(userId)
+        }
         event.track.contentHint = 'music'
         let dummyAudio = this.streamAudioElements.get(userId)
         if (!dummyAudio) {
@@ -3129,7 +3364,19 @@ export class WebRTCManager {
         this.updateRemoteStreamVolume(userId)
         this.startStreamSyncMonitoring()
       } else {
+        this.userVoiceTrackIds.set(userId, event.track.id)
+        event.track.onended = () => {
+          if (this.userVoiceTrackIds.get(userId) === event.track.id) {
+            this.userVoiceTrackIds.delete(userId)
+          }
+        }
         event.track.contentHint = 'speech'
+        try {
+          const receiver = pc.getReceivers().find(r => r.track && r.track.id === event.track.id)
+          if (receiver && 'playoutDelayHint' in receiver) {
+            (receiver as any).playoutDelayHint = null
+          }
+        } catch { }
         this.setupVAD(stream, userId, false)
 
         let dummyAudio = this.audioElements.get(userId)
@@ -3151,16 +3398,21 @@ export class WebRTCManager {
 
         const source = this.outputMixContext!.createMediaStreamSource(new MediaStream([event.track]))
         const gain = this.outputMixContext!.createGain()
-        const limiter = this.createPlaybackLimiter(PLAYBACK_VOICE_LIMIT_DB, 2, 20, 0.002, 0.060)
         const panner = new StereoPannerNode(this.outputMixContext!, { pan: 0 })
-        source.connect(limiter)
-        limiter.connect(gain)
+
+        if (this.ultraLowLatency) {
+          source.connect(gain)
+        } else {
+          const limiter = this.createPlaybackLimiter(PLAYBACK_VOICE_LIMIT_DB, 2, 20, 0.002, 0.060)
+          source.connect(limiter)
+          limiter.connect(gain)
+          this.userLimiterNodes.set(userId, limiter)
+        }
         gain.connect(panner)
         panner.connect(this.outputBusGain!)
 
         this.userSourceNodes.set(userId, source)
         this.userGainNodes.set(userId, gain)
-        this.userLimiterNodes.set(userId, limiter)
         this.userPannerNodes.set(userId, panner)
         if (!this.voiceSeatOrder.includes(userId)) this.voiceSeatOrder.push(userId)
         this.updateRemoteVolume(userId)
@@ -3205,6 +3457,9 @@ export class WebRTCManager {
           clearTimeout(dcTimer)
           this.dcTimers.delete(userId)
         }
+        if (this.userSourceNodes.has(userId)) {
+          this.softRefreshRemoteAudio(userId)
+        }
       } else if (st === 'failed' || iceSt === 'failed') {
         useAppStore.getState().setWebRTCConnectionStatus(userId, false)
         void this.attemptRenegotiation(userId)
@@ -3212,12 +3467,13 @@ export class WebRTCManager {
         useAppStore.getState().setWebRTCConnectionStatus(userId, false)
         const existingTimer = this.dcTimers.get(userId)
         if (!existingTimer) {
+          const grace = this.ultraLowLatency ? 1500 : WebRTCManager.DISCONNECTED_GRACE_MS
           const t = setTimeout(() => {
             if (pc.connectionState === 'disconnected' || pc.iceConnectionState === 'disconnected') {
               void this.attemptRenegotiation(userId)
             }
             this.dcTimers.delete(userId)
-          }, WebRTCManager.DISCONNECTED_GRACE_MS)
+          }, grace)
           this.dcTimers.set(userId, t)
         }
       } else {
@@ -3229,7 +3485,7 @@ export class WebRTCManager {
     pc.oniceconnectionstatechange = checkState
   }
 
-  private startIceTimeout(userId: string) {
+  private startIceTimeout(userId: string, timeoutMs = WebRTCManager.ICE_TIMEOUT_MS) {
     this.clearIceTimeout(userId)
     const timer = setTimeout(() => {
       this.iceTimeoutTimers.delete(userId)
@@ -3237,7 +3493,7 @@ export class WebRTCManager {
       if (pc && pc.connectionState !== 'connected') {
         void this.attemptRenegotiation(userId)
       }
-    }, WebRTCManager.ICE_TIMEOUT_MS)
+    }, timeoutMs)
     this.iceTimeoutTimers.set(userId, timer)
   }
 
@@ -3261,7 +3517,7 @@ export class WebRTCManager {
 
       if (me > userId && count === 0) {
         this.retryCount.set(userId, 1)
-        this.startIceTimeout(userId)
+        this.startIceTimeout(userId, WebRTCManager.FAST_ICE_TIE_BREAK_MS)
         return
       }
 
@@ -3518,29 +3774,38 @@ export class WebRTCManager {
   }
 
   private async renegotiatePeer(pc: RTCPeerConnection, userId: string, iceRestart = false): Promise<boolean> {
-    try {
-      if (pc.signalingState !== 'stable') {
+    return this.enqueueSignalingTask(userId, async () => {
+      if (pc.signalingState !== 'stable' || this.isMakingOffer.get(userId)) {
         this.pendingRenegotiation.add(userId)
         return false
       }
       this.pendingRenegotiation.delete(userId)
-      const offer = await pc.createOffer(
-        iceRestart ? SILENCE_SUPPRESSION_OFF_WITH_ICE_RESTART : SILENCE_SUPPRESSION_OFF
-      )
-      const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce)
-      await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
-      signalRService.sendWebRTCOffer(userId, JSON.stringify(pc.localDescription))
-      return true
-    } catch (e) {
-      console.error('[WebRTC] renegotiation failed', e)
-      return false
-    }
+      this.isMakingOffer.set(userId, true)
+      try {
+        const offer = await pc.createOffer(
+          iceRestart ? SILENCE_SUPPRESSION_OFF_WITH_ICE_RESTART : SILENCE_SUPPRESSION_OFF
+        )
+        if (pc.signalingState !== 'stable') {
+          this.pendingRenegotiation.add(userId)
+          return false
+        }
+        const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency)
+        await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
+        signalRService.sendWebRTCOffer(userId, JSON.stringify(pc.localDescription))
+        return true
+      } catch (e) {
+        console.error('[WebRTC] renegotiation failed', e)
+        return false
+      } finally {
+        this.isMakingOffer.set(userId, false)
+      }
+    }) as any
   }
 
   private flushPendingRenegotiation(userId: string) {
     if (!this.pendingRenegotiation.has(userId)) return
     const pc = this.peerConnections.get(userId)
-    if (!pc || pc.signalingState !== 'stable') return
+    if (!pc || pc.signalingState !== 'stable' || this.isMakingOffer.get(userId)) return
     this.pendingRenegotiation.delete(userId)
     void this.renegotiatePeer(pc, userId)
   }
@@ -3904,7 +4169,7 @@ export class WebRTCManager {
     const iceMs = Math.round(performance.now() - iceStartedAt)
     if (!this.isPeerRelevant(userId)) return
 
-    const pc = new RTCPeerConnection(this.rtcConfig())
+    const pc = new RTCPeerConnection(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS as any)
     this.peerConnections.set(userId, pc)
 
     if (this.localStream) {
@@ -3947,7 +4212,7 @@ export class WebRTCManager {
 
     try {
       const offer = await pc.createOffer(SILENCE_SUPPRESSION_OFF)
-      const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce)
+      const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency)
       await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
       if (this.peerConnections.get(userId) !== pc || !this.isPeerRelevant(userId)) {
         this.disconnectFromPeer(userId)
@@ -3967,150 +4232,176 @@ export class WebRTCManager {
   }
 
   public async handleOffer(senderId: string, offerStr: string) {
-    const store = useAppStore.getState()
-    if (senderId === store.currentUser?.id) return
-    if (!await this.awaitPeerRelevance(senderId)) return
+    return this.enqueueSignalingTask(senderId, async () => {
+      const store = useAppStore.getState()
+      if (senderId === store.currentUser?.id) return
+      if (!await this.awaitPeerRelevance(senderId)) return
 
-    let pc = this.peerConnections.get(senderId)
-    if (pc && (pc.connectionState === 'closed' || pc.connectionState === 'failed' || pc.connectionState === 'disconnected')) {
-      this.disconnectFromPeer(senderId, { preserveRemoteVideo: true })
-      pc = undefined
-    }
-    if (!pc) {
-      if (!this.peerConnectStartedAt.has(senderId)) this.peerConnectStartedAt.set(senderId, performance.now())
-      if (!this.localStream) {
-        await this.startLocalStream().catch(() => { })
+      let pc = this.peerConnections.get(senderId)
+      if (pc && (pc.connectionState === 'closed' || pc.connectionState === 'failed')) {
+        this.disconnectFromPeer(senderId, { preserveRemoteVideo: true })
+        pc = undefined
       }
-      await this.ensureIceServers()
-      if (!this.isPeerRelevant(senderId)) return
-      pc = new RTCPeerConnection(this.rtcConfig())
-      this.peerConnections.set(senderId, pc)
+      if (!pc) {
+        if (!this.peerConnectStartedAt.has(senderId)) this.peerConnectStartedAt.set(senderId, performance.now())
+        if (!this.localStream) {
+          await this.startLocalStream().catch(() => { })
+        }
+        await this.ensureIceServers()
+        if (!this.isPeerRelevant(senderId)) return
+        pc = new RTCPeerConnection(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS as any)
+        this.peerConnections.set(senderId, pc)
 
-      if (this.localStream) {
-        this.localStream.getTracks().forEach(track => {
-          const sender = pc!.addTrack(track, this.localStream!)
-          if (track.kind === 'audio') {
-            this.configureAudioSender(sender)
-          }
-        })
+        if (this.localStream) {
+          this.localStream.getTracks().forEach(track => {
+            const sender = pc!.addTrack(track, this.localStream!)
+            if (track.kind === 'audio') {
+              this.configureAudioSender(sender)
+            }
+          })
+        }
+        if (this.localVideoStream) {
+          this.localVideoStream.getTracks().forEach(track => {
+            const sender = pc!.addTrack(track, this.localVideoStream!)
+            if (track.kind === 'video') {
+              try {
+                const isCamera = this.currentStreamQuality === 'camera'
+                if (!isCamera) {
+                  const params = sender.getParameters()
+                  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+                  params.degradationPreference = 'maintain-framerate'
+                  params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
+                  params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
+                  params.encodings[0].networkPriority = 'high'
+                  sender.setParameters(params).catch(() => { })
+                }
+              } catch { }
+            } else if (track.kind === 'audio') {
+              this.configureAudioSender(sender)
+            }
+          })
+        } else {
+          try {
+            pc.addTransceiver('video', { direction: 'recvonly' })
+            pc.addTransceiver('audio', { direction: 'recvonly' })
+          } catch { }
+        }
+
+        this.setupPeerHandlers(pc, senderId)
+        this.startIceTimeout(senderId)
       }
-      if (this.localVideoStream) {
-        this.localVideoStream.getTracks().forEach(track => {
-          const sender = pc!.addTrack(track, this.localVideoStream!)
-          if (track.kind === 'video') {
-            try {
-              const isCamera = this.currentStreamQuality === 'camera'
-              if (!isCamera) {
-                const params = sender.getParameters()
-                if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
-                params.degradationPreference = 'maintain-framerate'
-                params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
-                params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
-                params.encodings[0].networkPriority = 'high'
-                sender.setParameters(params).catch(() => { })
-              }
-            } catch { }
-          } else if (track.kind === 'audio') {
-            this.configureAudioSender(sender)
-          }
-        })
-      } else {
-        try {
-          pc.addTransceiver('video', { direction: 'recvonly' })
-          pc.addTransceiver('audio', { direction: 'recvonly' })
-        } catch { }
-      }
 
-      this.setupPeerHandlers(pc, senderId)
-      this.startIceTimeout(senderId)
-    }
+      try {
+        const offer = JSON.parse(offerStr)
 
-    try {
-      const offer = JSON.parse(offerStr)
+        const isMakingOffer = this.isMakingOffer.get(senderId) ?? false
+        const readyForOffer = !isMakingOffer && (pc.signalingState === 'stable' || (this.isSettingRemoteAnswerPending.get(senderId) ?? false))
+        const offerCollision = !readyForOffer
 
-      const offerCollision = pc.signalingState !== 'stable'
-      if (offerCollision) {
         const me = store.currentUser?.id ?? ''
         const isPolitePeer = me > senderId
-        if (!isPolitePeer) return
-        await pc.setLocalDescription({ type: 'rollback' })
-      }
 
-      await pc.setRemoteDescription(new RTCSessionDescription(offer))
-      const answer = await pc.createAnswer(SILENCE_SUPPRESSION_OFF)
-      const optimizedAnswerSDP = optimizeSDP(answer.sdp!, this.relayOnlyIce)
-      await pc.setLocalDescription({ type: 'answer', sdp: optimizedAnswerSDP })
-      await this.drainPendingCandidates(senderId)
-      if (this.peerConnections.get(senderId) !== pc || !this.isPeerRelevant(senderId)) {
-        this.disconnectFromPeer(senderId)
-        return
-      }
-      signalRService.sendWebRTCAnswer(senderId, JSON.stringify(pc.localDescription))
-      this.flushPendingRenegotiation(senderId)
+        if (offerCollision) {
+          if (!isPolitePeer) {
+            console.log(`[WebRTC] Impolite peer ${me} ignoring colliding offer from ${senderId}`)
+            return
+          }
+          if (pc.signalingState === 'have-local-offer') {
+            await pc.setLocalDescription({ type: 'rollback' })
+          }
+          this.pendingRenegotiation.add(senderId)
+        }
 
-      if (this.localVideoStream) {
-        const senders = pc.getSenders()
-        const tracks = this.localVideoStream.getTracks()
-        const hasUnnegotiated = tracks.some(t => {
-          const s = senders.find(sender => sender.track === t)
-          return !s || !s.transport
-        })
-        if (hasUnnegotiated) {
-          void this.renegotiatePeer(pc, senderId)
+        await pc.setRemoteDescription(new RTCSessionDescription(offer))
+        const answer = await pc.createAnswer(SILENCE_SUPPRESSION_OFF)
+        const isOfferUltraLow = typeof offer.sdp === 'string' && (offer.sdp.includes('ptime=10') || offer.sdp.includes('minptime=10'))
+        const effectiveUltraLow = this.ultraLowLatency || isOfferUltraLow
+        const optimizedAnswerSDP = optimizeSDP(answer.sdp!, this.relayOnlyIce, effectiveUltraLow)
+        await pc.setLocalDescription({ type: 'answer', sdp: optimizedAnswerSDP })
+        await this.drainPendingCandidates(senderId)
+        if (this.peerConnections.get(senderId) !== pc || !this.isPeerRelevant(senderId)) {
+          this.disconnectFromPeer(senderId)
+          return
+        }
+        signalRService.sendWebRTCAnswer(senderId, JSON.stringify(pc.localDescription))
+        this.flushPendingRenegotiation(senderId)
+
+        if (this.localVideoStream) {
+          const senders = pc.getSenders()
+          const tracks = this.localVideoStream.getTracks()
+          const hasUnnegotiated = tracks.some(t => {
+            const s = senders.find(sender => sender.track === t)
+            return !s || !s.transport
+          })
+          if (hasUnnegotiated) {
+            void this.renegotiatePeer(pc, senderId)
+          }
+        }
+      } catch (e) {
+        console.error('[WebRTC] handleOffer failed', e)
+        if (!pc || pc.connectionState === 'closed' || pc.connectionState === 'failed') {
+          this.disconnectFromPeer(senderId, { preserveRemoteVideo: true })
+          void this.connectToPeer(senderId, true)
+        } else {
+          this.startIceTimeout(senderId)
         }
       }
-    } catch (e) {
-      console.error('[WebRTC] handleOffer failed', e)
-      this.disconnectFromPeer(senderId, { preserveRemoteVideo: true })
-      void this.connectToPeer(senderId, true)
-    }
+    })
   }
 
   public async handleAnswer(senderId: string, answerStr: string) {
-    if (senderId === useAppStore.getState().currentUser?.id) return
-    if (!this.isPeerRelevant(senderId)) return
-    const pc = this.peerConnections.get(senderId)
-    if (pc) {
-      try {
-        const answer = JSON.parse(answerStr)
-        await pc.setRemoteDescription(new RTCSessionDescription(answer))
-        await this.drainPendingCandidates(senderId)
-        this.flushPendingRenegotiation(senderId)
-      } catch (e) {
-        console.error('[WebRTC] handleAnswer failed', e)
+    return this.enqueueSignalingTask(senderId, async () => {
+      if (senderId === useAppStore.getState().currentUser?.id) return
+      if (!this.isPeerRelevant(senderId)) return
+      const pc = this.peerConnections.get(senderId)
+      if (pc) {
+        this.isSettingRemoteAnswerPending.set(senderId, true)
+        try {
+          const answer = JSON.parse(answerStr)
+          if (pc.signalingState === 'have-local-offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(answer))
+            await this.drainPendingCandidates(senderId)
+            this.flushPendingRenegotiation(senderId)
+          }
+        } catch (e) {
+          console.error('[WebRTC] handleAnswer failed', e)
+        } finally {
+          this.isSettingRemoteAnswerPending.set(senderId, false)
+        }
       }
-    }
+    })
   }
 
   public async handleIceCandidate(senderId: string, candidateStr: string) {
-    if (senderId === useAppStore.getState().currentUser?.id) return
-    let candidate: RTCIceCandidateInit
-    try { candidate = JSON.parse(candidateStr) } catch { return }
+    return this.enqueueSignalingTask(senderId, async () => {
+      if (senderId === useAppStore.getState().currentUser?.id) return
+      let candidate: RTCIceCandidateInit
+      try { candidate = JSON.parse(candidateStr) } catch { return }
 
-    if (!this.isPeerRelevant(senderId)) {
-      const early = this.pendingCandidates.get(senderId) ?? []
-      if (early.length < WebRTCManager.PENDING_CANDIDATES_PER_PEER) {
-        early.push(candidate)
-        this.pendingCandidates.set(senderId, early)
+      if (!this.isPeerRelevant(senderId)) {
+        const early = this.pendingCandidates.get(senderId) ?? []
+        if (early.length < WebRTCManager.PENDING_CANDIDATES_PER_PEER) {
+          early.push(candidate)
+          this.pendingCandidates.set(senderId, early)
+        }
+        return
       }
-      return
-    }
-    const pc = this.peerConnections.get(senderId)
-    if (!pc) {
-      const buf = this.pendingCandidates.get(senderId) ?? []
-      buf.push(candidate)
-      this.pendingCandidates.set(senderId, buf)
-      return
-    }
+      const pc = this.peerConnections.get(senderId)
+      if (!pc || !pc.remoteDescription) {
+        const buf = this.pendingCandidates.get(senderId) ?? []
+        buf.push(candidate)
+        this.pendingCandidates.set(senderId, buf)
+        return
+      }
 
-    if (!pc.remoteDescription) {
-      const buf = this.pendingCandidates.get(senderId) ?? []
-      buf.push(candidate)
-      this.pendingCandidates.set(senderId, buf)
-      return
-    }
-
-    try { await pc.addIceCandidate(new RTCIceCandidate(candidate)) } catch { }
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate))
+      } catch {
+        const buf = this.pendingCandidates.get(senderId) ?? []
+        buf.push(candidate)
+        this.pendingCandidates.set(senderId, buf)
+      }
+    })
   }
 
   private async drainPendingCandidates(userId: string): Promise<void> {
@@ -4153,23 +4444,8 @@ export class WebRTCManager {
     if (panner) { try { panner.disconnect() } catch { }; this.userPannerNodes.delete(userId) }
     this.applyVoiceSeats()
 
-    const streamAudio = this.streamAudioElements.get(userId)
-    if (streamAudio) { streamAudio.pause(); streamAudio.srcObject = null; this.streamAudioElements.delete(userId) }
-
-    const streamSource = this.streamSourceNodes.get(userId)
-    if (streamSource) { try { streamSource.disconnect() } catch { }; this.streamSourceNodes.delete(userId) }
-
-    const streamGain = this.streamGainNodes.get(userId)
-    if (streamGain) { try { streamGain.disconnect() } catch { }; this.streamGainNodes.delete(userId) }
-
-    const streamLimiter = this.streamLimiterNodes.get(userId)
-    if (streamLimiter) { try { streamLimiter.disconnect() } catch { }; this.streamLimiterNodes.delete(userId) }
-
-    const streamDelay = this.streamDelayNodes.get(userId)
-    if (streamDelay) { try { streamDelay.disconnect() } catch { }; this.streamDelayNodes.delete(userId) }
-    this.streamSyncOffsetEma.delete(userId)
-    this.streamSyncSkew.delete(userId)
-    if (this.streamGainNodes.size === 0) this.stopStreamSyncMonitoring()
+    this.cleanupRemoteStreamAudio(userId)
+    this.userVoiceTrackIds.delete(userId)
 
     if (!options.preserveRemoteVideo) {
       useAppStore.getState().setRemoteVideoStream(userId, null)
@@ -4177,6 +4453,9 @@ export class WebRTCManager {
 
     this.pendingCandidates.delete(userId)
     this.pendingRenegotiation.delete(userId)
+    this.peerSignalingQueues.delete(userId)
+    this.isMakingOffer.delete(userId)
+    this.isSettingRemoteAnswerPending.delete(userId)
     this.clearVAD(userId)
     this.lastPacketsLost.delete(userId)
     this.lastPacketsSent.delete(userId)
@@ -4185,12 +4464,15 @@ export class WebRTCManager {
     this.lossBreachCount.delete(userId)
     this.lossCleanCount.delete(userId)
     this.lossBaselineRtt.delete(userId)
+    this.lastAudioPacketTimes.delete(userId)
+    this.lastAudioConcealment.delete(userId)
     this.appliedVideoProfiles.delete(userId)
     this.viewerStates.delete(userId)
     this.reportedViewStates.delete(userId)
   }
 
-  public cleanupRemoteStream(userId: string) {
+  public cleanupRemoteStreamAudio(userId: string) {
+    this.userStreamAudioTrackIds.delete(userId)
     const streamAudio = this.streamAudioElements.get(userId)
     if (streamAudio) { streamAudio.pause(); streamAudio.srcObject = null; this.streamAudioElements.delete(userId) }
 
@@ -4208,14 +4490,23 @@ export class WebRTCManager {
     this.streamSyncOffsetEma.delete(userId)
     this.streamSyncSkew.delete(userId)
     if (this.streamGainNodes.size === 0) this.stopStreamSyncMonitoring()
+  }
 
+  public cleanupRemoteStream(userId: string) {
+    this.cleanupRemoteStreamAudio(userId)
     useAppStore.getState().setRemoteVideoStream(userId, null)
   }
 
   public leaveAll() {
+    this.stopAudioHealthMonitoring()
     this.peerConnections.forEach((_, uid) => this.disconnectFromPeer(uid))
     this.pendingCandidates.clear()
     this.pendingRenegotiation.clear()
+    this.peerSignalingQueues.clear()
+    this.isMakingOffer.clear()
+    this.isSettingRemoteAnswerPending.clear()
+    this.userVoiceTrackIds.clear()
+    this.userStreamAudioTrackIds.clear()
   }
 }
 
