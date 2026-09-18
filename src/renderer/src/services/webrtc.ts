@@ -414,7 +414,6 @@ export class WebRTCManager {
   private streamGainNodes: Map<string, GainNode> = new Map()
   private streamSourceNodes: Map<string, MediaStreamAudioSourceNode> = new Map()
   private streamDelayNodes: Map<string, DelayNode> = new Map()
-  private streamAudioElements: Map<string, HTMLAudioElement> = new Map()
   private streamCaptureContext: AudioContext | null = null
   private streamCaptureNode: AudioWorkletNode | null = null
   private streamCaptureDestination: MediaStreamAudioDestinationNode | null = null
@@ -428,7 +427,6 @@ export class WebRTCManager {
   private reportedViewStates: Map<string, 'watching' | 'preview'> = new Map()
 
   private peerConnections: Map<string, RTCPeerConnection> = new Map()
-  private audioElements: Map<string, HTMLAudioElement> = new Map()
   private lastPacketsLost: Map<string, number> = new Map()
   private lastPacketsSent: Map<string, number> = new Map()
   private lastFramesDropped: Map<string, number> = new Map()
@@ -730,7 +728,7 @@ export class WebRTCManager {
       try {
         for (const receiver of pc.getReceivers()) {
           if (receiver.track && receiver.track.kind === 'audio' && 'playoutDelayHint' in receiver) {
-            (receiver as any).playoutDelayHint = null
+            (receiver as any).playoutDelayHint = this.ultraLowLatency ? 0 : null
           }
         }
       } catch { }
@@ -1185,30 +1183,16 @@ export class WebRTCManager {
     this.audioProcessorError = null
     this.micEngineError = null
 
-    const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 0 })
+    // Create context only for UI meter
+    const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
     this.processedContext = ctx
     if (ctx.sampleRate !== 48000) {
-      const detail = `AudioContext runs at ${ctx.sampleRate}Hz, 48000Hz required`
-      console.error(`[WebRTC] Audio processing requires 48000Hz, got ${ctx.sampleRate}Hz`)
-      this.audioProcessorError = detail
-      await ctx.close().catch(() => { })
-      this.processedContext = null
-      return createSilentAudioStream()
+      console.warn(`[WebRTC] ULL AudioContext sampleRate is ${ctx.sampleRate}, expected 48000`)
     }
     if (ctx.state === 'suspended') await ctx.resume().catch(() => { })
 
-    const destination = ctx.createMediaStreamDestination()
-    const track = destination.stream.getAudioTracks()[0]
-    if (track) track.contentHint = 'speech'
     const source = ctx.createMediaStreamSource(rawStream)
     this.processedSource = source
-
-    const inputGain = ctx.createGain()
-    inputGain.gain.value = this.effectiveInputGain()
-    this.inputGainNode = inputGain
-
-    const peakGuard = this.createPeakGuard(ctx, 'none')
-    this.micOutputTap = peakGuard
 
     try {
       const analyser = ctx.createAnalyser()
@@ -1216,15 +1200,15 @@ export class WebRTCManager {
       source.connect(analyser)
       this.rawAnalyserNode = analyser
     } catch (error) {
-      console.warn('[WebRTC] Failed to create raw analyser node:', error)
+      console.warn('[WebRTC] Could not attach raw analyser:', error)
     }
 
-    source.connect(inputGain)
-    inputGain.connect(peakGuard)
-    peakGuard.connect(destination)
-
     this.localSpeakingState = false
-    return destination.stream
+
+    const rawTrack = rawStream.getAudioTracks()[0]
+    if (rawTrack) rawTrack.contentHint = 'speech'
+
+    return rawStream
   }
 
   private async createManualProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
@@ -3140,10 +3124,10 @@ export class WebRTCManager {
       return
     }
     try {
-      this.outputMixContext = new AudioContext({ sampleRate: 48000, latencyHint: this.ultraLowLatency ? 0 : 'interactive' })
+      this.outputMixContext = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
     } catch (e) {
       console.warn('[WebRTC] Failed to create outputMixContext at 48000Hz, falling back to default:', e)
-      this.outputMixContext = new AudioContext({ latencyHint: this.ultraLowLatency ? 0 : 'interactive' })
+      this.outputMixContext = new AudioContext({ latencyHint: 'interactive' })
     }
     if (this.outputMixContext.state === 'suspended') {
       this.outputMixContext.resume().catch(() => { })
@@ -3291,7 +3275,7 @@ export class WebRTCManager {
       }
       const stream = event.streams[0] || new MediaStream([event.track])
       if (event.track.kind === 'audio' && 'playoutDelayHint' in event.receiver) {
-        (event.receiver as any).playoutDelayHint = null
+        (event.receiver as any).playoutDelayHint = this.ultraLowLatency ? 0 : null
       }
       this.initOutputMixer()
 
@@ -3329,15 +3313,6 @@ export class WebRTCManager {
           this.cleanupRemoteStreamAudio(userId)
         }
         event.track.contentHint = 'music'
-        let dummyAudio = this.streamAudioElements.get(userId)
-        if (!dummyAudio) {
-          dummyAudio = new Audio()
-          dummyAudio.autoplay = true
-          dummyAudio.muted = true
-          this.streamAudioElements.set(userId, dummyAudio)
-        }
-        dummyAudio.srcObject = stream
-        dummyAudio.play().catch(() => { })
 
         if (this.streamSourceNodes.has(userId)) {
           try { this.streamSourceNodes.get(userId)?.disconnect() } catch { }
@@ -3374,20 +3349,10 @@ export class WebRTCManager {
         try {
           const receiver = pc.getReceivers().find(r => r.track && r.track.id === event.track.id)
           if (receiver && 'playoutDelayHint' in receiver) {
-            (receiver as any).playoutDelayHint = null
+            (receiver as any).playoutDelayHint = this.ultraLowLatency ? 0 : null
           }
         } catch { }
         this.setupVAD(stream, userId, false)
-
-        let dummyAudio = this.audioElements.get(userId)
-        if (!dummyAudio) {
-          dummyAudio = new Audio()
-          dummyAudio.autoplay = true
-          dummyAudio.muted = true
-          this.audioElements.set(userId, dummyAudio)
-        }
-        dummyAudio.srcObject = stream
-        dummyAudio.play().catch(() => { })
 
         if (this.userSourceNodes.has(userId)) {
           try { this.userSourceNodes.get(userId)?.disconnect() } catch { }
@@ -4428,9 +4393,6 @@ export class WebRTCManager {
     const pc = this.peerConnections.get(userId)
     if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.oniceconnectionstatechange = null; pc.close(); this.peerConnections.delete(userId) }
 
-    const audio = this.audioElements.get(userId)
-    if (audio) { audio.pause(); audio.srcObject = null; this.audioElements.delete(userId) }
-
     const source = this.userSourceNodes.get(userId)
     if (source) { try { source.disconnect() } catch { }; this.userSourceNodes.delete(userId) }
 
@@ -4473,8 +4435,6 @@ export class WebRTCManager {
 
   public cleanupRemoteStreamAudio(userId: string) {
     this.userStreamAudioTrackIds.delete(userId)
-    const streamAudio = this.streamAudioElements.get(userId)
-    if (streamAudio) { streamAudio.pause(); streamAudio.srcObject = null; this.streamAudioElements.delete(userId) }
 
     const streamSource = this.streamSourceNodes.get(userId)
     if (streamSource) { try { streamSource.disconnect() } catch { }; this.streamSourceNodes.delete(userId) }
