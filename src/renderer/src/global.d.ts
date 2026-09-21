@@ -18,6 +18,7 @@ export interface UpdateInfo {
   downloadUrl: string;
   releaseUrl: string;
   fileSize: number;
+  sha256?: string;
 }
 
 export interface UpdateProgress {
@@ -31,6 +32,15 @@ export interface UpdateCheckResult {
   currentVersion: string;
   updateInfo?: UpdateInfo;
   error?: string;
+}
+
+export type UpdateStatus = 'idle' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error';
+
+export interface UpdateSnapshot {
+  status: UpdateStatus;
+  updateInfo: UpdateInfo | null;
+  progress: UpdateProgress | null;
+  error: string | null;
 }
 
 declare global {
@@ -72,6 +82,9 @@ declare global {
       chatFileReadSlice: (storedName: string, offset: number, length: number) => Promise<Uint8Array | null>;
       chatFileSaveAs: (storedName: string, suggestedName: string) => Promise<boolean>;
       chatFileReveal: (storedName: string) => Promise<boolean>;
+      chatFilePickSavePath: (suggestedName: string) => Promise<string | null>;
+      chatFileSaveTo: (storedName: string, destPath: string) => Promise<boolean>;
+      chatFileRevealPath: (absPath: string) => Promise<boolean>;
       chatFilesPrune: (keepNames: string[]) => Promise<number>;
       chatFilesWipe: () => Promise<boolean>;
       getClientAttestation: () => Promise<string | null>;
@@ -85,6 +98,7 @@ declare global {
       ) => () => void;
       getAppVersion: () => Promise<string>;
       checkForUpdates: () => Promise<UpdateCheckResult>;
+      getUpdateStatus: () => Promise<UpdateSnapshot>;
       startUpdateDownload: (
         downloadUrl: string,
         version: string
@@ -96,6 +110,7 @@ declare global {
       onUpdateDownloadProgress: (callback: (progress: UpdateProgress) => void) => () => void;
       onUpdateDownloaded: (callback: (data: { filePath: string }) => void) => () => void;
       onUpdateError: (callback: (error: string) => void) => () => void;
+      onUpdateInstalling: (callback: () => void) => () => void;
     };
   }
 }

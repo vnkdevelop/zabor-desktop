@@ -4,7 +4,6 @@ import { createReadStream, createWriteStream, WriteStream } from 'fs';
 import { existsSync, promises as fsPromises } from 'fs';
 import { createHash, randomBytes } from 'crypto';
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_OPEN_WRITERS = 8;
 const WRITER_IDLE_MS = 120_000;
 
@@ -104,7 +103,7 @@ export function registerChatFileHandlers(): void {
       try {
         const filePath = resolve(entry);
         const stats = await fsPromises.stat(filePath);
-        if (!stats.isFile() || stats.size > MAX_FILE_BYTES) continue;
+        if (!stats.isFile()) continue;
         const name = sanitizeName(basename(filePath));
         const storedName = `${randomBytes(12).toString('hex')}-${name}`;
         const target = join(root, storedName);
@@ -124,7 +123,7 @@ export function registerChatFileHandlers(): void {
     if (typeof transferId !== 'string' || transferId.length === 0 || transferId.length > 128) {
       return { ok: false as const, error: 'bad-transfer-id' };
     }
-    if (typeof size !== 'number' || !Number.isFinite(size) || size < 0 || size > MAX_FILE_BYTES) {
+    if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) {
       return { ok: false as const, error: 'bad-size' };
     }
     if (writers.has(transferId)) return { ok: false as const, error: 'already-open' };
@@ -300,6 +299,35 @@ export function registerChatFileHandlers(): void {
     const path = storedPath(storedName);
     if (!path || !existsSync(path)) return false;
     shell.showItemInFolder(path);
+    return true;
+  });
+
+  ipcMain.handle('chat-file-pick-save-path', async (_event, suggestedName: unknown) => {
+    const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+    const defaultPath = sanitizeName(suggestedName);
+    const result = window
+      ? await dialog.showSaveDialog(window, { defaultPath })
+      : await dialog.showSaveDialog({ defaultPath });
+    if (result.canceled || !result.filePath) return null;
+    return result.filePath;
+  });
+
+  ipcMain.handle('chat-file-save-to', async (_event, storedName: unknown, destPath: unknown) => {
+    const source = storedPath(storedName);
+    if (!source || !existsSync(source)) return false;
+    if (typeof destPath !== 'string' || destPath.length === 0) return false;
+    try {
+      await fsPromises.copyFile(source, destPath);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle('chat-file-reveal-path', async (_event, absPath: unknown) => {
+    if (typeof absPath !== 'string' || absPath.length === 0) return false;
+    if (!existsSync(absPath)) return false;
+    shell.showItemInFolder(absPath);
     return true;
   });
 

@@ -72,6 +72,7 @@
     ],
     "copyright": "Copyright © 2026 ZABOR",
     "forceCodeSigning": false,
+    "publish": null,
     "directories": {
       "buildResources": "build",
       "output": "release"
@@ -88,8 +89,7 @@
           ]
         }
       ],
-      "icon": "build/icon.ico",
-      "sign": null
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -125,9 +125,9 @@
     "autoprefixer": "^10.4.20",
     "cross-env": "^7.0.3",
     "deepfilter-standalone": "^1.0.2",
-    "electron": "^33.3.0",
-    "electron-builder": "^25.1.8",
-    "electron-vite": "^2.3.0",
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
     "i18next": "^26.0.8",
     "i18next-browser-languagedetector": "^8.2.1",
     "node-gyp": "^13.0.1",

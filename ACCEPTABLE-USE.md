@@ -1,6 +1,6 @@
 # Правила допустимого использования ZABOR / ZABOR Acceptable Use Policy
 
-> Редакция от 11 сентября 2026 года.
+> Редакция от 18 сентября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -48,7 +48,7 @@
 
 ### 4. Передача файлов
 
-1. Ограничение размера одного файла — 2 ГБ.
+1. Размер одного файла не ограничивается Оператором; он ограничен только свободным местом на устройствах отправителя и получателя, поскольку файлы хранятся локально у участников.
 2. Ответственность за содержимое переданного файла несёт пользователь, его отправивший.
 3. **Оператор не проверяет содержимое файлов**, поскольку они передаются напрямую между участниками и Оператору недоступны. Это означает, что Оператор не осуществляет предварительную модерацию файлов и не может гарантировать их безопасность.
 4. Получателю рекомендуется проверять получаемые файлы средствами защиты операционной системы.
@@ -124,7 +124,7 @@ The Controller **may reject or remove** any proposed material without stating re
 
 ### 4. File transfer
 
-1. The size limit for a single file is 2 GB.
+1. The Controller sets no size limit for a single file; it is bounded only by the free space on the sender's and recipient's devices, since files are stored locally with the participants.
 2. Responsibility for the content of a transferred file rests with the user who sent it.
 3. **The Controller does not inspect file contents**, because files are transferred directly between participants and are not available to the Controller. Accordingly, the Controller performs no pre-moderation of files and cannot guarantee their safety.
 4. Recipients are advised to scan received files with their operating system's security tools.

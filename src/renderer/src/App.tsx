@@ -228,11 +228,45 @@ export default function App() {
       store.setUpdateError(err);
     });
 
+    const unsubInstalling = window.windowControls?.onUpdateInstalling?.(() => {
+      store.setUpdateStatus('installing');
+    });
+
+    const rehydrateUpdate = async (forceOpenAvailable: boolean) => {
+      try {
+        const snapshot = await window.windowControls?.getUpdateStatus?.();
+        if (!snapshot) return;
+        if (snapshot.updateInfo) store.setUpdateInfo(snapshot.updateInfo);
+        if (snapshot.progress) store.setUpdateProgress(snapshot.progress);
+        if (snapshot.error) store.setUpdateError(snapshot.error);
+        if (snapshot.status && snapshot.status !== 'idle') {
+          store.setUpdateStatus(snapshot.status);
+          const inProgress =
+            snapshot.status === 'downloading' ||
+            snapshot.status === 'downloaded' ||
+            snapshot.status === 'installing';
+          if (inProgress || (snapshot.status === 'available' && forceOpenAvailable)) {
+            store.setModal('update', true);
+          }
+        }
+      } catch {}
+    };
+
+    rehydrateUpdate(true);
+
+    const onWindowFocus = () => { rehydrateUpdate(false); };
+    const onVisibility = () => { if (document.visibilityState === 'visible') rehydrateUpdate(false); };
+    window.addEventListener('focus', onWindowFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
     return () => {
       unsubAvailable?.();
       unsubProgress?.();
       unsubDownloaded?.();
       unsubError?.();
+      unsubInstalling?.();
+      window.removeEventListener('focus', onWindowFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
@@ -2720,11 +2754,19 @@ export default function App() {
 
           <div className="flex-1 flex flex-col relative">
             {chatVisible && store.currentUser && selectedChatFriend && (!store.currentCallUser || callHidden) && (
-              <ChatPanel currentUser={store.currentUser} friend={selectedChatFriend} onCall={async () => {
-                setCallView('full');
-                const started = await signalRService.startCall(selectedChatFriend.id);
-                if (!started) setCallView('chat');
-              }} />
+              <ChatPanel
+                currentUser={store.currentUser}
+                friend={selectedChatFriend}
+                onCall={async () => {
+                  setCallView('full');
+                  const started = await signalRService.startCall(selectedChatFriend.id);
+                  if (!started) setCallView('chat');
+                }}
+                onOpenProfile={() => {
+                  store.setSelectedProfileUser(selectedChatFriend, 'friends');
+                  store.setModal('profile', true);
+                }}
+              />
             )}
             {callHidden && store.currentCallUser && (
               <ActiveSessionPip
@@ -4268,6 +4310,23 @@ export default function App() {
                       </button>
 
                       <button
+                        onClick={() => {
+                          if (store.selectedProfileUser) {
+                            const targetId = store.selectedProfileUser.id;
+                            selectChatFriend(targetId);
+                            setActiveTab('friends');
+                            void chatPeer.open(targetId);
+                            if (store.currentCallUser) setCallView('chat');
+                          }
+                          store.closeProfileOnly();
+                        }}
+                        className="w-16 h-16 rounded-2xl bg-surface/70 border border-[#303035]/70 flex items-center justify-center text-primaryText hover:bg-primary/10 hover:border-primary/40 hover:scale-105 active:scale-95 transition-all"
+                        title={t('profile.chat', 'чат')}
+                      >
+                        <ChatCircle weight="bold" size={28} />
+                      </button>
+
+                      <button
                         onClick={async () => {
                           if (store.selectedProfileUser && store.selectedProfileUser.isOnline) {
                             const ok = await signalRService.startCall(store.selectedProfileUser.id);
@@ -4598,6 +4657,22 @@ export default function App() {
           ) : (
             <>
               <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'friends'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Settings weight="bold" size={16} /> {t('contextMenu.profile', 'профиль')}</button>
+              <button onClick={async () => {
+                const friend = contextMenu.item;
+                setContextMenu(null);
+                if (!friend.isOnline) {
+                  setOfflineToast(t('profile.userOffline', 'пользователь не в сети'));
+                  setTimeout(() => setOfflineToast(null), 3000);
+                  return;
+                }
+                setCallView('full');
+                const started = await signalRService.startCall(friend.id);
+                if (!started) {
+                  setOfflineToast(t('profile.userOffline', 'пользователь не в сети'));
+                  setTimeout(() => setOfflineToast(null), 3000);
+                  if (selectedChatFriend?.id === friend.id) setCallView('chat');
+                }
+              }} className="w-full text-left px-4 py-2 text-success hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1"><Phone weight="bold" size={16} /> {t('contextMenu.call', 'позвонить')}</button>
               <button onClick={() => { signalRService.removeFriend(contextMenu.item.id); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1"><UserMinus weight="bold" size={16} /> {t('contextMenu.remove', 'удалить')}</button>
             </>
           )}

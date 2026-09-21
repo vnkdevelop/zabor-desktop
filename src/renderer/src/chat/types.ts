@@ -5,8 +5,9 @@ export interface ChatFileAttachment {
   size: number;
   sha256: string;
   storedName: string | null;
+  savedPath: string | null;
   sourceAvailable: boolean;
-  transferState: 'available' | 'missing' | 'transferring' | 'failed';
+  transferState: 'available' | 'missing' | 'transferring' | 'failed' | 'deleted';
   progress: number;
 }
 

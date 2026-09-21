@@ -1,6 +1,6 @@
 # Криптография в ZABOR: состав и свойства / ZABOR Cryptography Notice
 
-> Редакция от 11 сентября 2026 года.
+> Редакция от 19 сентября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -12,7 +12,7 @@
 
 ### 1. Назначение
 
-Криптография в ZABOR применяется для защиты **обмена сообщениями, файлами и служебными пакетами** между участниками, а также для защиты **локально хранимых данных** на устройстве пользователя. Защита голосового и видеотракта обеспечивается штатными средствами WebRTC (DTLS-SRTP) и в настоящем документе не рассматривается.
+Криптография в ZABOR применяется для защиты **обмена сообщениями, файлами и служебными пакетами** между участниками, а также для защиты **данных сессии и закрытого ключа переписки**, хранящихся локально на устройстве пользователя. Прочие локально хранимые данные — история сообщений и полученные файлы — в состоянии покоя не шифруются (см. п. 4.4). Защита голосового и видеотракта обеспечивается штатными средствами WebRTC (DTLS-SRTP) и в настоящем документе не рассматривается.
 
 ### 2. Применяемые алгоритмы
 
@@ -29,7 +29,7 @@
 
 Защита содержимого устроена по-разному в зависимости от маршрута, и это различие принципиально.
 
-**Прямой маршрут (P2P).** Соединение устанавливается напрямую между участниками по WebRTC. Содержимое защищено **транспортным шифрованием WebRTC (DTLS)**. Прикладной слой шифрования на этом маршруте **не применяется**: приложение передаёт данные по каналу данных WebRTC, полагаясь на защиту самого транспорта. Сервер при прямом соединении содержимого не видит.
+**Прямой маршрут (P2P).** Соединение устанавливается напрямую между участниками по WebRTC. Содержимое защищено **транспортным шифрованием WebRTC (DTLS)**. Прикладной слой шифрования на этом маршруте **не применяется**: приложение передаёт данные по каналу данных WebRTC, полагаясь на защиту самого транспорта. Пассивный сервер, лишь передающий сигнальные сообщения, содержимого прямого соединения не видит. При этом отпечатки DTLS согласуются через сервер сигнализации и в интерфейсе между участниками вне канала связи не сверяются, поэтому сервер, действующий активно, способен подменить параметры соединения и выступить посредником (MITM); защита от активной подмены на прямом маршруте ограничена (см. п. 4.7).
 
 **Резервный маршрут через сервер.** Когда прямое соединение не установлено, пакеты передаются через сервер приложения. На этом маршруте применяется прикладное шифрование:
 
@@ -49,6 +49,7 @@
 4. **Защита локальных данных зависит от операционной системы.** Ключ переписки и данные сессии шифруются средствами ОС; при отсутствии такой возможности в системе защита не применяется.
 5. **Метаданные не защищаются.** Оператору доступны сведения о том, кто с кем, когда и в каком объёме обменивается сообщениями (см. раздел 3.3 [PRIVACY.md](PRIVACY.md)).
 6. **Резервный маршрут использует сервер.** При невозможности прямого соединения шифрованные пакеты передаются через сервер, который видит метаданные, но не содержимое.
+7. **На прямом маршруте отпечаток DTLS не сверяется вне канала сигнализации.** Согласование транспортных ключей WebRTC проходит через сервер сигнализации, а средства сверки отпечатка между участниками в интерфейсе не предусмотрены; поэтому активный сервер сигнализации способен выступить посредником (MITM) на прямом маршруте, включая голосовой и видеотракт. Заявление о том, что сервер не видит содержимого прямого соединения, относится к пассивному серверу.
 
 ### 5. Ключи и их местонахождение
 
@@ -75,7 +76,7 @@
 
 ### 1. Purpose
 
-Cryptography in ZABOR protects the **exchange of messages, files and control packets** between participants, and protects **data stored locally** on the user's device. Protection of the voice and video path is provided by native WebRTC facilities (DTLS-SRTP) and is not covered by this document.
+Cryptography in ZABOR protects the **exchange of messages, files and control packets** between participants, and protects the **session data and the private messaging key** stored locally on the user's device. Other locally stored data — message history and received files — is not encrypted at rest (see section 4.4). Protection of the voice and video path is provided by native WebRTC facilities (DTLS-SRTP) and is not covered by this document.
 
 ### 2. Algorithms used
 
@@ -92,7 +93,7 @@ Cryptography in ZABOR protects the **exchange of messages, files and control pac
 
 Protection differs by route, and the difference is fundamental.
 
-**Direct route (P2P).** The connection is established directly between participants over WebRTC. Content is protected by **WebRTC transport encryption (DTLS)**. No application-layer encryption is applied on this route: the application sends data over the WebRTC data channel and relies on the transport's own protection. On a direct connection the server does not see the content.
+**Direct route (P2P).** The connection is established directly between participants over WebRTC. Content is protected by **WebRTC transport encryption (DTLS)**. No application-layer encryption is applied on this route: the application sends data over the WebRTC data channel and relies on the transport's own protection. A passive server that merely relays signalling messages does not see the content of a direct connection. However, DTLS fingerprints are negotiated through the signalling server and are not compared between participants out of band, so a server acting actively can substitute the connection parameters and act as a man in the middle (MITM); protection against active substitution on the direct route is limited (see section 4.7).
 
 **Fallback route through the server.** Where a direct connection is not established, packets are transmitted through the application server. Application-layer encryption applies on this route:
 
@@ -112,6 +113,7 @@ The Controller states these limitations expressly so that protection claims are 
 4. **Local data protection depends on the operating system.** The messaging key and session data are encrypted with OS facilities; where the system does not provide them, protection is not applied.
 5. **Metadata is not protected.** The Controller can see who exchanges messages with whom, when and in what volume (see section 3.3 of [PRIVACY.md](PRIVACY.md)).
 6. **The fallback route uses the server.** Where a direct connection cannot be established, encrypted packets pass through the server, which sees metadata but not content.
+7. **On the direct route the DTLS fingerprint is not verified outside the signalling channel.** WebRTC transport-key negotiation passes through the signalling server, and the interface provides no means for participants to compare fingerprints; therefore an active signalling server can act as a man in the middle (MITM) on the direct route, including the voice and video path. The statement that the server does not see the content of a direct connection applies to a passive server.
 
 ### 5. Keys and their location
 

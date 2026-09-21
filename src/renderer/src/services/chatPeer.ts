@@ -8,7 +8,6 @@ const CHAT_SDP_PREFIX = 'zabor-chat:';
 const CHUNK_BYTES = 48 * 1024;
 const BUFFER_LIMIT = 512 * 1024;
 const MAX_CONTROL_BYTES = 64 * 1024;
-const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const CONNECT_TIMEOUT_MS = 8_000;
@@ -176,12 +175,12 @@ class ChatPeerManager {
     const ownerId = this.ownerId();
     if (!ownerId || !this.isFriend(friendId)) return;
     for (const picked of files) {
-      if (picked.size > MAX_FILE_BYTES) continue;
       const message = this.createMessage(ownerId, friendId, 'file', '', {
         name: picked.name,
         size: picked.size,
         sha256: picked.sha256,
         storedName: picked.storedName,
+        savedPath: null,
         sourceAvailable: true,
         transferState: 'available',
         progress: 1
@@ -201,7 +200,7 @@ class ChatPeerManager {
   public async clearFile(message: ChatMessage): Promise<void> {
     if (!message.file?.storedName) return;
     if (!await window.windowControls.chatFileDelete(message.file.storedName)) return;
-    await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, transferState: 'missing', progress: 0 } });
+    await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, transferState: 'deleted', progress: 0 } });
     await this.sendOrQueueDeletion(message.conversationId, { type: 'file-delete', messageId: message.id });
   }
 
@@ -442,7 +441,7 @@ class ChatPeerManager {
       if (raw.kind === 'text' && (raw.file !== null || raw.text.trim().length === 0)) return;
       if (raw.kind === 'file') {
         if (!raw.file || raw.text.length > 0 || typeof raw.file.name !== 'string' || raw.file.name.length === 0 || raw.file.name.length > 255) return;
-        if (!Number.isSafeInteger(raw.file.size) || raw.file.size <= 0 || raw.file.size > MAX_FILE_BYTES) return;
+        if (!Number.isSafeInteger(raw.file.size) || raw.file.size <= 0) return;
         if (!/^[a-f0-9]{64}$/.test(raw.file.sha256)) return;
       }
       const tombstones = this.readDeletionQueue(this.incomingDeletionKey(ownerId, friendId));
@@ -454,7 +453,7 @@ class ChatPeerManager {
         return;
       }
       const fileDeleted = tombstones.some(item => item.type === 'file-delete' && item.messageId === raw.id);
-      const message: ChatMessage = { ...raw, ownerId, conversationId: friendId, delivery: 'delivered', file: raw.file ? { ...raw.file, storedName: null, sourceAvailable: false, transferState: fileDeleted ? 'failed' : 'missing', progress: 0 } : null };
+      const message: ChatMessage = { ...raw, ownerId, conversationId: friendId, delivery: 'delivered', file: raw.file ? { ...raw.file, storedName: null, savedPath: null, sourceAvailable: false, transferState: fileDeleted ? 'deleted' : 'missing', progress: 0 } : null };
       this.sequences.set(friendId, Math.max(this.sequences.get(friendId) ?? 0, message.sequence));
       await useChatStore.getState().upsert(message);
       await this.sendControl(friendId, { type: 'ack', messageId: message.id });
@@ -529,7 +528,7 @@ class ChatPeerManager {
       }
       if (message.file) {
         if (message.file.storedName && !await window.windowControls.chatFileDelete(message.file.storedName)) return;
-        await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, transferState: 'missing', progress: 0 } });
+        await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, transferState: 'deleted', progress: 0 } });
       }
       return;
     }
@@ -547,7 +546,7 @@ class ChatPeerManager {
     }
     if (packet.type === 'file-begin' && packet.messageId && packet.transferId) {
       const message = this.findMessage(friendId, packet.messageId);
-      if (!message?.file || message.senderId !== friendId || message.file.size > MAX_FILE_BYTES || this.incoming.has(packet.transferId)) return;
+      if (!message?.file || message.senderId !== friendId || this.incoming.has(packet.transferId)) return;
       const result = await window.windowControls.chatFileBegin(packet.transferId, message.file.name, message.file.size);
       if (result.ok) this.incoming.set(packet.transferId, { messageId: message.id, transferId: packet.transferId, expected: message.file.size, written: 0, storedName: result.storedName, sha256: message.file.sha256 });
       else await useChatStore.getState().upsert({ ...message, file: { ...message.file, transferState: 'failed', progress: 0 } });
@@ -556,7 +555,7 @@ class ChatPeerManager {
     if (packet.type === 'file-complete' && packet.transferId) await this.completeIncoming(friendId, packet.transferId);
     if (packet.type === 'file-unavailable' && packet.messageId) {
       const message = this.findMessage(friendId, packet.messageId);
-      if (message?.file) await useChatStore.getState().upsert({ ...message, file: { ...message.file, transferState: 'failed', progress: 0 } });
+      if (message?.file) await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, transferState: 'deleted', progress: 0 } });
     }
   }
 

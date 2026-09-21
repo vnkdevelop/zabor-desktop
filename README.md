@@ -38,7 +38,7 @@ npm run dev
 | Область                 | Технологии                                                  |
 | ----------------------- | ----------------------------------------------------------- |
 | Интерфейс               | React 18, TypeScript, Tailwind CSS, Framer Motion           |
-| Desktop                 | Electron 33, electron-vite, electron-builder                |
+| Desktop                 | Electron 44, electron-vite, electron-builder                |
 | Состояние и локализация | Zustand, i18next                                            |
 | Связь                   | WebRTC, ASP.NET Core SignalR                                |
 | Медиа                   | Web Audio API, WebAssembly, ONNX Runtime Web, DeepFilterNet |

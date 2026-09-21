@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, ArrowSquareOut, DownloadSimple, Sparkle, ArrowRight, CheckCircle, Warning } from '@phosphor-icons/react';
+import { X, ArrowSquareOut, DownloadSimple, Sparkle, ArrowRight, CheckCircle, Warning, CircleNotch } from '@phosphor-icons/react';
 import { useAppStore } from '../../store/useAppStore';
 
 interface UpdateModalProps {
@@ -41,6 +41,8 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   };
 
   const handleInstall = async () => {
+    setUpdateStatus('installing');
+    setUpdateError(null);
     try {
       const res = await window.windowControls.installUpdate();
       if (res && !res.success && (res.error || res.message)) {
@@ -61,6 +63,26 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
 
   const isDownloading = updateStatus === 'downloading';
   const isDownloaded = updateStatus === 'downloaded';
+  const isInstalling = updateStatus === 'installing';
+
+  if (isInstalling) {
+    return (
+      <div className="glass-modal w-[420px] max-w-full p-8 flex flex-col items-center text-center relative overflow-hidden animate-modal-in">
+        <div className="w-14 h-14 rounded-2xl bg-primary/20 flex items-center justify-center text-primary mb-5">
+          <CircleNotch weight="bold" size={30} className="animate-spin" />
+        </div>
+        <h2 className="text-xl font-bold text-white leading-tight mb-2">
+          {t('modals.update.installingTitle', 'устанавливаю обновление')}
+        </h2>
+        <p className="text-sm text-textMuted leading-relaxed">
+          {t('modals.update.installingDesc', 'закрываю zabor и обновляю. приложение перезапустится само на новой версии.')}
+        </p>
+        <div className="w-full h-1.5 rounded-full bg-black/40 overflow-hidden relative mt-6">
+          <div className="h-full w-1/3 bg-primary/90 rounded-full animate-update-indeterminate" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="glass-modal w-[520px] max-w-full p-6 flex flex-col relative overflow-hidden animate-modal-in">
@@ -89,7 +111,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
 
         <button
           onClick={onClose}
-          className="group text-textMuted hover:text-white transition-colors duration-200 p-1.5 rounded-lg hover:bg-surface/70"
+          disabled={isDownloading}
+          className={`group text-textMuted hover:text-white transition-colors duration-200 p-1.5 rounded-lg hover:bg-surface/70 ${
+            isDownloading ? 'opacity-40 cursor-not-allowed' : ''
+          }`}
           title={t('common.close', 'закрыть')}
         >
           <X weight="bold" size={20} />

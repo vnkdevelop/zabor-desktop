@@ -167,11 +167,11 @@ interface AppState {
 
   updateInfo: import('../global').UpdateInfo | null;
   updateProgress: import('../global').UpdateProgress | null;
-  updateStatus: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error';
+  updateStatus: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error';
   updateError: string | null;
   setUpdateInfo: (info: import('../global').UpdateInfo | null) => void;
   setUpdateProgress: (progress: import('../global').UpdateProgress | null) => void;
-  setUpdateStatus: (status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error') => void;
+  setUpdateStatus: (status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error') => void;
   setUpdateError: (err: string | null) => void;
 
   setModal: (modalName: keyof AppState['modals'], isOpen: boolean) => void;

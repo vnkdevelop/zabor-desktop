@@ -23,7 +23,10 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     define: {
       __ZABOR_CLIENT_SECRET__: JSON.stringify(clientSecret),
-      __ZABOR_CLIENT_CHANNEL__: JSON.stringify(clientChannel)
+      __ZABOR_CLIENT_CHANNEL__: JSON.stringify(clientChannel),
+      __ZABOR_UPDATE_SIGNER__: JSON.stringify(
+        process.env.ZABOR_UPDATE_SIGNER || fileEnv.ZABOR_UPDATE_SIGNER || ''
+      )
     }
   },
   preload: {

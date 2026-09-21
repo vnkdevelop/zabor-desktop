@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { DownloadSimple, File, Paperclip, PaperPlaneRight, Trash, Copy, Broom, PhoneCall, X, Info } from '@phosphor-icons/react';
+import { DownloadSimple, ArrowSquareOut, File, Paperclip, PaperPlaneRight, Trash, Copy, Broom, PhoneCall, X, Info } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
-import type { User } from '../../store/useAppStore';
+import { useAppStore, type User } from '../../store/useAppStore';
 import { useChatStore } from '../../store/useChatStore';
 import type { ChatMessage } from '../../chat/types';
 import { chatPeer } from '../../services/chatPeer';
@@ -11,6 +11,7 @@ interface ChatPanelProps {
   currentUser: User;
   friend: User;
   onCall: () => void;
+  onOpenProfile?: () => void;
 }
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -22,8 +23,97 @@ function formatSize(bytes: number, unit: (key: string) => string): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} ${unit('chat.units.gb')}`;
 }
 
-export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
+function renderMessageContent(text: string) {
+  if (!text) return null;
+  const regex = /(https?:\/\/[^\s<]+|www\.[^\s<]+)/gi;
+  const parts: Array<{ type: 'text' | 'link'; content: string; url?: string }> = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    const matchStart = match.index;
+    if (matchStart > lastIndex) {
+      parts.push({ type: 'text', content: text.slice(lastIndex, matchStart) });
+    }
+
+    let rawUrl = match[0];
+    let trailingPunctuation = '';
+
+    while (rawUrl.length > 0) {
+      const lastChar = rawUrl[rawUrl.length - 1];
+      if (['.', ',', ';', ':', '!', '?'].includes(lastChar)) {
+        trailingPunctuation = lastChar + trailingPunctuation;
+        rawUrl = rawUrl.slice(0, -1);
+      } else if (lastChar === ')') {
+        const openCount = (rawUrl.match(/\(/g) || []).length;
+        const closeCount = (rawUrl.match(/\)/g) || []).length;
+        if (closeCount > openCount) {
+          trailingPunctuation = lastChar + trailingPunctuation;
+          rawUrl = rawUrl.slice(0, -1);
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+
+    if (rawUrl.length > 0) {
+      const href = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+      parts.push({ type: 'link', content: rawUrl, url: href });
+    }
+
+    if (trailingPunctuation) {
+      parts.push({ type: 'text', content: trailingPunctuation });
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ type: 'text', content: text.slice(lastIndex) });
+  }
+
+  return parts.map((part, index) => {
+    if (part.type === 'link' && part.url) {
+      return (
+        <a
+          key={index}
+          href={part.url}
+          onClick={event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (part.url) {
+              if (window.windowControls?.openExternalUrl) {
+                void window.windowControls.openExternalUrl(part.url);
+              } else {
+                window.open(part.url, '_blank', 'noopener,noreferrer');
+              }
+            }
+          }}
+          className="text-blue-400 hover:text-blue-300 underline underline-offset-2 break-all cursor-pointer transition-colors"
+          title={part.url}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {part.content}
+        </a>
+      );
+    }
+    return <span key={index}>{part.content}</span>;
+  });
+}
+
+export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPanelProps) {
   const { t } = useTranslation();
+  const handleOpenProfile = () => {
+    if (onOpenProfile) {
+      onOpenProfile();
+    } else {
+      useAppStore.getState().setSelectedProfileUser(friend, 'friends');
+      useAppStore.getState().setModal('profile', true);
+    }
+  };
   const storedMessages = useChatStore(state => state.messages[friend.id]);
   const messages = storedMessages ?? EMPTY_MESSAGES;
   const connected = useChatStore(state => state.connections[friend.id] ?? false);
@@ -34,6 +124,7 @@ export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const pendingSaveRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => { void chatPeer.open(friend.id); }, [friend.id]);
   useEffect(() => () => chatPeer.keepWarm(friend.id), [friend.id]);
@@ -72,6 +163,24 @@ export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
     };
   }, [menu]);
 
+  useEffect(() => {
+    if (pendingSaveRef.current.size === 0) return;
+    for (const message of messages) {
+      const dest = pendingSaveRef.current.get(message.id);
+      if (!dest || !message.file) continue;
+      if (message.file.storedName) {
+        const storedName = message.file.storedName;
+        pendingSaveRef.current.delete(message.id);
+        void (async () => {
+          const ok = await window.windowControls.chatFileSaveTo(storedName, dest);
+          if (ok) await useChatStore.getState().upsert({ ...message, file: { ...message.file!, savedPath: dest } });
+        })();
+      } else if (message.file.transferState === 'failed' || message.file.transferState === 'deleted') {
+        pendingSaveRef.current.delete(message.id);
+      }
+    }
+  }, [messages]);
+
   const canSend = value.trim().length > 0 && value.trim().length <= 4000;
   const status = useMemo(() => connected ? t('chat.connected') : friend.isOnline ? t('chat.connecting') : t('chat.offline'), [connected, friend.isOnline, t]);
 
@@ -83,9 +192,32 @@ export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
   };
 
   const download = async (message: ChatMessage) => {
-    if (!message.file) return;
-    if (message.file.storedName) await window.windowControls.chatFileSaveAs(message.file.storedName, message.file.name);
-    else await chatPeer.requestFile(message);
+    const file = message.file;
+    if (!file) return;
+    const own = message.senderId === currentUser.id;
+    if (file.savedPath) {
+      if (await window.windowControls.chatFileRevealPath(file.savedPath)) return;
+      await useChatStore.getState().upsert({ ...message, file: { ...file, savedPath: null } });
+    }
+    if (file.storedName) {
+      const dest = await window.windowControls.chatFilePickSavePath(file.name);
+      if (!dest) return;
+      if (await window.windowControls.chatFileSaveTo(file.storedName, dest)) {
+        await useChatStore.getState().upsert({ ...message, file: { ...file, savedPath: dest } });
+        return;
+      }
+      const cleared: ChatMessage = { ...message, file: { ...file, storedName: null, savedPath: null, transferState: own ? 'deleted' : 'missing', progress: 0 } };
+      await useChatStore.getState().upsert(cleared);
+      if (own) return;
+      pendingSaveRef.current.set(message.id, dest);
+      await chatPeer.requestFile(cleared);
+      return;
+    }
+    if (own) return;
+    const dest = await window.windowControls.chatFilePickSavePath(file.name);
+    if (!dest) return;
+    pendingSaveRef.current.set(message.id, dest);
+    await chatPeer.requestFile(message);
   };
 
   const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -107,7 +239,7 @@ export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
     event.preventDefault();
     dragDepth.current = 0;
     setDragging(false);
-    const files = Array.from(event.dataTransfer.files).filter(file => file.size <= 2 * 1024 * 1024 * 1024);
+    const files = Array.from(event.dataTransfer.files);
     if (files.length > 0) setDroppedFiles(files);
   };
 
@@ -127,11 +259,20 @@ export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
             <div className="mt-2 text-xs text-textMuted">{t('chat.encryptionHint')}</div>
           </div>
         </div>
-        <div className="min-w-0 text-center">
-          <div className="font-bold text-white truncate">{friend.displayName}</div>
-          <div className="text-xs text-textMuted truncate">{status}</div>
+        <div className="min-w-0 flex flex-col items-center justify-center">
+          <button
+            type="button"
+            onClick={handleOpenProfile}
+            className="group max-w-full inline-flex items-center justify-center px-2.5 py-0.5 -my-0.5 rounded-lg hover:bg-white/[0.08] active:bg-white/[0.12] active:scale-[0.98] transition-all cursor-pointer select-none"
+            title={t('contextMenu.profile', 'профиль')}
+          >
+            <span className="font-bold text-white group-hover:text-primaryText transition-colors truncate">
+              {friend.displayName}
+            </span>
+          </button>
+          <div className="text-xs text-textMuted truncate max-w-full">{status}</div>
         </div>
-        <button onClick={onCall} disabled={!friend.isOnline} className="w-10 h-10 rounded-full bg-surface/70 hover:bg-surfaceHover/80 disabled:opacity-40 text-white flex items-center justify-center transition-transform active:scale-95" title={t('chat.call')}>
+        <button onClick={onCall} disabled={!friend.isOnline} className="w-10 h-10 rounded-full bg-surface/70 hover:bg-surfaceHover/80 disabled:opacity-40 text-success flex items-center justify-center transition-transform active:scale-95" title={t('chat.call')}>
           <PhoneCall weight="bold" size={19} />
         </button>
       </div>
@@ -150,7 +291,7 @@ export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
                     className={`max-w-[72%] rounded-[14px] px-4 py-3 border ${own ? 'bg-primary/20 border-primary/30' : 'bg-surface/70 border-white/[0.07]'}`}
                   >
                     {message.kind === 'text' ? (
-                      <p className="text-white text-sm whitespace-pre-wrap break-words select-text">{message.text}</p>
+                      <p className="text-white text-sm whitespace-pre-wrap break-words select-text">{renderMessageContent(message.text)}</p>
                     ) : message.file && (
                       <div className="flex items-center gap-3 min-w-[240px]">
                         <div className="w-10 h-10 rounded-xl bg-white/[0.06] flex items-center justify-center shrink-0"><File weight="bold" size={20} /></div>
@@ -158,10 +299,14 @@ export function ChatPanel({ currentUser, friend, onCall }: ChatPanelProps) {
                           <div className="text-white text-sm font-semibold truncate">{message.file.name}</div>
                           <div className="text-textMuted text-xs">{formatSize(message.file.size, t)}</div>
                           {message.file.transferState === 'transferring' && <div className="h-1 bg-black/30 rounded-full overflow-hidden mt-2"><div className="h-full bg-primary origin-left" style={{ transform: `scaleX(${message.file.progress})` }} /></div>}
+                          {message.file.transferState === 'deleted' && <div className="text-danger text-xs mt-1">{own ? t('chat.file.deletedByYou') : t('chat.file.deletedBySender')}</div>}
+                          {message.file.transferState === 'failed' && <div className="text-warning text-xs mt-1">{t('chat.file.failed')}</div>}
                         </div>
-                        <button onClick={() => void download(message)} disabled={message.file.transferState === 'transferring'} className="w-9 h-9 rounded-xl bg-surface/70 hover:bg-surfaceHover/80 disabled:opacity-40 flex items-center justify-center active:scale-95" title={message.file.storedName ? t('chat.saveFile') : t('chat.download')}>
-                          <DownloadSimple weight="bold" size={17} />
-                        </button>
+                        {(message.file.savedPath || message.file.transferState !== 'deleted') && (
+                          <button onClick={() => void download(message)} disabled={message.file.transferState === 'transferring'} className="w-9 h-9 rounded-xl bg-surface/70 hover:bg-surfaceHover/80 disabled:opacity-40 flex items-center justify-center active:scale-95" title={message.file.savedPath ? t('chat.openFile') : t('chat.download')}>
+                            {message.file.savedPath ? <ArrowSquareOut weight="bold" size={17} /> : <DownloadSimple weight="bold" size={17} />}
+                          </button>
+                        )}
                       </div>
                     )}
                     <div className="mt-1.5 text-[10px] text-white/35 text-right">

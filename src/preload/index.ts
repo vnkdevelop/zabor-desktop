@@ -40,6 +40,9 @@ const windowControls = {
   chatFileReadSlice: (storedName: string, offset: number, length: number): Promise<Uint8Array | null> => ipcRenderer.invoke('chat-file-read-slice', storedName, offset, length),
   chatFileSaveAs: (storedName: string, suggestedName: string): Promise<boolean> => ipcRenderer.invoke('chat-file-save-as', storedName, suggestedName),
   chatFileReveal: (storedName: string): Promise<boolean> => ipcRenderer.invoke('chat-file-reveal', storedName),
+  chatFilePickSavePath: (suggestedName: string): Promise<string | null> => ipcRenderer.invoke('chat-file-pick-save-path', suggestedName),
+  chatFileSaveTo: (storedName: string, destPath: string): Promise<boolean> => ipcRenderer.invoke('chat-file-save-to', storedName, destPath),
+  chatFileRevealPath: (absPath: string): Promise<boolean> => ipcRenderer.invoke('chat-file-reveal-path', absPath),
   chatFilesPrune: (keepNames: string[]): Promise<number> => ipcRenderer.invoke('chat-files-prune', keepNames),
   chatFilesWipe: (): Promise<boolean> => ipcRenderer.invoke('chat-files-wipe'),
   getClientAttestation: (): Promise<string | null> => ipcRenderer.invoke('get-client-attestation'),
@@ -68,6 +71,7 @@ const windowControls = {
   },
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),
   checkForUpdates: (): Promise<any> => ipcRenderer.invoke('check-for-updates'),
+  getUpdateStatus: (): Promise<any> => ipcRenderer.invoke('get-update-status'),
   startUpdateDownload: (downloadUrl: string, version: string): Promise<{ success: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('start-update-download', downloadUrl, version),
   cancelUpdateDownload: (): Promise<boolean> => ipcRenderer.invoke('cancel-update-download'),
@@ -93,6 +97,11 @@ const windowControls = {
     const listener = (_event: Electron.IpcRendererEvent, error: string) => callback(error)
     ipcRenderer.on('update-error', listener)
     return () => { ipcRenderer.removeListener('update-error', listener) }
+  },
+  onUpdateInstalling: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('update-installing', listener)
+    return () => { ipcRenderer.removeListener('update-installing', listener) }
   }
 }
 
