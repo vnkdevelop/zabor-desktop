@@ -10,6 +10,7 @@ const WRITER_IDLE_MS = 120_000;
 interface ActiveWriter {
   stream: WriteStream;
   path: string;
+  finalPath: string;
   written: number;
   expected: number;
   lastTouched: number;
@@ -89,7 +90,14 @@ function writeChunk(writer: ActiveWriter, chunk: Buffer): Promise<void> {
 
 function closeStream(writer: ActiveWriter): Promise<void> {
   return new Promise(resolvePromise => {
-    writer.stream.end(() => resolvePromise());
+    let settled = false;
+    const done = (): void => {
+      if (settled) return;
+      settled = true;
+      resolvePromise();
+    };
+    writer.stream.once('error', () => { writer.failed = true; done(); });
+    writer.stream.end(() => done());
   });
 }
 
@@ -132,11 +140,17 @@ export function registerChatFileHandlers(): void {
     try {
       const root = await ensureRoot();
       const stored = `${randomBytes(12).toString('hex')}-${sanitizeName(fileName)}`;
-      const path = join(root, stored);
-      const stream = createWriteStream(path, { flags: 'wx' });
+      const finalPath = join(root, stored);
+      const tempPath = `${finalPath}.part`;
+      const stream = createWriteStream(tempPath, { flags: 'wx' });
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        stream.once('open', () => resolvePromise());
+        stream.once('error', rejectPromise);
+      });
       const writer: ActiveWriter = {
         stream,
-        path,
+        path: tempPath,
+        finalPath,
         written: 0,
         expected: size,
         lastTouched: Date.now(),
@@ -157,8 +171,14 @@ export function registerChatFileHandlers(): void {
     if (!writer) return { ok: false as const, error: 'not-open' };
     if (writer.failed) return { ok: false as const, error: 'write-failed' };
 
-    const buffer = chunk instanceof Uint8Array ? Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength) : null;
-    if (!buffer) return { ok: false as const, error: 'bad-chunk' };
+    const buffer = Buffer.isBuffer(chunk)
+      ? Buffer.from(chunk)
+      : chunk instanceof Uint8Array
+        ? Buffer.from(chunk)
+        : chunk instanceof ArrayBuffer
+          ? Buffer.from(new Uint8Array(chunk))
+          : null;
+    if (!buffer || buffer.byteLength === 0) return { ok: false as const, error: 'bad-chunk' };
     if (writer.written + buffer.byteLength > writer.expected) {
       return { ok: false as const, error: 'size-exceeded' };
     }
@@ -185,13 +205,19 @@ export function registerChatFileHandlers(): void {
       await fsPromises.rm(writer.path, { force: true }).catch(() => { });
       return { ok: false as const, error: 'incomplete' };
     }
-    return { ok: true as const, storedName: basename(writer.path), size: writer.written };
+    try {
+      await fsPromises.rename(writer.path, writer.finalPath);
+    } catch {
+      await fsPromises.rm(writer.path, { force: true }).catch(() => { });
+      return { ok: false as const, error: 'commit-failed' };
+    }
+    return { ok: true as const, storedName: basename(writer.finalPath), size: writer.written };
   });
 
   ipcMain.handle('chat-file-abort', async (_event, transferId: unknown) => {
-    if (typeof transferId !== 'string') return true;
+    if (typeof transferId !== 'string') return false;
     const writer = writers.get(transferId);
-    if (!writer) return true;
+    if (!writer) return false;
     writers.delete(transferId);
     writer.stream.destroy();
     await fsPromises.rm(writer.path, { force: true }).catch(() => { });

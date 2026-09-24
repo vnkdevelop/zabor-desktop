@@ -1,0 +1,38 @@
+name: native low-latency audio
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native/low-latency-audio/**'
+      - 'scripts/rebuild-low-latency-audio.cjs'
+      - '.github/workflows/native-low-latency-audio.yml'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: install module dependencies
+        working-directory: native/low-latency-audio
+        run: npm install --no-audit --no-fund
+
+      - name: build (node abi)
+        working-directory: native/low-latency-audio
+        run: npx node-gyp rebuild
+
+      - name: smoke test (loads module, prints device periods)
+        working-directory: native/low-latency-audio
+        run: node smoke.cjs
+
+      - name: upload prebuilt addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: zabor-low-latency-audio-node-abi
+          path: native/low-latency-audio/build/Release/*.node
+          if-no-files-found: error

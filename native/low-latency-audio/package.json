@@ -1,0 +1,15 @@
+{
+  "name": "zabor-low-latency-audio",
+  "version": "0.0.1",
+  "private": true,
+  "description": "native windows low-latency audio probe (iaudioclient3) for ultra voice mode",
+  "main": "index.js",
+  "gypfile": true,
+  "scripts": {
+    "smoke": "node smoke.cjs"
+  },
+  "devDependencies": {
+    "node-addon-api": "^8.3.0",
+    "node-gyp": "^13.0.2"
+  }
+}

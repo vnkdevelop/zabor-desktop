@@ -40,7 +40,7 @@ export interface ChatControlPacket {
   version: 1;
   senderId: string;
   targetId: string;
-  type: 'key' | 'encrypted' | 'message' | 'ack' | 'ack-through' | 'read' | 'read-through' | 'sync-request' | 'sync-state' | 'sync-complete' | 'ping' | 'pong' | 'file-request' | 'file-begin' | 'file-complete' | 'file-unavailable' | 'message-delete' | 'file-delete';
+  type: 'key' | 'encrypted' | 'message' | 'ack' | 'ack-through' | 'read' | 'read-through' | 'sync-request' | 'sync-state' | 'sync-complete' | 'ping' | 'pong' | 'file-request' | 'file-unavailable' | 'file-cancel' | 'message-delete' | 'file-delete';
   messageId?: string;
   transferId?: string;
   message?: ChatWireMessage;
@@ -55,8 +55,8 @@ export interface ChatChunkHeader {
   version: 1;
   senderId: string;
   targetId: string;
-  type: 'file-chunk';
+  type: 'file-begin' | 'file-chunk' | 'file-complete';
   messageId: string;
   transferId: string;
-  offset: number;
+  offset?: number;
 }

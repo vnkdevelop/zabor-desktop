@@ -129,7 +129,7 @@ export function NoiseSuppressionSettings({
               {t('settings.audio.ultraLowLatencyDesc', 'минимально возможная задержка голоса без тяжёлых фильтров и обработок.')}
             </p>
           </div>
-          <Md3Switch checked={ultraLowLatency} onChange={onUltraLowLatencyChange} />
+          <Md3Switch checked={ultraLowLatency} onChange={onUltraLowLatencyChange ?? (() => {})} />
         </div>
       </section>
 

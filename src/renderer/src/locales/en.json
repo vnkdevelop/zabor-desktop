@@ -110,6 +110,7 @@
     "sendFile": "send",
     "placeholder": "write a message",
     "download": "download",
+    "cancel": "cancel",
     "saveFile": "save file",
     "openFile": "open file",
     "copy": "copy",

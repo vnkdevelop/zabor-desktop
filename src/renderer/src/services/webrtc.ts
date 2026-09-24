@@ -6,6 +6,8 @@ import micPipelineDeepFilterUrl from './mic-pipeline-deepfilter?worker&url'
 import micPipelineRnnoiseUrl from './mic-pipeline-rnnoise?worker&url'
 import micTestCaptureProcessorUrl from './mic-test-capture-processor?worker&url'
 import playbackBufferProcessorUrl from './playback-buffer-processor?worker&url'
+import ultraJitterProcessorUrl from './ultra-jitter-processor?worker&url'
+import UltraVoiceTransformWorker from './ultra-voice-transform.worker?worker'
 import VadWorker from './silero-vad.worker?worker'
 import {
   getDeepFilterAsset,
@@ -221,12 +223,80 @@ const ULTRA_JITTER_MAX_MS = 140
 const ULTRA_JITTER_HEADROOM_MS = 6
 const ULTRA_JITTER_FACTOR = 2.2
 const ULTRA_JITTER_ATTACK = 0.6
-const ULTRA_JITTER_RELEASE = 0.08
+const ULTRA_JITTER_RELEASE = 0.25
 const ULTRA_FRAME_MS_SAFE = 10
 const ULTRA_FRAME_MS_FAST = 5
-const ULTRA_FRAME_DOWNGRADE_LOSS = 0.02
-const ULTRA_FRAME_CLEAN_TICKS = 8
-const ULTRA_FRAME_MIN_SWITCH_MS = 15000
+const ULTRA_FRAME_DOWNGRADE_LOSS = 0.05
+const ULTRA_FRAME_DOWNGRADE_TICKS = 2
+const ULTRA_FRAME_CLEAN_TICKS = 3
+const ULTRA_FRAME_MIN_SWITCH_MS = 8000
+const ULTRA_CONCEAL_BUMP_SAMPLES = 4800
+const ULTRA_CONCEAL_BUMP_MS = 30
+const ULTRA_CONCEAL_CEILING_MS = 70
+const ULTRA_CONCEAL_DECAY = 0.5
+const ULTRA_MIC_LATENCY_HINT_S = 0
+const ULTRA_CUSTOM_BUFFER_STORAGE_KEY = 'zabor.ultraCustomBuffer'
+const ULTRA_REORDER_HOLD = 0
+const ULTRA_CUSTOM_UNDERRUN_FALLBACK = 40
+const ULTRA_CUSTOM_CONNECT_TIMEOUT_MS = 1200
+const ULTRA_CUSTOM_FRAME_TIMEOUT_MS = 3000
+const ULTRA_PENDING_PREROLL_MAX = 40
+
+type WebCodecsAudioData = {
+  numberOfFrames: number
+  numberOfChannels: number
+  sampleRate: number
+  format: string | null
+  copyTo: (dest: ArrayBufferView, options: { planeIndex: number; format?: string }) => void
+  close: () => void
+}
+
+type WebCodecsAudioDecoder = {
+  state: string
+  configure: (config: { codec: string; sampleRate: number; numberOfChannels: number }) => void
+  decode: (chunk: unknown) => void
+  close: () => void
+}
+
+type WebCodecsAudioDecoderCtor = new (init: {
+  output: (data: WebCodecsAudioData) => void
+  error: (reason: unknown) => void
+}) => WebCodecsAudioDecoder
+
+type WebCodecsEncodedAudioChunkCtor = new (init: {
+  type: 'key' | 'delta'
+  timestamp: number
+  data: ArrayBuffer | ArrayBufferView
+}) => unknown
+
+type RtcScriptTransformCtor = new (worker: Worker, options?: unknown) => unknown
+
+type UltraCodecGlobals = {
+  RTCRtpScriptTransform?: RtcScriptTransformCtor
+  AudioDecoder?: WebCodecsAudioDecoderCtor
+  EncodedAudioChunk?: WebCodecsEncodedAudioChunkCtor
+}
+
+type UltraEncodedFrameMessage = {
+  timestamp: number
+  sequenceNumber?: number
+  data: ArrayBuffer
+}
+
+type UltraTransformEndedMessage = {
+  type: 'ended'
+  reason: string
+  posts: number
+}
+
+type UltraTransformMessage = UltraEncodedFrameMessage | { type: 'connected' } | UltraTransformEndedMessage
+
+type UltraJitterStatsMessage = {
+  type: string
+  bufferMs?: number
+  targetMs?: number
+  underruns?: number
+}
 
 function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false, ultraPtimeMs = 10): string {
   let lines = sdp.split('\r\n')
@@ -264,12 +334,14 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
         }
       }
     }
-    const hasNack = lines.some(l => l.startsWith(`a=rtcp-fb:${pt} nack`))
-    if (!hasNack) {
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].startsWith(`a=fmtp:${pt}`) || lines[i].startsWith(`a=rtpmap:${pt}`)) {
-          lines.splice(i + 1, 0, `a=rtcp-fb:${pt} nack`)
-          break
+    if (!isUltraLowLatency) {
+      const hasNack = lines.some(l => l.startsWith(`a=rtcp-fb:${pt} nack`))
+      if (!hasNack) {
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].startsWith(`a=fmtp:${pt}`) || lines[i].startsWith(`a=rtpmap:${pt}`)) {
+            lines.splice(i + 1, 0, `a=rtcp-fb:${pt} nack`)
+            break
+          }
         }
       }
     }
@@ -469,6 +541,7 @@ export class WebRTCManager {
   private peerSignalingQueues: Map<string, Promise<void>> = new Map()
   private isMakingOffer: Map<string, boolean> = new Map()
   private isSettingRemoteAnswerPending: Map<string, boolean> = new Map()
+  private offerEpoch: Map<string, number> = new Map()
   private userVoiceTrackIds: Map<string, string> = new Map()
   private userStreamAudioTrackIds: Map<string, string> = new Map()
   private userVoiceStreamIds: Map<string, string> = new Map()
@@ -483,6 +556,12 @@ export class WebRTCManager {
   private lastInboundLoss: Map<string, number> = new Map()
   private lastInboundReceived: Map<string, number> = new Map()
   private renegotiationStuckSince: Map<string, number> = new Map()
+  private ultraRttMs: Map<string, number> = new Map()
+  private ultraConcealRate: Map<string, number> = new Map()
+  private ultraConcealBurstMs: Map<string, number> = new Map()
+  private ultraFrameLossTicks: Map<string, number> = new Map()
+  private lastJitterBufferDelay: Map<string, number> = new Map()
+  private lastJitterBufferEmitted: Map<string, number> = new Map()
 
   private enqueueSignalingTask(userId: string, task: () => Promise<void>): Promise<void> {
     const currentQueue = this.peerSignalingQueues.get(userId) || Promise.resolve()
@@ -594,12 +673,30 @@ export class WebRTCManager {
   private outputPeakGuard: WaveShaperNode | null = null
   private outputBusGain: GainNode | null = null
   private mixAudioElement: HTMLAudioElement | null = null
+  private audioElements: Map<string, HTMLAudioElement> = new Map()
+  private streamAudioElements: Map<string, HTMLAudioElement> = new Map()
   private userGainNodes: Map<string, GainNode> = new Map()
   private userLimiterNodes: Map<string, DynamicsCompressorNode> = new Map()
   private userPannerNodes: Map<string, StereoPannerNode> = new Map()
   private voiceSeatOrder: string[] = []
   private streamLimiterNodes: Map<string, DynamicsCompressorNode> = new Map()
   private userSourceNodes: Map<string, MediaStreamAudioSourceNode> = new Map()
+  private ultraJitterNodes: Map<string, AudioWorkletNode> = new Map()
+  private ultraJitterGains: Map<string, GainNode> = new Map()
+  private ultraDecoders: Map<string, WebCodecsAudioDecoder> = new Map()
+  private ultraTransformWorkers: Map<string, Worker> = new Map()
+  private ultraReorderBuffers: Map<string, UltraEncodedFrameMessage[]> = new Map()
+  private ultraCustomUsers: Set<string> = new Set()
+  private ultraCustomUnderruns: Map<string, number> = new Map()
+  private ultraCustomBufferMs: Map<string, number> = new Map()
+  private ultraCustomSpeaking: Map<string, { lastSoundAt: number; speaking: boolean }> = new Map()
+  private ultraCustomFrameWatchdogs: Map<string, ReturnType<typeof setTimeout>> = new Map()
+  private ultraTransformConnected: Set<string> = new Set()
+  private ultraCustomGotFrame: Set<string> = new Set()
+  private ultraCustomHandedOver: Set<string> = new Set()
+  private ultraReceiverTransformUnsupported = false
+  private ultraTransformDeadReason = ''
+  private ultraJitterModuleContext: AudioContext | null = null
   private defaultInputFingerprint: string | null = null
   private defaultOutputFingerprint: string | null = null
   private deviceChangePromise: Promise<AudioDeviceChangeResult> | null = null
@@ -621,16 +718,18 @@ export class WebRTCManager {
   private ultraLowLatency = localStorage.getItem(ULTRA_LOW_LATENCY_STORAGE_KEY) === 'true'
   private relayWarningShownAt = 0
   private turnExpiresAt = 0
+  private turnTtlMs = 0
   private turnUserId: string | null = null
   private turnFetch: Promise<void> | null = null
   private turnRetryAfter = 0
 
   private static readonly TURN_REFRESH_MARGIN_MS = 60 * 60 * 1000
+  private static readonly TURN_MIN_REFRESH_MARGIN_MS = 30_000
   private static readonly TURN_RETRY_COOLDOWN_MS = 30_000
   private static readonly FALLBACK_STUN_URL = 'stun:stun.cloudflare.com:3478'
 
   private deriveStunServers(servers: RTCIceServer[]): RTCIceServer[] {
-    const derived = new Set<string>()
+    const byHost = new Map<string, string>()
     for (const server of servers) {
       const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
       for (const url of urls) {
@@ -639,20 +738,36 @@ export class WebRTCManager {
         if (!match) continue
         const transport = match[2]?.toLowerCase()
         if (transport && transport !== 'udp') continue
-        derived.add(`stun:${match[1]}`)
+        const host = match[1].replace(/:\d+$/, '')
+        if (!byHost.has(host)) byHost.set(host, `stun:${match[1]}`)
       }
     }
-    return [...derived].map(urls => ({ urls }))
+    return [...byHost.values()].map(urls => ({ urls }))
+  }
+
+  private turnRefreshMargin(): number {
+    if (this.turnTtlMs <= 0) return WebRTCManager.TURN_REFRESH_MARGIN_MS
+    return Math.min(
+      WebRTCManager.TURN_REFRESH_MARGIN_MS,
+      Math.max(WebRTCManager.TURN_MIN_REFRESH_MARGIN_MS, this.turnTtlMs / 2)
+    )
   }
 
   private async ensureIceServers(): Promise<void> {
     const userId = useAppStore.getState().currentUser?.id ?? null
-    const fresh = this.turnServers.length > 0
-      && this.turnUserId === userId
-      && Date.now() < this.turnExpiresAt - WebRTCManager.TURN_REFRESH_MARGIN_MS
-    if (fresh) return
+    const sameUser = this.turnServers.length > 0 && this.turnUserId === userId
+    const now = Date.now()
+    if (sameUser && now < this.turnExpiresAt - this.turnRefreshMargin()) return
+    if (sameUser && now < this.turnExpiresAt) {
+      void this.refreshIceServers(userId)
+      return
+    }
+    return this.refreshIceServers(userId)
+  }
+
+  private refreshIceServers(userId: string | null): Promise<void> {
     if (this.turnFetch) return this.turnFetch
-    if (Date.now() < this.turnRetryAfter) return
+    if (Date.now() < this.turnRetryAfter) return Promise.resolve()
 
     this.turnFetch = (async () => {
       try {
@@ -662,6 +777,7 @@ export class WebRTCManager {
           this.turnServers = servers
           this.ownStunServers = this.deriveStunServers(servers)
           this.turnExpiresAt = config!.expiresAtUnixMs
+          this.turnTtlMs = config!.ttlSeconds > 0 ? config!.ttlSeconds * 1000 : 0
           this.turnUserId = userId
           this.turnRetryAfter = 0
         } else {
@@ -748,11 +864,26 @@ export class WebRTCManager {
     this.ultraFrameMs.clear()
     this.ultraFrameCleanTicks.clear()
     this.ultraFrameLastSwitchAt.clear()
+    this.ultraFrameLossTicks.clear()
     this.lastInboundLoss.clear()
     this.lastInboundReceived.clear()
     this.ultraJitterTargetMs.clear()
+    this.ultraRttMs.clear()
+    this.ultraConcealRate.clear()
+    this.ultraConcealBurstMs.clear()
+    this.ultraReceiverTransformUnsupported = false
+    this.ultraTransformDeadReason = ''
 
     this.applyPlayoutDelayHints()
+
+    for (const [userId, el] of this.audioElements.entries()) {
+      const voiceStream = el.srcObject as MediaStream | null
+      const voiceTrack = voiceStream?.getAudioTracks()[0]
+      if (voiceStream && voiceTrack) {
+        const receiver = this.findVoiceReceiver(userId, voiceTrack.id)
+        this.setupVoicePlayout(userId, voiceStream, voiceTrack, receiver)
+      }
+    }
 
     for (const [userId, pc] of this.peerConnections.entries()) {
       void this.renegotiatePeer(pc, userId)
@@ -764,7 +895,7 @@ export class WebRTCManager {
   }
 
   private ultraPtimeFor(userId: string): number {
-    return this.ultraFrameMs.get(userId) ?? ULTRA_FRAME_MS_SAFE
+    return this.ultraFrameMs.get(userId) ?? ULTRA_FRAME_MS_FAST
   }
 
   private isolateReceiverLatency(receiver: RTCRtpReceiver) {
@@ -784,11 +915,12 @@ export class WebRTCManager {
       return
     }
     const ms = targetMs ?? ULTRA_PLAYOUT_DELAY_HINT_S * 1000
-    if ('jitterBufferTarget' in receiver) {
+    const hasTarget = 'jitterBufferTarget' in receiver
+    if (hasTarget) {
       try { (receiver as any).jitterBufferTarget = ms } catch { }
     }
     if ('playoutDelayHint' in receiver) {
-      try { (receiver as any).playoutDelayHint = ms / 1000 } catch { }
+      try { (receiver as any).playoutDelayHint = hasTarget ? 0 : ms / 1000 } catch { }
     }
   }
 
@@ -808,7 +940,7 @@ export class WebRTCManager {
     }
   }
 
-  private updateUltraJitterTarget(userId: string, jitterSeconds: number) {
+  private updateUltraJitterTarget(userId: string, jitterSeconds: number, concealBurst = false) {
     const voiceTrackId = this.userVoiceTrackIds.get(userId)
     if (!voiceTrackId) return
     const pc = this.peerConnections.get(userId)
@@ -817,18 +949,25 @@ export class WebRTCManager {
     if (!receiver) return
 
     const measuredMs = Math.max(0, jitterSeconds * 1000)
+    const prev = this.ultraJitterTargetMs.get(voiceTrackId) ?? ULTRA_PLAYOUT_DELAY_HINT_S * 1000
+    const prevBurst = this.ultraConcealBurstMs.get(voiceTrackId) ?? 0
+    const burstExtra = concealBurst
+      ? Math.min(ULTRA_CONCEAL_CEILING_MS, Math.max(prevBurst, ULTRA_CONCEAL_BUMP_MS))
+      : prevBurst * ULTRA_CONCEAL_DECAY
+    this.ultraConcealBurstMs.set(voiceTrackId, burstExtra)
+
+    const jitterWanted = ULTRA_JITTER_HEADROOM_MS + measuredMs * ULTRA_JITTER_FACTOR
     const wanted = Math.max(
       ULTRA_JITTER_MIN_MS,
-      Math.min(ULTRA_JITTER_MAX_MS, ULTRA_JITTER_HEADROOM_MS + measuredMs * ULTRA_JITTER_FACTOR)
+      Math.min(ULTRA_JITTER_MAX_MS, jitterWanted + burstExtra)
     )
-    const prev = this.ultraJitterTargetMs.get(voiceTrackId) ?? ULTRA_PLAYOUT_DELAY_HINT_S * 1000
     const alpha = wanted > prev ? ULTRA_JITTER_ATTACK : ULTRA_JITTER_RELEASE
     const next = prev + (wanted - prev) * alpha
     this.ultraJitterTargetMs.set(voiceTrackId, next)
     this.applyReceiverLatency(receiver, next)
   }
 
-  private maybeAdaptUltraFrame(userId: string, pc: RTCPeerConnection, packetsLost: number, packetsReceived: number) {
+  private maybeAdaptUltraFrame(userId: string, pc: RTCPeerConnection, packetsLost: number, packetsReceived: number, rttMs: number) {
     const prevLost = this.lastInboundLoss.get(userId) ?? packetsLost
     const prevReceived = this.lastInboundReceived.get(userId) ?? packetsReceived
     this.lastInboundLoss.set(userId, packetsLost)
@@ -839,12 +978,17 @@ export class WebRTCManager {
     const totalDelta = deltaLost + deltaReceived
     const lossRatio = totalDelta > 0 ? deltaLost / totalDelta : 0
 
-    const current = this.ultraFrameMs.get(userId) ?? ULTRA_FRAME_MS_SAFE
+    const current = this.ultraFrameMs.get(userId) ?? ULTRA_FRAME_MS_FAST
     const now = performance.now()
+    const lastSwitch = this.ultraFrameLastSwitchAt.get(userId) ?? 0
+    const canSwitch = now - lastSwitch > ULTRA_FRAME_MIN_SWITCH_MS
 
-    if (lossRatio > ULTRA_FRAME_DOWNGRADE_LOSS) {
+    const lossy = lossRatio > ULTRA_FRAME_DOWNGRADE_LOSS
+    if (lossy) {
       this.ultraFrameCleanTicks.set(userId, 0)
-      if (current !== ULTRA_FRAME_MS_SAFE) {
+      const lossTicks = (this.ultraFrameLossTicks.get(userId) ?? 0) + 1
+      this.ultraFrameLossTicks.set(userId, lossTicks)
+      if (current !== ULTRA_FRAME_MS_SAFE && lossTicks >= ULTRA_FRAME_DOWNGRADE_TICKS && canSwitch) {
         this.ultraFrameMs.set(userId, ULTRA_FRAME_MS_SAFE)
         this.ultraFrameLastSwitchAt.set(userId, now)
         void this.renegotiatePeer(pc, userId)
@@ -852,10 +996,10 @@ export class WebRTCManager {
       return
     }
 
+    this.ultraFrameLossTicks.set(userId, 0)
     const cleanTicks = (this.ultraFrameCleanTicks.get(userId) ?? 0) + 1
     this.ultraFrameCleanTicks.set(userId, cleanTicks)
-    const lastSwitch = this.ultraFrameLastSwitchAt.get(userId) ?? 0
-    if (current !== ULTRA_FRAME_MS_FAST && cleanTicks >= ULTRA_FRAME_CLEAN_TICKS && now - lastSwitch > ULTRA_FRAME_MIN_SWITCH_MS) {
+    if (current !== ULTRA_FRAME_MS_FAST && cleanTicks >= ULTRA_FRAME_CLEAN_TICKS && canSwitch) {
       this.ultraFrameMs.set(userId, ULTRA_FRAME_MS_FAST)
       this.ultraFrameLastSwitchAt.set(userId, now)
       void this.renegotiatePeer(pc, userId)
@@ -1774,6 +1918,7 @@ export class WebRTCManager {
   public setOutputVolume(volume: number) {
     this.outputVolume = volume
     this.userGainNodes.forEach((_, userId) => this.updateRemoteVolume(userId))
+    if (this.ultraLowLatency) this.audioElements.forEach((_, userId) => this.updateRemoteVolume(userId))
     if (this.micTestGain) this.micTestGain.gain.value = this.micTestVolume()
   }
 
@@ -1785,9 +1930,16 @@ export class WebRTCManager {
     if (this.mixAudioElement) {
       this.mixAudioElement.muted = deafened
     }
+    if (this.ultraLowLatency) {
+      this.audioElements.forEach((el, userId) => {
+        if (!this.userGainNodes.has(userId)) { try { el.muted = deafened } catch { } }
+      })
+      this.ultraCustomUsers.forEach(uid => this.updateUltraCustomGain(uid))
+    }
   }
 
   private updateRemoteVolume(userId: string) {
+    if (this.ultraCustomUsers.has(userId)) { this.updateUltraCustomGain(userId); return }
     const store = useAppStore.getState()
     const isActive = store.activeStreamId === userId
     const streamGainNode = this.streamGainNodes.get(userId)
@@ -1800,6 +1952,14 @@ export class WebRTCManager {
     if (gainNode) {
       const vol = store.userVolumes[userId] ?? 100
       gainNode.gain.value = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+    }
+
+    if (this.ultraLowLatency && !this.userGainNodes.has(userId)) {
+      const el = this.audioElements.get(userId)
+      if (el) {
+        const vol = store.userVolumes[userId] ?? 100
+        el.volume = Math.max(0, Math.min(1.0, (this.outputVolume / 100) * (vol / 100)))
+      }
     }
   }
 
@@ -2177,6 +2337,7 @@ export class WebRTCManager {
       noiseSuppression: useWebRtcNoiseSuppression,
       autoGainControl: false,
       sampleRate: { ideal: 48000 },
+      ...(this.ultraLowLatency ? { latency: { ideal: ULTRA_MIC_LATENCY_HINT_S } } : {}),
       // @ts-ignore
       googAutoGainControl: false,
       googAutoGainControl2: false,
@@ -2412,6 +2573,12 @@ export class WebRTCManager {
     }
 
     if (this.micTestContext) await this.applyMicTestSink(this.micTestContext)
+
+    if (this.ultraLowLatency) {
+      for (const [userId, el] of this.audioElements.entries()) {
+        if (!this.userGainNodes.has(userId)) await this.applyVoiceElementSink(el)
+      }
+    }
 
     const audioElement = this.mixAudioElement
     if (!audioElement) return
@@ -3322,6 +3489,397 @@ export class WebRTCManager {
     })
   }
 
+  private async applyVoiceElementSink(el: HTMLAudioElement) {
+    const sinkId = this.currentOutputDeviceId === 'default' ? '' : this.currentOutputDeviceId
+    const setSinkId = (el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }).setSinkId
+    if (typeof setSinkId !== 'function') return
+    try {
+      await setSinkId.call(el, sinkId)
+    } catch {
+      if (sinkId !== '') { try { await setSinkId.call(el, '') } catch { } }
+    }
+  }
+
+  private teardownVoiceGraph(userId: string) {
+    try { this.userSourceNodes.get(userId)?.disconnect() } catch { }
+    try { this.userGainNodes.get(userId)?.disconnect() } catch { }
+    try { this.userLimiterNodes.get(userId)?.disconnect() } catch { }
+    try { this.userPannerNodes.get(userId)?.disconnect() } catch { }
+    this.userSourceNodes.delete(userId)
+    this.userGainNodes.delete(userId)
+    this.userLimiterNodes.delete(userId)
+    this.userPannerNodes.delete(userId)
+  }
+
+  private setupUltraElementPlayout(userId: string, stream: MediaStream) {
+    let voicePull = this.audioElements.get(userId)
+    if (!voicePull) {
+      voicePull = new Audio()
+      voicePull.autoplay = true
+      this.audioElements.set(userId, voicePull)
+    }
+    if (voicePull.srcObject !== stream) voicePull.srcObject = stream
+    voicePull.muted = this.isDeafened
+    this.updateRemoteVolume(userId)
+    void this.applyVoiceElementSink(voicePull)
+    void voicePull.play().catch(() => { })
+    this.voiceSeatOrder = this.voiceSeatOrder.filter(id => id !== userId)
+    this.applyVoiceSeats()
+  }
+
+  private findVoiceReceiver(userId: string, trackId: string): RTCRtpReceiver | undefined {
+    const pc = this.peerConnections.get(userId)
+    if (!pc) return undefined
+    return pc.getReceivers().find(r => r.track && r.track.kind === 'audio' && r.track.id === trackId)
+  }
+
+  private canUseUltraCustomBuffer(): boolean {
+    if (!this.ultraLowLatency) return false
+    if (this.ultraReceiverTransformUnsupported) return false
+    if (localStorage.getItem(ULTRA_CUSTOM_BUFFER_STORAGE_KEY) !== 'true') return false
+    const g = globalThis as unknown as UltraCodecGlobals
+    return typeof g.RTCRtpScriptTransform === 'function'
+      && typeof g.AudioDecoder === 'function'
+      && typeof g.EncodedAudioChunk === 'function'
+      && !!this.outputMixContext
+  }
+
+  private ultraCustomOffReason(userId: string): string {
+    if (this.ultraCustomUsers.has(userId)) return 'on'
+    if (!this.ultraLowLatency) return 'off:notUltra'
+    if (localStorage.getItem(ULTRA_CUSTOM_BUFFER_STORAGE_KEY) !== 'true') return 'off:disabled'
+    if (this.ultraReceiverTransformUnsupported) {
+      return this.ultraTransformDeadReason ? `off:txDead:${this.ultraTransformDeadReason}` : 'off:txDead'
+    }
+    const g = globalThis as unknown as UltraCodecGlobals
+    if (typeof g.RTCRtpScriptTransform !== 'function') return 'off:noScriptTransform'
+    if (typeof g.AudioDecoder !== 'function' || typeof g.EncodedAudioChunk !== 'function') return 'off:noWebCodecs'
+    if (!this.outputMixContext) return 'off:noMixCtx'
+    if (this.ultraTransformConnected.has(userId)) return 'off:connectedNoFrames'
+    return 'off:noConnect'
+  }
+
+  private attachUltraTransform(userId: string, receiver: RTCRtpReceiver): boolean {
+    const g = globalThis as unknown as UltraCodecGlobals
+    const ScriptTransformCtor = g.RTCRtpScriptTransform
+    if (!ScriptTransformCtor) return false
+    try {
+      const worker = new UltraVoiceTransformWorker()
+      worker.onmessage = (event: MessageEvent<UltraTransformMessage>) => {
+        const data = event.data
+        const kind = (data as { type?: string }).type
+        if (kind === 'connected') { this.onUltraTransformConnected(userId); return }
+        if (kind === 'ended') { this.onUltraTransformEnded(userId, data as UltraTransformEndedMessage); return }
+        this.onUltraEncodedFrame(userId, data as UltraEncodedFrameMessage)
+      }
+      this.ultraTransformConnected.delete(userId)
+      this.ultraCustomGotFrame.delete(userId)
+      this.ultraCustomHandedOver.delete(userId)
+      this.ultraReorderBuffers.set(userId, [])
+      this.ultraCustomUnderruns.set(userId, 0)
+      this.ultraCustomBufferMs.set(userId, 0)
+      this.ultraCustomSpeaking.set(userId, { lastSoundAt: 0, speaking: false })
+      this.ultraTransformWorkers.set(userId, worker)
+      this.ultraCustomUsers.add(userId)
+      ;(receiver as unknown as { transform: unknown }).transform = new ScriptTransformCtor(worker, { userId })
+
+      this.armUltraCustomWatchdog(userId, ULTRA_CUSTOM_CONNECT_TIMEOUT_MS)
+      return true
+    } catch {
+      this.teardownUltraCustomPlayout(userId)
+      return false
+    }
+  }
+
+  private armUltraCustomWatchdog(userId: string, timeoutMs: number) {
+    const existing = this.ultraCustomFrameWatchdogs.get(userId)
+    if (existing !== undefined) clearTimeout(existing)
+    const watchdog = setTimeout(() => {
+      this.ultraCustomFrameWatchdogs.delete(userId)
+      if (!this.ultraCustomUsers.has(userId)) return
+      if (!this.ultraCustomGotFrame.has(userId)) {
+        this.ultraReceiverTransformUnsupported = true
+        this.ultraTransformDeadReason = this.ultraTransformConnected.has(userId) ? 'noFrames' : 'noConnect'
+      }
+      this.fallbackUltraCustomPlayout(userId)
+    }, timeoutMs)
+    this.ultraCustomFrameWatchdogs.set(userId, watchdog)
+  }
+
+  private onUltraTransformConnected(userId: string) {
+    if (!this.ultraCustomUsers.has(userId)) return
+    this.ultraTransformConnected.add(userId)
+    this.armUltraCustomWatchdog(userId, ULTRA_CUSTOM_FRAME_TIMEOUT_MS)
+  }
+
+  private onUltraTransformEnded(userId: string, info: UltraTransformEndedMessage) {
+    if (!this.ultraCustomUsers.has(userId)) return
+    if (!this.ultraCustomGotFrame.has(userId)) {
+      this.ultraReceiverTransformUnsupported = true
+      this.ultraTransformDeadReason = `${info.reason}#${info.posts}`
+    }
+    this.fallbackUltraCustomPlayout(userId)
+  }
+
+  private async engageUltraCustomPlayout(userId: string): Promise<void> {
+    const ctx = this.outputMixContext
+    const g = globalThis as unknown as UltraCodecGlobals
+    const DecoderCtor = g.AudioDecoder
+    if (!ctx || ctx.state === 'closed' || !DecoderCtor || !this.ultraCustomUsers.has(userId)) {
+      this.fallbackUltraCustomPlayout(userId)
+      return
+    }
+
+    try {
+      if (this.ultraJitterModuleContext !== ctx) {
+        await ctx.audioWorklet.addModule(ultraJitterProcessorUrl)
+        this.ultraJitterModuleContext = ctx
+      }
+      if (!this.ultraLowLatency || !this.ultraCustomUsers.has(userId)) {
+        this.fallbackUltraCustomPlayout(userId)
+        return
+      }
+
+      const node = new AudioWorkletNode(ctx, 'ultra-jitter-processor', {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1]
+      })
+      const gain = ctx.createGain()
+      node.connect(gain)
+      gain.connect(ctx.destination)
+      node.port.onmessage = (event: MessageEvent<UltraJitterStatsMessage>) => this.onUltraJitterStats(userId, event.data)
+
+      const decoder = new DecoderCtor({
+        output: (data) => this.onUltraDecodedAudio(userId, data),
+        error: () => this.fallbackUltraCustomPlayout(userId)
+      })
+      decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1 })
+
+      this.ultraJitterNodes.set(userId, node)
+      this.ultraJitterGains.set(userId, gain)
+      this.ultraDecoders.set(userId, decoder)
+
+      this.updateUltraCustomGain(userId)
+      if (ctx.state === 'suspended') void ctx.resume().catch(() => { })
+      this.drainUltraReorder(userId)
+    } catch {
+      this.fallbackUltraCustomPlayout(userId)
+    }
+  }
+
+  private drainUltraReorder(userId: string) {
+    const pending = this.ultraReorderBuffers.get(userId)
+    const decoder = this.ultraDecoders.get(userId)
+    if (!pending || !decoder) return
+    while (pending.length > ULTRA_REORDER_HOLD) {
+      const next = pending.shift()
+      if (next) this.decodeUltraChunk(userId, next.timestamp >>> 0, next.data)
+    }
+  }
+
+  private onUltraEncodedFrame(userId: string, frame: UltraEncodedFrameMessage) {
+    const pending = this.ultraReorderBuffers.get(userId)
+    if (!pending) return
+    if (!this.ultraCustomGotFrame.has(userId)) {
+      this.ultraCustomGotFrame.add(userId)
+      this.commitUltraCustomHandover(userId)
+    }
+    const watchdog = this.ultraCustomFrameWatchdogs.get(userId)
+    if (watchdog !== undefined) {
+      clearTimeout(watchdog)
+      this.ultraCustomFrameWatchdogs.delete(userId)
+    }
+    pending.push(frame)
+    pending.sort((a, b) => ((a.timestamp >>> 0) - (b.timestamp >>> 0)))
+    if (!this.ultraDecoders.has(userId)) {
+      while (pending.length > ULTRA_PENDING_PREROLL_MAX) pending.shift()
+      return
+    }
+    while (pending.length > ULTRA_REORDER_HOLD) {
+      const next = pending.shift()
+      if (next) this.decodeUltraChunk(userId, next.timestamp >>> 0, next.data)
+    }
+  }
+
+  private decodeUltraChunk(userId: string, rtpTimestamp: number, data: ArrayBuffer) {
+    const decoder = this.ultraDecoders.get(userId)
+    if (!decoder || decoder.state !== 'configured') return
+    const g = globalThis as unknown as UltraCodecGlobals
+    const ChunkCtor = g.EncodedAudioChunk
+    if (!ChunkCtor) return
+    try {
+      const timestampUs = Math.round((rtpTimestamp / 48000) * 1e6)
+      decoder.decode(new ChunkCtor({ type: 'key', timestamp: timestampUs, data }))
+    } catch {
+      this.fallbackUltraCustomPlayout(userId)
+    }
+  }
+
+  private onUltraDecodedAudio(userId: string, data: WebCodecsAudioData) {
+    const node = this.ultraJitterNodes.get(userId)
+    try {
+      const frames = data.numberOfFrames
+      const channels = Math.min(2, data.numberOfChannels || 1)
+      if (node && frames > 0) {
+        if (channels === 1) {
+          const mono = new Float32Array(frames)
+          data.copyTo(mono, { planeIndex: 0, format: 'f32-planar' })
+          this.trackUltraSpeaking(userId, mono)
+          node.port.postMessage({ type: 'audio', buffer: mono.buffer, channels: 1 }, [mono.buffer])
+        } else {
+          const left = new Float32Array(frames)
+          const right = new Float32Array(frames)
+          data.copyTo(left, { planeIndex: 0, format: 'f32-planar' })
+          data.copyTo(right, { planeIndex: 1, format: 'f32-planar' })
+          this.trackUltraSpeaking(userId, left)
+          const interleaved = new Float32Array(frames * 2)
+          for (let i = 0; i < frames; i++) {
+            interleaved[i * 2] = left[i]
+            interleaved[i * 2 + 1] = right[i]
+          }
+          node.port.postMessage({ type: 'audio', buffer: interleaved.buffer, channels: 2 }, [interleaved.buffer])
+        }
+      }
+    } catch { } finally {
+      try { data.close() } catch { }
+    }
+  }
+
+  private trackUltraSpeaking(userId: string, samples: Float32Array) {
+    const state = this.ultraCustomSpeaking.get(userId)
+    if (!state) return
+    let peak = 0
+    for (let i = 0; i < samples.length; i += 8) {
+      const magnitude = Math.abs(samples[i])
+      if (magnitude > peak) peak = magnitude
+    }
+    const now = Date.now()
+    if (peak > 0.01) state.lastSoundAt = now
+    const speaking = now - state.lastSoundAt <= 250
+    if (speaking !== state.speaking) {
+      state.speaking = speaking
+      useAppStore.getState().setSpeakingStatus(userId, speaking)
+    }
+  }
+
+  private onUltraJitterStats(userId: string, message: UltraJitterStatsMessage) {
+    if (!message || message.type !== 'stats') return
+    this.ultraCustomBufferMs.set(userId, message.bufferMs ?? 0)
+    const total = message.underruns ?? 0
+    const previous = this.ultraCustomUnderruns.get(userId) ?? 0
+    this.ultraCustomUnderruns.set(userId, total)
+    if (total - previous >= ULTRA_CUSTOM_UNDERRUN_FALLBACK) this.fallbackUltraCustomPlayout(userId)
+  }
+
+  private commitUltraCustomHandover(userId: string) {
+    if (this.ultraCustomHandedOver.has(userId)) return
+    this.ultraCustomHandedOver.add(userId)
+    const el = this.audioElements.get(userId)
+    if (el) { try { el.muted = true; el.pause() } catch { } }
+    this.clearVAD(userId)
+  }
+
+  private fallbackUltraCustomPlayout(userId: string) {
+    if (!this.ultraCustomUsers.has(userId)) return
+    this.teardownUltraCustomPlayout(userId)
+    const el = this.audioElements.get(userId)
+    const stream = el?.srcObject as MediaStream | null
+    const track = stream?.getAudioTracks()[0]
+    if (this.ultraLowLatency && stream && track) {
+      this.setupUltraElementPlayout(userId, stream)
+      this.setupVAD(stream, userId, false)
+    }
+  }
+
+  private teardownUltraCustomPlayout(userId: string) {
+    if (!this.ultraCustomUsers.has(userId)
+      && !this.ultraJitterNodes.has(userId)
+      && !this.ultraDecoders.has(userId)
+      && !this.ultraTransformWorkers.has(userId)
+      && !this.ultraCustomFrameWatchdogs.has(userId)) return
+
+    const watchdog = this.ultraCustomFrameWatchdogs.get(userId)
+    if (watchdog !== undefined) { clearTimeout(watchdog); this.ultraCustomFrameWatchdogs.delete(userId) }
+
+    const receiver = this.findVoiceReceiver(userId, this.userVoiceTrackIds.get(userId) ?? '')
+    if (receiver) { try { (receiver as unknown as { transform: unknown }).transform = null } catch { } }
+
+    const worker = this.ultraTransformWorkers.get(userId)
+    if (worker) { try { worker.onmessage = null; worker.terminate() } catch { } ; this.ultraTransformWorkers.delete(userId) }
+
+    const decoder = this.ultraDecoders.get(userId)
+    if (decoder) { try { if (decoder.state !== 'closed') decoder.close() } catch { } ; this.ultraDecoders.delete(userId) }
+
+    const node = this.ultraJitterNodes.get(userId)
+    if (node) {
+      try { node.port.onmessage = null; node.port.postMessage({ type: 'reset' }); node.disconnect() } catch { }
+      this.ultraJitterNodes.delete(userId)
+    }
+
+    const gain = this.ultraJitterGains.get(userId)
+    if (gain) { try { gain.disconnect() } catch { } ; this.ultraJitterGains.delete(userId) }
+
+    this.ultraReorderBuffers.delete(userId)
+    this.ultraCustomUnderruns.delete(userId)
+    this.ultraCustomBufferMs.delete(userId)
+    this.ultraCustomSpeaking.delete(userId)
+    this.ultraCustomGotFrame.delete(userId)
+    this.ultraCustomHandedOver.delete(userId)
+    this.ultraCustomUsers.delete(userId)
+  }
+
+  private updateUltraCustomGain(userId: string) {
+    const gain = this.ultraJitterGains.get(userId)
+    if (!gain) return
+    const store = useAppStore.getState()
+    const vol = store.userVolumes[userId] ?? 100
+    gain.gain.value = this.isDeafened ? 0 : Math.max(0, Math.min(1.0, (this.outputVolume / 100) * (vol / 100)))
+  }
+
+  private setupVoicePlayout(userId: string, stream: MediaStream, track: MediaStreamTrack, receiver?: RTCRtpReceiver) {
+    let voicePull = this.audioElements.get(userId)
+    if (!voicePull) {
+      voicePull = new Audio()
+      voicePull.autoplay = true
+      this.audioElements.set(userId, voicePull)
+    }
+    if (voicePull.srcObject !== stream) voicePull.srcObject = stream
+
+    this.teardownVoiceGraph(userId)
+    this.teardownUltraCustomPlayout(userId)
+
+    if (this.ultraLowLatency) {
+      const voiceReceiver = receiver ?? this.findVoiceReceiver(userId, track.id)
+      this.setupUltraElementPlayout(userId, stream)
+      if (voiceReceiver && this.canUseUltraCustomBuffer() && this.attachUltraTransform(userId, voiceReceiver)) {
+        void this.engageUltraCustomPlayout(userId)
+      }
+      return
+    }
+
+    if (!this.outputMixContext) return
+    voicePull.muted = true
+    void voicePull.play().catch(() => { })
+
+    const source = this.outputMixContext.createMediaStreamSource(new MediaStream([track]))
+    const gain = this.outputMixContext.createGain()
+    const panner = new StereoPannerNode(this.outputMixContext, { pan: 0 })
+    const limiter = this.createPlaybackLimiter(PLAYBACK_VOICE_LIMIT_DB, 2, 20, 0.002, 0.060)
+    source.connect(limiter)
+    limiter.connect(gain)
+    this.userLimiterNodes.set(userId, limiter)
+    gain.connect(panner)
+    panner.connect(this.outputBusGain!)
+
+    this.userSourceNodes.set(userId, source)
+    this.userGainNodes.set(userId, gain)
+    this.userPannerNodes.set(userId, panner)
+    if (!this.voiceSeatOrder.includes(userId)) this.voiceSeatOrder.push(userId)
+    this.updateRemoteVolume(userId)
+    this.applyVoiceSeats()
+  }
+
   public softRefreshRemoteAudio(userId: string) {
     if (!this.outputMixContext || this.outputMixContext.state === 'closed') return
     if (this.outputMixContext.state === 'suspended') {
@@ -3338,6 +3896,15 @@ export class WebRTCManager {
     const receiver = pc.getReceivers().find(r => r.track && r.track.kind === 'audio' && r.track.id === voiceTrackId)
     const track = receiver?.track
     if (!track || track.readyState !== 'live') return
+
+    if (this.ultraLowLatency && !this.userGainNodes.has(userId)) {
+      const el = this.audioElements.get(userId)
+      if (el) {
+        try { el.srcObject = new MediaStream([track]) } catch { }
+        void el.play().catch(() => { })
+      }
+      return
+    }
 
     const destination = this.userLimiterNodes.get(userId) ?? this.userGainNodes.get(userId)
     if (!destination) return
@@ -3407,6 +3974,40 @@ export class WebRTCManager {
         if (pc.connectionState !== 'connected') continue
         try {
           const stats = await pc.getStats()
+          let rttMs = 0
+          const candTypes = new Map<string, string>()
+          const candById = new Map<string, any>()
+          let selPair: any = null
+          const dbgIn: any = {}
+          const dbgOut: any = {}
+          stats.forEach(report => {
+            if (report.type === 'candidate-pair' && (report.nominated || report.selected) && typeof report.currentRoundTripTime === 'number') {
+              rttMs = report.currentRoundTripTime * 1000
+            }
+            if (report.type === 'candidate-pair' && (report.nominated || report.selected)) selPair = report
+            if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+              candTypes.set(report.id, report.candidateType)
+              candById.set(report.id, report)
+            }
+            if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+              dbgIn.pkts = report.packetsReceived ?? 0
+              dbgIn.lost = report.packetsLost ?? 0
+              dbgIn.level = report.audioLevel ?? 'na'
+              dbgIn.energy = report.totalAudioEnergy ?? 'na'
+            }
+            if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+              dbgOut.pkts = report.packetsSent ?? 0
+              dbgOut.bytes = report.bytesSent ?? 0
+            }
+          })
+          const audioTx = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio')
+          const txDir = audioTx ? `${audioTx.direction}/${audioTx.currentDirection ?? '?'}` : 'none'
+          const lc = selPair ? candById.get(selPair.localCandidateId) : null
+          const rc = selPair ? candById.get(selPair.remoteCandidateId) : null
+          const lcInfo = lc ? `${lc.candidateType}/${lc.protocol ?? '?'}${lc.relayProtocol ? '(' + lc.relayProtocol + ')' : ''}${lc.url ? ' via ' + lc.url : ''}` : '?'
+          const rcInfo = rc ? `${rc.candidateType}/${rc.protocol ?? '?'}` : '?'
+          console.info(`[ZDBG] peer=${userId} state=${pc.connectionState}/${pc.iceConnectionState} path=${selPair ? (candTypes.get(selPair.localCandidateId) ?? '?') + '->' + (candTypes.get(selPair.remoteCandidateId) ?? '?') : 'none'} local=${lcInfo} remote=${rcInfo} rtt=${Math.round(rttMs)}ms audioTx=${txDir} IN{pkts=${dbgIn.pkts ?? 'none'} lost=${dbgIn.lost ?? '?'} level=${dbgIn.level ?? '?'} energy=${dbgIn.energy ?? '?'}} OUT{pkts=${dbgOut.pkts ?? 'none'} bytes=${dbgOut.bytes ?? '?'}} ultra=${this.ultraLowLatency}`)
+          if (this.ultraLowLatency && rttMs > 0) this.ultraRttMs.set(userId, rttMs)
           stats.forEach(report => {
             if (report.type === 'inbound-rtp' && report.kind === 'audio') {
               const concealed = report.concealedSamples || 0
@@ -3418,14 +4019,38 @@ export class WebRTCManager {
               this.lastAudioPacketTimes.set(userId, lastPacketTime)
 
               if (this.ultraLowLatency) {
-                this.updateUltraJitterTarget(userId, report.jitter || 0)
-                this.maybeAdaptUltraFrame(userId, pc, report.packetsLost || 0, report.packetsReceived || 0)
+                const totalSamples = report.totalSamplesReceived || 0
+                if (totalSamples > 0) this.ultraConcealRate.set(userId, Math.max(0, Math.min(1, concealed / totalSamples)))
+                const concealBurst = concealed - prevConcealed > ULTRA_CONCEAL_BUMP_SAMPLES
+                this.updateUltraJitterTarget(userId, report.jitter || 0, concealBurst)
+                this.maybeAdaptUltraFrame(userId, pc, report.packetsLost || 0, report.packetsReceived || 0, rttMs)
+
+                const jbDelay = report.jitterBufferDelay || 0
+                const jbEmitted = report.jitterBufferEmittedCount || 0
+                const prevJbDelay = this.lastJitterBufferDelay.get(userId) ?? jbDelay
+                const prevJbEmitted = this.lastJitterBufferEmitted.get(userId) ?? jbEmitted
+                this.lastJitterBufferDelay.set(userId, jbDelay)
+                this.lastJitterBufferEmitted.set(userId, jbEmitted)
+                const emittedDelta = jbEmitted - prevJbEmitted
+                const measuredBufferMs = emittedDelta > 0 ? ((jbDelay - prevJbDelay) / emittedDelta) * 1000 : 0
+                const targetBufferMs = this.ultraJitterTargetMs.get(this.userVoiceTrackIds.get(userId) ?? '') ?? 0
+                const micSettings = this.localStream?.getAudioTracks()[0]?.getSettings() as (MediaTrackSettings & { latency?: number }) | undefined
+                const micLatMs = typeof micSettings?.latency === 'number' ? (micSettings.latency * 1000).toFixed(1) : 'na'
+                const voiceTrackId = this.userVoiceTrackIds.get(userId)
+                const voiceReceiver = voiceTrackId ? pc.getReceivers().find(r => r.track && r.track.id === voiceTrackId) : undefined
+                const appliedTarget = voiceReceiver ? (voiceReceiver as any).jitterBufferTarget : undefined
+                const appliedHint = voiceReceiver ? (voiceReceiver as any).playoutDelayHint : undefined
+                const neqTargetMs = jbEmitted > 0 ? ((report.jitterBufferTargetDelay || 0) / jbEmitted) * 1000 : 0
+                const neqMinMs = jbEmitted > 0 ? ((report.jitterBufferMinimumDelay || 0) / jbEmitted) * 1000 : 0
+                console.info(`[ZULTRA] peer=${userId} jitter=${Math.round((report.jitter || 0) * 1000)}ms buffer=${Math.round(measuredBufferMs)}ms target=${Math.round(targetBufferMs)}ms applied=${appliedTarget ?? 'na'}/${appliedHint ?? 'na'} neqTarget=${Math.round(neqTargetMs)}ms neqMin=${Math.round(neqMinMs)}ms ptime=${this.ultraPtimeFor(userId)}ms conceal=${((this.ultraConcealRate.get(userId) ?? 0) * 100).toFixed(1)}% rtt=${Math.round(rttMs)}ms micLat=${micLatMs}ms custom=${this.ultraCustomOffReason(userId)} custBuf=${Math.round(this.ultraCustomBufferMs.get(userId) ?? 0)}ms`)
               }
 
-              if (lastPacketTime > 0 && prevPacketTime > 0 && (lastPacketTime - prevPacketTime > 3000)) {
-                this.softRefreshRemoteAudio(userId)
-              } else if (concealed - prevConcealed > 4800) {
-                this.softRefreshRemoteAudio(userId)
+              if (!this.ultraCustomUsers.has(userId)) {
+                if (lastPacketTime > 0 && prevPacketTime > 0 && (lastPacketTime - prevPacketTime > 3000)) {
+                  this.softRefreshRemoteAudio(userId)
+                } else if (concealed - prevConcealed > 4800) {
+                  this.softRefreshRemoteAudio(userId)
+                }
               }
             }
           })
@@ -3445,6 +4070,25 @@ export class WebRTCManager {
     this.lastInboundLoss.clear()
     this.lastInboundReceived.clear()
     this.renegotiationStuckSince.clear()
+    this.ultraRttMs.clear()
+    this.ultraConcealRate.clear()
+    this.ultraConcealBurstMs.clear()
+    this.ultraFrameLossTicks.clear()
+    this.lastJitterBufferDelay.clear()
+    this.lastJitterBufferEmitted.clear()
+  }
+
+  public getUltraLatencyStats(): { rttMs: number; concealmentRate: number; jitterTargetMs: number; frameMs: number } | null {
+    if (!this.ultraLowLatency || this.ultraRttMs.size === 0) return null
+    let rttMs = 0
+    for (const value of this.ultraRttMs.values()) rttMs = Math.max(rttMs, value)
+    let concealmentRate = 0
+    for (const value of this.ultraConcealRate.values()) concealmentRate = Math.max(concealmentRate, value)
+    let jitterTargetMs = 0
+    for (const value of this.ultraJitterTargetMs.values()) jitterTargetMs = Math.max(jitterTargetMs, value)
+    let frameMs = ULTRA_FRAME_MS_SAFE
+    for (const value of this.ultraFrameMs.values()) frameMs = Math.min(frameMs, value)
+    return { rttMs, concealmentRate, jitterTargetMs, frameMs }
   }
 
   private setupPeerHandlers(pc: RTCPeerConnection, userId: string) {
@@ -3497,6 +4141,16 @@ export class WebRTCManager {
         }
         event.track.contentHint = 'music'
 
+        let streamPull = this.streamAudioElements.get(userId)
+        if (!streamPull) {
+          streamPull = new Audio()
+          streamPull.autoplay = true
+          streamPull.muted = true
+          this.streamAudioElements.set(userId, streamPull)
+        }
+        streamPull.srcObject = stream
+        void streamPull.play().catch(() => { })
+
         if (this.streamSourceNodes.has(userId)) {
           try { this.streamSourceNodes.get(userId)?.disconnect() } catch { }
           try { this.streamDelayNodes.get(userId)?.disconnect() } catch { }
@@ -3530,40 +4184,13 @@ export class WebRTCManager {
           }
         }
         event.track.contentHint = 'speech'
+        let voiceReceiver: RTCRtpReceiver | undefined
         try {
-          const receiver = pc.getReceivers().find(r => r.track && r.track.id === event.track.id)
-          if (receiver) this.applyReceiverLatency(receiver)
+          voiceReceiver = pc.getReceivers().find(r => r.track && r.track.id === event.track.id)
+          if (voiceReceiver) this.applyReceiverLatency(voiceReceiver)
         } catch { }
         this.setupVAD(stream, userId, false)
-
-        if (this.userSourceNodes.has(userId)) {
-          try { this.userSourceNodes.get(userId)?.disconnect() } catch { }
-          try { this.userGainNodes.get(userId)?.disconnect() } catch { }
-          try { this.userLimiterNodes.get(userId)?.disconnect() } catch { }
-          try { this.userPannerNodes.get(userId)?.disconnect() } catch { }
-        }
-
-        const source = this.outputMixContext!.createMediaStreamSource(new MediaStream([event.track]))
-        const gain = this.outputMixContext!.createGain()
-        const panner = new StereoPannerNode(this.outputMixContext!, { pan: 0 })
-
-        if (this.ultraLowLatency) {
-          source.connect(gain)
-        } else {
-          const limiter = this.createPlaybackLimiter(PLAYBACK_VOICE_LIMIT_DB, 2, 20, 0.002, 0.060)
-          source.connect(limiter)
-          limiter.connect(gain)
-          this.userLimiterNodes.set(userId, limiter)
-        }
-        gain.connect(panner)
-        panner.connect(this.outputBusGain!)
-
-        this.userSourceNodes.set(userId, source)
-        this.userGainNodes.set(userId, gain)
-        this.userPannerNodes.set(userId, panner)
-        if (!this.voiceSeatOrder.includes(userId)) this.voiceSeatOrder.push(userId)
-        this.updateRemoteVolume(userId)
-        this.applyVoiceSeats()
+        this.setupVoicePlayout(userId, stream, event.track, voiceReceiver)
       }
     }
 
@@ -3920,11 +4547,11 @@ export class WebRTCManager {
     this.viewerStates.clear()
   }
 
-  private async renegotiatePeer(pc: RTCPeerConnection, userId: string, iceRestart = false): Promise<boolean> {
+  private async renegotiatePeer(pc: RTCPeerConnection, userId: string, iceRestart = false): Promise<void> {
     return this.enqueueSignalingTask(userId, async () => {
       if (pc.signalingState !== 'stable' || this.isMakingOffer.get(userId)) {
         this.pendingRenegotiation.add(userId)
-        return false
+        return
       }
       this.pendingRenegotiation.delete(userId)
       this.isMakingOffer.set(userId, true)
@@ -3934,19 +4561,19 @@ export class WebRTCManager {
         )
         if (pc.signalingState !== 'stable') {
           this.pendingRenegotiation.add(userId)
-          return false
+          return
         }
         const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId))
         await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
-        signalRService.sendWebRTCOffer(userId, JSON.stringify(pc.localDescription))
-        return true
+        const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
+        this.offerEpoch.set(userId, offerEpoch)
+        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch }))
       } catch (e) {
         console.error('[WebRTC] renegotiation failed', e)
-        return false
       } finally {
         this.isMakingOffer.set(userId, false)
       }
-    }) as any
+    })
   }
 
   private flushPendingRenegotiation(userId: string) {
@@ -4382,7 +5009,7 @@ export class WebRTCManager {
     const iceMs = Math.round(performance.now() - iceStartedAt)
     if (!this.isPeerRelevant(userId)) return
 
-    const pc = new RTCPeerConnection(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS as any)
+    const pc = new (RTCPeerConnection as any)(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS) as RTCPeerConnection
     this.peerConnections.set(userId, pc)
 
     if (this.localStream) {
@@ -4431,7 +5058,9 @@ export class WebRTCManager {
         this.disconnectFromPeer(userId)
         return
       }
-      signalRService.sendWebRTCOffer(userId, JSON.stringify(pc.localDescription))
+      const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
+      this.offerEpoch.set(userId, offerEpoch)
+      signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch }))
       console.log(`[WebRTC] offer to ${userId} sent in ${Math.round(performance.now() - startedAt)}ms (ice servers ${iceMs}ms)`)
     } catch (e) {
       console.error('[WebRTC] connectToPeer failed', e)
@@ -4442,6 +5071,17 @@ export class WebRTCManager {
         this.disconnectFromPeer(userId)
       }
     }
+  }
+
+  public getPeerConnection(userId: string): RTCPeerConnection | undefined {
+    return this.peerConnections.get(userId)
+  }
+
+  public reconcilePeers(desiredIds: string[]): void {
+    const desired = new Set(desiredIds)
+    this.peerConnections.forEach((_, uid) => {
+      if (!desired.has(uid)) this.disconnectFromPeer(uid)
+    })
   }
 
   public async handleOffer(senderId: string, offerStr: string) {
@@ -4462,7 +5102,7 @@ export class WebRTCManager {
         }
         await this.ensureIceServers()
         if (!this.isPeerRelevant(senderId)) return
-        pc = new RTCPeerConnection(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS as any)
+        pc = new (RTCPeerConnection as any)(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS) as RTCPeerConnection
         this.peerConnections.set(senderId, pc)
 
         if (this.localStream) {
@@ -4539,7 +5179,7 @@ export class WebRTCManager {
           this.disconnectFromPeer(senderId)
           return
         }
-        signalRService.sendWebRTCAnswer(senderId, JSON.stringify(pc.localDescription))
+        signalRService.sendWebRTCAnswer(senderId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: (offer as { epoch?: number }).epoch }))
         this.flushPendingRenegotiation(senderId)
 
         if (this.localVideoStream) {
@@ -4574,6 +5214,9 @@ export class WebRTCManager {
         this.isSettingRemoteAnswerPending.set(senderId, true)
         try {
           const answer = JSON.parse(answerStr)
+          const currentEpoch = this.offerEpoch.get(senderId)
+          const answerEpoch = (answer as { epoch?: number }).epoch
+          if (answerEpoch != null && currentEpoch != null && answerEpoch !== currentEpoch) return
           if (pc.signalingState === 'have-local-offer') {
             await pc.setRemoteDescription(new RTCSessionDescription(answer))
             await this.drainPendingCandidates(senderId)
@@ -4583,6 +5226,7 @@ export class WebRTCManager {
           }
         } catch (e) {
           console.error('[WebRTC] handleAnswer failed', e)
+          void this.attemptRenegotiation(senderId)
         } finally {
           this.isSettingRemoteAnswerPending.set(senderId, false)
         }
@@ -4643,11 +5287,19 @@ export class WebRTCManager {
     const dcTimer = this.dcTimers.get(userId)
     if (dcTimer) { clearTimeout(dcTimer); this.dcTimers.delete(userId) }
 
+    this.teardownUltraCustomPlayout(userId)
+    this.ultraTransformConnected.delete(userId)
+    this.ultraCustomGotFrame.delete(userId)
+    this.ultraCustomHandedOver.delete(userId)
+
     const pc = this.peerConnections.get(userId)
     if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.oniceconnectionstatechange = null; pc.close(); this.peerConnections.delete(userId) }
 
     const source = this.userSourceNodes.get(userId)
     if (source) { try { source.disconnect() } catch { }; this.userSourceNodes.delete(userId) }
+
+    const voicePull = this.audioElements.get(userId)
+    if (voicePull) { try { voicePull.pause(); voicePull.srcObject = null } catch { }; this.audioElements.delete(userId) }
 
     const gain = this.userGainNodes.get(userId)
     if (gain) { try { gain.disconnect() } catch { }; this.userGainNodes.delete(userId) }
@@ -4661,7 +5313,10 @@ export class WebRTCManager {
 
     this.cleanupRemoteStreamAudio(userId)
     const voiceTrackId = this.userVoiceTrackIds.get(userId)
-    if (voiceTrackId) this.ultraJitterTargetMs.delete(voiceTrackId)
+    if (voiceTrackId) {
+      this.ultraJitterTargetMs.delete(voiceTrackId)
+      this.ultraConcealBurstMs.delete(voiceTrackId)
+    }
     this.userVoiceTrackIds.delete(userId)
     this.userVoiceStreamIds.delete(userId)
 
@@ -4674,6 +5329,7 @@ export class WebRTCManager {
     this.peerSignalingQueues.delete(userId)
     this.isMakingOffer.delete(userId)
     this.isSettingRemoteAnswerPending.delete(userId)
+    this.offerEpoch.delete(userId)
     this.clearVAD(userId)
     this.lastPacketsLost.delete(userId)
     this.lastPacketsSent.delete(userId)
@@ -4687,9 +5343,14 @@ export class WebRTCManager {
     this.ultraFrameMs.delete(userId)
     this.ultraFrameCleanTicks.delete(userId)
     this.ultraFrameLastSwitchAt.delete(userId)
+    this.ultraFrameLossTicks.delete(userId)
     this.lastInboundLoss.delete(userId)
     this.lastInboundReceived.delete(userId)
     this.renegotiationStuckSince.delete(userId)
+    this.ultraRttMs.delete(userId)
+    this.ultraConcealRate.delete(userId)
+    this.lastJitterBufferDelay.delete(userId)
+    this.lastJitterBufferEmitted.delete(userId)
     this.appliedVideoProfiles.delete(userId)
     this.viewerStates.delete(userId)
     this.reportedViewStates.delete(userId)
@@ -4698,6 +5359,9 @@ export class WebRTCManager {
   public cleanupRemoteStreamAudio(userId: string) {
     this.userStreamAudioTrackIds.delete(userId)
     this.userScreenStreamIds.delete(userId)
+
+    const streamPull = this.streamAudioElements.get(userId)
+    if (streamPull) { try { streamPull.pause(); streamPull.srcObject = null } catch { }; this.streamAudioElements.delete(userId) }
 
     const streamSource = this.streamSourceNodes.get(userId)
     if (streamSource) { try { streamSource.disconnect() } catch { }; this.streamSourceNodes.delete(userId) }
@@ -4732,10 +5396,15 @@ export class WebRTCManager {
     this.peerSignalingQueues.clear()
     this.isMakingOffer.clear()
     this.isSettingRemoteAnswerPending.clear()
+    this.offerEpoch.clear()
     this.userVoiceTrackIds.clear()
     this.userStreamAudioTrackIds.clear()
     this.userVoiceStreamIds.clear()
     this.userScreenStreamIds.clear()
+    this.audioElements.forEach(el => { try { el.pause(); el.srcObject = null } catch { } })
+    this.audioElements.clear()
+    this.streamAudioElements.forEach(el => { try { el.pause(); el.srcObject = null } catch { } })
+    this.streamAudioElements.clear()
   }
 }
 

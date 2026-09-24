@@ -13,6 +13,7 @@ interface ChatState {
   markRead: (friendId: string) => void;
   load: (ownerId: string, friendId: string) => Promise<void>;
   upsert: (message: ChatMessage) => Promise<void>;
+  updateFileProgress: (conversationId: string, messageId: string, progress: number) => void;
   updateDeliveries: (ownerId: string, friendId: string, messageIds: string[], delivery: ChatMessage['delivery']) => Promise<void>;
   remove: (ownerId: string, friendId: string, messageId: string) => Promise<void>;
   setConnection: (friendId: string, connected: boolean) => void;
@@ -67,6 +68,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     await saveMessage(message);
   },
+  updateFileProgress: (conversationId, messageId, progress) => set(state => {
+    const current = state.messages[conversationId];
+    if (!current) return state;
+    let changed = false;
+    const next = current.map(item => {
+      if (item.id !== messageId || !item.file) return item;
+      if (item.file.progress === progress && item.file.transferState === 'transferring') return item;
+      changed = true;
+      return { ...item, file: { ...item.file, progress, transferState: 'transferring' as const } };
+    });
+    return changed ? { messages: { ...state.messages, [conversationId]: next } } : state;
+  }),
   updateDeliveries: async (ownerId, friendId, messageIds, delivery) => {
     const ids = new Set(messageIds);
     const current = get().messages[friendId] ?? [];

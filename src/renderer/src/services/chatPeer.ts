@@ -6,6 +6,8 @@ import { chatPublicKey, decryptChatPayload, deriveChatKey, encryptChatPayload } 
 
 const CHAT_SDP_PREFIX = 'zabor-chat:';
 const CHUNK_BYTES = 48 * 1024;
+const DOWNLOAD_STALL_MS = 30_000;
+const PROGRESS_PERSIST_DELTA = 0.02;
 const BUFFER_LIMIT = 512 * 1024;
 const MAX_CONTROL_BYTES = 64 * 1024;
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -42,12 +44,14 @@ export function configureChatSignaling(value: ChatSignaling): void {
 }
 
 interface IncomingTransfer {
+  friendId: string;
   messageId: string;
   transferId: string;
   expected: number;
   written: number;
   storedName: string;
   sha256: string;
+  lastPersisted: number;
 }
 
 class ChatPeerManager {
@@ -55,6 +59,10 @@ class ChatPeerManager {
   private channels = new Map<string, RTCDataChannel>();
   private fileChannels = new Map<string, RTCDataChannel>();
   private incoming = new Map<string, IncomingTransfer>();
+  private outgoingCancels = new Set<string>();
+  private outgoingActive = new Set<string>();
+  private saveTargets = new Map<string, string>();
+  private downloadTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private pendingCandidates = new Map<string, RTCIceCandidateInit[]>();
   private ignoredOffers = new Set<string>();
   private connecting = new Map<string, Promise<void>>();
@@ -190,22 +198,46 @@ class ChatPeerManager {
     }
   }
 
-  public async requestFile(message: ChatMessage): Promise<void> {
-    if (message.kind !== 'file' || message.senderId === this.ownerId()) return;
-    const next = { ...message, file: message.file ? { ...message.file, transferState: 'transferring' as const, progress: 0 } : null };
-    await useChatStore.getState().upsert(next);
-    await this.sendControl(message.senderId, { type: 'file-request', messageId: message.id });
+  public async requestFile(message: ChatMessage, saveTo?: string): Promise<void> {
+    if (message.kind !== 'file' || message.senderId === this.ownerId() || !message.file) return;
+    if (saveTo) this.saveTargets.set(message.id, saveTo);
+    else this.saveTargets.delete(message.id);
+    useChatStore.getState().updateFileProgress(message.conversationId, message.id, 0);
+    this.armDownloadWatchdog(message.conversationId, message.id);
+    if (!await this.sendControl(message.senderId, { type: 'file-request', messageId: message.id })) {
+      this.failDownload(message.conversationId, message.id);
+    }
+  }
+
+  public async cancelDownload(message: ChatMessage): Promise<void> {
+    const entry = this.findIncoming(message.id);
+    if (entry) {
+      await window.windowControls.chatFileAbort(entry.transferId);
+      this.incoming.delete(entry.transferId);
+    }
+    this.clearDownloadWatchdog(message.id);
+    this.saveTargets.delete(message.id);
+    await this.sendControl(message.senderId, { type: 'file-cancel', messageId: message.id });
+    const current = this.findMessage(message.conversationId, message.id) ?? message;
+    if (current.file) await useChatStore.getState().upsert({ ...current, file: { ...current.file, transferState: 'missing', progress: 0 } });
   }
 
   public async clearFile(message: ChatMessage): Promise<void> {
     if (!message.file?.storedName) return;
-    if (!await window.windowControls.chatFileDelete(message.file.storedName)) return;
-    await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, transferState: 'deleted', progress: 0 } });
+    await window.windowControls.chatFileDelete(message.file.storedName);
+    await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, savedPath: null, transferState: 'deleted', progress: 0 } });
     await this.sendOrQueueDeletion(message.conversationId, { type: 'file-delete', messageId: message.id });
   }
 
   public async deleteLocal(message: ChatMessage): Promise<void> {
-    if (message.file?.storedName && !await window.windowControls.chatFileDelete(message.file.storedName)) return;
+    const entry = this.findIncoming(message.id);
+    if (entry) {
+      await window.windowControls.chatFileAbort(entry.transferId);
+      this.incoming.delete(entry.transferId);
+    }
+    this.clearDownloadWatchdog(message.id);
+    this.saveTargets.delete(message.id);
+    if (message.file?.storedName) await window.windowControls.chatFileDelete(message.file.storedName);
     await useChatStore.getState().remove(message.ownerId, message.conversationId, message.id);
     await this.sendOrQueueDeletion(message.conversationId, { type: 'message-delete', messageId: message.id });
   }
@@ -273,6 +305,11 @@ class ChatPeerManager {
     this.fileChannels.clear();
     this.peers.clear();
     this.incoming.clear();
+    this.outgoingCancels.clear();
+    this.outgoingActive.clear();
+    this.saveTargets.clear();
+    for (const timer of this.downloadTimers.values()) clearTimeout(timer);
+    this.downloadTimers.clear();
     this.pendingCandidates.clear();
     this.ignoredOffers.clear();
     this.connecting.clear();
@@ -397,7 +434,7 @@ class ChatPeerManager {
       await this.receiveControl(friendId, packet);
       return;
     }
-    await this.receiveChunk(friendId, data);
+    await this.receiveFileFrame(friendId, data);
   }
 
   private async receiveControl(friendId: string, packet: ChatControlPacket): Promise<void> {
@@ -544,28 +581,34 @@ class ChatPeerManager {
       } else await this.sendControl(friendId, { type: 'file-unavailable', messageId: packet.messageId });
       return;
     }
-    if (packet.type === 'file-begin' && packet.messageId && packet.transferId) {
-      const message = this.findMessage(friendId, packet.messageId);
-      if (!message?.file || message.senderId !== friendId || this.incoming.has(packet.transferId)) return;
-      const result = await window.windowControls.chatFileBegin(packet.transferId, message.file.name, message.file.size);
-      if (result.ok) this.incoming.set(packet.transferId, { messageId: message.id, transferId: packet.transferId, expected: message.file.size, written: 0, storedName: result.storedName, sha256: message.file.sha256 });
-      else await useChatStore.getState().upsert({ ...message, file: { ...message.file, transferState: 'failed', progress: 0 } });
+    if (packet.type === 'file-cancel') {
+      if (packet.messageId && this.outgoingActive.has(packet.messageId)) this.outgoingCancels.add(packet.messageId);
       return;
     }
-    if (packet.type === 'file-complete' && packet.transferId) await this.completeIncoming(friendId, packet.transferId);
     if (packet.type === 'file-unavailable' && packet.messageId) {
+      this.clearDownloadWatchdog(packet.messageId);
+      this.saveTargets.delete(packet.messageId);
       const message = this.findMessage(friendId, packet.messageId);
       if (message?.file) await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, transferState: 'deleted', progress: 0 } });
     }
   }
 
-  private async receiveChunk(friendId: string, data: ArrayBuffer): Promise<void> {
+  private async receiveFileFrame(friendId: string, data: ArrayBuffer): Promise<void> {
     if (data.byteLength < 4) return;
     const view = new DataView(data);
     const headerLength = view.getUint32(0);
     if (headerLength <= 0 || headerLength > MAX_CONTROL_BYTES || 4 + headerLength > data.byteLength) return;
-    const header = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 4, headerLength))) as ChatChunkHeader;
-    if (header.type !== 'file-chunk' || header.senderId !== friendId || header.targetId !== this.ownerId()) return;
+    let header: ChatChunkHeader;
+    try {
+      header = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 4, headerLength))) as ChatChunkHeader;
+    } catch {
+      return;
+    }
+    if (header.senderId !== friendId || header.targetId !== this.ownerId()) return;
+    if (typeof header.messageId !== 'string' || typeof header.transferId !== 'string') return;
+    if (header.type === 'file-begin') return this.beginIncoming(friendId, header);
+    if (header.type === 'file-complete') return this.completeIncoming(friendId, header.transferId);
+    if (header.type !== 'file-chunk') return;
     const transfer = this.incoming.get(header.transferId);
     if (!transfer || transfer.messageId !== header.messageId || header.offset !== transfer.written) return;
     const chunk = new Uint8Array(data, 4 + headerLength);
@@ -573,41 +616,94 @@ class ChatPeerManager {
     if (!result.ok) {
       await window.windowControls.chatFileAbort(header.transferId);
       this.incoming.delete(header.transferId);
-      const failed = this.findMessage(friendId, transfer.messageId);
-      if (failed?.file) await useChatStore.getState().upsert({ ...failed, file: { ...failed.file, transferState: 'failed', progress: 0 } });
+      this.failDownload(friendId, transfer.messageId);
       return;
     }
     transfer.written = result.written;
-    const message = this.findMessage(friendId, transfer.messageId);
-    if (message?.file) await useChatStore.getState().upsert({ ...message, file: { ...message.file, transferState: 'transferring', progress: transfer.expected ? transfer.written / transfer.expected : 1 } });
+    this.armDownloadWatchdog(friendId, transfer.messageId);
+    const fraction = transfer.expected ? transfer.written / transfer.expected : 1;
+    if (fraction - transfer.lastPersisted >= PROGRESS_PERSIST_DELTA || fraction >= 1) transfer.lastPersisted = fraction;
+    useChatStore.getState().updateFileProgress(friendId, transfer.messageId, fraction);
+  }
+
+  private async beginIncoming(friendId: string, header: ChatChunkHeader): Promise<void> {
+    const message = this.findMessage(friendId, header.messageId);
+    if (!message?.file || message.senderId !== friendId || message.file.transferState !== 'transferring' || this.incoming.has(header.transferId)) return;
+    const result = await window.windowControls.chatFileBegin(header.transferId, message.file.name, message.file.size);
+    if (result.ok) {
+      this.incoming.set(header.transferId, { friendId, messageId: message.id, transferId: header.transferId, expected: message.file.size, written: 0, storedName: result.storedName, sha256: message.file.sha256, lastPersisted: 0 });
+      this.armDownloadWatchdog(friendId, message.id);
+      useChatStore.getState().updateFileProgress(friendId, message.id, 0);
+    } else {
+      this.failDownload(friendId, message.id);
+    }
   }
 
   private async completeIncoming(friendId: string, transferId: string): Promise<void> {
     const transfer = this.incoming.get(transferId);
     if (!transfer) return;
+    this.incoming.delete(transferId);
+    this.clearDownloadWatchdog(transfer.messageId);
     if (transfer.written !== transfer.expected) {
       await window.windowControls.chatFileAbort(transferId);
-      this.incoming.delete(transferId);
-      const incomplete = this.findMessage(friendId, transfer.messageId);
-      if (incomplete?.file) await useChatStore.getState().upsert({ ...incomplete, file: { ...incomplete.file, transferState: 'failed', progress: 0 } });
+      this.failDownload(friendId, transfer.messageId);
       return;
     }
     const committed = await window.windowControls.chatFileCommit(transferId);
-    this.incoming.delete(transferId);
     if (!committed.ok) {
-      const failed = this.findMessage(friendId, transfer.messageId);
-      if (failed?.file) await useChatStore.getState().upsert({ ...failed, file: { ...failed.file, transferState: 'failed', progress: 0 } });
+      this.failDownload(friendId, transfer.messageId);
       return;
     }
     const hash = await window.windowControls.chatFileHash(committed.storedName);
     const message = this.findMessage(friendId, transfer.messageId);
-    if (!message?.file) return;
-    if (hash !== transfer.sha256) {
+    if (!message?.file) {
       await window.windowControls.chatFileDelete(committed.storedName);
-      await useChatStore.getState().upsert({ ...message, file: { ...message.file, transferState: 'failed', progress: 0 } });
+      this.saveTargets.delete(transfer.messageId);
       return;
     }
-    await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: committed.storedName, transferState: 'available', progress: 1 } });
+    if (hash !== transfer.sha256) {
+      await window.windowControls.chatFileDelete(committed.storedName);
+      this.saveTargets.delete(transfer.messageId);
+      await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, transferState: 'failed', progress: 0 } });
+      return;
+    }
+    const dest = this.saveTargets.get(transfer.messageId);
+    this.saveTargets.delete(transfer.messageId);
+    const savedPath = dest && await window.windowControls.chatFileSaveTo(committed.storedName, dest) ? dest : message.file.savedPath;
+    await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: committed.storedName, savedPath, transferState: 'available', progress: 1 } });
+  }
+
+  private findIncoming(messageId: string): IncomingTransfer | undefined {
+    for (const transfer of this.incoming.values()) if (transfer.messageId === messageId) return transfer;
+    return undefined;
+  }
+
+  private armDownloadWatchdog(friendId: string, messageId: string): void {
+    this.clearDownloadWatchdog(messageId);
+    this.downloadTimers.set(messageId, setTimeout(() => {
+      this.downloadTimers.delete(messageId);
+      const entry = this.findIncoming(messageId);
+      if (entry) {
+        void window.windowControls.chatFileAbort(entry.transferId);
+        this.incoming.delete(entry.transferId);
+      }
+      this.failDownload(friendId, messageId);
+    }, DOWNLOAD_STALL_MS));
+  }
+
+  private clearDownloadWatchdog(messageId: string): void {
+    const timer = this.downloadTimers.get(messageId);
+    if (timer) clearTimeout(timer);
+    this.downloadTimers.delete(messageId);
+  }
+
+  private failDownload(friendId: string, messageId: string): void {
+    this.clearDownloadWatchdog(messageId);
+    this.saveTargets.delete(messageId);
+    const message = this.findMessage(friendId, messageId);
+    if (message?.file && message.file.transferState === 'transferring') {
+      void useChatStore.getState().upsert({ ...message, file: { ...message.file, transferState: 'failed', progress: 0 } });
+    }
   }
 
   private toWire(message: ChatMessage): ChatWireMessage {
@@ -683,14 +779,29 @@ class ChatPeerManager {
       await this.sendControl(friendId, { type: 'file-unavailable', messageId: message.id });
       return;
     }
+    const ownerId = this.ownerId();
+    if (!ownerId) return;
     const transferId = crypto.randomUUID();
-    await this.sendControl(friendId, { type: 'file-begin', messageId: message.id, transferId });
-    for (let offset = 0; offset < file.size; offset += CHUNK_BYTES) {
-      const chunk = await window.windowControls.chatFileReadSlice(file.storedName, offset, Math.min(CHUNK_BYTES, file.size - offset));
-      if (!chunk) return;
-      await this.sendBinary(friendId, { version: 1, senderId: this.ownerId()!, targetId: friendId, type: 'file-chunk', messageId: message.id, transferId, offset }, chunk);
+    const empty = new Uint8Array(0);
+    this.outgoingCancels.delete(message.id);
+    this.outgoingActive.add(message.id);
+    try {
+      if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-begin', messageId: message.id, transferId }, empty)) {
+        await this.sendControl(friendId, { type: 'file-unavailable', messageId: message.id });
+        return;
+      }
+      for (let offset = 0; offset < file.size; offset += CHUNK_BYTES) {
+        if (this.outgoingCancels.has(message.id)) return;
+        const chunk = await window.windowControls.chatFileReadSlice(file.storedName, offset, Math.min(CHUNK_BYTES, file.size - offset));
+        if (!chunk) return;
+        if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-chunk', messageId: message.id, transferId, offset }, chunk)) return;
+      }
+      if (this.outgoingCancels.has(message.id)) return;
+      await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-complete', messageId: message.id, transferId }, empty);
+    } finally {
+      this.outgoingActive.delete(message.id);
+      this.outgoingCancels.delete(message.id);
     }
-    await this.sendControl(friendId, { type: 'file-complete', messageId: message.id, transferId });
   }
 
   private async sendControl(friendId: string, packet: Omit<ChatControlPacket, 'version' | 'senderId' | 'targetId'>): Promise<boolean> {
@@ -702,7 +813,7 @@ class ChatPeerManager {
         await this.connect(friendId);
         await this.waitForChannel(friendId);
       } catch {
-        if (packet.type === 'file-begin' || packet.type === 'file-complete') return false;
+        if (packet.type === 'file-cancel') return false;
         if (packet.message?.kind === 'file') return false;
         return this.sendFallback(friendId, packet, packet.messageId ?? packet.message?.id);
       }
@@ -764,16 +875,18 @@ class ChatPeerManager {
     localStorage.setItem(key, JSON.stringify(queued.slice(-1000)));
   }
 
-  private async sendBinary(friendId: string, header: ChatChunkHeader, chunk: Uint8Array): Promise<void> {
+  private async sendBinary(friendId: string, header: ChatChunkHeader, chunk: Uint8Array): Promise<boolean> {
     const channel = this.fileChannels.get(friendId) ?? this.channels.get(friendId);
-    if (!channel || channel.readyState !== 'open') return;
-    while (channel.bufferedAmount > BUFFER_LIMIT) await new Promise<void>(resolve => { channel.onbufferedamountlow = () => { channel.onbufferedamountlow = null; resolve(); }; });
+    if (!channel || channel.readyState !== 'open') return false;
+    while (channel.readyState === 'open' && channel.bufferedAmount > BUFFER_LIMIT) await new Promise<void>(resolve => { channel.onbufferedamountlow = () => { channel.onbufferedamountlow = null; resolve(); }; });
+    if (channel.readyState !== 'open') return false;
     const encoded = new TextEncoder().encode(JSON.stringify(header));
     const packet = new Uint8Array(4 + encoded.byteLength + chunk.byteLength);
     new DataView(packet.buffer).setUint32(0, encoded.byteLength);
     packet.set(encoded, 4);
-    packet.set(chunk, 4 + encoded.byteLength);
+    if (chunk.byteLength) packet.set(chunk, 4 + encoded.byteLength);
     channel.send(packet);
+    return true;
   }
 
   private async flushPending(friendId: string): Promise<void> {
@@ -809,7 +922,7 @@ class ChatPeerManager {
 
   private validPacket(friendId: string, packet: ChatControlPacket): boolean {
     if (packet.version !== 1 || packet.senderId !== friendId || packet.targetId !== this.ownerId()) return false;
-    if (!['key', 'encrypted', 'message', 'ack', 'ack-through', 'read', 'read-through', 'sync-request', 'sync-state', 'sync-complete', 'ping', 'pong', 'file-request', 'file-begin', 'file-complete', 'file-unavailable', 'message-delete', 'file-delete'].includes(packet.type)) return false;
+    if (!['key', 'encrypted', 'message', 'ack', 'ack-through', 'read', 'read-through', 'sync-request', 'sync-state', 'sync-complete', 'ping', 'pong', 'file-request', 'file-unavailable', 'file-cancel', 'message-delete', 'file-delete'].includes(packet.type)) return false;
     if (packet.messageId !== undefined && (typeof packet.messageId !== 'string' || packet.messageId.length === 0 || packet.messageId.length > 128)) return false;
     if (packet.transferId !== undefined && (typeof packet.transferId !== 'string' || packet.transferId.length === 0 || packet.transferId.length > 128)) return false;
     if (packet.sequence !== undefined && (!Number.isSafeInteger(packet.sequence) || packet.sequence < 0)) return false;
@@ -840,6 +953,25 @@ class ChatPeerManager {
     return useAppStore.getState().friends.some(friend => friend.id === friendId);
   }
 
+  private withBaseStun(servers: RTCIceServer[]): RTCIceServer[] {
+    const seen = new Set<string>();
+    const merged: RTCIceServer[] = [];
+    const add = (server: RTCIceServer): void => {
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+      const key = urls.join('|');
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(server);
+    };
+    [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' }
+    ].forEach(add);
+    servers.forEach(add);
+    return merged;
+  }
+
   private async refreshIce(): Promise<void> {
     const relayOnly = localStorage.getItem('zabor_relay_only_ice') === 'true';
     if (Date.now() < this.iceExpiresAt - 60_000
@@ -854,7 +986,7 @@ class ChatPeerManager {
           }),
           iceTransportPolicy: 'relay'
         }
-        : { iceServers: config.iceServers };
+        : { iceServers: this.withBaseStun(config.iceServers) };
       this.iceExpiresAt = config.expiresAtUnixMs;
     }
   }
@@ -868,6 +1000,12 @@ class ChatPeerManager {
     this.peers.delete(friendId);
     this.pendingCandidates.delete(friendId);
     this.ignoredOffers.delete(friendId);
+    for (const [transferId, transfer] of [...this.incoming.entries()]) {
+      if (transfer.friendId !== friendId) continue;
+      this.incoming.delete(transferId);
+      void window.windowControls.chatFileAbort(transferId);
+      this.failDownload(friendId, transfer.messageId);
+    }
     channel?.close();
     fileChannel?.close();
     peer?.close();

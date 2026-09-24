@@ -124,7 +124,6 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const pendingSaveRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => { void chatPeer.open(friend.id); }, [friend.id]);
   useEffect(() => () => chatPeer.keepWarm(friend.id), [friend.id]);
@@ -163,24 +162,6 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
     };
   }, [menu]);
 
-  useEffect(() => {
-    if (pendingSaveRef.current.size === 0) return;
-    for (const message of messages) {
-      const dest = pendingSaveRef.current.get(message.id);
-      if (!dest || !message.file) continue;
-      if (message.file.storedName) {
-        const storedName = message.file.storedName;
-        pendingSaveRef.current.delete(message.id);
-        void (async () => {
-          const ok = await window.windowControls.chatFileSaveTo(storedName, dest);
-          if (ok) await useChatStore.getState().upsert({ ...message, file: { ...message.file!, savedPath: dest } });
-        })();
-      } else if (message.file.transferState === 'failed' || message.file.transferState === 'deleted') {
-        pendingSaveRef.current.delete(message.id);
-      }
-    }
-  }, [messages]);
-
   const canSend = value.trim().length > 0 && value.trim().length <= 4000;
   const status = useMemo(() => connected ? t('chat.connected') : friend.isOnline ? t('chat.connecting') : t('chat.offline'), [connected, friend.isOnline, t]);
 
@@ -206,18 +187,16 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
         await useChatStore.getState().upsert({ ...message, file: { ...file, savedPath: dest } });
         return;
       }
-      const cleared: ChatMessage = { ...message, file: { ...file, storedName: null, savedPath: null, transferState: own ? 'deleted' : 'missing', progress: 0 } };
-      await useChatStore.getState().upsert(cleared);
       if (own) return;
-      pendingSaveRef.current.set(message.id, dest);
-      await chatPeer.requestFile(cleared);
+      const cleared: ChatMessage = { ...message, file: { ...file, storedName: null, savedPath: null, transferState: 'missing', progress: 0 } };
+      await useChatStore.getState().upsert(cleared);
+      await chatPeer.requestFile(cleared, dest);
       return;
     }
     if (own) return;
     const dest = await window.windowControls.chatFilePickSavePath(file.name);
     if (!dest) return;
-    pendingSaveRef.current.set(message.id, dest);
-    await chatPeer.requestFile(message);
+    await chatPeer.requestFile(message, dest);
   };
 
   const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -302,8 +281,12 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
                           {message.file.transferState === 'deleted' && <div className="text-danger text-xs mt-1">{own ? t('chat.file.deletedByYou') : t('chat.file.deletedBySender')}</div>}
                           {message.file.transferState === 'failed' && <div className="text-warning text-xs mt-1">{t('chat.file.failed')}</div>}
                         </div>
-                        {(message.file.savedPath || message.file.transferState !== 'deleted') && (
-                          <button onClick={() => void download(message)} disabled={message.file.transferState === 'transferring'} className="w-9 h-9 rounded-xl bg-surface/70 hover:bg-surfaceHover/80 disabled:opacity-40 flex items-center justify-center active:scale-95" title={message.file.savedPath ? t('chat.openFile') : t('chat.download')}>
+                        {message.file.transferState === 'transferring' ? (
+                          <button onClick={() => void chatPeer.cancelDownload(message)} className="w-9 h-9 rounded-xl bg-surface/70 hover:bg-surfaceHover/80 flex items-center justify-center active:scale-95" title={t('chat.cancel')}>
+                            <X weight="bold" size={17} />
+                          </button>
+                        ) : (message.file.savedPath || message.file.transferState !== 'deleted') && (
+                          <button onClick={() => void download(message)} className="w-9 h-9 rounded-xl bg-surface/70 hover:bg-surfaceHover/80 flex items-center justify-center active:scale-95" title={message.file.savedPath ? t('chat.openFile') : t('chat.download')}>
                             {message.file.savedPath ? <ArrowSquareOut weight="bold" size={17} /> : <DownloadSimple weight="bold" size={17} />}
                           </button>
                         )}

@@ -545,6 +545,7 @@ export default function App() {
   const credentialsRef = useRef<{ login: string; password: string }>({ login: '', password: '' });
   const initCompleteRef = useRef(false);
   const isLoggingOutRef = useRef(false);
+  const authInFlightRef = useRef(false);
 
   const autoLoginPendingRef = useRef(false);
   const autoLoginInFlightRef = useRef(false);
@@ -1454,6 +1455,7 @@ export default function App() {
   }, [authStep, fetchCaptcha]);
 
   const handleAuth = useCallback(async () => {
+    if (authInFlightRef.current) return;
     setError('');
     const loginErr = validateInput(login);
     const passErr = validateInput(password);
@@ -1465,6 +1467,7 @@ export default function App() {
       if (!captchaAnswer.trim()) { setError(t('validation.captchaRequired', 'введите код с картинки')); return; }
     }
 
+    authInFlightRef.current = true;
     setIsLoading(true);
     try {
       const connected = await signalRService.connect();
@@ -1545,6 +1548,7 @@ export default function App() {
       setError(t('validation.connectError', 'ошибка подключения'));
     } finally {
       setIsLoading(false);
+      authInFlightRef.current = false;
     }
   }, [login, password, authStep, displayName, avatarBase64, avatarColor,
     captchaData, captchaAnswer, fetchCaptcha,
@@ -2395,8 +2399,9 @@ export default function App() {
                   type="text"
                   value={login}
                   onChange={e => setLogin(e.target.value)}
+                  disabled={isLoading}
                   maxLength={25}
-                  className="glass-field text-white rounded-xl p-3 mb-4 outline-none focus:ring-2 focus:ring-primary"
+                  className="glass-field text-white rounded-xl p-3 mb-4 outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-not-allowed"
                 />
                 <label className="text-xs font-bold text-textMuted mb-2 tracking-wider">{t('auth.password')}</label>
                 <div className="relative mb-6">
@@ -2405,13 +2410,15 @@ export default function App() {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
+                    disabled={isLoading}
                     maxLength={25}
                     onKeyDown={e => e.key === 'Enter' && handleAuth()}
-                    className="w-full glass-field text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-primary pr-10"
+                    className="w-full glass-field text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-primary pr-10 disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                   <button
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors"
+                    disabled={isLoading}
+                    className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {showPassword ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}
                   </button>
@@ -2439,20 +2446,21 @@ export default function App() {
                   <input type="file" accept="image/*" className="hidden" onChange={e => onFileChange(e, 'setup')} />
                 </label>
                 <label className="text-xs font-bold text-textMuted mb-1.5 tracking-wider">{t('auth.displayName')}</label>
-                <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuth()} maxLength={20} placeholder={t('auth.max20chars')} className="glass-field text-white rounded-xl p-3 mb-4 outline-none focus:ring-2 focus:ring-primary" />
+                <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} disabled={isLoading} onKeyDown={e => e.key === 'Enter' && handleAuth()} maxLength={20} placeholder={t('auth.max20chars')} className="glass-field text-white rounded-xl p-3 mb-4 outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-not-allowed" />
                 <label className="text-xs font-bold text-textMuted mb-1.5 tracking-wider">{t('auth.captcha')}</label>
                 <div className="flex gap-2 items-center mb-6 w-full">
                   <input
                     type="text"
                     value={captchaAnswer}
                     onChange={e => setCaptchaAnswer(e.target.value.toUpperCase())}
+                    disabled={isLoading}
                     maxLength={8}
                     placeholder={t('auth.captchaPlaceholder')}
                     onKeyDown={e => e.key === 'Enter' && handleAuth()}
-                    className="glass-field flex-1 min-w-0 text-white rounded-xl h-[52px] px-3 outline-none focus:ring-2 focus:ring-primary tracking-widest text-center uppercase font-mono font-bold text-base"
+                    className="glass-field flex-1 min-w-0 text-white rounded-xl h-[52px] px-3 outline-none focus:ring-2 focus:ring-primary tracking-widest text-center uppercase font-mono font-bold text-base disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                   <div
-                    onClick={!isCaptchaLoading ? fetchCaptcha : undefined}
+                    onClick={!isCaptchaLoading && !isLoading ? fetchCaptcha : undefined}
                     title={t('auth.refreshCaptcha')}
                     className="w-[154px] h-[52px] px-2.5 rounded-xl bg-surface/60 hover:bg-surfaceHover/80 border border-white/[0.07] border-t-white/[0.14] flex items-center justify-between cursor-pointer select-none active:scale-[0.98] transition-transform shrink-0 group"
                   >

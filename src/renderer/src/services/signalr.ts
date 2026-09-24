@@ -84,6 +84,7 @@ class SignalRService {
   private static readonly CONNECT_WAIT_TIMEOUT_MS = 15000;
   private static readonly CONNECT_START_TIMEOUT_MS = 35000;
   private static readonly INVOKE_TIMEOUT_MS = 20000;
+  private static readonly AUTH_INVOKE_TIMEOUT_MS = 15000;
   private static readonly VOICE_OPERATION_TIMEOUT_MS = 75000;
   private static readonly PING_INTERVAL_MS = 5000;
   private static readonly PING_TIMEOUT_MS = 10000;
@@ -545,8 +546,11 @@ class SignalRService {
       store().updateUserStatus(user.id, { ...user, currentChannelId: channelId, currentCallUserId: null, isOnline: true });
       store().addUserToChannelMap(channelId, { ...user, currentChannelId: channelId, currentCallUserId: null });
       if (store().currentChannelId === channelId && user.id !== store().currentUser?.id) {
-        webrtc.disconnectFromPeer(user.id);
-        webrtc.connectToPeer(user.id);
+        const existing = webrtc.getPeerConnection(user.id);
+        if (!existing || existing.connectionState === 'failed' || existing.connectionState === 'closed') {
+          webrtc.disconnectFromPeer(user.id);
+          webrtc.connectToPeer(user.id);
+        }
         this.playSfx(channelJoinSound, 0.3);
       }
     });
@@ -934,7 +938,7 @@ class SignalRService {
 
   private async safeInvoke<T>(method: string, ...args: any[]): Promise<T | null> {
     if (!await this.ensureSessionReady()) return null;
-    try { return await this.connection!.invoke<T>(method, ...args); }
+    try { return await this.invokeWithTimeout<T>(method, SignalRService.INVOKE_TIMEOUT_MS, ...args); }
     catch (error) {
       console.warn(`[SignalR] ${method} failed`, error);
       return null;
@@ -944,7 +948,7 @@ class SignalRService {
   private async invokeCommand(method: string, ...args: any[]): Promise<boolean> {
     if (!await this.ensureSessionReady()) return false;
     try {
-      await this.connection!.invoke(method, ...args);
+      await this.invokeWithTimeout(method, SignalRService.INVOKE_TIMEOUT_MS, ...args);
       return true;
     } catch (error) {
       console.warn(`[SignalR] ${method} failed`, error);
@@ -973,7 +977,7 @@ class SignalRService {
     if (!this.isConnected()) return;
     if (!this.sessionReady) return;
     try {
-      await this.connection!.invoke("ReportTimeZone", offset);
+      await this.invokeWithTimeout("ReportTimeZone", SignalRService.INVOKE_TIMEOUT_MS, offset);
       this.lastReportedUtcOffset = offset;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -993,7 +997,7 @@ class SignalRService {
     if (!await this.ensureConnected()) return false;
     this.authThrottleMessage = null;
     try {
-      return await this.connection!.invoke<boolean>("CheckUserExists", username);
+      return await this.invokeWithTimeout<boolean>("CheckUserExists", SignalRService.AUTH_INVOKE_TIMEOUT_MS, username);
     } catch (e) {
       this.authThrottleMessage = this.parseAuthThrottle(e);
       return false;
@@ -1069,7 +1073,7 @@ class SignalRService {
   public async getRegistrationCaptcha(): Promise<{ id: string; imageBase64: string } | null> {
     if (!await this.ensureConnected()) return null;
     try {
-      const res = await this.connection!.invoke<any>("GetRegistrationCaptcha");
+      const res = await this.invokeWithTimeout<any>("GetRegistrationCaptcha", SignalRService.AUTH_INVOKE_TIMEOUT_MS);
       if (!res) return null;
       return {
         id: String(res.id ?? res.Id ?? ''),
@@ -1095,8 +1099,9 @@ class SignalRService {
     this.registerError = null;
     let user: User | null = null;
     try {
-      user = await this.connection!.invoke<User>(
+      user = await this.invokeWithTimeout<User>(
         "Register",
+        SignalRService.AUTH_INVOKE_TIMEOUT_MS,
         username,
         password,
         displayName,
@@ -1359,6 +1364,7 @@ class SignalRService {
 
   private async _joinChannelImpl(channelId: string, operationId: number): Promise<'ok' | 'network' | 'mic_failed' | 'full'> {
     const startedAt = performance.now();
+    webrtc.warmUpConnectivity();
     const laps: string[] = [];
     let lapAt = startedAt;
     const lap = (label: string) => {
@@ -1378,6 +1384,7 @@ class SignalRService {
     const store = useAppStore.getState();
     const currentUser = store.currentUser;
     if (!currentUser) return 'network';
+    const isResumeJoin = store.currentChannelId === channelId;
     const optimisticUser: User = { ...currentUser, currentChannelId: channelId, currentCallUserId: null, isSpeaking: false };
     const targetUsers = store.channelUsersMap[channelId] || [];
     const optimisticUsers = targetUsers.some(user => user.id === currentUser.id)
@@ -1402,12 +1409,16 @@ class SignalRService {
       lap('JoinChannel');
       if (operationId !== this.voiceOperationId) return 'network';
       if (update?.users) {
-        webrtc.leaveAll();
+        const peerIds = update.users.filter(user => user.id !== currentUser.id).map(user => user.id);
+        if (isResumeJoin) {
+          webrtc.reconcilePeers(peerIds);
+        } else {
+          webrtc.leaveAll();
+        }
         store.commitVoiceChannel(channelId, update.users);
         store.setCallStatus('idle');
         store.setCurrentCallUser(null);
-        const peerIds = update.users.filter(user => user.id !== currentUser.id).map(user => user.id);
-        report(`ok, ${peerIds.length} peers`);
+        report(`${isResumeJoin ? 'resume' : 'ok'}, ${peerIds.length} peers`);
         setTimeout(() => {
           if (operationId !== this.voiceOperationId || useAppStore.getState().currentChannelId !== channelId) return;
           this.connectToPeersStaggered(peerIds, operationId, channelId);
@@ -1626,6 +1637,7 @@ class SignalRService {
 
     if (store.currentChannelId) await this.leaveChannel();
 
+    webrtc.warmUpConnectivity();
     const micStarted = await webrtc.startLocalStream();
     if (!micStarted) { store.setCallStatus('idle'); store.setCurrentCallUser(null); return false; }
 
@@ -1639,6 +1651,7 @@ class SignalRService {
   public async acceptCall(callerId: string): Promise<void> {
     if (this.isAcceptingCall) return;
     this.isAcceptingCall = true;
+    webrtc.warmUpConnectivity();
     const store = useAppStore.getState();
     const callerUser = store.incomingCall;
     store.setModal('incomingCall', false);
