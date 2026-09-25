@@ -79,6 +79,33 @@ function writeGpuFallbackTier(tier: number, reason: string) {
   }
 }
 
+function webrtcIpPolicyPath(): string {
+  return join(app.getPath('userData'), 'webrtc-ip-policy.json');
+}
+
+function readWebRtcRelayOnly(): boolean {
+  if (process.env.ZABOR_WEBRTC_IP_POLICY !== undefined) {
+    return process.env.ZABOR_WEBRTC_IP_POLICY === 'relay';
+  }
+  try {
+    const state = JSON.parse(readFileSync(webrtcIpPolicyPath(), 'utf-8'));
+    return state?.relayOnly === true;
+  } catch {
+    return false;
+  }
+}
+
+function writeWebRtcRelayOnly(relayOnly: boolean): void {
+  try {
+    writeFileSync(
+      webrtcIpPolicyPath(),
+      JSON.stringify({ relayOnly, updatedAt: new Date().toISOString() }, null, 2)
+    );
+  } catch (error) {
+    console.warn('[WebRTC] Could not persist the IP handling policy:', error);
+  }
+}
+
 function reportGpuStatus() {
   try {
     const status = app.getGPUFeatureStatus() as unknown as Record<string, string>;
@@ -101,7 +128,10 @@ if (app) {
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-background-timer-throttling');
-  app.commandLine.appendSwitch('force-webrtc-ip-handling-policy', 'default_public_interface_only');
+  app.commandLine.appendSwitch(
+    'force-webrtc-ip-handling-policy',
+    readWebRtcRelayOnly() ? 'disable_non_proxied_udp' : 'default'
+  );
   if (process.env.ZABOR_SCALE_FACTOR) {
     app.commandLine.appendSwitch('force-device-scale-factor', process.env.ZABOR_SCALE_FACTOR);
   }
@@ -706,6 +736,15 @@ app.whenReady().then(() => {
     const currentSettings = loadAppSettings();
     currentSettings.minimizeToTray = enabled;
     saveAppSettings(currentSettings);
+    return true;
+  });
+
+  ipcMain.handle('get-webrtc-relay-only', () => {
+    return readWebRtcRelayOnly();
+  });
+
+  ipcMain.handle('set-webrtc-relay-only', (_event, enabled: boolean) => {
+    writeWebRtcRelayOnly(enabled === true);
     return true;
   });
 

@@ -82,7 +82,7 @@
       "changePasswordFailed": "failed to change password",
       "network": "network",
       "hideIp": "hide my IP address",
-      "hideIpDesc": "all voice traffic goes through the relay server, so other people cannot see your IP. slightly higher latency. applies to new connections.",
+      "hideIpDesc": "all voice traffic goes through the relay server, so other people cannot see your IP. slightly higher latency. fully applies after a restart.",
       "deleteAccount": "delete account",
       "deleteAccountTitle": "delete account",
       "deleteAccountWarning": "this action cannot be undone. all your data, achievements, friends list, and created channels will be permanently deleted.",
@@ -406,7 +406,8 @@
     "calibrationBusy": "calibration is already running. please wait for it to finish.",
     "micUnknownError": "unknown microphone error",
     "channelJoinFailed": "could not join the channel: the server did not respond. please try again.",
-    "relayUnavailable": "IP hiding is on, but the relay server is unreachable — the connection will not be established."
+    "relayUnavailable": "IP hiding is on, but the relay server is unreachable — the connection will not be established.",
+    "ipPolicyRestart": "the ip setting fully applies after you restart zabor."
   },
   "stream": {
     "pickerTitle": "select source",

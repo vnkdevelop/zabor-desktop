@@ -7,7 +7,6 @@ import micPipelineRnnoiseUrl from './mic-pipeline-rnnoise?worker&url'
 import micTestCaptureProcessorUrl from './mic-test-capture-processor?worker&url'
 import playbackBufferProcessorUrl from './playback-buffer-processor?worker&url'
 import ultraJitterProcessorUrl from './ultra-jitter-processor?worker&url'
-import UltraVoiceTransformWorker from './ultra-voice-transform.worker?worker'
 import VadWorker from './silero-vad.worker?worker'
 import {
   getDeepFilterAsset,
@@ -235,12 +234,17 @@ const ULTRA_CONCEAL_BUMP_MS = 30
 const ULTRA_CONCEAL_CEILING_MS = 70
 const ULTRA_CONCEAL_DECAY = 0.5
 const ULTRA_MIC_LATENCY_HINT_S = 0
-const ULTRA_CUSTOM_BUFFER_STORAGE_KEY = 'zabor.ultraCustomBuffer'
 const ULTRA_REORDER_HOLD = 0
 const ULTRA_CUSTOM_UNDERRUN_FALLBACK = 40
-const ULTRA_CUSTOM_CONNECT_TIMEOUT_MS = 1200
-const ULTRA_CUSTOM_FRAME_TIMEOUT_MS = 3000
 const ULTRA_PENDING_PREROLL_MAX = 40
+const ULTRA_DC_LABEL = 'zabor-ultra-voice-v1'
+const ULTRA_DC_ID = 4242
+const ULTRA_DC_OPUS_FRAME_US = 10000
+const ULTRA_DC_HEADER_BYTES = 8
+const ULTRA_DC_MAX_BUFFERED_BYTES = 262144
+const ULTRA_CUSTOM_AUDIO_DROUGHT_MS = 1200
+const ULTRA_CUSTOM_MAX_FAILURES = 3
+const ULTRA_HI_MAX_RESENDS = 10
 
 type WebCodecsAudioData = {
   numberOfFrames: number
@@ -269,12 +273,42 @@ type WebCodecsEncodedAudioChunkCtor = new (init: {
   data: ArrayBuffer | ArrayBufferView
 }) => unknown
 
-type RtcScriptTransformCtor = new (worker: Worker, options?: unknown) => unknown
+type WebCodecsEncodedAudioChunk = {
+  type: 'key' | 'delta'
+  timestamp: number
+  duration: number | null
+  byteLength: number
+  copyTo: (dest: ArrayBufferView) => void
+}
+
+type WebCodecsAudioEncoder = {
+  state: string
+  configure: (config: {
+    codec: string
+    sampleRate: number
+    numberOfChannels: number
+    bitrate?: number
+    opus?: { frameDuration?: number; useinbandfec?: boolean; usedtx?: boolean; application?: string }
+  }) => void
+  encode: (data: WebCodecsAudioData) => void
+  flush: () => Promise<void>
+  close: () => void
+}
+
+type WebCodecsAudioEncoderCtor = new (init: {
+  output: (chunk: WebCodecsEncodedAudioChunk, metadata?: unknown) => void
+  error: (reason: unknown) => void
+}) => WebCodecsAudioEncoder
+
+type MediaStreamTrackProcessorCtor = new (init: { track: MediaStreamTrack }) => {
+  readable: ReadableStream<WebCodecsAudioData>
+}
 
 type UltraCodecGlobals = {
-  RTCRtpScriptTransform?: RtcScriptTransformCtor
   AudioDecoder?: WebCodecsAudioDecoderCtor
   EncodedAudioChunk?: WebCodecsEncodedAudioChunkCtor
+  AudioEncoder?: WebCodecsAudioEncoderCtor
+  MediaStreamTrackProcessor?: MediaStreamTrackProcessorCtor
 }
 
 type UltraEncodedFrameMessage = {
@@ -282,14 +316,6 @@ type UltraEncodedFrameMessage = {
   sequenceNumber?: number
   data: ArrayBuffer
 }
-
-type UltraTransformEndedMessage = {
-  type: 'ended'
-  reason: string
-  posts: number
-}
-
-type UltraTransformMessage = UltraEncodedFrameMessage | { type: 'connected' } | UltraTransformEndedMessage
 
 type UltraJitterStatsMessage = {
   type: string
@@ -535,6 +561,8 @@ export class WebRTCManager {
 
   private retryCount: Map<string, number> = new Map()
 
+  private rollbackCount: Map<string, number> = new Map()
+
   private iceRestartInFlight: Set<string> = new Set()
 
   private pendingRenegotiation: Set<string> = new Set()
@@ -577,6 +605,8 @@ export class WebRTCManager {
   }
 
   private static readonly MAX_ICE_RETRIES = 4
+
+  private static readonly MAX_ROLLBACKS = 3
 
   private static readonly ICE_TIMEOUT_MS = 15000
   private static readonly DISCONNECTED_GRACE_MS = 2500
@@ -684,18 +714,29 @@ export class WebRTCManager {
   private ultraJitterNodes: Map<string, AudioWorkletNode> = new Map()
   private ultraJitterGains: Map<string, GainNode> = new Map()
   private ultraDecoders: Map<string, WebCodecsAudioDecoder> = new Map()
-  private ultraTransformWorkers: Map<string, Worker> = new Map()
   private ultraReorderBuffers: Map<string, UltraEncodedFrameMessage[]> = new Map()
   private ultraCustomUsers: Set<string> = new Set()
   private ultraCustomUnderruns: Map<string, number> = new Map()
   private ultraCustomBufferMs: Map<string, number> = new Map()
   private ultraCustomSpeaking: Map<string, { lastSoundAt: number; speaking: boolean }> = new Map()
-  private ultraCustomFrameWatchdogs: Map<string, ReturnType<typeof setTimeout>> = new Map()
-  private ultraTransformConnected: Set<string> = new Set()
   private ultraCustomGotFrame: Set<string> = new Set()
   private ultraCustomHandedOver: Set<string> = new Set()
-  private ultraReceiverTransformUnsupported = false
-  private ultraTransformDeadReason = ''
+  private ultraCustomLastAudioAt: Map<string, number> = new Map()
+  private ultraCustomFailCount: Map<string, number> = new Map()
+  private ultraCustomFailed: Set<string> = new Set()
+  private ultraHiResends: Map<string, number> = new Map()
+  private ultraCustomEngaging: Set<string> = new Set()
+  private ultraDataChannels: Map<string, RTCDataChannel> = new Map()
+  private ultraSendTargets: Set<string> = new Set()
+  private ultraSendEncoder: WebCodecsAudioEncoder | null = null
+  private ultraSendReader: ReadableStreamDefaultReader<WebCodecsAudioData> | null = null
+  private ultraSendClonedTrack: MediaStreamTrack | null = null
+  private ultraSendTrackId: string | null = null
+  private ultraSendGeneration = 0
+  private ultraSendSeq = 0
+  private ultraSendFrameCount = 0
+  private ultraSendStarting = false
+  private ultraSendUnsupported = false
   private ultraJitterModuleContext: AudioContext | null = null
   private defaultInputFingerprint: string | null = null
   private defaultOutputFingerprint: string | null = null
@@ -715,6 +756,7 @@ export class WebRTCManager {
   private turnServers: RTCIceServer[] = []
   private ownStunServers: RTCIceServer[] = []
   private relayOnlyIce = localStorage.getItem(RELAY_ONLY_STORAGE_KEY) === 'true'
+  private ipPolicyReconciled = false
   private ultraLowLatency = localStorage.getItem(ULTRA_LOW_LATENCY_STORAGE_KEY) === 'true'
   private relayWarningShownAt = 0
   private turnExpiresAt = 0
@@ -839,6 +881,7 @@ export class WebRTCManager {
     if (this.relayOnlyIce === enabled) return
     this.relayOnlyIce = enabled
     localStorage.setItem(RELAY_ONLY_STORAGE_KEY, enabled ? 'true' : 'false')
+    void window.windowControls?.setWebrtcRelayOnly(enabled)
     if (enabled) void this.ensureIceServers()
   }
 
@@ -871,8 +914,19 @@ export class WebRTCManager {
     this.ultraRttMs.clear()
     this.ultraConcealRate.clear()
     this.ultraConcealBurstMs.clear()
-    this.ultraReceiverTransformUnsupported = false
-    this.ultraTransformDeadReason = ''
+    this.ultraCustomFailed.clear()
+    this.ultraCustomFailCount.clear()
+    this.ultraCustomLastAudioAt.clear()
+    this.ultraHiResends.clear()
+
+    if (!enabled) {
+      this.stopUltraSend()
+      this.ultraSendTargets.clear()
+      for (const channel of this.ultraDataChannels.values()) {
+        try { channel.onopen = channel.onclose = channel.onerror = channel.onmessage = null; channel.close() } catch { }
+      }
+      this.ultraDataChannels.clear()
+    }
 
     this.applyPlayoutDelayHints()
 
@@ -1379,6 +1433,7 @@ export class WebRTCManager {
   }
 
   public warmUpConnectivity(): void {
+    void this.reconcileIpPolicyWithMain()
     const startedAt = performance.now()
     void this.ensureIceServers()
       .then(() => {
@@ -1386,6 +1441,17 @@ export class WebRTCManager {
           `(${this.turnServers.length} entries)`)
       })
       .catch(error => console.warn('[WebRTC] ICE server warm-up failed:', error))
+  }
+
+  private async reconcileIpPolicyWithMain(): Promise<void> {
+    if (this.ipPolicyReconciled) return
+    this.ipPolicyReconciled = true
+    try {
+      const mainValue = await window.windowControls?.getWebrtcRelayOnly()
+      if (mainValue !== undefined && mainValue !== this.relayOnlyIce) {
+        await window.windowControls?.setWebrtcRelayOnly(this.relayOnlyIce)
+      }
+    } catch {}
   }
 
   private createPeakGuard(ctx: AudioContext, oversample: OverSampleType = '4x'): WaveShaperNode {
@@ -1932,7 +1998,9 @@ export class WebRTCManager {
     }
     if (this.ultraLowLatency) {
       this.audioElements.forEach((el, userId) => {
-        if (!this.userGainNodes.has(userId)) { try { el.muted = deafened } catch { } }
+        if (this.userGainNodes.has(userId)) return
+        if (this.ultraCustomHandedOver.has(userId)) return
+        try { el.muted = deafened } catch { }
       })
       this.ultraCustomUsers.forEach(uid => this.updateUltraCustomGain(uid))
     }
@@ -3268,6 +3336,7 @@ export class WebRTCManager {
             this.configureAudioSender(sender)
           }
         }
+        if (this.ultraLowLatency) this.restartUltraSend()
       } catch (e) {
         throw e
       }
@@ -3402,6 +3471,7 @@ export class WebRTCManager {
     if (this.localStream) {
       this.localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted })
     }
+    if (this.ultraSendClonedTrack) { try { this.ultraSendClonedTrack.enabled = !isMuted } catch { } }
   }
 
   public setUserVolume(userId: string, volume: number) {
@@ -3410,9 +3480,15 @@ export class WebRTCManager {
   }
 
   public setUserVolumeRealtime(userId: string, volume: number) {
+    const clamped = Math.max(0, Math.min(200, volume))
+    const level = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (clamped / 100)))
     const gainNode = this.userGainNodes.get(userId)
     if (gainNode) {
-      gainNode.gain.value = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (Math.max(0, Math.min(200, volume)) / 100)))
+      gainNode.gain.value = level
+    }
+    const jitterGain = this.ultraJitterGains.get(userId)
+    if (jitterGain) {
+      jitterGain.gain.value = level
     }
   }
 
@@ -3533,92 +3609,93 @@ export class WebRTCManager {
     return pc.getReceivers().find(r => r.track && r.track.kind === 'audio' && r.track.id === trackId)
   }
 
-  private canUseUltraCustomBuffer(): boolean {
+  private canUseUltraCustomPlayout(): boolean {
     if (!this.ultraLowLatency) return false
-    if (this.ultraReceiverTransformUnsupported) return false
-    if (localStorage.getItem(ULTRA_CUSTOM_BUFFER_STORAGE_KEY) !== 'true') return false
     const g = globalThis as unknown as UltraCodecGlobals
-    return typeof g.RTCRtpScriptTransform === 'function'
-      && typeof g.AudioDecoder === 'function'
+    return typeof g.AudioDecoder === 'function'
       && typeof g.EncodedAudioChunk === 'function'
       && !!this.outputMixContext
+  }
+
+  private canSendUltraFrames(): boolean {
+    if (!this.ultraLowLatency) return false
+    if (this.ultraSendUnsupported) return false
+    const g = globalThis as unknown as UltraCodecGlobals
+    return typeof g.AudioEncoder === 'function'
+      && typeof g.MediaStreamTrackProcessor === 'function'
   }
 
   private ultraCustomOffReason(userId: string): string {
     if (this.ultraCustomUsers.has(userId)) return 'on'
     if (!this.ultraLowLatency) return 'off:notUltra'
-    if (localStorage.getItem(ULTRA_CUSTOM_BUFFER_STORAGE_KEY) !== 'true') return 'off:disabled'
-    if (this.ultraReceiverTransformUnsupported) {
-      return this.ultraTransformDeadReason ? `off:txDead:${this.ultraTransformDeadReason}` : 'off:txDead'
-    }
-    const g = globalThis as unknown as UltraCodecGlobals
-    if (typeof g.RTCRtpScriptTransform !== 'function') return 'off:noScriptTransform'
-    if (typeof g.AudioDecoder !== 'function' || typeof g.EncodedAudioChunk !== 'function') return 'off:noWebCodecs'
-    if (!this.outputMixContext) return 'off:noMixCtx'
-    if (this.ultraTransformConnected.has(userId)) return 'off:connectedNoFrames'
-    return 'off:noConnect'
+    if (!this.canUseUltraCustomPlayout()) return 'off:noWebCodecs'
+    const ch = this.ultraDataChannels.get(userId)
+    if (!ch) return 'off:noChannel'
+    if (ch.readyState !== 'open') return `off:ch:${ch.readyState}`
+    return 'off:noFrames'
   }
 
-  private attachUltraTransform(userId: string, receiver: RTCRtpReceiver): boolean {
-    const g = globalThis as unknown as UltraCodecGlobals
-    const ScriptTransformCtor = g.RTCRtpScriptTransform
-    if (!ScriptTransformCtor) return false
-    try {
-      const worker = new UltraVoiceTransformWorker()
-      worker.onmessage = (event: MessageEvent<UltraTransformMessage>) => {
-        const data = event.data
-        const kind = (data as { type?: string }).type
-        if (kind === 'connected') { this.onUltraTransformConnected(userId); return }
-        if (kind === 'ended') { this.onUltraTransformEnded(userId, data as UltraTransformEndedMessage); return }
-        this.onUltraEncodedFrame(userId, data as UltraEncodedFrameMessage)
-      }
-      this.ultraTransformConnected.delete(userId)
-      this.ultraCustomGotFrame.delete(userId)
-      this.ultraCustomHandedOver.delete(userId)
-      this.ultraReorderBuffers.set(userId, [])
-      this.ultraCustomUnderruns.set(userId, 0)
-      this.ultraCustomBufferMs.set(userId, 0)
-      this.ultraCustomSpeaking.set(userId, { lastSoundAt: 0, speaking: false })
-      this.ultraTransformWorkers.set(userId, worker)
-      this.ultraCustomUsers.add(userId)
-      ;(receiver as unknown as { transform: unknown }).transform = new ScriptTransformCtor(worker, { userId })
-
-      this.armUltraCustomWatchdog(userId, ULTRA_CUSTOM_CONNECT_TIMEOUT_MS)
-      return true
-    } catch {
-      this.teardownUltraCustomPlayout(userId)
-      return false
-    }
+  private ensureUltraCustomPlayout(userId: string): void {
+    if (!this.canUseUltraCustomPlayout()) return
+    if (this.ultraCustomFailed.has(userId)) return
+    if (this.ultraDecoders.has(userId) || this.ultraCustomEngaging.has(userId)) return
+    this.ultraCustomEngaging.add(userId)
+    if (!this.ultraReorderBuffers.has(userId)) this.ultraReorderBuffers.set(userId, [])
+    if (!this.ultraCustomSpeaking.has(userId)) this.ultraCustomSpeaking.set(userId, { lastSoundAt: 0, speaking: false })
+    this.ultraCustomUnderruns.set(userId, 0)
+    this.ultraCustomBufferMs.set(userId, 0)
+    this.ultraCustomUsers.add(userId)
+    void this.engageUltraCustomPlayout(userId).finally(() => this.ultraCustomEngaging.delete(userId))
   }
 
-  private armUltraCustomWatchdog(userId: string, timeoutMs: number) {
-    const existing = this.ultraCustomFrameWatchdogs.get(userId)
-    if (existing !== undefined) clearTimeout(existing)
-    const watchdog = setTimeout(() => {
-      this.ultraCustomFrameWatchdogs.delete(userId)
-      if (!this.ultraCustomUsers.has(userId)) return
-      if (!this.ultraCustomGotFrame.has(userId)) {
-        this.ultraReceiverTransformUnsupported = true
-        this.ultraTransformDeadReason = this.ultraTransformConnected.has(userId) ? 'noFrames' : 'noConnect'
+  private attachUltraDataChannel(userId: string, channel: RTCDataChannel): void {
+    try { channel.binaryType = 'arraybuffer' } catch { }
+    const previous = this.ultraDataChannels.get(userId)
+    if (previous && previous !== channel) {
+      try { previous.onopen = previous.onclose = previous.onerror = previous.onmessage = null; previous.close() } catch { }
+    }
+    this.ultraDataChannels.set(userId, channel)
+    const handleOpen = () => {
+      if (this.ultraDataChannels.get(userId) !== channel) return
+      this.ultraCustomFailed.delete(userId)
+      this.ultraCustomFailCount.delete(userId)
+      this.ultraHiResends.set(userId, 0)
+      if (this.canUseUltraCustomPlayout()) {
+        try { channel.send('hi'); this.ultraHiResends.set(userId, 1) } catch { }
       }
+    }
+    channel.onopen = handleOpen
+    channel.onclose = () => {
+      if (this.ultraDataChannels.get(userId) === channel) this.ultraDataChannels.delete(userId)
+      this.ultraSendTargets.delete(userId)
+      if (this.ultraSendTargets.size === 0) this.stopUltraSend()
       this.fallbackUltraCustomPlayout(userId)
-    }, timeoutMs)
-    this.ultraCustomFrameWatchdogs.set(userId, watchdog)
-  }
-
-  private onUltraTransformConnected(userId: string) {
-    if (!this.ultraCustomUsers.has(userId)) return
-    this.ultraTransformConnected.add(userId)
-    this.armUltraCustomWatchdog(userId, ULTRA_CUSTOM_FRAME_TIMEOUT_MS)
-  }
-
-  private onUltraTransformEnded(userId: string, info: UltraTransformEndedMessage) {
-    if (!this.ultraCustomUsers.has(userId)) return
-    if (!this.ultraCustomGotFrame.has(userId)) {
-      this.ultraReceiverTransformUnsupported = true
-      this.ultraTransformDeadReason = `${info.reason}#${info.posts}`
     }
-    this.fallbackUltraCustomPlayout(userId)
+    channel.onerror = () => this.fallbackUltraCustomPlayout(userId)
+    channel.onmessage = (event: MessageEvent) => this.onUltraChannelMessage(userId, event.data)
+    if (channel.readyState === 'open') handleOpen()
+  }
+
+  private onUltraChannelMessage(userId: string, data: unknown): void {
+    if (typeof data === 'string') {
+      if (data === 'hi') { this.ultraSendTargets.add(userId); this.maybeStartUltraSend() }
+      return
+    }
+    let buffer: ArrayBuffer | null = null
+    if (data instanceof ArrayBuffer) buffer = data
+    else if (ArrayBuffer.isView(data)) {
+      const view = data as ArrayBufferView
+      buffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer
+    }
+    if (!buffer || buffer.byteLength <= ULTRA_DC_HEADER_BYTES) return
+    if (!this.canUseUltraCustomPlayout()) return
+    if (!this.ultraSendTargets.has(userId)) { this.ultraSendTargets.add(userId); this.maybeStartUltraSend() }
+    this.ensureUltraCustomPlayout(userId)
+    const header = new DataView(buffer)
+    const timestamp = header.getUint32(0, true)
+    const sequenceNumber = header.getUint32(4, true)
+    const payload = buffer.slice(ULTRA_DC_HEADER_BYTES)
+    this.onUltraEncodedFrame(userId, { timestamp, sequenceNumber, data: payload })
   }
 
   private async engageUltraCustomPlayout(userId: string): Promise<void> {
@@ -3647,17 +3724,16 @@ export class WebRTCManager {
       })
       const gain = ctx.createGain()
       node.connect(gain)
-      gain.connect(ctx.destination)
+      gain.connect(this.outputBusGain ?? ctx.destination)
       node.port.onmessage = (event: MessageEvent<UltraJitterStatsMessage>) => this.onUltraJitterStats(userId, event.data)
+      this.ultraJitterNodes.set(userId, node)
+      this.ultraJitterGains.set(userId, gain)
 
       const decoder = new DecoderCtor({
         output: (data) => this.onUltraDecodedAudio(userId, data),
         error: () => this.fallbackUltraCustomPlayout(userId)
       })
       decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 1 })
-
-      this.ultraJitterNodes.set(userId, node)
-      this.ultraJitterGains.set(userId, gain)
       this.ultraDecoders.set(userId, decoder)
 
       this.updateUltraCustomGain(userId)
@@ -3681,15 +3757,7 @@ export class WebRTCManager {
   private onUltraEncodedFrame(userId: string, frame: UltraEncodedFrameMessage) {
     const pending = this.ultraReorderBuffers.get(userId)
     if (!pending) return
-    if (!this.ultraCustomGotFrame.has(userId)) {
-      this.ultraCustomGotFrame.add(userId)
-      this.commitUltraCustomHandover(userId)
-    }
-    const watchdog = this.ultraCustomFrameWatchdogs.get(userId)
-    if (watchdog !== undefined) {
-      clearTimeout(watchdog)
-      this.ultraCustomFrameWatchdogs.delete(userId)
-    }
+    this.ultraCustomGotFrame.add(userId)
     pending.push(frame)
     pending.sort((a, b) => ((a.timestamp >>> 0) - (b.timestamp >>> 0)))
     if (!this.ultraDecoders.has(userId)) {
@@ -3740,6 +3808,8 @@ export class WebRTCManager {
           }
           node.port.postMessage({ type: 'audio', buffer: interleaved.buffer, channels: 2 }, [interleaved.buffer])
         }
+        this.ultraCustomLastAudioAt.set(userId, Date.now())
+        this.commitUltraCustomHandover(userId)
       }
     } catch { } finally {
       try { data.close() } catch { }
@@ -3775,6 +3845,7 @@ export class WebRTCManager {
   private commitUltraCustomHandover(userId: string) {
     if (this.ultraCustomHandedOver.has(userId)) return
     this.ultraCustomHandedOver.add(userId)
+    this.ultraCustomFailCount.set(userId, 0)
     const el = this.audioElements.get(userId)
     if (el) { try { el.muted = true; el.pause() } catch { } }
     this.clearVAD(userId)
@@ -3782,6 +3853,9 @@ export class WebRTCManager {
 
   private fallbackUltraCustomPlayout(userId: string) {
     if (!this.ultraCustomUsers.has(userId)) return
+    const fails = (this.ultraCustomFailCount.get(userId) ?? 0) + 1
+    this.ultraCustomFailCount.set(userId, fails)
+    if (fails >= ULTRA_CUSTOM_MAX_FAILURES) this.ultraCustomFailed.add(userId)
     this.teardownUltraCustomPlayout(userId)
     const el = this.audioElements.get(userId)
     const stream = el?.srcObject as MediaStream | null
@@ -3795,18 +3869,7 @@ export class WebRTCManager {
   private teardownUltraCustomPlayout(userId: string) {
     if (!this.ultraCustomUsers.has(userId)
       && !this.ultraJitterNodes.has(userId)
-      && !this.ultraDecoders.has(userId)
-      && !this.ultraTransformWorkers.has(userId)
-      && !this.ultraCustomFrameWatchdogs.has(userId)) return
-
-    const watchdog = this.ultraCustomFrameWatchdogs.get(userId)
-    if (watchdog !== undefined) { clearTimeout(watchdog); this.ultraCustomFrameWatchdogs.delete(userId) }
-
-    const receiver = this.findVoiceReceiver(userId, this.userVoiceTrackIds.get(userId) ?? '')
-    if (receiver) { try { (receiver as unknown as { transform: unknown }).transform = null } catch { } }
-
-    const worker = this.ultraTransformWorkers.get(userId)
-    if (worker) { try { worker.onmessage = null; worker.terminate() } catch { } ; this.ultraTransformWorkers.delete(userId) }
+      && !this.ultraDecoders.has(userId)) return
 
     const decoder = this.ultraDecoders.get(userId)
     if (decoder) { try { if (decoder.state !== 'closed') decoder.close() } catch { } ; this.ultraDecoders.delete(userId) }
@@ -3834,7 +3897,136 @@ export class WebRTCManager {
     if (!gain) return
     const store = useAppStore.getState()
     const vol = store.userVolumes[userId] ?? 100
-    gain.gain.value = this.isDeafened ? 0 : Math.max(0, Math.min(1.0, (this.outputVolume / 100) * (vol / 100)))
+    gain.gain.value = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+  }
+
+  private ensureUltraSendChannel(pc: RTCPeerConnection, userId: string): void {
+    if (!this.ultraLowLatency) return
+    if (this.ultraDataChannels.has(userId)) return
+    if (!this.canSendUltraFrames() && !this.canUseUltraCustomPlayout()) return
+    try {
+      const channel = pc.createDataChannel(ULTRA_DC_LABEL, {
+        ordered: false,
+        maxRetransmits: 0,
+        negotiated: true,
+        id: ULTRA_DC_ID
+      })
+      this.attachUltraDataChannel(userId, channel)
+    } catch { }
+  }
+
+  private maybeStartUltraSend(): void {
+    if (!this.ultraLowLatency) return
+    if (this.ultraSendTargets.size === 0) return
+    if (!this.canSendUltraFrames()) return
+    if (this.ultraSendEncoder || this.ultraSendStarting) return
+    void this.startUltraSend()
+  }
+
+  private async startUltraSend(): Promise<void> {
+    if (this.ultraSendStarting || this.ultraSendEncoder) return
+    const track = this.localStream?.getAudioTracks()[0]
+    if (!track || track.readyState !== 'live') return
+    const g = globalThis as unknown as UltraCodecGlobals
+    const EncoderCtor = g.AudioEncoder
+    const ProcessorCtor = g.MediaStreamTrackProcessor
+    if (!EncoderCtor || !ProcessorCtor) return
+    this.ultraSendStarting = true
+    this.ultraSendFrameCount = 0
+    const generation = ++this.ultraSendGeneration
+    try {
+      const clone = track.clone()
+      this.ultraSendClonedTrack = clone
+      this.ultraSendTrackId = track.id
+      const processor = new ProcessorCtor({ track: clone })
+      const reader = processor.readable.getReader()
+      this.ultraSendReader = reader
+      const encoder = new EncoderCtor({
+        output: (chunk) => this.broadcastUltraFrame(chunk),
+        error: () => {
+          if (this.ultraSendGeneration !== generation) return
+          if (this.ultraSendFrameCount === 0) this.ultraSendUnsupported = true
+          this.stopUltraSend()
+        }
+      })
+      this.ultraSendEncoder = encoder
+      encoder.configure({
+        codec: 'opus',
+        sampleRate: 48000,
+        numberOfChannels: 1,
+        bitrate: OPUS_AUDIO_BITRATE,
+        opus: { frameDuration: ULTRA_DC_OPUS_FRAME_US, useinbandfec: true, usedtx: false, application: 'voip' }
+      })
+      this.ultraSendStarting = false
+      void this.pumpUltraSend(reader, encoder, generation)
+    } catch {
+      this.ultraSendStarting = false
+      this.teardownUltraSendInternals()
+    }
+  }
+
+  private async pumpUltraSend(
+    reader: ReadableStreamDefaultReader<WebCodecsAudioData>,
+    encoder: WebCodecsAudioEncoder,
+    generation: number
+  ): Promise<void> {
+    try {
+      while (this.ultraSendGeneration === generation) {
+        const { value, done } = await reader.read()
+        if (done) break
+        if (!value) continue
+        if (this.ultraSendGeneration !== generation) { try { value.close() } catch { } ; break }
+        try {
+          if (encoder.state === 'configured') encoder.encode(value)
+        } finally {
+          try { value.close() } catch { }
+        }
+      }
+    } catch { } finally {
+      if (this.ultraSendGeneration === generation) this.stopUltraSend()
+    }
+  }
+
+  private broadcastUltraFrame(chunk: WebCodecsEncodedAudioChunk): void {
+    const size = chunk.byteLength
+    if (size <= 0) return
+    const buffer = new ArrayBuffer(ULTRA_DC_HEADER_BYTES + size)
+    const header = new DataView(buffer)
+    const rtpTimestamp = Math.round((chunk.timestamp / 1e6) * 48000) >>> 0
+    header.setUint32(0, rtpTimestamp, true)
+    header.setUint32(4, this.ultraSendSeq++ >>> 0, true)
+    chunk.copyTo(new Uint8Array(buffer, ULTRA_DC_HEADER_BYTES))
+    this.ultraSendFrameCount++
+    for (const [userId, channel] of this.ultraDataChannels) {
+      if (!this.ultraSendTargets.has(userId)) continue
+      if (channel.readyState !== 'open') continue
+      if (channel.bufferedAmount > ULTRA_DC_MAX_BUFFERED_BYTES) continue
+      try { channel.send(buffer) } catch { }
+    }
+  }
+
+  private stopUltraSend(): void {
+    this.ultraSendGeneration++
+    this.teardownUltraSendInternals()
+  }
+
+  private teardownUltraSendInternals(): void {
+    const reader = this.ultraSendReader
+    this.ultraSendReader = null
+    if (reader) { try { void reader.cancel() } catch { } }
+    const encoder = this.ultraSendEncoder
+    this.ultraSendEncoder = null
+    if (encoder) { try { if (encoder.state !== 'closed') encoder.close() } catch { } }
+    const clone = this.ultraSendClonedTrack
+    this.ultraSendClonedTrack = null
+    if (clone) { try { clone.stop() } catch { } }
+    this.ultraSendTrackId = null
+    this.ultraSendStarting = false
+  }
+
+  private restartUltraSend(): void {
+    this.stopUltraSend()
+    this.maybeStartUltraSend()
   }
 
   private setupVoicePlayout(userId: string, stream: MediaStream, track: MediaStreamTrack, receiver?: RTCRtpReceiver) {
@@ -3847,17 +4039,19 @@ export class WebRTCManager {
     if (voicePull.srcObject !== stream) voicePull.srcObject = stream
 
     this.teardownVoiceGraph(userId)
-    this.teardownUltraCustomPlayout(userId)
 
     if (this.ultraLowLatency) {
-      const voiceReceiver = receiver ?? this.findVoiceReceiver(userId, track.id)
       this.setupUltraElementPlayout(userId, stream)
-      if (voiceReceiver && this.canUseUltraCustomBuffer() && this.attachUltraTransform(userId, voiceReceiver)) {
-        void this.engageUltraCustomPlayout(userId)
+      if (this.ultraCustomHandedOver.has(userId)) {
+        const el = this.audioElements.get(userId)
+        if (el) { try { el.muted = true; el.pause() } catch { } }
       }
+      const channel = this.ultraDataChannels.get(userId)
+      if (channel && channel.readyState === 'open') this.ensureUltraCustomPlayout(userId)
       return
     }
 
+    this.teardownUltraCustomPlayout(userId)
     if (!this.outputMixContext) return
     voicePull.muted = true
     void voicePull.play().catch(() => { })
@@ -3969,6 +4163,24 @@ export class WebRTCManager {
         void this.outputMixContext.resume().catch(() => { })
       }
 
+      if (this.ultraLowLatency) {
+        const now = Date.now()
+        for (const [uid, ch] of this.ultraDataChannels) {
+          if (ch.readyState !== 'open') continue
+          if (this.canUseUltraCustomPlayout() && !this.ultraCustomGotFrame.has(uid) && !this.ultraCustomFailed.has(uid)) {
+            const sent = this.ultraHiResends.get(uid) ?? 0
+            if (sent < ULTRA_HI_MAX_RESENDS) {
+              try { ch.send('hi') } catch { }
+              this.ultraHiResends.set(uid, sent + 1)
+            }
+          }
+        }
+        for (const uid of [...this.ultraCustomHandedOver]) {
+          const last = this.ultraCustomLastAudioAt.get(uid) ?? 0
+          if (now - last > ULTRA_CUSTOM_AUDIO_DROUGHT_MS) this.fallbackUltraCustomPlayout(uid)
+        }
+      }
+
       for (const [userId, pc] of this.peerConnections.entries()) {
         this.checkRenegotiationHealth(userId, pc)
         if (pc.connectionState !== 'connected') continue
@@ -4070,6 +4282,7 @@ export class WebRTCManager {
     this.lastInboundLoss.clear()
     this.lastInboundReceived.clear()
     this.renegotiationStuckSince.clear()
+    this.rollbackCount.clear()
     this.ultraRttMs.clear()
     this.ultraConcealRate.clear()
     this.ultraConcealBurstMs.clear()
@@ -4556,6 +4769,7 @@ export class WebRTCManager {
       this.pendingRenegotiation.delete(userId)
       this.isMakingOffer.set(userId, true)
       try {
+        this.ensureUltraSendChannel(pc, userId)
         const offer = await pc.createOffer(
           iceRestart ? SILENCE_SUPPRESSION_OFF_WITH_ICE_RESTART : SILENCE_SUPPRESSION_OFF
         )
@@ -4581,6 +4795,31 @@ export class WebRTCManager {
     const pc = this.peerConnections.get(userId)
     if (!pc || pc.signalingState !== 'stable' || this.isMakingOffer.get(userId)) return
     this.pendingRenegotiation.delete(userId)
+    void this.renegotiatePeer(pc, userId)
+  }
+
+  private async recoverRejectedAnswer(userId: string, pc: RTCPeerConnection): Promise<void> {
+    if (this.peerConnections.get(userId) !== pc || pc.connectionState === 'closed') {
+      void this.attemptRenegotiation(userId)
+      return
+    }
+    if (pc.signalingState !== 'have-local-offer') return
+    const attempts = (this.rollbackCount.get(userId) ?? 0) + 1
+    this.rollbackCount.set(userId, attempts)
+    if (attempts > WebRTCManager.MAX_ROLLBACKS) {
+      this.rollbackCount.delete(userId)
+      void this.attemptRenegotiation(userId)
+      return
+    }
+    try {
+      await pc.setLocalDescription({ type: 'rollback' })
+    } catch {
+      void this.attemptRenegotiation(userId)
+      return
+    }
+    this.isMakingOffer.set(userId, false)
+    this.renegotiationStuckSince.delete(userId)
+    this.pendingRenegotiation.add(userId)
     void this.renegotiatePeer(pc, userId)
   }
 
@@ -5049,6 +5288,7 @@ export class WebRTCManager {
 
     this.setupPeerHandlers(pc, userId)
     this.startIceTimeout(userId)
+    this.ensureUltraSendChannel(pc, userId)
 
     try {
       const offer = await pc.createOffer(SILENCE_SUPPRESSION_OFF)
@@ -5166,8 +5406,9 @@ export class WebRTCManager {
         }
 
         await pc.setRemoteDescription(new RTCSessionDescription(offer))
-        const answer = await pc.createAnswer(SILENCE_SUPPRESSION_OFF)
         const offerSdp = typeof offer.sdp === 'string' ? offer.sdp : ''
+        if (this.ultraLowLatency && offerSdp.includes('m=application')) this.ensureUltraSendChannel(pc, senderId)
+        const answer = await pc.createAnswer(SILENCE_SUPPRESSION_OFF)
         const offeredMinPtime = offerSdp.match(/minptime=(\d+)/)
         const isOfferUltraLow = Boolean(offeredMinPtime && Number(offeredMinPtime[1]) <= 10)
         const effectiveUltraLow = this.ultraLowLatency || isOfferUltraLow
@@ -5219,6 +5460,7 @@ export class WebRTCManager {
           if (answerEpoch != null && currentEpoch != null && answerEpoch !== currentEpoch) return
           if (pc.signalingState === 'have-local-offer') {
             await pc.setRemoteDescription(new RTCSessionDescription(answer))
+            this.rollbackCount.delete(senderId)
             await this.drainPendingCandidates(senderId)
             this.flushPendingRenegotiation(senderId)
           } else if (pc.signalingState !== 'stable') {
@@ -5226,7 +5468,7 @@ export class WebRTCManager {
           }
         } catch (e) {
           console.error('[WebRTC] handleAnswer failed', e)
-          void this.attemptRenegotiation(senderId)
+          await this.recoverRejectedAnswer(senderId, pc)
         } finally {
           this.isSettingRemoteAnswerPending.set(senderId, false)
         }
@@ -5288,9 +5530,20 @@ export class WebRTCManager {
     if (dcTimer) { clearTimeout(dcTimer); this.dcTimers.delete(userId) }
 
     this.teardownUltraCustomPlayout(userId)
-    this.ultraTransformConnected.delete(userId)
+    const ultraChannel = this.ultraDataChannels.get(userId)
+    if (ultraChannel) {
+      try { ultraChannel.onopen = ultraChannel.onclose = ultraChannel.onerror = ultraChannel.onmessage = null; ultraChannel.close() } catch { }
+      this.ultraDataChannels.delete(userId)
+    }
+    this.ultraCustomEngaging.delete(userId)
+    this.ultraSendTargets.delete(userId)
+    if (this.ultraSendTargets.size === 0) this.stopUltraSend()
     this.ultraCustomGotFrame.delete(userId)
     this.ultraCustomHandedOver.delete(userId)
+    this.ultraCustomLastAudioAt.delete(userId)
+    this.ultraCustomFailCount.delete(userId)
+    this.ultraCustomFailed.delete(userId)
+    this.ultraHiResends.delete(userId)
 
     const pc = this.peerConnections.get(userId)
     if (pc) { pc.ontrack = null; pc.onicecandidate = null; pc.onconnectionstatechange = null; pc.oniceconnectionstatechange = null; pc.close(); this.peerConnections.delete(userId) }
@@ -5347,6 +5600,7 @@ export class WebRTCManager {
     this.lastInboundLoss.delete(userId)
     this.lastInboundReceived.delete(userId)
     this.renegotiationStuckSince.delete(userId)
+    this.rollbackCount.delete(userId)
     this.ultraRttMs.delete(userId)
     this.ultraConcealRate.delete(userId)
     this.lastJitterBufferDelay.delete(userId)
@@ -5391,6 +5645,16 @@ export class WebRTCManager {
   public leaveAll() {
     this.stopAudioHealthMonitoring()
     this.peerConnections.forEach((_, uid) => this.disconnectFromPeer(uid))
+    this.stopUltraSend()
+    this.ultraSendTargets.clear()
+    this.ultraSendUnsupported = false
+    this.ultraDataChannels.forEach(ch => { try { ch.onopen = ch.onclose = ch.onerror = ch.onmessage = null; ch.close() } catch { } })
+    this.ultraDataChannels.clear()
+    this.ultraCustomEngaging.clear()
+    this.ultraCustomFailed.clear()
+    this.ultraCustomFailCount.clear()
+    this.ultraCustomLastAudioAt.clear()
+    this.ultraHiResends.clear()
     this.pendingCandidates.clear()
     this.pendingRenegotiation.clear()
     this.peerSignalingQueues.clear()

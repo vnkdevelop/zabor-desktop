@@ -63,6 +63,8 @@ declare global {
       setAutoLaunch: (enabled: boolean) => Promise<boolean>;
       getMinimizeToTray: () => Promise<boolean>;
       setMinimizeToTray: (enabled: boolean) => Promise<boolean>;
+      getWebrtcRelayOnly: () => Promise<boolean>;
+      setWebrtcRelayOnly: (enabled: boolean) => Promise<boolean>;
       saveSession: (data: string) => Promise<boolean>;
       loadSession: () => Promise<string | null>;
       clearSession: () => Promise<boolean>;

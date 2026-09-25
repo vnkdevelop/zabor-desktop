@@ -3744,11 +3744,16 @@ export default function App() {
                   <div className="flex items-center justify-between glass-row p-4 rounded-xl">
                     <div className="mr-4">
                       <span className="font-semibold text-white text-[15px]">{t('settings.privacy.hideIp', 'скрывать мой IP-адрес')}</span>
-                      <p className="text-xs text-textMuted mt-1">{t('settings.privacy.hideIpDesc', 'весь голос идёт через сервер ретрансляции, собеседники не видят ваш IP. задержка чуть выше. применяется к новым подключениям.')}</p>
+                      <p className="text-xs text-textMuted mt-1">{t('settings.privacy.hideIpDesc', 'весь голос идёт через сервер ретрансляции, собеседники не видят ваш IP. задержка чуть выше. полностью применяется после перезапуска.')}</p>
                     </div>
                     <Md3Switch checked={relayOnlyIce} onChange={(v) => {
                       setRelayOnlyIce(v);
                       webrtc.setRelayOnlyIce(v);
+                      const restartMsg = t('toasts.ipPolicyRestart', 'настройка ip полностью применится после перезапуска zabor.');
+                      store.setSystemToast(restartMsg);
+                      setTimeout(() => {
+                        if (useAppStore.getState().systemToast === restartMsg) useAppStore.getState().setSystemToast(null);
+                      }, 5000);
                     }} />
                   </div>
                 </div>

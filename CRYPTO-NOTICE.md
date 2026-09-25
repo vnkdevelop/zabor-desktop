@@ -1,6 +1,6 @@
 # Криптография в ZABOR: состав и свойства / ZABOR Cryptography Notice
 
-> Редакция от 19 сентября 2026 года.
+> Редакция от 25 сентября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -12,7 +12,7 @@
 
 ### 1. Назначение
 
-Криптография в ZABOR применяется для защиты **обмена сообщениями, файлами и служебными пакетами** между участниками, а также для защиты **данных сессии и закрытого ключа переписки**, хранящихся локально на устройстве пользователя. Прочие локально хранимые данные — история сообщений и полученные файлы — в состоянии покоя не шифруются (см. п. 4.4). Защита голосового и видеотракта обеспечивается штатными средствами WebRTC (DTLS-SRTP) и в настоящем документе не рассматривается.
+Криптография в ZABOR применяется для защиты **обмена сообщениями, файлами и служебными пакетами** между участниками, а также для защиты **данных сессии и закрытого ключа переписки**, хранящихся локально на устройстве пользователя. Прочие локально хранимые данные — история сообщений и полученные файлы — в состоянии покоя не шифруются (см. п. 4.4). Защита голосового и видеотракта обеспечивается штатными средствами WebRTC (DTLS-SRTP для медиапотока RTP; в режиме низкой задержки голос может дополнительно передаваться по каналу данных WebRTC — SCTP поверх DTLS) и в настоящем документе не рассматривается. В обоих случаях это штатный транспорт WebRTC; отдельная криптозащита прикладного уровня для голоса не добавляется и не убирается.
 
 ### 2. Применяемые алгоритмы
 
@@ -76,7 +76,7 @@
 
 ### 1. Purpose
 
-Cryptography in ZABOR protects the **exchange of messages, files and control packets** between participants, and protects the **session data and the private messaging key** stored locally on the user's device. Other locally stored data — message history and received files — is not encrypted at rest (see section 4.4). Protection of the voice and video path is provided by native WebRTC facilities (DTLS-SRTP) and is not covered by this document.
+Cryptography in ZABOR protects the **exchange of messages, files and control packets** between participants, and protects the **session data and the private messaging key** stored locally on the user's device. Other locally stored data — message history and received files — is not encrypted at rest (see section 4.4). Protection of the voice and video path is provided by native WebRTC facilities (DTLS-SRTP for the RTP media stream; in low-latency mode voice may additionally be carried over the WebRTC data channel — SCTP over DTLS) and is not covered by this document. In both cases this is native WebRTC transport; no separate application-layer cryptographic protection for voice is added or removed.
 
 ### 2. Algorithms used
 
