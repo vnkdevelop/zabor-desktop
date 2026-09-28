@@ -23,7 +23,8 @@ export interface User {
   isSpeaking: boolean;
   currentChannelId?: string | null;
   currentCallUserId?: string | null;
-  lastSeen?: string;
+  lastOnline?: string;
+  showLastOnline?: boolean;
   friendRequestsReceived?: string[];
   FriendRequestsReceived?: string[];
   isStreaming?: boolean;

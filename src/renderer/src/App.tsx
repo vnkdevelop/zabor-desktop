@@ -12,6 +12,7 @@ import i18n from './i18n';
 
 import { ACHIEVEMENTS, getAchievementDef, formatProgress, AchievementsPayload, getProgressPercent, AchievementDef } from './achievements';
 import { translateJoke } from './utils/jokesTranslation';
+import { formatLastOnline } from './utils/presence';
 
 import { TitleBar } from './components/Layout/TitleBar';
 import { Md3Slider } from './components/Shared/Md3Slider';
@@ -981,10 +982,14 @@ export default function App() {
       }
       if (result === 'throttled') {
         autoLoginAttemptsRef.current = 0;
-        autoLoginPendingRef.current = false;
+        autoLoginPendingRef.current = true;
         setShowErrorText(true);
-        setLoadingFadeOut(true);
-        setTimeout(() => setAppLoading(false), 650);
+        setShowReconnectingOverlay(true);
+        if (autoLoginRetryTimerRef.current) clearTimeout(autoLoginRetryTimerRef.current);
+        autoLoginRetryTimerRef.current = setTimeout(() => {
+          autoLoginRetryTimerRef.current = null;
+          attemptAutoLoginRef.current();
+        }, 60000 + Math.floor(Math.random() * 2000));
         return;
       }
       autoLoginPendingRef.current = true;
@@ -2697,7 +2702,12 @@ export default function App() {
                             </div>
                             <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[3px] border-panelBg ${f.isOnline ? 'bg-success' : 'bg-gray-500'}`} />
                           </div>
-                          <span className={`font-semibold text-[15px] truncate flex-1 ${f.isOnline ? 'text-white' : 'text-textMuted'}`}>{f.displayName}</span>
+                          <div className="flex flex-col flex-1 min-w-0">
+                            <span className={`font-semibold text-[15px] truncate ${f.isOnline ? 'text-white' : 'text-textMuted'}`}>{f.displayName}</span>
+                            {!f.isOnline && (
+                              <span className="text-xs text-textMuted/70 truncate">{formatLastOnline(f.lastOnline, t, i18n.language)}</span>
+                            )}
+                          </div>
                           {unreadChats[f.id] && <span className="w-2 h-2 rounded-full bg-primary shrink-0" />}
                         </div>
                       ))}
@@ -3758,6 +3768,18 @@ export default function App() {
                   </div>
                 </div>
                 <div>
+                  <label className="text-xs font-bold text-textMuted mb-3 block tracking-wider">{t('settings.privacy.visibility', 'видимость')}</label>
+                  <div className="flex items-center justify-between glass-row p-4 rounded-xl">
+                    <div className="mr-4">
+                      <span className="font-semibold text-white text-[15px]">{t('settings.privacy.showLastOnline', 'показывать время последнего входа')}</span>
+                    </div>
+                    <Md3Switch checked={store.currentUser?.showLastOnline ?? true} onChange={(v) => {
+                      void signalRService.setShowLastOnline(v);
+                      if (store.currentUser) store.updateUserStatus(store.currentUser.id, { showLastOnline: v });
+                    }} />
+                  </div>
+                </div>
+                <div>
                   <button
                     onClick={() => store.setModal('privacy', true)}
                     className="group w-full bg-primary/20 hover:bg-primary/30 text-white border border-primary/30 py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-200 active:scale-98"
@@ -4214,6 +4236,13 @@ export default function App() {
                     >
                       {isLoginCopied ? t('profile.loginCopied', 'скопировано!') : `@${store.selectedProfileUser?.username}`}
                     </p>
+                    {store.selectedProfileUser?.id !== store.currentUser?.id && (
+                      <p className="text-sm mt-1.5 text-textMuted font-medium">
+                        {store.selectedProfileUser?.isOnline
+                          ? t('presence.online', 'в сети')
+                          : formatLastOnline(store.selectedProfileUser?.lastOnline, t, i18n.language)}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

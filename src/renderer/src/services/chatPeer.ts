@@ -6,6 +6,9 @@ import { chatPublicKey, decryptChatPayload, deriveChatKey, encryptChatPayload } 
 
 const CHAT_SDP_PREFIX = 'zabor-chat:';
 const CHUNK_BYTES = 48 * 1024;
+const READ_BLOCK_BYTES = 4 * 1024 * 1024;
+const WIRE_CHUNK_BYTES = 192 * 1024;
+const WIRE_HEADER_RESERVE = 1024;
 const DOWNLOAD_STALL_MS = 30_000;
 const PROGRESS_PERSIST_DELTA = 0.02;
 const BUFFER_LIMIT = 512 * 1024;
@@ -771,6 +774,12 @@ class ChatPeerManager {
     for (const packet of queued) await this.sendFallback(friendId, packet, packet.messageId ?? packet.message?.id);
   }
 
+  private wireChunkBytes(friendId: string): number {
+    const max = this.peers.get(friendId)?.sctp?.maxMessageSize;
+    if (typeof max !== 'number' || !Number.isFinite(max) || max <= WIRE_HEADER_RESERVE) return CHUNK_BYTES;
+    return Math.min(WIRE_CHUNK_BYTES, max - WIRE_HEADER_RESERVE);
+  }
+
   private async sendFile(friendId: string, message: ChatMessage): Promise<void> {
     const file = message.file;
     if (!file?.storedName) return;
@@ -781,8 +790,14 @@ class ChatPeerManager {
     }
     const ownerId = this.ownerId();
     if (!ownerId) return;
+    const readId = await window.windowControls.chatFileReadOpen(file.storedName);
+    if (!readId) {
+      await this.sendControl(friendId, { type: 'file-unavailable', messageId: message.id });
+      return;
+    }
     const transferId = crypto.randomUUID();
     const empty = new Uint8Array(0);
+    const wireBytes = this.wireChunkBytes(friendId);
     this.outgoingCancels.delete(message.id);
     this.outgoingActive.add(message.id);
     try {
@@ -790,17 +805,24 @@ class ChatPeerManager {
         await this.sendControl(friendId, { type: 'file-unavailable', messageId: message.id });
         return;
       }
-      for (let offset = 0; offset < file.size; offset += CHUNK_BYTES) {
+      let offset = 0;
+      while (offset < file.size) {
         if (this.outgoingCancels.has(message.id)) return;
-        const chunk = await window.windowControls.chatFileReadSlice(file.storedName, offset, Math.min(CHUNK_BYTES, file.size - offset));
-        if (!chunk) return;
-        if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-chunk', messageId: message.id, transferId, offset }, chunk)) return;
+        const block = await window.windowControls.chatFileReadBlock(readId, offset, Math.min(READ_BLOCK_BYTES, file.size - offset));
+        if (!block || block.byteLength === 0) return;
+        for (let cursor = 0; cursor < block.byteLength; cursor += wireBytes) {
+          if (this.outgoingCancels.has(message.id)) return;
+          const slice = block.subarray(cursor, Math.min(cursor + wireBytes, block.byteLength));
+          if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-chunk', messageId: message.id, transferId, offset: offset + cursor }, slice)) return;
+        }
+        offset += block.byteLength;
       }
       if (this.outgoingCancels.has(message.id)) return;
       await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-complete', messageId: message.id, transferId }, empty);
     } finally {
       this.outgoingActive.delete(message.id);
       this.outgoingCancels.delete(message.id);
+      void window.windowControls.chatFileReadClose(readId);
     }
   }
 

@@ -83,6 +83,8 @@
       "network": "network",
       "hideIp": "hide my IP address",
       "hideIpDesc": "all voice traffic goes through the relay server, so other people cannot see your IP. slightly higher latency. fully applies after a restart.",
+      "visibility": "visibility",
+      "showLastOnline": "show last seen time",
       "deleteAccount": "delete account",
       "deleteAccountTitle": "delete account",
       "deleteAccountWarning": "this action cannot be undone. all your data, achievements, friends list, and created channels will be permanently deleted.",
@@ -91,6 +93,17 @@
       "deleteAccountConfirmBtn": "delete permanently",
       "deleteAccountFailed": "failed to delete account"
     }
+  },
+  "presence": {
+    "online": "online",
+    "offline": "offline",
+    "justNow": "last seen just now",
+    "minutesAgo_one": "last seen {{count}} minute ago",
+    "minutesAgo_other": "last seen {{count}} minutes ago",
+    "hoursAgo_one": "last seen {{count}} hour ago",
+    "hoursAgo_other": "last seen {{count}} hours ago",
+    "yesterday": "last seen yesterday",
+    "lastSeenDate": "last seen {{date}}"
   },
   "chat": {
     "empty": "no messages yet",

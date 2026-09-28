@@ -1,6 +1,6 @@
 # Политика в отношении обработки персональных данных ZABOR / ZABOR Privacy Policy
 
-> Редакция от 11 сентября 2026 года.
+> Редакция от 26 сентября 2026 года. Предыдущая редакция — от 11 сентября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -34,12 +34,13 @@
 | Аватар и его цвет | Необязательно | Отображение в интерфейсе |
 | Текст «о себе» | Необязательно | Отображение в профиле |
 | Настройки звука | Формируется автоматически | Работа голосовой связи |
+| Видимость времени последнего входа | Формируется автоматически | Управление приватностью профиля |
 
 Оператор **не запрашивает** фамилию, имя, отчество, адрес электронной почты, номер телефона, документы, сведения о месте жительства и иные идентифицирующие сведения. Логин выбирается пользователем самостоятельно.
 
 #### 3.2. Данные, формируемые автоматически
 
-- статус присутствия в сети;
+- статус присутствия в сети и время последнего входа (время последнего входа показывается другим пользователям, если его показ не отключён в настройках приватности);
 - данные достижений в приложении;
 - технические журналы подключений: версия и канал сборки приложения, время подключения, результат проверки подписи сборки, сетевой адрес подключения;
 - идентификатор учётной записи во внутренних структурах сервера.
@@ -167,12 +168,13 @@ Processing takes place in connection with use of the **Controller's servers**. R
 | Avatar and avatar colour | Optional | Display in the interface |
 | "About me" text | Optional | Profile display |
 | Audio settings | Generated automatically | Voice communication |
+| Last-seen time visibility | Generated automatically | Profile privacy control |
 
 The Controller does **not** request given names, surnames, email addresses, phone numbers, identity documents, residence details or other identifying information. The username is chosen by the user.
 
 #### 3.2. Automatically generated data
 
-- online presence status;
+- online presence status and last-seen time (last-seen time is shown to other users unless its display is disabled in privacy settings);
 - in-app achievement data;
 - technical connection logs: application version and build channel, connection time, result of build signature verification, connection network address;
 - account identifier within the Service's internal structures.

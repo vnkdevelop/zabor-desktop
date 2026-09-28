@@ -23,7 +23,7 @@ export interface PingStats {
 
 const OFFLINE_PING_STATS: PingStats = { ping: -1, jitter: 0, loss: 0, missed: 0 };
 
-const RECONNECT_GIVE_UP_MS = 95000;
+const RECONNECT_GIVE_UP_MS = 600000;
 const RECONNECT_MAX_STEP_MS = 30000;
 
 const RECONNECT_POLICY: signalR.IRetryPolicy = {
@@ -85,6 +85,7 @@ class SignalRService {
   private static readonly CONNECT_START_TIMEOUT_MS = 35000;
   private static readonly INVOKE_TIMEOUT_MS = 20000;
   private static readonly AUTH_INVOKE_TIMEOUT_MS = 15000;
+  private static readonly LOGIN_INVOKE_TIMEOUT_MS = 45000;
   private static readonly VOICE_OPERATION_TIMEOUT_MS = 75000;
   private static readonly PING_INTERVAL_MS = 5000;
   private static readonly PING_TIMEOUT_MS = 10000;
@@ -336,16 +337,21 @@ class SignalRService {
     this.lastReportedUtcOffset = null;
     let connection: signalR.HubConnection | null = null;
     try {
-      if (this.connection) {
+      const previous = this.connection;
+      if (previous) {
+        this.connection = null;
         try {
-
           await Promise.race([
-            this.connection.stop(),
-            new Promise<void>(resolve => setTimeout(resolve, 2000))
+            previous.stop(),
+            new Promise<void>(resolve => setTimeout(resolve, 4000))
           ]);
         } catch { }
       }
       this.listenersAttached = false;
+      if (this.intentionalDisconnect || this.clientRejectedReason) {
+        this.isReconnecting = false;
+        return this.isConnected();
+      }
       connection = new signalR.HubConnectionBuilder()
         .withUrl(SERVER_URL, {
           skipNegotiation: false,
@@ -362,7 +368,7 @@ class SignalRService {
         .withAutomaticReconnect(RECONNECT_POLICY)
         .build();
       this.connection = connection;
-      connection.serverTimeoutInMilliseconds = 45000;
+      connection.serverTimeoutInMilliseconds = 60000;
       connection.keepAliveIntervalInMilliseconds = 8000;
       this.setupListeners();
       this.setupReconnectionHandlers(connection);
@@ -1009,14 +1015,14 @@ class SignalRService {
     this.authThrottleMessage = null;
     try {
       const user = await this.invokeWithTimeout<User | null>(
-        "Login", SignalRService.INVOKE_TIMEOUT_MS, username, password
+        "Login", SignalRService.LOGIN_INVOKE_TIMEOUT_MS, username, password
       );
       if (user) {
         this.sessionReady = true;
         useAppStore.getState().setCurrentUser(user);
         webrtc.warmUpConnectivity();
 
-        await this.reportTimeZone(true);
+        void this.reportTimeZone(true);
 
         const channelToRejoin = this.wasInChannel;
         const streamToRejoin = this.wasStreaming;
@@ -1126,7 +1132,7 @@ class SignalRService {
       this.sessionReady = true;
       useAppStore.getState().setCurrentUser(user);
       webrtc.warmUpConnectivity();
-      await this.reportTimeZone(true);
+      void this.reportTimeZone(true);
       if (user.currentChannelId) {
         this.joinChannel(user.currentChannelId).catch(() => { });
       }
@@ -1160,6 +1166,10 @@ class SignalRService {
     manualThresholdValue?: number;
   }): Promise<void> {
     await this.safeInvoke("SaveAudioSettings", JSON.stringify(settings));
+  }
+
+  public async setShowLastOnline(value: boolean): Promise<void> {
+    await this.safeInvoke("SetShowLastOnline", value);
   }
 
   public async loadAudioSettings(): Promise<{
@@ -1228,10 +1238,17 @@ class SignalRService {
   public async getUserByUsername(username: string): Promise<User | null> {
     return await this.safeInvoke<User>("GetUserByUsername", username);
   }
+  private jokeCache: { date: string; joke: string } | null = null;
   public async getJokeOfTheDay(): Promise<string> {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+    if (this.jokeCache && this.jokeCache.date === today) return this.jokeCache.joke;
     for (let attempt = 0; attempt < 3; attempt++) {
       const joke = await this.safeInvoke<string>("GetJokeOfTheDay");
-      if (typeof joke === 'string' && joke.trim() && joke.trim() !== '0') return joke;
+      if (typeof joke === 'string' && joke.trim() && joke.trim() !== '0') {
+        this.jokeCache = { date: today, joke };
+        return joke;
+      }
       if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
     }
     return '';

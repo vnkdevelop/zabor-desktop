@@ -81,7 +81,9 @@ declare global {
       chatFileDeleteMany: (storedNames: string[]) => Promise<number>;
       chatFileStat: (storedName: string) => Promise<{ size: number } | null>;
       chatFileHash: (storedName: string) => Promise<string | null>;
-      chatFileReadSlice: (storedName: string, offset: number, length: number) => Promise<Uint8Array | null>;
+      chatFileReadOpen: (storedName: string) => Promise<string | null>;
+      chatFileReadBlock: (readId: string, offset: number, length: number) => Promise<Uint8Array | null>;
+      chatFileReadClose: (readId: string) => Promise<boolean>;
       chatFileSaveAs: (storedName: string, suggestedName: string) => Promise<boolean>;
       chatFileReveal: (storedName: string) => Promise<boolean>;
       chatFilePickSavePath: (suggestedName: string) => Promise<string | null>;

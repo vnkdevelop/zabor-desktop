@@ -6,6 +6,11 @@ import { createHash, randomBytes } from 'crypto';
 
 const MAX_OPEN_WRITERS = 8;
 const WRITER_IDLE_MS = 120_000;
+const MAX_OPEN_READERS = 8;
+const READER_IDLE_MS = 60_000;
+const MAX_READ_BLOCK = 8 * 1024 * 1024;
+
+type FileHandle = Awaited<ReturnType<typeof fsPromises.open>>;
 
 interface ActiveWriter {
   stream: WriteStream;
@@ -17,8 +22,15 @@ interface ActiveWriter {
   failed: boolean;
 }
 
+interface ActiveReader {
+  handle: FileHandle;
+  lastTouched: number;
+}
+
 const writers = new Map<string, ActiveWriter>();
+const readers = new Map<string, ActiveReader>();
 let sweepTimer: NodeJS.Timeout | null = null;
+let readerSweepTimer: NodeJS.Timeout | null = null;
 
 function chatFilesRoot(): string {
   return join(app.getPath('userData'), 'chat-files');
@@ -77,6 +89,23 @@ function scheduleSweep(): void {
     }
   }, 30_000);
   sweepTimer.unref?.();
+}
+
+function scheduleReaderSweep(): void {
+  if (readerSweepTimer) return;
+  readerSweepTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [readId, reader] of [...readers.entries()]) {
+      if (now - reader.lastTouched < READER_IDLE_MS) continue;
+      readers.delete(readId);
+      void reader.handle.close().catch(() => { });
+    }
+    if (readers.size === 0 && readerSweepTimer) {
+      clearInterval(readerSweepTimer);
+      readerSweepTimer = null;
+    }
+  }, 30_000);
+  readerSweepTimer.unref?.();
 }
 
 function writeChunk(writer: ActiveWriter, chunk: Buffer): Promise<void> {
@@ -261,23 +290,44 @@ export function registerChatFileHandlers(): void {
     }
   });
 
-  ipcMain.handle('chat-file-read-slice', async (_event, storedName: unknown, offset: unknown, length: unknown) => {
+  ipcMain.handle('chat-file-read-open', async (_event, storedName: unknown) => {
     const path = storedPath(storedName);
     if (!path) return null;
-    if (typeof offset !== 'number' || offset < 0 || !Number.isFinite(offset)) return null;
-    if (typeof length !== 'number' || length <= 0 || length > 4 * 1024 * 1024) return null;
-
-    let handle: Awaited<ReturnType<typeof fsPromises.open>> | null = null;
+    if (readers.size >= MAX_OPEN_READERS) return null;
     try {
-      handle = await fsPromises.open(path, 'r');
+      const handle = await fsPromises.open(path, 'r');
+      const readId = randomBytes(12).toString('hex');
+      readers.set(readId, { handle, lastTouched: Date.now() });
+      scheduleReaderSweep();
+      return readId;
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle('chat-file-read-block', async (_event, readId: unknown, offset: unknown, length: unknown) => {
+    if (typeof readId !== 'string') return null;
+    const reader = readers.get(readId);
+    if (!reader) return null;
+    if (typeof offset !== 'number' || offset < 0 || !Number.isFinite(offset)) return null;
+    if (typeof length !== 'number' || length <= 0 || length > MAX_READ_BLOCK) return null;
+    try {
       const buffer = Buffer.allocUnsafe(length);
-      const { bytesRead } = await handle.read(buffer, 0, length, offset);
+      const { bytesRead } = await reader.handle.read(buffer, 0, length, offset);
+      reader.lastTouched = Date.now();
       return new Uint8Array(buffer.subarray(0, bytesRead));
     } catch {
       return null;
-    } finally {
-      await handle?.close().catch(() => { });
     }
+  });
+
+  ipcMain.handle('chat-file-read-close', async (_event, readId: unknown) => {
+    if (typeof readId !== 'string') return false;
+    const reader = readers.get(readId);
+    if (!reader) return false;
+    readers.delete(readId);
+    await reader.handle.close().catch(() => { });
+    return true;
   });
 
   ipcMain.handle('chat-file-hash', async (_event, storedName: unknown) => {
@@ -396,8 +446,14 @@ export function disposeChatFileWriters(): void {
     void fsPromises.rm(writer.path, { force: true }).catch(() => { });
   }
   writers.clear();
+  for (const [, reader] of readers) void reader.handle.close().catch(() => { });
+  readers.clear();
   if (sweepTimer) {
     clearInterval(sweepTimer);
     sweepTimer = null;
+  }
+  if (readerSweepTimer) {
+    clearInterval(readerSweepTimer);
+    readerSweepTimer = null;
   }
 }

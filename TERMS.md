@@ -1,6 +1,6 @@
 # Условия использования сервиса ZABOR / ZABOR Terms of Service
 
-> Редакция от 11 сентября 2026 года. Предыдущая редакция — от 18 августа 2026 года.
+> Редакция от 26 сентября 2026 года. Предыдущая редакция — от 11 сентября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 >
@@ -80,7 +80,7 @@
 
 ### 7. Данные пользователей
 
-1. Сервер хранит: имя пользователя, хеш пароля, отображаемое имя, аватар, цвет аватара, текст «о себе», настройки звука, данные достижений и статус присутствия.
+1. Сервер хранит: имя пользователя, хеш пароля, отображаемое имя, аватар, цвет аватара, текст «о себе», настройки звука, данные достижений, статус присутствия, время последнего входа и настройку его видимости.
 2. **Голос, видео и трансляции экрана передаются напрямую между участниками по технологии WebRTC (P2P) и не проходят через сервер Оператора.** Через сервер передаются только сигнальные сообщения, необходимые для установления соединения. При прямом соединении участники звонка получают сетевые адреса друг друга — это неотъемлемое свойство P2P-связи.
 3. **Сообщения и файлы.** При использовании встроенного обмена сообщениями сервер обрабатывает только метаданные, необходимые для доставки: пару участников, время и порядковые номера сообщений, состояние доставки и прочтения, а также размер и контрольную сумму файлов. **Содержание сообщений и файлов серверу недоступно** — см. раздел 8.
 4. **Хранение на устройстве.** История сообщений хранится локально на устройстве пользователя и удаляется автоматически по истечении 14 суток. Полученные файлы хранятся в каталоге данных приложения до их удаления пользователем.
@@ -203,7 +203,7 @@ Responsibility for content transmitted through the Service rests with the user w
 
 ### 7. User data
 
-1. The server stores: username, password hash, display name, avatar, avatar colour, "about me" text, audio settings, achievement data and presence status.
+1. The server stores: username, password hash, display name, avatar, avatar colour, "about me" text, audio settings, achievement data, presence status, last-seen time and its visibility setting.
 2. **Voice, video and screen shares are transmitted directly between participants over WebRTC (P2P) and do not pass through the Operator's server.** Only the signaling messages needed to establish a connection traverse the server. In a direct connection, call participants learn each other's network addresses — this is inherent to P2P communication.
 3. **Messages and files.** When the built-in messaging feature is used, the server processes only the metadata required for delivery: the pair of participants, send time and message sequence numbers, delivery and read state, and the size and checksum of files. **The content of messages and files is not available to the server** — see section 8.
 4. **On-device storage.** Message history is stored locally on the user's device and is deleted automatically after 14 days. Received files are stored in the application data directory until deleted by the user.

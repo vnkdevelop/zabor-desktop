@@ -29,12 +29,12 @@ type InboundMessage = AudioChunkMessage | ControlMessage
 
 const SAMPLE_RATE = 48000
 const RING_FRAMES = SAMPLE_RATE
-const MIN_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.010)
-const START_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.012)
-const MAX_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.060)
+const MIN_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.007)
+const START_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.008)
+const MAX_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.032)
 const UNDERRUN_GROW_FRAMES = Math.round(SAMPLE_RATE * 0.005)
-const TARGET_DECAY_FRAMES = Math.round(SAMPLE_RATE * 0.002)
-const DROP_MARGIN_FRAMES = Math.round(SAMPLE_RATE * 0.020)
+const TARGET_DECAY_FRAMES = Math.round(SAMPLE_RATE * 0.004)
+const DROP_MARGIN_FRAMES = Math.round(SAMPLE_RATE * 0.003)
 const RESTART_STARVED_FRAMES = Math.round(SAMPLE_RATE * 0.150)
 const FADE_STEP = 1 / Math.round(SAMPLE_RATE * 0.002)
 const DRIFT_GAIN = 0.05
