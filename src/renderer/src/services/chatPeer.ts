@@ -6,12 +6,13 @@ import { chatPublicKey, decryptChatPayload, deriveChatKey, encryptChatPayload } 
 
 const CHAT_SDP_PREFIX = 'zabor-chat:';
 const CHUNK_BYTES = 48 * 1024;
-const READ_BLOCK_BYTES = 4 * 1024 * 1024;
+const READ_BLOCK_BYTES = 8 * 1024 * 1024;
 const WIRE_CHUNK_BYTES = 192 * 1024;
 const WIRE_HEADER_RESERVE = 1024;
+const RECEIVE_FLUSH_BYTES = 4 * 1024 * 1024;
 const DOWNLOAD_STALL_MS = 30_000;
 const PROGRESS_PERSIST_DELTA = 0.02;
-const BUFFER_LIMIT = 512 * 1024;
+const BUFFER_LIMIT = 12 * 1024 * 1024;
 const MAX_CONTROL_BYTES = 64 * 1024;
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
@@ -55,6 +56,8 @@ interface IncomingTransfer {
   storedName: string;
   sha256: string;
   lastPersisted: number;
+  pending: Uint8Array[];
+  pendingBytes: number;
 }
 
 class ChatPeerManager {
@@ -615,18 +618,48 @@ class ChatPeerManager {
     const transfer = this.incoming.get(header.transferId);
     if (!transfer || transfer.messageId !== header.messageId || header.offset !== transfer.written) return;
     const chunk = new Uint8Array(data, 4 + headerLength);
-    const result = await window.windowControls.chatFileChunk(header.transferId, chunk);
-    if (!result.ok) {
+    if (chunk.byteLength === 0) return;
+    if (transfer.written + chunk.byteLength > transfer.expected) {
       await window.windowControls.chatFileAbort(header.transferId);
       this.incoming.delete(header.transferId);
       this.failDownload(friendId, transfer.messageId);
       return;
     }
-    transfer.written = result.written;
+    transfer.pending.push(chunk);
+    transfer.pendingBytes += chunk.byteLength;
+    transfer.written += chunk.byteLength;
     this.armDownloadWatchdog(friendId, transfer.messageId);
     const fraction = transfer.expected ? transfer.written / transfer.expected : 1;
-    if (fraction - transfer.lastPersisted >= PROGRESS_PERSIST_DELTA || fraction >= 1) transfer.lastPersisted = fraction;
-    useChatStore.getState().updateFileProgress(friendId, transfer.messageId, fraction);
+    if (fraction - transfer.lastPersisted >= PROGRESS_PERSIST_DELTA || fraction >= 1) {
+      transfer.lastPersisted = fraction;
+      useChatStore.getState().updateFileProgress(friendId, transfer.messageId, fraction);
+    }
+    if (transfer.pendingBytes >= RECEIVE_FLUSH_BYTES) await this.flushIncoming(friendId, transfer);
+  }
+
+  private async flushIncoming(friendId: string, transfer: IncomingTransfer): Promise<boolean> {
+    if (transfer.pendingBytes === 0) return true;
+    const batch = transfer.pending.length === 1 ? transfer.pending[0] : this.concatChunks(transfer.pending, transfer.pendingBytes);
+    transfer.pending = [];
+    transfer.pendingBytes = 0;
+    const result = await window.windowControls.chatFileChunk(transfer.transferId, batch);
+    if (!result.ok) {
+      await window.windowControls.chatFileAbort(transfer.transferId);
+      this.incoming.delete(transfer.transferId);
+      this.failDownload(friendId, transfer.messageId);
+      return false;
+    }
+    return true;
+  }
+
+  private concatChunks(chunks: Uint8Array[], total: number): Uint8Array {
+    const out = new Uint8Array(total);
+    let position = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, position);
+      position += chunk.byteLength;
+    }
+    return out;
   }
 
   private async beginIncoming(friendId: string, header: ChatChunkHeader): Promise<void> {
@@ -634,7 +667,7 @@ class ChatPeerManager {
     if (!message?.file || message.senderId !== friendId || message.file.transferState !== 'transferring' || this.incoming.has(header.transferId)) return;
     const result = await window.windowControls.chatFileBegin(header.transferId, message.file.name, message.file.size);
     if (result.ok) {
-      this.incoming.set(header.transferId, { friendId, messageId: message.id, transferId: header.transferId, expected: message.file.size, written: 0, storedName: result.storedName, sha256: message.file.sha256, lastPersisted: 0 });
+      this.incoming.set(header.transferId, { friendId, messageId: message.id, transferId: header.transferId, expected: message.file.size, written: 0, storedName: result.storedName, sha256: message.file.sha256, lastPersisted: 0, pending: [], pendingBytes: 0 });
       this.armDownloadWatchdog(friendId, message.id);
       useChatStore.getState().updateFileProgress(friendId, message.id, 0);
     } else {
@@ -645,6 +678,7 @@ class ChatPeerManager {
   private async completeIncoming(friendId: string, transferId: string): Promise<void> {
     const transfer = this.incoming.get(transferId);
     if (!transfer) return;
+    if (!await this.flushIncoming(friendId, transfer)) return;
     this.incoming.delete(transferId);
     this.clearDownloadWatchdog(transfer.messageId);
     if (transfer.written !== transfer.expected) {
@@ -657,14 +691,13 @@ class ChatPeerManager {
       this.failDownload(friendId, transfer.messageId);
       return;
     }
-    const hash = await window.windowControls.chatFileHash(committed.storedName);
     const message = this.findMessage(friendId, transfer.messageId);
     if (!message?.file) {
       await window.windowControls.chatFileDelete(committed.storedName);
       this.saveTargets.delete(transfer.messageId);
       return;
     }
-    if (hash !== transfer.sha256) {
+    if (committed.sha256 !== transfer.sha256) {
       await window.windowControls.chatFileDelete(committed.storedName);
       this.saveTargets.delete(transfer.messageId);
       await useChatStore.getState().upsert({ ...message, file: { ...message.file, storedName: null, transferState: 'failed', progress: 0 } });
@@ -806,16 +839,23 @@ class ChatPeerManager {
         return;
       }
       let offset = 0;
-      while (offset < file.size) {
+      let nextBlock: Promise<Uint8Array | null> | null = offset < file.size
+        ? window.windowControls.chatFileReadBlock(readId, offset, Math.min(READ_BLOCK_BYTES, file.size - offset))
+        : null;
+      while (nextBlock) {
         if (this.outgoingCancels.has(message.id)) return;
-        const block = await window.windowControls.chatFileReadBlock(readId, offset, Math.min(READ_BLOCK_BYTES, file.size - offset));
+        const block = await nextBlock;
         if (!block || block.byteLength === 0) return;
+        const blockStart = offset;
+        offset += block.byteLength;
+        nextBlock = offset < file.size
+          ? window.windowControls.chatFileReadBlock(readId, offset, Math.min(READ_BLOCK_BYTES, file.size - offset))
+          : null;
         for (let cursor = 0; cursor < block.byteLength; cursor += wireBytes) {
           if (this.outgoingCancels.has(message.id)) return;
           const slice = block.subarray(cursor, Math.min(cursor + wireBytes, block.byteLength));
-          if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-chunk', messageId: message.id, transferId, offset: offset + cursor }, slice)) return;
+          if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-chunk', messageId: message.id, transferId, offset: blockStart + cursor }, slice)) return;
         }
-        offset += block.byteLength;
       }
       if (this.outgoingCancels.has(message.id)) return;
       await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-complete', messageId: message.id, transferId }, empty);
@@ -907,8 +947,15 @@ class ChatPeerManager {
     new DataView(packet.buffer).setUint32(0, encoded.byteLength);
     packet.set(encoded, 4);
     if (chunk.byteLength) packet.set(chunk, 4 + encoded.byteLength);
-    channel.send(packet);
-    return true;
+    for (let attempt = 0; attempt < 50 && channel.readyState === 'open'; attempt += 1) {
+      try {
+        channel.send(packet);
+        return true;
+      } catch {
+        await new Promise<void>(resolve => setTimeout(resolve, 20));
+      }
+    }
+    return false;
   }
 
   private async flushPending(friendId: string): Promise<void> {

@@ -45,6 +45,26 @@ GEMINI.md
 .continue/
 .windsurf/
 .copilot/
+.cline/
+.roo/
+.roomodes
+.trae/
+.zed/
+.aider*
 skills-lock.json
 src/renderer/public/deepfilternet3/**/*.download
 scripts/generate-screenshots.cjs
+
+# Media, launch videos & promo assets
+brag*
+promo_assets/
+renders/
+.hyperframes/
+.remotion/
+
+# Local temp & overrides
+.tmp/
+tmp/
+temp/
+*.local
+

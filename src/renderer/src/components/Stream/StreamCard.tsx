@@ -37,7 +37,7 @@ const StreamOwnerPill = ({ user, cardWidth, compact }: { user: User; cardWidth: 
 
 interface StreamCardProps {
   user: User
-  stream: MediaStream
+  stream: MediaStream | null
   cardSize: { w: number; h: number }
   isFocused: boolean
   isFullscreen?: boolean
@@ -76,7 +76,7 @@ export const StreamCard = ({
   const compactPill = cardSize.w <= 200
 
   useEffect(() => {
-    if (isLocal) return
+    if (isLocal || !stream) return
     const videoTrack = stream.getVideoTracks()[0]
     if (!videoTrack || videoTrack.readyState === 'ended') return
     const isWatching = isFocused || isFullscreen
@@ -126,7 +126,7 @@ export const StreamCard = ({
   }, [mode, stream])
 
   useEffect(() => {
-    if (isCapturing && captureVideoRef.current) {
+    if (isCapturing && captureVideoRef.current && stream) {
       const video = captureVideoRef.current
       video.srcObject = stream
 
@@ -194,7 +194,7 @@ export const StreamCard = ({
   }, [stream])
 
   const videoOnlyStream = useMemo(() => {
-    const tracks = stream.getVideoTracks()
+    const tracks = stream ? stream.getVideoTracks() : []
     return tracks.length > 0 ? new MediaStream(tracks) : null
   }, [stream])
 

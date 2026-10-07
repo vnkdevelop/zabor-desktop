@@ -75,7 +75,7 @@ declare global {
       chatFileImport: (filePaths: string[]) => Promise<Array<{ storedName: string; name: string; size: number; sha256: string }>>;
       chatFileBegin: (transferId: string, fileName: string, size: number) => Promise<{ ok: true; storedName: string } | { ok: false; error: string }>;
       chatFileChunk: (transferId: string, chunk: Uint8Array) => Promise<{ ok: true; written: number } | { ok: false; error: string }>;
-      chatFileCommit: (transferId: string) => Promise<{ ok: true; storedName: string; size: number } | { ok: false; error: string }>;
+      chatFileCommit: (transferId: string) => Promise<{ ok: true; storedName: string; size: number; sha256: string } | { ok: false; error: string }>;
       chatFileAbort: (transferId: string) => Promise<boolean>;
       chatFileDelete: (storedName: string) => Promise<boolean>;
       chatFileDeleteMany: (storedNames: string[]) => Promise<number>;

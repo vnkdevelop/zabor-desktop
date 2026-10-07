@@ -2,7 +2,7 @@ import { app, ipcMain, dialog, shell, BrowserWindow } from 'electron';
 import { join, basename, resolve, sep } from 'path';
 import { createReadStream, createWriteStream, WriteStream } from 'fs';
 import { existsSync, promises as fsPromises } from 'fs';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, type Hash } from 'crypto';
 
 const MAX_OPEN_WRITERS = 8;
 const WRITER_IDLE_MS = 120_000;
@@ -20,6 +20,7 @@ interface ActiveWriter {
   expected: number;
   lastTouched: number;
   failed: boolean;
+  hash: Hash;
 }
 
 interface ActiveReader {
@@ -29,6 +30,7 @@ interface ActiveReader {
 
 const writers = new Map<string, ActiveWriter>();
 const readers = new Map<string, ActiveReader>();
+const hashCache = new Map<string, { mtimeMs: number; size: number; sha256: string }>();
 let sweepTimer: NodeJS.Timeout | null = null;
 let readerSweepTimer: NodeJS.Timeout | null = null;
 
@@ -183,7 +185,8 @@ export function registerChatFileHandlers(): void {
         written: 0,
         expected: size,
         lastTouched: Date.now(),
-        failed: false
+        failed: false,
+        hash: createHash('sha256')
       };
       stream.on('error', () => { writer.failed = true; });
       writers.set(transferId, writer);
@@ -215,6 +218,7 @@ export function registerChatFileHandlers(): void {
     try {
       await writeChunk(writer, buffer);
       writer.written += buffer.byteLength;
+      writer.hash.update(buffer);
       writer.lastTouched = Date.now();
       return { ok: true as const, written: writer.written };
     } catch {
@@ -240,7 +244,13 @@ export function registerChatFileHandlers(): void {
       await fsPromises.rm(writer.path, { force: true }).catch(() => { });
       return { ok: false as const, error: 'commit-failed' };
     }
-    return { ok: true as const, storedName: basename(writer.finalPath), size: writer.written };
+    const sha256 = writer.hash.digest('hex');
+    const stored = basename(writer.finalPath);
+    try {
+      const stats = await fsPromises.stat(writer.finalPath);
+      hashCache.set(stored, { mtimeMs: stats.mtimeMs, size: writer.written, sha256 });
+    } catch { }
+    return { ok: true as const, storedName: stored, size: writer.written, sha256 };
   });
 
   ipcMain.handle('chat-file-abort', async (_event, transferId: unknown) => {
@@ -334,7 +344,17 @@ export function registerChatFileHandlers(): void {
     const path = storedPath(storedName);
     if (!path) return null;
     try {
-      return await hashFile(path);
+      const stats = await fsPromises.stat(path);
+      const key = basename(path);
+      const cached = hashCache.get(key);
+      if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) return cached.sha256;
+      const sha256 = await hashFile(path);
+      if (hashCache.size >= 1000) {
+        const oldest = hashCache.keys().next().value;
+        if (oldest !== undefined) hashCache.delete(oldest);
+      }
+      hashCache.set(key, { mtimeMs: stats.mtimeMs, size: stats.size, sha256 });
+      return sha256;
     } catch {
       return null;
     }

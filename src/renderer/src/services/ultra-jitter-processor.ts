@@ -31,10 +31,12 @@ const SAMPLE_RATE = 48000
 const RING_FRAMES = SAMPLE_RATE
 const MIN_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.007)
 const START_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.008)
-const MAX_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.032)
+const MAX_TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.120)
 const UNDERRUN_GROW_FRAMES = Math.round(SAMPLE_RATE * 0.005)
+const GAP_GROW_MAX_FRAMES = Math.round(SAMPLE_RATE * 0.020)
 const TARGET_DECAY_FRAMES = Math.round(SAMPLE_RATE * 0.004)
 const DROP_MARGIN_FRAMES = Math.round(SAMPLE_RATE * 0.003)
+const DROP_HEADROOM_RATIO = 0.5
 const RESTART_STARVED_FRAMES = Math.round(SAMPLE_RATE * 0.150)
 const FADE_STEP = 1 / Math.round(SAMPLE_RATE * 0.002)
 const DRIFT_GAIN = 0.05
@@ -85,7 +87,7 @@ class UltraJitterProcessor extends AudioWorkletProcessor {
         this.starvedFrames = 0
       }
 
-      const ceiling = this.targetFrames + DROP_MARGIN_FRAMES
+      const ceiling = this.targetFrames + Math.max(DROP_MARGIN_FRAMES, Math.round(this.targetFrames * DROP_HEADROOM_RATIO))
       if (this.availableFrames > ceiling) this.dropOldest(this.availableFrames - this.targetFrames)
     }
   }
@@ -176,6 +178,9 @@ class UltraJitterProcessor extends AudioWorkletProcessor {
         continue
       }
 
+      if (this.starvedFrames > 0) {
+        this.targetFrames = Math.min(MAX_TARGET_FRAMES, this.targetFrames + Math.min(GAP_GROW_MAX_FRAMES, this.starvedFrames))
+      }
       this.starvedFrames = 0
       this.cleanFrames++
       if (this.cleanFrames >= CLEAN_DECAY_FRAMES && this.targetFrames > MIN_TARGET_FRAMES) {

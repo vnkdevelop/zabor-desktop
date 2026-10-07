@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, safeStorage } from 'electron';
+import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, safeStorage, session } from 'electron';
 import { join } from 'path';
 import { existsSync, rmSync, readFileSync, writeFileSync, promises as fsPromises } from 'fs';
 import { createHmac, randomBytes } from 'crypto';
@@ -474,7 +474,8 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      devTools: isDev
     }
   });
 
@@ -555,6 +556,23 @@ function createWindow(): void {
     return { action: 'deny' };
   });
 
+  if (!isDev) {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      const key = input.key.toLowerCase();
+      if (
+        (input.control && input.shift && (key === 'i' || key === 'j' || key === 'c')) ||
+        ((input.meta || input.control) && input.alt && (key === 'i' || key === 'j')) ||
+        key === 'f12'
+      ) {
+        event.preventDefault();
+      }
+    });
+
+    mainWindow.webContents.on('devtools-opened', () => {
+      mainWindow?.webContents.closeDevTools();
+    });
+  }
+
   const rendererLoad = isDev && process.env['ELECTRON_RENDERER_URL']
     ? mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
     : mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
@@ -566,11 +584,20 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  if (!isDev) {
+    Menu.setApplicationMenu(null);
+  }
   try {
     const os = require('os');
     os.setPriority(os.constants.priority.PRIORITY_HIGH);
   } catch {}
   reportGpuStatus();
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    return permission === 'media';
+  });
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === 'media');
+  });
   const settings = loadAppSettings();
   applyAutoLaunch(settings.openAtLogin);
   registerChatFileHandlers();

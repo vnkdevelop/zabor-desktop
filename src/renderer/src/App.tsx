@@ -901,18 +901,15 @@ export default function App() {
   const activeUserCount = useMemo(() => {
     if (store.currentCallUser) {
       let count = 1;
-      const remoteStream = (store.currentCallUser.isStreaming || !!store.remoteVideoStreams[store.currentCallUser.id]) ? store.remoteVideoStreams[store.currentCallUser.id] : null;
-      if (remoteStream) count++;
+      const isRemoteStreaming = Boolean(store.currentCallUser.isStreaming || store.remoteVideoStreams[store.currentCallUser.id]);
+      if (isRemoteStreaming) count++;
       if ((store.currentUser?.isStreaming || !!webrtc.localVideoStream) && webrtc.localVideoStream) count++;
       return count;
     }
     let count = store.voiceUsers.length;
     store.voiceUsers.forEach(u => {
       const isStreaming = u.isStreaming || (u.id === store.currentUser?.id && !!webrtc.localVideoStream);
-      if (isStreaming) {
-        const stream = u.id === store.currentUser?.id ? webrtc.localVideoStream : store.remoteVideoStreams[u.id];
-        if (stream) count++;
-      }
+      if (isStreaming) count++;
     });
     return count;
   }, [store.voiceUsers, store.currentCallUser, store.currentUser?.id, store.currentUser?.isStreaming, store.remoteVideoStreams, showStreamPicker]);
@@ -1099,8 +1096,17 @@ export default function App() {
         return false;
       });
 
+      const safeAwaitMic = async (timeoutMs = 1200) => {
+        try {
+          await Promise.race([
+            micPromise,
+            new Promise<void>(resolve => setTimeout(resolve, timeoutMs))
+          ]);
+        } catch { }
+      };
+
       if (!cachedCredentials) {
-        await micPromise;
+        await safeAwaitMic(400);
         initCompleteRef.current = true;
         setLoadingFadeOut(true);
         setTimeout(() => setAppLoading(false), 650);
@@ -1124,7 +1130,7 @@ export default function App() {
 
       if (!connected) {
         autoLoginPendingRef.current = true;
-        await micPromise;
+        await safeAwaitMic();
         initCompleteRef.current = true;
         setShowInitConnectionError(true);
         return;
@@ -1150,14 +1156,14 @@ export default function App() {
           const previousInput = settingsRef.current.selectedInput;
           const previousNoiseSuppression = settingsRef.current.noiseSuppression;
           applySettings(serverSettings);
-          await micPromise;
+          await safeAwaitMic();
 
           const nextInput = serverSettings.selectedInput === 'communications'
             ? 'default'
             : (serverSettings.selectedInput ?? 'default');
           const nextNoiseSuppression = serverSettings.noiseSuppression ?? true;
           if (nextInput !== previousInput || nextNoiseSuppression !== previousNoiseSuppression) {
-            await webrtc.updateSettings(nextInput, nextNoiseSuppression);
+            await webrtc.updateSettings(nextInput, nextNoiseSuppression).catch(() => {});
           }
         }
         setJoke(jokeText || '__NO_JOKE__');
@@ -1168,13 +1174,13 @@ export default function App() {
         setTimeout(() => { settingsLoadedRef.current = true; }, 1000);
 
         initCompleteRef.current = true;
-        await micPromise;
+        await safeAwaitMic();
         setTimeout(() => {
           setLoadingFadeOut(true);
           setTimeout(() => setAppLoading(false), 650);
         }, 300);
       } else if (loginResult === 'throttled') {
-        await micPromise;
+        await safeAwaitMic();
         initCompleteRef.current = true;
         setShowErrorText(true);
         setLoadingFadeOut(true);
@@ -1182,14 +1188,14 @@ export default function App() {
       } else if (loginResult === 'invalid') {
 
         await window.windowControls.clearSession().catch(() => { });
-        await micPromise;
+        await safeAwaitMic();
         initCompleteRef.current = true;
         setLoadingFadeOut(true);
         setTimeout(() => setAppLoading(false), 650);
       } else {
 
         autoLoginPendingRef.current = true;
-        await micPromise;
+        await safeAwaitMic();
         initCompleteRef.current = true;
         setShowErrorText(true);
         setShowReconnectingOverlay(true);
@@ -2077,8 +2083,6 @@ export default function App() {
   }, [store.currentUser?.id]);
 
   const loadDevices = useCallback(async () => {
-    const devices = await webrtc.getAudioDevices();
-    setAudioDevices(devices);
     try {
       const result = await webrtc.handleAudioDeviceChange();
       setAudioDevices({ inputs: result.inputs, outputs: result.outputs });
@@ -2088,6 +2092,10 @@ export default function App() {
       console.warn('[Audio] Failed to validate audio devices:', error);
     }
   }, []);
+
+  useEffect(() => {
+    void loadDevices();
+  }, [loadDevices]);
 
   useEffect(() => {
     if (!store.modals.settings) return;
@@ -2114,12 +2122,40 @@ export default function App() {
     };
 
     navigator.mediaDevices?.addEventListener('devicechange', handleDeviceChange);
+
+    const onFocus = () => {
+      if (webrtc.isFallbackMic()) {
+        void webrtc.retryMicCaptureIfFallback().then(() => {
+          if (!disposed) void loadDevices();
+        });
+      }
+    };
+    window.addEventListener('focus', onFocus);
+
+    let permissionStatus: PermissionStatus | null = null;
+    if (typeof navigator !== 'undefined' && navigator.permissions?.query) {
+      navigator.permissions.query({ name: 'microphone' as PermissionName }).then(status => {
+        if (disposed) return;
+        permissionStatus = status;
+        status.onchange = () => {
+          if (disposed) return;
+          if (status.state === 'granted') {
+            void webrtc.retryMicCaptureIfFallback().then(() => {
+              if (!disposed) void loadDevices();
+            });
+          }
+        };
+      }).catch(() => { });
+    }
+
     return () => {
       disposed = true;
       if (deviceChangeTimer) clearTimeout(deviceChangeTimer);
       navigator.mediaDevices?.removeEventListener('devicechange', handleDeviceChange);
+      window.removeEventListener('focus', onFocus);
+      if (permissionStatus) permissionStatus.onchange = null;
     };
-  }, []);
+  }, [loadDevices]);
 
   const rgbToHsl = useCallback((r: number, g: number, b: number) => {
     r /= 255; g /= 255; b /= 255;
@@ -2798,10 +2834,11 @@ export default function App() {
                 {(() => {
                   const callUser = store.currentCallUser!;
                   const currentUser = store.currentUser;
-                  const remoteStream = (callUser.isStreaming || !!store.remoteVideoStreams[callUser.id]) ? store.remoteVideoStreams[callUser.id] : null;
+                  const isRemoteStreaming = Boolean(callUser.isStreaming || store.remoteVideoStreams[callUser.id]);
+                  const remoteStream = isRemoteStreaming ? (store.remoteVideoStreams[callUser.id] ?? null) : null;
                   const localStream = (currentUser?.isStreaming || !!webrtc.localVideoStream) ? webrtc.localVideoStream : null;
 
-                  const hasStreams = Boolean(remoteStream || localStream);
+                  const hasStreams = Boolean(isRemoteStreaming || localStream);
 
                   if (!hasStreams) {
                     return (
@@ -2824,7 +2861,7 @@ export default function App() {
                     { type: 'user', id: `calluser-${callUser.id}`, user: callUser }
                   ];
 
-                  if (remoteStream) {
+                  if (isRemoteStreaming) {
                     items.push({ type: 'stream', id: `stream-${callUser.id}`, user: callUser, stream: remoteStream });
                   }
                   if (localStream && currentUser) {
@@ -3113,10 +3150,8 @@ export default function App() {
                     items.push({ type: 'user', id: `user-${user.id}`, user });
                     const isStreaming = user.isStreaming || (user.id === store.currentUser?.id && !!webrtc.localVideoStream);
                     if (isStreaming) {
-                      const stream = user.id === store.currentUser?.id ? webrtc.localVideoStream : store.remoteVideoStreams[user.id];
-                      if (stream) {
-                        items.push({ type: 'stream', id: `stream-${user.id}`, user, stream });
-                      }
+                      const stream = user.id === store.currentUser?.id ? webrtc.localVideoStream : (store.remoteVideoStreams[user.id] ?? null);
+                      items.push({ type: 'stream', id: `stream-${user.id}`, user, stream });
                     }
                   });
 
