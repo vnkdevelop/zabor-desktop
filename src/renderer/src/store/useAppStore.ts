@@ -280,7 +280,15 @@ export const useAppStore = create<AppState>((set) => ({
     activeStreamId: null,
     remoteVideoStreams: {}
   }),
-  setChannels: (channels) => set({ channels }),
+  setChannels: (channels) => {
+    const seen = new Set<string>();
+    const uniqueChannels = channels.filter(c => {
+      if (!c.id || seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+    set({ channels: uniqueChannels });
+  },
   setFriends: (friends) => set({ friends }),
   setFriendRequests: (reqs) => set({ friendRequests: reqs }),
   setChannelInvites: (invites) => set({ channelInvites: invites }),

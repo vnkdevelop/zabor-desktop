@@ -52,6 +52,9 @@ GEMINI.md
 .zed/
 .aider*
 skills-lock.json
+*.skill.md
+**/SKILL.md
+skills/
 src/renderer/public/deepfilternet3/**/*.download
 scripts/generate-screenshots.cjs
 

@@ -26,6 +26,10 @@ export function chatIdentity(): Promise<CryptoKeyPair> {
   return identityPromise;
 }
 
+export function resetChatIdentity(): void {
+  identityPromise = null;
+}
+
 export async function chatPublicKey(): Promise<JsonWebKey> {
   return crypto.subtle.exportKey('jwk', (await chatIdentity()).publicKey);
 }

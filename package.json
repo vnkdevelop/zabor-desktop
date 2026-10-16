@@ -107,8 +107,8 @@
     }
   },
   "dependencies": {
+    "animejs": "4.5.0",
     "electron-native-screenshare": "^1.2.0",
-    "framer-motion": "^12.42.2",
     "onnxruntime-web": "^1.27.0"
   },
   "devDependencies": {

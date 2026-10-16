@@ -42,7 +42,8 @@ const FADE_STEP = 1 / Math.round(SAMPLE_RATE * 0.002)
 const DRIFT_GAIN = 0.05
 const MAX_RATE_DEVIATION = 0.02
 const MIN_READABLE_FRAMES = 2
-const CLEAN_DECAY_FRAMES = SAMPLE_RATE
+const CLEAN_DECAY_FRAMES = Math.round(SAMPLE_RATE * 0.25)
+const UNDERRUN_CLEAN_PENALTY_FRAMES = Math.round(SAMPLE_RATE * 0.05)
 const STATS_INTERVAL_FRAMES = Math.round(SAMPLE_RATE * 0.25)
 
 class UltraJitterProcessor extends AudioWorkletProcessor {
@@ -168,10 +169,14 @@ class UltraJitterProcessor extends AudioWorkletProcessor {
         if (this.starvedFrames === 0) {
           this.underruns++
           this.targetFrames = Math.min(MAX_TARGET_FRAMES, this.targetFrames + UNDERRUN_GROW_FRAMES)
+          this.cleanFrames = Math.max(0, this.cleanFrames - UNDERRUN_CLEAN_PENALTY_FRAMES)
         }
         this.starvedFrames++
-        this.cleanFrames = 0
-        if (this.starvedFrames >= RESTART_STARVED_FRAMES) this.playing = false
+        if (this.starvedFrames >= RESTART_STARVED_FRAMES) {
+          this.playing = false
+          this.targetFrames = Math.max(MIN_TARGET_FRAMES, START_TARGET_FRAMES + Math.round((this.targetFrames - START_TARGET_FRAMES) * 0.5))
+          this.cleanFrames = 0
+        }
         if (this.fadeGain > 0) this.fadeGain = Math.max(0, this.fadeGain - FADE_STEP)
         output[0][frame] = this.lastLeft * this.fadeGain
         if (stereo) stereo[frame] = this.lastRight * this.fadeGain
@@ -183,9 +188,12 @@ class UltraJitterProcessor extends AudioWorkletProcessor {
       }
       this.starvedFrames = 0
       this.cleanFrames++
-      if (this.cleanFrames >= CLEAN_DECAY_FRAMES && this.targetFrames > MIN_TARGET_FRAMES) {
+      if (this.cleanFrames >= CLEAN_DECAY_FRAMES) {
         this.cleanFrames = 0
-        this.targetFrames = Math.max(MIN_TARGET_FRAMES, this.targetFrames - TARGET_DECAY_FRAMES)
+        if (this.targetFrames > MIN_TARGET_FRAMES) {
+          const decayStep = Math.max(TARGET_DECAY_FRAMES, Math.round((this.targetFrames - MIN_TARGET_FRAMES) * 0.08))
+          this.targetFrames = Math.max(MIN_TARGET_FRAMES, this.targetFrames - decayStep)
+        }
       }
       if (this.fadeGain < 1) this.fadeGain = Math.min(1, this.fadeGain + FADE_STEP)
       this.lastLeft = this.readFrame(this.left, this.readPosition)

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { CornersIn, CornersOut } from '@phosphor-icons/react'
+import { animate, spring, utils, prefersReducedMotion } from '../../lib/anime'
 import { useTranslation } from 'react-i18next'
 import { User, useAppStore } from '../../store/useAppStore'
 import { AvatarImg } from '../Shared/AvatarImg'
@@ -61,6 +61,7 @@ export const StreamCard = ({
   onRatioChange
 }: StreamCardProps) => {
   const { t } = useTranslation()
+  const rootRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const captureVideoRef = useRef<HTMLVideoElement | null>(null)
   const [snapshot, setSnapshot] = useState<string | null>(null)
@@ -249,12 +250,21 @@ export const StreamCard = ({
     }
   }, [mode, videoOnlyStream])
 
+  useLayoutEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    if (mode === 'fullscreen' || prefersReducedMotion()) {
+      utils.set(el, { opacity: 1, scale: 1 })
+      return
+    }
+    utils.set(el, { opacity: 0, scale: 0.9 })
+    animate(el, { opacity: [0, 1], scale: [0.9, 1], ease: spring({ stiffness: 300, damping: 25 }) })
+  }, [])
+
   if (mode === 'normal') {
     return (
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+      <div
+        ref={rootRef}
         onContextMenu={onContextMenu}
         onClick={onClick}
         className="relative flex flex-col overflow-hidden cursor-pointer bg-transparent group transition-all duration-300"
@@ -293,15 +303,13 @@ export const StreamCard = ({
             style={{ display: 'none' }}
           />
         )}
-      </motion.div>
+      </div>
     )
   }
 
   return (
-    <motion.div
-      initial={isFullscreen ? {} : { scale: 0.9, opacity: 0 }}
-      animate={isFullscreen ? {} : { scale: 1, opacity: 1 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+    <div
+      ref={rootRef}
       onContextMenu={onContextMenu}
       style={{
         WebkitTransform: 'translate3d(0, 0, 0)',
@@ -394,6 +402,6 @@ export const StreamCard = ({
           </div>
         </>
       )}
-    </motion.div>
+    </div>
   )
 }

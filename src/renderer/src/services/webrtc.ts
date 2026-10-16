@@ -251,9 +251,9 @@ const ULTRA_CUSTOM_UNDERRUN_FALLBACK = 40
 const ULTRA_PENDING_PREROLL_MAX = 40
 const ULTRA_DC_LABEL = 'zabor-ultra-voice-v1'
 const ULTRA_DC_ID = 4242
-const ULTRA_DC_OPUS_FRAME_US = 10000
+const ULTRA_DC_OPUS_FRAME_US = 5000
 const ULTRA_DC_HEADER_BYTES = 8
-const ULTRA_DC_MAX_BUFFERED_BYTES = 2048
+const ULTRA_DC_MAX_BUFFERED_BYTES = 256
 const ULTRA_DC_STALE_WINDOW_SAMPLES = 48000
 const ULTRA_CUSTOM_AUDIO_DROUGHT_MS = 1200
 const ULTRA_CUSTOM_MAX_FAILURES = 3
@@ -547,6 +547,7 @@ export class WebRTCManager {
   private localStream: MediaStream | null = null
   private rawStream: MediaStream | null = null
   private rawStreamIsFallback = false
+  private activeRawDeviceId: string | null = null
   public localVideoStream: MediaStream | null = null
   private statsInterval: NodeJS.Timeout | null = null
   private streamGainNodes: Map<string, GainNode> = new Map()
@@ -591,6 +592,7 @@ export class WebRTCManager {
   private iceRestartInFlight: Set<string> = new Set()
 
   private pendingRenegotiation: Set<string> = new Set()
+  private pendingIceRestart: Set<string> = new Set()
   private peerSignalingQueues: Map<string, Promise<void>> = new Map()
   private isMakingOffer: Map<string, boolean> = new Map()
   private isSettingRemoteAnswerPending: Map<string, boolean> = new Map()
@@ -613,8 +615,6 @@ export class WebRTCManager {
   private ultraConcealRate: Map<string, number> = new Map()
   private ultraConcealBurstMs: Map<string, number> = new Map()
   private ultraFrameLossTicks: Map<string, number> = new Map()
-  private lastJitterBufferDelay: Map<string, number> = new Map()
-  private lastJitterBufferEmitted: Map<string, number> = new Map()
   private peerLastSettledState: Map<string, 'connected' | 'disconnected' | 'failed'> = new Map()
   private lastSoftRefreshAt: Map<string, number> = new Map()
 
@@ -646,7 +646,8 @@ export class WebRTCManager {
   private currentDeviceId = 'default'
   private currentStreamQuality: 'high' | 'low' | 'camera' = 'low'
   private currentOutputDeviceId = 'default'
-  private noiseSuppression = true
+  private noiseSuppression = localStorage.getItem(ULTRA_LOW_LATENCY_STORAGE_KEY) !== 'true'
+  private activeGraphSignature: string | null = null
 
   private inputVolume = 100
   private outputVolume = 100
@@ -775,6 +776,13 @@ export class WebRTCManager {
   private ultraSendLastError = ''
   private ultraRcvStats: Map<string, { msgs: number; str: number; bin: number; blob: number; view: number; sml: number; other: number }> = new Map()
   private ultraJitterModuleContext: AudioContext | null = null
+  private ultraJitterLoadingContext: AudioContext | null = null
+  private ultraJitterModulePromise: Promise<void> | null = null
+  private pendingSettingsUpdate: { deviceId: string; useNS: boolean } | null = null
+  private settingsUpdateTimer: NodeJS.Timeout | null = null
+  private settingsWaiters: Array<{ resolve: () => void; reject: (err: any) => void }> = []
+  private activeSettingsPromise: Promise<void> | null = null
+  private isFlushingSettings = false
   private defaultInputFingerprint: string | null = null
   private defaultOutputFingerprint: string | null = null
   private deviceChangePromise: Promise<AudioDeviceChangeResult> | null = null
@@ -962,10 +970,22 @@ export class WebRTCManager {
     if (!enabled) {
       this.stopUltraSend()
       this.ultraSendTargets.clear()
-      for (const channel of this.ultraDataChannels.values()) {
-        try { channel.onopen = channel.onclose = channel.onerror = channel.onmessage = null; channel.close() } catch { }
+      const customUsers = new Set([
+        ...this.ultraCustomUsers,
+        ...this.ultraDecoders.keys(),
+        ...this.ultraJitterNodes.keys(),
+        ...this.peerConnections.keys()
+      ])
+      for (const uid of customUsers) {
+        this.teardownUltraCustomPlayout(uid)
       }
-      this.ultraDataChannels.clear()
+      this.ultraCustomHandedOver.clear()
+      for (const uid of this.peerConnections.keys()) {
+        this.updateRemoteVolume(uid)
+      }
+      if (this.ultraOutputContext && this.ultraOutputContext.state === 'running') {
+        void this.ultraOutputContext.suspend().catch(() => {})
+      }
     }
 
     this.applyPlayoutDelayHints()
@@ -987,7 +1007,11 @@ export class WebRTCManager {
       for (const [userId, channel] of this.ultraDataChannels.entries()) {
         if (channel.readyState === 'open') {
           try { channel.send('hi'); this.ultraHiResends.set(userId, 1) } catch { }
+          this.ensureUltraCustomPlayout(userId)
         }
+      }
+      for (const [userId, pc] of this.peerConnections.entries()) {
+        this.ensureUltraSendChannel(pc, userId)
       }
       this.maybeStartUltraSend()
     }
@@ -1375,6 +1399,12 @@ export class WebRTCManager {
   private applyAnalyzerToWorklet(): void {
     const micNode = this.micNode
     if (!micNode) return
+    const me = useAppStore.getState().currentUser
+    if (me) {
+      useAppStore.getState().setSpeakingStatus(me.id, false)
+      signalRService.setSpeakingState(false)
+    }
+    this.localSpeakingState = false
     if (!this.analyzerFeedsWorklet()) {
       micNode.port.postMessage({ type: 'setConfig', sileroVadEnabled: false })
       this.vadProbabilityHandler = null
@@ -1565,7 +1595,7 @@ export class WebRTCManager {
   }
 
   private async createUltraLowLatencyProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
-    this.cleanupProcessedStream()
+    await this.cleanupProcessedStream()
     this.audioProcessorError = null
     this.micEngineError = null
 
@@ -1598,7 +1628,7 @@ export class WebRTCManager {
   }
 
   private async createManualProcessedStream(rawStream: MediaStream): Promise<MediaStream> {
-    this.cleanupProcessedStream()
+    await this.cleanupProcessedStream()
     this.audioProcessorError = null
 
     const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
@@ -1686,7 +1716,7 @@ export class WebRTCManager {
     rawStream: MediaStream,
     model: SmartNoiseModel
   ): Promise<MediaStream> {
-    this.cleanupProcessedStream()
+    await this.cleanupProcessedStream()
     this.micEngineError = null
     this.audioProcessorError = null
 
@@ -1951,7 +1981,7 @@ export class WebRTCManager {
     }
   }
 
-  private cleanupProcessedStream() {
+  private async cleanupProcessedStream(): Promise<void> {
     this.cleanupProcessedStreamSourceOnly()
     if (this.micNode) {
       try { this.micNode.port.close() } catch { }
@@ -1963,15 +1993,18 @@ export class WebRTCManager {
     }
     this.voiceProbeCollector = null
     this.micNodeReady = false
-    if (this.processedContext && this.processedContext.state !== 'closed') {
-      this.processedContext.close().catch(() => { })
-    }
+    const ctxToClose = this.processedContext
     this.processedContext = null
+    if (ctxToClose && ctxToClose.state !== 'closed') {
+      try { await ctxToClose.close() } catch { }
+    }
+    this.activeGraphSignature = null
     this.vadEpoch++
     this.vadProbabilityHandler = null
     this.vadWorker?.postMessage({ type: 'reset' })
     const me = useAppStore.getState().currentUser
     if (me) {
+      this.clearVAD(me.id)
       useAppStore.getState().setSpeakingStatus(me.id, false)
       signalRService.setSpeakingState(false)
     }
@@ -2037,46 +2070,66 @@ export class WebRTCManager {
 
   public setDeafened(deafened: boolean) {
     this.isDeafened = deafened
+    const targetGain = deafened ? 0 : Math.pow(10, PLAYBACK_MAKEUP_GAIN_DB / 20)
     if (this.outputBusGain) {
-      this.outputBusGain.gain.value = deafened ? 0 : Math.pow(10, PLAYBACK_MAKEUP_GAIN_DB / 20)
+      if (this.outputMixContext && this.outputMixContext.state === 'running') {
+        this.outputBusGain.gain.setTargetAtTime(targetGain, this.outputMixContext.currentTime, 0.015)
+      } else {
+        this.outputBusGain.gain.value = targetGain
+      }
     }
     if (this.ultraOutputBusGain) {
-      this.ultraOutputBusGain.gain.value = deafened ? 0 : Math.pow(10, PLAYBACK_MAKEUP_GAIN_DB / 20)
+      if (this.ultraOutputContext && this.ultraOutputContext.state === 'running') {
+        this.ultraOutputBusGain.gain.setTargetAtTime(targetGain, this.ultraOutputContext.currentTime, 0.015)
+      } else {
+        this.ultraOutputBusGain.gain.value = targetGain
+      }
     }
     if (this.mixAudioElement) {
       this.mixAudioElement.muted = deafened
     }
     if (this.ultraLowLatency) {
-      this.audioElements.forEach((el, userId) => {
-        if (this.userGainNodes.has(userId)) return
-        if (this.ultraCustomHandedOver.has(userId)) return
-        try { el.muted = deafened } catch { }
+      this.audioElements.forEach((el) => {
+        try { el.muted = true } catch { }
       })
       this.ultraCustomUsers.forEach(uid => this.updateUltraCustomGain(uid))
     }
   }
 
   private updateRemoteVolume(userId: string) {
-    if (this.ultraCustomUsers.has(userId)) { this.updateUltraCustomGain(userId); return }
+    if (this.ultraCustomUsers.has(userId)) {
+      this.updateUltraCustomGain(userId)
+    }
     const store = useAppStore.getState()
     const isActive = store.activeStreamId === userId
     const streamGainNode = this.streamGainNodes.get(userId)
     if (streamGainNode) {
       const streamVol = isActive ? (store.streamVolumes[userId] ?? 100) : 0
-      streamGainNode.gain.value = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (streamVol / 100)))
+      const targetStreamGain = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (streamVol / 100)))
+      if (this.outputMixContext && this.outputMixContext.state === 'running') {
+        streamGainNode.gain.setTargetAtTime(targetStreamGain, this.outputMixContext.currentTime, 0.015)
+      } else {
+        streamGainNode.gain.value = targetStreamGain
+      }
     }
 
     const gainNode = this.userGainNodes.get(userId)
     if (gainNode) {
       const vol = store.userVolumes[userId] ?? 100
-      gainNode.gain.value = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+      const targetGain = this.ultraCustomHandedOver.has(userId)
+        ? 0
+        : Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+      if (this.outputMixContext && this.outputMixContext.state === 'running') {
+        gainNode.gain.setTargetAtTime(targetGain, this.outputMixContext.currentTime, 0.015)
+      } else {
+        gainNode.gain.value = targetGain
+      }
     }
 
     if (this.ultraLowLatency && !this.userGainNodes.has(userId)) {
       const el = this.audioElements.get(userId)
       if (el) {
-        const vol = store.userVolumes[userId] ?? 100
-        el.volume = Math.max(0, Math.min(1.0, (this.outputVolume / 100) * (vol / 100)))
+        el.muted = true
       }
     }
   }
@@ -2126,8 +2179,12 @@ export class WebRTCManager {
     localStorage.setItem(SPEECH_ANALYZER_STORAGE_KEY, enabled ? 'true' : 'false')
     if (enabled) this.warmUpSmartNoiseSuppression()
     if (this.micGraphSignature() === previousSignature) {
-      if (this.micNode) this.applyAnalyzerToWorklet()
-      else if (!enabled && !this.calibrationForcesAnalyzer) this.terminateVadWorker()
+      if (this.micNode) {
+        this.applyAnalyzerToWorklet()
+        if (!enabled && !this.calibrationForcesAnalyzer) this.terminateVadWorker()
+      } else if (!enabled && !this.calibrationForcesAnalyzer) {
+        this.terminateVadWorker()
+      }
       return
     }
     if (!enabled && !this.calibrationForcesAnalyzer) {
@@ -2184,20 +2241,18 @@ export class WebRTCManager {
         bp2.Q.value = 0.5
 
         const analyser = contextToUse.createAnalyser()
-        analyser.fftSize = 512
-        analyser.smoothingTimeConstant = 0.6
+        analyser.fftSize = 256
+        analyser.smoothingTimeConstant = 0
 
         source.connect(bp1)
         bp1.connect(bp2)
         bp2.connect(analyser)
 
         const vadNodes: AudioNode[] = [source, bp1, bp2, analyser]
-        const buf = new Uint8Array(analyser.fftSize)
+        const buf = new Float32Array(analyser.fftSize)
         let lastVoice = 0
         let wasSpeaking = false
-        let voiceFrames = 0
         let silenceFrames = 0
-        let vadSilenceFrames = 0
         let hasWarnedSilence = false
 
         const check = () => {
@@ -2205,7 +2260,7 @@ export class WebRTCManager {
           if (store.currentUser?.isMuted || store.currentUser?.isServerMuted) {
             if (wasSpeaking) {
               wasSpeaking = false
-              voiceFrames = 0
+              this.localSpeakingState = false
               store.setSpeakingStatus(userId, false)
               signalRService.setSpeakingState(false)
             }
@@ -2213,23 +2268,30 @@ export class WebRTCManager {
             return
           }
 
-          analyser.getByteTimeDomainData(buf)
-          let peak = 0, sum = 0
-          for (let i = 0; i < buf.length; i++) {
-            const s = Math.abs(buf[i] - 128)
-            if (s > peak) peak = s
-            sum += s
+          if (contextToUse.state === 'suspended') {
+            contextToUse.resume().catch(() => { })
           }
-          const avg = sum / buf.length
 
-          if (peak === 0) {
+          analyser.getFloatTimeDomainData(buf)
+          let peak = 0, sumSq = 0
+          for (let i = 0; i < buf.length; i++) {
+            const sample = buf[i]
+            const s = Math.abs(sample)
+            if (s > peak) peak = s
+            sumSq += sample * sample
+          }
+          const gainScale = this.ultraLowLatency ? 1 : this.effectiveInputGain()
+          const rms = Math.sqrt(sumSq / buf.length) * gainScale
+          const scaledPeak = peak * gainScale
+
+          if (peak < 0.0001) {
             silenceFrames++
           } else {
             silenceFrames = 0
             hasWarnedSilence = false
           }
 
-          if (silenceFrames > 150 && !hasWarnedSilence) {
+          if (silenceFrames > 450 && !hasWarnedSilence) {
             const toastMsg = i18n.t('toasts.micNotHearing', 'вас не слышно, проверьте микрофон')
             store.setSystemToast(toastMsg)
             setTimeout(() => {
@@ -2241,26 +2303,24 @@ export class WebRTCManager {
             hasWarnedSilence = true
           }
 
-          const isVoice = avg >= 2.5 || peak >= 7
+          const now = Date.now()
+          const isVoice = rms >= 0.0015 || scaledPeak >= 0.005
           if (isVoice) {
-            voiceFrames++
-            vadSilenceFrames = 0
-          } else {
-            vadSilenceFrames++
-            if (vadSilenceFrames >= 6) voiceFrames = 0
+            lastVoice = now
           }
-          if (voiceFrames >= 2) lastVoice = Date.now()
 
-          const speaking = (Date.now() - lastVoice) < 400
+          const speaking = (now - lastVoice) < 180
           if (speaking !== wasSpeaking) {
             wasSpeaking = speaking
+            this.localSpeakingState = speaking
             store.setSpeakingStatus(userId, speaking)
             signalRService.setSpeakingState(speaking)
           }
         }
 
-        const timer = setInterval(check, 30)
+        const timer = setInterval(check, 10)
         this.speakingIntervals.set(userId, { timer, stream, nodes: vadNodes })
+        check()
       } else {
         let wasSpeaking = false
         let lastSoundAt = 0
@@ -2308,7 +2368,12 @@ export class WebRTCManager {
       entry.nodes.forEach(n => { try { n.disconnect() } catch { } })
       this.speakingIntervals.delete(userId)
     }
-    useAppStore.getState().setSpeakingStatus(userId, false)
+    const store = useAppStore.getState()
+    store.setSpeakingStatus(userId, false)
+    if (store.currentUser?.id === userId) {
+      this.localSpeakingState = false
+      signalRService.setSpeakingState(false)
+    }
   }
 
   private toCleanAudioDevice(device: MediaDeviceInfo): MediaDeviceInfo {
@@ -2587,6 +2652,7 @@ export class WebRTCManager {
           this.currentDeviceId = 'default'
           console.warn(`[WebRTC] Microphone "${requestedDeviceId}" unavailable, captured via ${attempt.label}`)
         }
+        this.activeRawDeviceId = this.currentDeviceId
         this.lastMicCaptureError = null
         this.lastReportedMicError = null
         return stream
@@ -2630,9 +2696,16 @@ export class WebRTCManager {
 
   public async startBackgroundMic(deviceId?: string): Promise<boolean> {
     if (deviceId !== undefined) this.currentDeviceId = deviceId
+    const targetDeviceId = deviceId || this.currentDeviceId || 'default'
     if (this.rawStream?.getAudioTracks().some(track => track.readyState === 'live')) {
-      if (!this.localStream) this.startBackgroundMeter()
-      return true
+      if (this.activeRawDeviceId !== null && (this.activeRawDeviceId || 'default') !== targetDeviceId) {
+        this.rawStream.getTracks().forEach(t => t.stop())
+        this.rawStream = null
+        this.activeRawDeviceId = null
+      } else {
+        if (!this.localStream) this.startBackgroundMeter()
+        return true
+      }
     }
 
     try {
@@ -2755,8 +2828,8 @@ export class WebRTCManager {
     if (this.micTestContext) await this.applyMicTestSink(this.micTestContext)
 
     if (this.ultraLowLatency) {
-      for (const [userId, el] of this.audioElements.entries()) {
-        if (!this.userGainNodes.has(userId)) await this.applyVoiceElementSink(el)
+      for (const [, el] of this.audioElements.entries()) {
+        await this.applyVoiceElementSink(el)
       }
     }
 
@@ -3352,8 +3425,19 @@ export class WebRTCManager {
         laps.push(`${label} ${Math.round(now - lapAt)}ms`)
         lapAt = now
       }
-      if (!forceRestart && !this.rawStreamIsFallback && this.localStream && this.localStream.getAudioTracks().length > 0 && this.localStream.getAudioTracks().every(t => t.readyState === 'live')) {
+      const targetDeviceId = deviceId || this.currentDeviceId || 'default'
+      if (
+        !forceRestart &&
+        !this.rawStreamIsFallback &&
+        this.activeRawDeviceId !== null &&
+        (this.activeRawDeviceId || 'default') === targetDeviceId &&
+        this.activeGraphSignature === this.micGraphSignature() &&
+        this.localStream &&
+        this.localStream.getAudioTracks().length > 0 &&
+        this.localStream.getAudioTracks().every(t => t.readyState === 'live')
+      ) {
         this.initOutputMixer()
+        await safeResumeContext(this.processedContext)
         this.startSilenceMonitor()
         const me = useAppStore.getState().currentUser
         if (me && this.rawStream && !this.hasSpeakingWorklet() && !this.speakingIntervals.has(me.id)) {
@@ -3368,25 +3452,34 @@ export class WebRTCManager {
       try {
         this.initOutputMixer()
         this.stopBackgroundMeter()
-        if (forceRestart && this.rawStream) { this.rawStream.getTracks().forEach(t => t.stop()); this.rawStream = null }
-        if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null }
-        this.cleanupProcessedStream()
+        if (this.rawStream) {
+          this.rawStream.getTracks().forEach(t => t.stop())
+          this.rawStream = null
+          this.activeRawDeviceId = null
+        }
+        if (this.localStream) {
+          this.localStream.getTracks().forEach(t => t.stop())
+          this.localStream = null
+        }
+        await this.cleanupProcessedStream()
         lap('cleanup')
 
-        let raw = this.rawStream
-        if (this.rawStreamIsFallback || !raw?.getAudioTracks().some(track => track.readyState === 'live')) {
-          try {
-            raw = await this.captureRawMicStream()
-            this.rawStreamIsFallback = false
-          } catch (error) {
-            this.reportMicCaptureError(error)
-            raw = createSilentAudioStream()
-            this.rawStreamIsFallback = true
-          }
+        let raw: MediaStream
+        try {
+          raw = await this.captureRawMicStream()
+          this.rawStreamIsFallback = false
+        } catch (error) {
+          this.reportMicCaptureError(error)
+          raw = createSilentAudioStream()
+          this.rawStreamIsFallback = true
+          this.activeRawDeviceId = null
         }
         lap('getUserMedia')
 
         this.rawStream = raw
+        if (!this.rawStreamIsFallback && !this.activeRawDeviceId) {
+          this.activeRawDeviceId = targetDeviceId
+        }
         const rawTrack = raw.getAudioTracks()[0]
         if (rawTrack) {
           rawTrack.contentHint = 'speech'
@@ -3403,6 +3496,7 @@ export class WebRTCManager {
         }
 
         this.localStream = await this.createProcessedStream(raw)
+        this.activeGraphSignature = this.micGraphSignature()
         lap('graph')
 
         const localTrack = this.localStream.getAudioTracks()[0]
@@ -3436,10 +3530,66 @@ export class WebRTCManager {
     }
   }
 
-  public async updateSettings(deviceId: string, useNS: boolean) {
+  public async updateSettings(deviceId: string, useNS: boolean): Promise<void> {
     this.currentDeviceId = deviceId
     this.noiseSuppression = useNS
+    this.pendingSettingsUpdate = { deviceId, useNS }
 
+    return new Promise<void>((resolve, reject) => {
+      this.settingsWaiters.push({ resolve, reject })
+      if (this.settingsUpdateTimer) {
+        clearTimeout(this.settingsUpdateTimer)
+      }
+      this.settingsUpdateTimer = setTimeout(() => {
+        this.settingsUpdateTimer = null
+        void this.flushSettingsQueue()
+      }, 30)
+    })
+  }
+
+  private async flushSettingsQueue(): Promise<void> {
+    if (this.isFlushingSettings) return
+    this.isFlushingSettings = true
+    try {
+      while (this.pendingSettingsUpdate || this.settingsWaiters.length > 0) {
+        if (this.settingsUpdateTimer) {
+          clearTimeout(this.settingsUpdateTimer)
+          this.settingsUpdateTimer = null
+        }
+        const target = this.pendingSettingsUpdate
+        this.pendingSettingsUpdate = null
+        const waiters = this.settingsWaiters
+        this.settingsWaiters = []
+
+        if (!target) {
+          for (const w of waiters) {
+            try { w.resolve() } catch { }
+          }
+          continue
+        }
+
+        try {
+          const promise = this.executeUpdateSettings(target.deviceId, target.useNS)
+          this.activeSettingsPromise = promise
+          await promise
+          for (const w of waiters) {
+            try { w.resolve() } catch { }
+          }
+        } catch (err) {
+          console.error('[WebRTC] executeUpdateSettings failed in flushSettingsQueue:', err)
+          for (const w of waiters) {
+            try { w.resolve() } catch { }
+          }
+        } finally {
+          this.activeSettingsPromise = null
+        }
+      }
+    } finally {
+      this.isFlushingSettings = false
+    }
+  }
+
+  private async executeUpdateSettings(deviceId: string, useNS: boolean): Promise<void> {
     if (this.localStream) {
       try {
         const oldAudioTrack = this.localStream.getAudioTracks()[0]
@@ -3461,6 +3611,7 @@ export class WebRTCManager {
     } else if (this.rawStream) {
       this.rawStream.getTracks().forEach(track => track.stop())
       this.rawStream = null
+      this.activeRawDeviceId = null
       this.stopBackgroundMeter()
       await this.startBackgroundMic(deviceId)
     }
@@ -3477,7 +3628,7 @@ export class WebRTCManager {
     if (me) this.clearVAD(me.id)
     this.stopSilenceMonitor()
     if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null }
-    if (this.rawStream) { this.rawStream.getTracks().forEach(t => t.stop()); this.rawStream = null }
+    if (this.rawStream) { this.rawStream.getTracks().forEach(t => t.stop()); this.rawStream = null; this.activeRawDeviceId = null }
     this.stopBackgroundMeter()
     this.cleanupProcessedStream()
     this.leaveAll()
@@ -3503,7 +3654,7 @@ export class WebRTCManager {
         this.localStream.getTracks().forEach(track => track.stop())
         this.localStream = null
       }
-      this.cleanupProcessedStream()
+      await this.cleanupProcessedStream()
 
       if (this.rawStream?.getAudioTracks().some(track => track.readyState === 'live')) {
         this.startBackgroundMeter()
@@ -3602,11 +3753,20 @@ export class WebRTCManager {
     const level = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (clamped / 100)))
     const gainNode = this.userGainNodes.get(userId)
     if (gainNode) {
-      gainNode.gain.value = level
+      const target = this.ultraCustomHandedOver.has(userId) ? 0 : level
+      if (this.outputMixContext && this.outputMixContext.state === 'running') {
+        gainNode.gain.setTargetAtTime(target, this.outputMixContext.currentTime, 0.015)
+      } else {
+        gainNode.gain.value = target
+      }
     }
     const jitterGain = this.ultraJitterGains.get(userId)
     if (jitterGain) {
-      jitterGain.gain.value = level
+      if (this.ultraOutputContext && this.ultraOutputContext.state === 'running') {
+        jitterGain.gain.setTargetAtTime(level, this.ultraOutputContext.currentTime, 0.015)
+      } else {
+        jitterGain.gain.value = level
+      }
     }
   }
 
@@ -3713,12 +3873,40 @@ export class WebRTCManager {
       this.audioElements.set(userId, voicePull)
     }
     if (voicePull.srcObject !== stream) voicePull.srcObject = stream
-    voicePull.muted = this.isDeafened
-    this.updateRemoteVolume(userId)
+    voicePull.muted = true
     void this.applyVoiceElementSink(voicePull)
     void voicePull.play().catch(() => { })
-    this.voiceSeatOrder = this.voiceSeatOrder.filter(id => id !== userId)
-    this.applyVoiceSeats()
+
+    if (!this.outputMixContext) {
+      this.initOutputMixer()
+    }
+
+    const track = stream.getAudioTracks()[0]
+    if (track && this.outputMixContext && !this.userGainNodes.has(userId)) {
+      const source = this.outputMixContext.createMediaStreamSource(new MediaStream([track]))
+      const gain = this.outputMixContext.createGain()
+      const store = useAppStore.getState()
+      const vol = store.userVolumes[userId] ?? 100
+      const targetGain = (this.ultraLowLatency && this.ultraCustomHandedOver.has(userId))
+        ? 0
+        : Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+      gain.gain.value = targetGain
+
+      const panner = new StereoPannerNode(this.outputMixContext, { pan: 0 })
+      const limiter = this.createPlaybackLimiter(PLAYBACK_VOICE_LIMIT_DB, 2, 20, 0.002, 0.060)
+      source.connect(limiter)
+      limiter.connect(gain)
+      this.userLimiterNodes.set(userId, limiter)
+      gain.connect(panner)
+      panner.connect(this.outputBusGain!)
+
+      this.userSourceNodes.set(userId, source)
+      this.userGainNodes.set(userId, gain)
+      this.userPannerNodes.set(userId, panner)
+      if (!this.voiceSeatOrder.includes(userId)) this.voiceSeatOrder.push(userId)
+      this.applyVoiceSeats()
+    }
+    this.updateRemoteVolume(userId)
   }
 
   private findVoiceReceiver(userId: string, trackId: string): RTCRtpReceiver | undefined {
@@ -3741,16 +3929,6 @@ export class WebRTCManager {
     const g = globalThis as unknown as UltraCodecGlobals
     return typeof g.AudioEncoder === 'function'
       && typeof g.MediaStreamTrackProcessor === 'function'
-  }
-
-  private ultraCustomOffReason(userId: string): string {
-    if (this.ultraCustomUsers.has(userId)) return 'on'
-    if (!this.ultraLowLatency) return 'off:notUltra'
-    if (!this.canUseUltraCustomPlayout()) return 'off:noWebCodecs'
-    const ch = this.ultraDataChannels.get(userId)
-    if (!ch) return 'off:noChannel'
-    if (ch.readyState !== 'open') return `off:ch:${ch.readyState}`
-    return 'off:noFrames'
   }
 
   private ensureUltraCustomPlayout(userId: string): void {
@@ -3839,12 +4017,6 @@ export class WebRTCManager {
     return s
   }
 
-  private ultraRcvDebug(userId: string): string {
-    const s = this.ultraRcv(userId)
-    const got = this.ultraCustomGotFrame.has(userId) ? 'y' : 'n'
-    return `msgs=${s.msgs} str=${s.str} bin=${s.bin} blob=${s.blob} view=${s.view} sml=${s.sml} oth=${s.other} got=${got}`
-  }
-
   private ensureUltraOutputContext(): AudioContext | null {
     if (this.ultraOutputContext) {
       if (this.ultraOutputContext.state === 'suspended') this.ultraOutputContext.resume().catch(() => { })
@@ -3897,10 +4069,25 @@ export class WebRTCManager {
 
     try {
       if (this.ultraJitterModuleContext !== ctx) {
-        await ctx.audioWorklet.addModule(ultraJitterProcessorUrl)
-        this.ultraJitterModuleContext = ctx
+        if (!this.ultraJitterModulePromise || this.ultraJitterLoadingContext !== ctx) {
+          this.ultraJitterLoadingContext = ctx
+          this.ultraJitterModulePromise = ctx.audioWorklet.addModule(ultraJitterProcessorUrl).then(() => {
+            this.ultraJitterModuleContext = ctx
+            this.ultraJitterLoadingContext = null
+          }).catch(err => {
+            if (this.ultraJitterLoadingContext === ctx) {
+              this.ultraJitterLoadingContext = null
+              this.ultraJitterModulePromise = null
+            }
+            if (this.ultraJitterModuleContext === ctx) {
+              this.ultraJitterModuleContext = null
+            }
+            throw err
+          })
+        }
+        await this.ultraJitterModulePromise
       }
-      if (!this.ultraLowLatency || !this.ultraCustomUsers.has(userId)) {
+      if (!this.ultraLowLatency || !this.ultraCustomUsers.has(userId) || !this.peerConnections.has(userId) || !this.ultraCustomEngaging.has(userId)) {
         this.fallbackUltraCustomPlayout(userId)
         return
       }
@@ -4014,13 +4201,13 @@ export class WebRTCManager {
     const state = this.ultraCustomSpeaking.get(userId)
     if (!state) return
     let peak = 0
-    for (let i = 0; i < samples.length; i += 8) {
+    for (let i = 0; i < samples.length; i += 2) {
       const magnitude = Math.abs(samples[i])
       if (magnitude > peak) peak = magnitude
     }
     const now = Date.now()
-    if (peak > 0.01) state.lastSoundAt = now
-    const speaking = now - state.lastSoundAt <= 250
+    if (peak > 0.002) state.lastSoundAt = now
+    const speaking = now - state.lastSoundAt <= 180
     if (speaking !== state.speaking) {
       state.speaking = speaking
       useAppStore.getState().setSpeakingStatus(userId, speaking)
@@ -4044,6 +4231,7 @@ export class WebRTCManager {
     const el = this.audioElements.get(userId)
     if (el) { try { el.muted = true; el.pause() } catch { } }
     this.clearVAD(userId)
+    this.updateRemoteVolume(userId)
   }
 
   private fallbackUltraCustomPlayout(userId: string) {
@@ -4059,9 +4247,11 @@ export class WebRTCManager {
       this.setupUltraElementPlayout(userId, stream)
       this.setupVAD(stream, userId, false)
     }
+    this.updateRemoteVolume(userId)
   }
 
   private teardownUltraCustomPlayout(userId: string) {
+    this.ultraCustomEngaging.delete(userId)
     if (!this.ultraCustomUsers.has(userId)
       && !this.ultraJitterNodes.has(userId)
       && !this.ultraDecoders.has(userId)) return
@@ -4076,7 +4266,22 @@ export class WebRTCManager {
     }
 
     const gain = this.ultraJitterGains.get(userId)
-    if (gain) { try { gain.disconnect() } catch { } ; this.ultraJitterGains.delete(userId) }
+    if (gain) {
+      try {
+        if (this.ultraOutputContext && this.ultraOutputContext.state === 'running') {
+          const now = this.ultraOutputContext.currentTime
+          gain.gain.cancelScheduledValues(now)
+          gain.gain.setValueAtTime(gain.gain.value, now)
+          gain.gain.linearRampToValueAtTime(0, now + 0.005)
+          setTimeout(() => { try { gain.disconnect() } catch { } }, 10)
+        } else {
+          gain.disconnect()
+        }
+      } catch {
+        try { gain.disconnect() } catch { }
+      }
+      this.ultraJitterGains.delete(userId)
+    }
 
     this.ultraReorderBuffers.delete(userId)
     this.ultraLastDecodedTs.delete(userId)
@@ -4094,12 +4299,18 @@ export class WebRTCManager {
     if (!gain) return
     const store = useAppStore.getState()
     const vol = store.userVolumes[userId] ?? 100
-    gain.gain.value = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+    const target = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+    if (this.ultraOutputContext && this.ultraOutputContext.state === 'running') {
+      gain.gain.setTargetAtTime(target, this.ultraOutputContext.currentTime, 0.015)
+    } else {
+      gain.gain.value = target
+    }
   }
 
   private ensureUltraSendChannel(pc: RTCPeerConnection, userId: string): void {
     if (!this.ultraLowLatency) return
-    if (this.ultraDataChannels.has(userId)) return
+    const existing = this.ultraDataChannels.get(userId)
+    if (existing && (existing.readyState === 'open' || existing.readyState === 'connecting')) return
     if (!this.canSendUltraFrames() && !this.canUseUltraCustomPlayout()) return
     try {
       const channel = pc.createDataChannel(ULTRA_DC_LABEL, {
@@ -4113,7 +4324,8 @@ export class WebRTCManager {
   }
 
   private acceptUltraChannelFromOffer(pc: RTCPeerConnection, userId: string): void {
-    if (this.ultraDataChannels.has(userId)) return
+    const existing = this.ultraDataChannels.get(userId)
+    if (existing && (existing.readyState === 'open' || existing.readyState === 'connecting')) return
     try {
       const channel = pc.createDataChannel(ULTRA_DC_LABEL, {
         ordered: false,
@@ -4191,16 +4403,6 @@ export class WebRTCManager {
   private noteUltraSendStartFailure(): void {
     this.ultraSendStartFailures++
     if (this.ultraSendStartFailures >= ULTRA_SEND_MAX_START_FAILURES) this.ultraSendUnsupported = true
-  }
-
-  private ultraSendDebug(): string {
-    const cap = this.canSendUltraFrames() ? 'y' : (this.ultraSendUnsupported ? 'unsup' : 'no')
-    const enc = this.ultraSendEncoder ? this.ultraSendEncoder.state : (this.ultraSendStarting ? 'starting' : 'idle')
-    const track = this.localStream?.getAudioTracks()[0]
-    const mic = track ? track.readyState : 'none'
-    const rate = track?.getSettings().sampleRate ?? 0
-    const err = this.ultraSendLastError ? ` err=${this.ultraSendLastError}` : ''
-    return `cap=${cap} enc=${enc} tgt=${this.ultraSendTargets.size} frames=${this.ultraSendFrameCount} sent=${this.ultraSentOk} fail=${this.ultraSendStartFailures} mic=${mic}/${rate}${err}`
   }
 
   private async pumpUltraSend(
@@ -4307,23 +4509,30 @@ export class WebRTCManager {
     this.teardownVoiceGraph(userId)
 
     if (this.ultraLowLatency) {
-      this.setupUltraElementPlayout(userId, stream)
-      if (this.ultraCustomHandedOver.has(userId)) {
-        const el = this.audioElements.get(userId)
-        if (el) { try { el.muted = true; el.pause() } catch { } }
-      }
       const channel = this.ultraDataChannels.get(userId)
       if (channel && channel.readyState === 'open') this.ensureUltraCustomPlayout(userId)
-      return
+    } else {
+      this.teardownUltraCustomPlayout(userId)
     }
 
-    this.teardownUltraCustomPlayout(userId)
+    if (!this.outputMixContext) {
+      this.initOutputMixer()
+    }
     if (!this.outputMixContext) return
+
     voicePull.muted = true
+    void this.applyVoiceElementSink(voicePull)
     void voicePull.play().catch(() => { })
 
     const source = this.outputMixContext.createMediaStreamSource(new MediaStream([track]))
     const gain = this.outputMixContext.createGain()
+    const store = useAppStore.getState()
+    const vol = store.userVolumes[userId] ?? 100
+    const targetGain = (this.ultraLowLatency && this.ultraCustomHandedOver.has(userId))
+      ? 0
+      : Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+    gain.gain.value = targetGain
+
     const panner = new StereoPannerNode(this.outputMixContext, { pan: 0 })
     const limiter = this.createPlaybackLimiter(PLAYBACK_VOICE_LIMIT_DB, 2, 20, 0.002, 0.060)
     source.connect(limiter)
@@ -4338,6 +4547,11 @@ export class WebRTCManager {
     if (!this.voiceSeatOrder.includes(userId)) this.voiceSeatOrder.push(userId)
     this.updateRemoteVolume(userId)
     this.applyVoiceSeats()
+
+    if (this.ultraLowLatency && this.ultraCustomHandedOver.has(userId)) {
+      const el = this.audioElements.get(userId)
+      if (el) { try { el.muted = true; el.pause() } catch { } }
+    }
   }
 
   public softRefreshRemoteAudio(userId: string) {
@@ -4365,9 +4579,11 @@ export class WebRTCManager {
     if (this.ultraLowLatency && !this.userGainNodes.has(userId)) {
       const el = this.audioElements.get(userId)
       if (el) {
+        el.muted = true
         try { el.srcObject = new MediaStream([track]) } catch { }
         void el.play().catch(() => { })
       }
+      this.setupVoicePlayout(userId, new MediaStream([track]), track, receiver)
       return
     }
 
@@ -4464,38 +4680,11 @@ export class WebRTCManager {
         try {
           const stats = await pc.getStats()
           let rttMs = 0
-          const candTypes = new Map<string, string>()
-          const candById = new Map<string, any>()
-          let selPair: any = null
-          const dbgIn: any = {}
-          const dbgOut: any = {}
           stats.forEach(report => {
             if (report.type === 'candidate-pair' && (report.nominated || report.selected) && typeof report.currentRoundTripTime === 'number') {
               rttMs = report.currentRoundTripTime * 1000
             }
-            if (report.type === 'candidate-pair' && (report.nominated || report.selected)) selPair = report
-            if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
-              candTypes.set(report.id, report.candidateType)
-              candById.set(report.id, report)
-            }
-            if (report.type === 'inbound-rtp' && report.kind === 'audio') {
-              dbgIn.pkts = report.packetsReceived ?? 0
-              dbgIn.lost = report.packetsLost ?? 0
-              dbgIn.level = report.audioLevel ?? 'na'
-              dbgIn.energy = report.totalAudioEnergy ?? 'na'
-            }
-            if (report.type === 'outbound-rtp' && report.kind === 'audio') {
-              dbgOut.pkts = report.packetsSent ?? 0
-              dbgOut.bytes = report.bytesSent ?? 0
-            }
           })
-          const audioTx = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio')
-          const txDir = audioTx ? `${audioTx.direction}/${audioTx.currentDirection ?? '?'}` : 'none'
-          const lc = selPair ? candById.get(selPair.localCandidateId) : null
-          const rc = selPair ? candById.get(selPair.remoteCandidateId) : null
-          const lcInfo = lc ? `${lc.candidateType}/${lc.protocol ?? '?'}${lc.relayProtocol ? '(' + lc.relayProtocol + ')' : ''}${lc.url ? ' via ' + lc.url : ''}` : '?'
-          const rcInfo = rc ? `${rc.candidateType}/${rc.protocol ?? '?'}` : '?'
-          console.info(`[ZDBG] peer=${userId} state=${pc.connectionState}/${pc.iceConnectionState} path=${selPair ? (candTypes.get(selPair.localCandidateId) ?? '?') + '->' + (candTypes.get(selPair.remoteCandidateId) ?? '?') : 'none'} local=${lcInfo} remote=${rcInfo} rtt=${Math.round(rttMs)}ms audioTx=${txDir} IN{pkts=${dbgIn.pkts ?? 'none'} lost=${dbgIn.lost ?? '?'} level=${dbgIn.level ?? '?'} energy=${dbgIn.energy ?? '?'}} OUT{pkts=${dbgOut.pkts ?? 'none'} bytes=${dbgOut.bytes ?? '?'}} ultra=${this.ultraLowLatency}`)
           if (this.ultraLowLatency && rttMs > 0) this.ultraRttMs.set(userId, rttMs)
           stats.forEach(report => {
             if (report.type === 'inbound-rtp' && report.kind === 'audio') {
@@ -4513,29 +4702,6 @@ export class WebRTCManager {
                 const concealBurst = concealed - prevConcealed > ULTRA_CONCEAL_BUMP_SAMPLES
                 this.updateUltraJitterTarget(userId, report.jitter || 0, concealBurst)
                 this.maybeAdaptUltraFrame(userId, pc, report.packetsLost || 0, report.packetsReceived || 0, rttMs)
-
-                const jbDelay = report.jitterBufferDelay || 0
-                const jbEmitted = report.jitterBufferEmittedCount || 0
-                const prevJbDelay = this.lastJitterBufferDelay.get(userId) ?? jbDelay
-                const prevJbEmitted = this.lastJitterBufferEmitted.get(userId) ?? jbEmitted
-                this.lastJitterBufferDelay.set(userId, jbDelay)
-                this.lastJitterBufferEmitted.set(userId, jbEmitted)
-                const emittedDelta = jbEmitted - prevJbEmitted
-                const measuredBufferMs = emittedDelta > 0 ? ((jbDelay - prevJbDelay) / emittedDelta) * 1000 : 0
-                const targetBufferMs = this.ultraJitterTargetMs.get(this.userVoiceTrackIds.get(userId) ?? '') ?? 0
-                const micSettings = this.localStream?.getAudioTracks()[0]?.getSettings() as (MediaTrackSettings & { latency?: number }) | undefined
-                const micLatMs = typeof micSettings?.latency === 'number' ? (micSettings.latency * 1000).toFixed(1) : 'na'
-                const voiceTrackId = this.userVoiceTrackIds.get(userId)
-                const voiceReceiver = voiceTrackId ? pc.getReceivers().find(r => r.track && r.track.id === voiceTrackId) : undefined
-                const appliedTarget = voiceReceiver ? (voiceReceiver as any).jitterBufferTarget : undefined
-                const appliedHint = voiceReceiver ? (voiceReceiver as any).playoutDelayHint : undefined
-                const neqTargetMs = jbEmitted > 0 ? ((report.jitterBufferTargetDelay || 0) / jbEmitted) * 1000 : 0
-                const neqMinMs = jbEmitted > 0 ? ((report.jitterBufferMinimumDelay || 0) / jbEmitted) * 1000 : 0
-                const outCtx = this.ultraCustomUsers.has(userId) && this.ultraOutputContext ? this.ultraOutputContext : this.outputMixContext
-                const baseLatMs = outCtx ? outCtx.baseLatency * 1000 : 0
-                const outLatMs = outCtx && typeof (outCtx as unknown as { outputLatency?: number }).outputLatency === 'number' ? (outCtx as unknown as { outputLatency: number }).outputLatency * 1000 : 0
-                const outLatDbg = `${baseLatMs.toFixed(1)}+${outLatMs.toFixed(1)}`
-                console.info(`[ZULTRA] peer=${userId} jitter=${Math.round((report.jitter || 0) * 1000)}ms buffer=${Math.round(measuredBufferMs)}ms target=${Math.round(targetBufferMs)}ms applied=${appliedTarget ?? 'na'}/${appliedHint ?? 'na'} neqTarget=${Math.round(neqTargetMs)}ms neqMin=${Math.round(neqMinMs)}ms ptime=${this.ultraPtimeFor(userId)}ms conceal=${((this.ultraConcealRate.get(userId) ?? 0) * 100).toFixed(1)}% rtt=${Math.round(rttMs)}ms micLat=${micLatMs}ms custom=${this.ultraCustomOffReason(userId)} custBuf=${Math.round(this.ultraCustomBufferMs.get(userId) ?? 0)}ms wt=${Math.round(this.ultraCustomTargetMs.get(userId) ?? 0)}ms wu=${this.ultraCustomUnderruns.get(userId) ?? 0} out=${outLatDbg}ms snd=[${this.ultraSendDebug()}] rcv=[${this.ultraRcvDebug(userId)}]`)
               }
 
               if (!this.ultraCustomUsers.has(userId)) {
@@ -4568,8 +4734,6 @@ export class WebRTCManager {
     this.ultraConcealRate.clear()
     this.ultraConcealBurstMs.clear()
     this.ultraFrameLossTicks.clear()
-    this.lastJitterBufferDelay.clear()
-    this.lastJitterBufferEmitted.clear()
     this.peerLastSettledState.clear()
     this.lastSoftRefreshAt.clear()
   }
@@ -4677,6 +4841,7 @@ export class WebRTCManager {
         event.track.onended = () => {
           if (this.userVoiceTrackIds.get(userId) === event.track.id) {
             this.userVoiceTrackIds.delete(userId)
+            this.teardownVoiceGraph(userId)
           }
         }
         event.track.contentHint = 'speech'
@@ -4727,11 +4892,20 @@ export class WebRTCManager {
           clearTimeout(dcTimer)
           this.dcTimers.delete(userId)
         }
+        this.ultraCustomFailed.delete(userId)
+        this.ultraCustomFailCount.delete(userId)
         const prevSettled = this.peerLastSettledState.get(userId)
         if (this.userSourceNodes.has(userId) && (prevSettled === 'disconnected' || prevSettled === 'failed')) {
           this.softRefreshRemoteAudio(userId)
         }
         this.peerLastSettledState.set(userId, 'connected')
+        if (this.ultraLowLatency && this.canUseUltraCustomPlayout()) {
+          const channel = this.ultraDataChannels.get(userId)
+          if (channel && channel.readyState === 'open') {
+            try { channel.send('hi'); this.ultraHiResends.set(userId, 1) } catch { }
+            this.ensureUltraCustomPlayout(userId)
+          }
+        }
       } else if (st === 'failed' || iceSt === 'failed') {
         this.peerLastSettledState.set(userId, 'failed')
         useAppStore.getState().setWebRTCConnectionStatus(userId, false)
@@ -5076,19 +5250,32 @@ export class WebRTCManager {
 
   private async renegotiatePeer(pc: RTCPeerConnection, userId: string, iceRestart = false): Promise<void> {
     return this.enqueueSignalingTask(userId, async () => {
+      if (this.peerConnections.get(userId) !== pc || pc.signalingState === 'closed' || pc.connectionState === 'closed') {
+        this.pendingRenegotiation.delete(userId)
+        this.pendingIceRestart.delete(userId)
+        return
+      }
       if (pc.signalingState !== 'stable' || this.isMakingOffer.get(userId)) {
         this.pendingRenegotiation.add(userId)
+        if (iceRestart) this.pendingIceRestart.add(userId)
         return
       }
       this.pendingRenegotiation.delete(userId)
+      const needsIceRestart = iceRestart || this.pendingIceRestart.has(userId)
       this.isMakingOffer.set(userId, true)
       try {
         this.ensureUltraSendChannel(pc, userId)
         const offer = await pc.createOffer(
-          iceRestart ? SILENCE_SUPPRESSION_OFF_WITH_ICE_RESTART : SILENCE_SUPPRESSION_OFF
+          needsIceRestart ? SILENCE_SUPPRESSION_OFF_WITH_ICE_RESTART : SILENCE_SUPPRESSION_OFF
         )
+        if (this.peerConnections.get(userId) !== pc || pc.signalingState === 'closed' || pc.connectionState === 'closed') {
+          this.pendingRenegotiation.delete(userId)
+          this.pendingIceRestart.delete(userId)
+          return
+        }
         if (pc.signalingState !== 'stable') {
           this.pendingRenegotiation.add(userId)
+          if (needsIceRestart) this.pendingIceRestart.add(userId)
           return
         }
         const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId))
@@ -5096,6 +5283,7 @@ export class WebRTCManager {
         const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
         this.offerEpoch.set(userId, offerEpoch)
         signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch }))
+        this.pendingIceRestart.delete(userId)
       } catch (e) {
         console.error('[WebRTC] renegotiation failed', e)
       } finally {
@@ -5563,69 +5751,77 @@ export class WebRTCManager {
     await Promise.all([localStreamPromise, iceServersPromise])
     if (!this.isPeerRelevant(userId)) return
 
-    const pc = new (RTCPeerConnection as any)(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS) as RTCPeerConnection
-    this.peerConnections.set(userId, pc)
+    return this.enqueueSignalingTask(userId, async () => {
+      if (!this.isPeerRelevant(userId)) return
+      if (this.peerConnections.has(userId)) return
 
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(track => {
-        const sender = pc.addTrack(track, this.localStream!)
-        if (track.kind === 'audio') {
-          this.configureAudioSender(sender)
-        }
-      })
-    }
-    if (this.localVideoStream) {
-      this.localVideoStream.getTracks().forEach(track => {
-        const sender = pc.addTrack(track, this.localVideoStream!)
-        if (track.kind === 'video') {
-          try {
-            const isCamera = this.currentStreamQuality === 'camera'
-            if (!isCamera) {
-              const params = sender.getParameters()
-              if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
-              params.degradationPreference = 'maintain-framerate'
-              params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
-              params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
-              params.encodings[0].networkPriority = 'high'
-              sender.setParameters(params).catch(() => { })
-            }
-          } catch { }
-        } else if (track.kind === 'audio') {
-          this.configureAudioSender(sender)
-        }
-      })
-    } else {
-      try {
-        pc.addTransceiver('video', { direction: 'recvonly' })
-        pc.addTransceiver('audio', { direction: 'recvonly' })
-      } catch { }
-    }
+      const pc = new (RTCPeerConnection as any)(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS) as RTCPeerConnection
+      this.peerConnections.set(userId, pc)
 
-    this.setupPeerHandlers(pc, userId)
-    this.startIceTimeout(userId)
-    this.ensureUltraSendChannel(pc, userId)
-
-    try {
-      const offer = await pc.createOffer(SILENCE_SUPPRESSION_OFF)
-      const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId))
-      await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
-      if (this.peerConnections.get(userId) !== pc || !this.isPeerRelevant(userId)) {
-        this.disconnectFromPeer(userId)
-        return
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(track => {
+          const sender = pc.addTrack(track, this.localStream!)
+          if (track.kind === 'audio') {
+            this.configureAudioSender(sender)
+          }
+        })
       }
-      const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
-      this.offerEpoch.set(userId, offerEpoch)
-      signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch }))
-      console.log(`[WebRTC] offer to ${userId} sent in ${Math.round(performance.now() - startedAt)}ms (ice servers ${iceMs}ms)`)
-    } catch (e) {
-      console.error('[WebRTC] connectToPeer failed', e)
-      this.peerConnectStartedAt.delete(userId)
-      if (preserveRemoteVideoOnFailure) {
-        this.startIceTimeout(userId)
+      if (this.localVideoStream) {
+        this.localVideoStream.getTracks().forEach(track => {
+          const sender = pc.addTrack(track, this.localVideoStream!)
+          if (track.kind === 'video') {
+            try {
+              const isCamera = this.currentStreamQuality === 'camera'
+              if (!isCamera) {
+                const params = sender.getParameters()
+                if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+                params.degradationPreference = 'maintain-framerate'
+                params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
+                params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
+                params.encodings[0].networkPriority = 'high'
+                sender.setParameters(params).catch(() => { })
+              }
+            } catch { }
+          } else if (track.kind === 'audio') {
+            this.configureAudioSender(sender)
+          }
+        })
       } else {
-        this.disconnectFromPeer(userId)
+        try {
+          pc.addTransceiver('video', { direction: 'recvonly' })
+          pc.addTransceiver('audio', { direction: 'recvonly' })
+        } catch { }
       }
-    }
+
+      this.setupPeerHandlers(pc, userId)
+      this.startIceTimeout(userId)
+      this.ensureUltraSendChannel(pc, userId)
+
+      this.isMakingOffer.set(userId, true)
+      try {
+        const offer = await pc.createOffer(SILENCE_SUPPRESSION_OFF)
+        const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId))
+        await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
+        if (this.peerConnections.get(userId) !== pc || !this.isPeerRelevant(userId)) {
+          this.disconnectFromPeer(userId)
+          return
+        }
+        const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
+        this.offerEpoch.set(userId, offerEpoch)
+        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch }))
+        console.log(`[WebRTC] offer to ${userId} sent in ${Math.round(performance.now() - startedAt)}ms (ice servers ${iceMs}ms)`)
+      } catch (e) {
+        console.error('[WebRTC] connectToPeer failed', e)
+        this.peerConnectStartedAt.delete(userId)
+        if (preserveRemoteVideoOnFailure) {
+          this.startIceTimeout(userId)
+        } else {
+          this.disconnectFromPeer(userId)
+        }
+      } finally {
+        this.isMakingOffer.set(userId, false)
+      }
+    })
   }
 
   public getPeerConnection(userId: string): RTCPeerConnection | undefined {
@@ -5833,6 +6029,7 @@ export class WebRTCManager {
     useAppStore.getState().setWebRTCConnectionStatus(userId, false)
 
     this.clearIceTimeout(userId)
+    this.iceRestartInFlight.delete(userId)
     if (!options.preserveRetryState) this.retryCount.delete(userId)
     const dcTimer = this.dcTimers.get(userId)
     if (dcTimer) { clearTimeout(dcTimer); this.dcTimers.delete(userId) }
@@ -5888,6 +6085,7 @@ export class WebRTCManager {
 
     this.pendingCandidates.delete(userId)
     this.pendingRenegotiation.delete(userId)
+    this.pendingIceRestart.delete(userId)
     this.peerSignalingQueues.delete(userId)
     this.isMakingOffer.delete(userId)
     this.isSettingRemoteAnswerPending.delete(userId)
@@ -5912,8 +6110,6 @@ export class WebRTCManager {
     this.rollbackCount.delete(userId)
     this.ultraRttMs.delete(userId)
     this.ultraConcealRate.delete(userId)
-    this.lastJitterBufferDelay.delete(userId)
-    this.lastJitterBufferEmitted.delete(userId)
     this.peerLastSettledState.delete(userId)
     this.lastSoftRefreshAt.delete(userId)
     this.appliedVideoProfiles.delete(userId)
@@ -5955,7 +6151,27 @@ export class WebRTCManager {
 
   public leaveAll() {
     this.stopAudioHealthMonitoring()
+    this.stopStreamSyncMonitoring()
+    if (this.viewInterestTimer) {
+      clearTimeout(this.viewInterestTimer)
+      this.viewInterestTimer = null
+    }
+    if (this.settingsUpdateTimer) {
+      clearTimeout(this.settingsUpdateTimer)
+      this.settingsUpdateTimer = null
+    }
+    this.pendingSettingsUpdate = null
+    this.settingsWaiters.forEach(w => w.resolve())
+    this.settingsWaiters = []
+
+    this.dcTimers.forEach(t => clearTimeout(t))
+    this.dcTimers.clear()
+    this.iceTimeoutTimers.forEach(t => clearTimeout(t))
+    this.iceTimeoutTimers.clear()
+
     this.peerConnections.forEach((_, uid) => this.disconnectFromPeer(uid))
+    this.iceRestartInFlight.clear()
+
     this.stopUltraSend()
     this.ultraSendTargets.clear()
     this.ultraSendUnsupported = false
@@ -5964,6 +6180,31 @@ export class WebRTCManager {
     this.ultraRcvStats.clear()
     this.ultraDataChannels.forEach(ch => { try { ch.onopen = ch.onclose = ch.onerror = ch.onmessage = null; ch.close() } catch { } })
     this.ultraDataChannels.clear()
+
+    this.ultraDecoders.forEach(dec => { try { if (dec.state !== 'closed') dec.close() } catch { } })
+    this.ultraDecoders.clear()
+    this.ultraJitterNodes.forEach(node => { try { node.port.onmessage = null; node.disconnect() } catch { } })
+    this.ultraJitterNodes.clear()
+    this.ultraJitterGains.forEach(gain => { try { gain.disconnect() } catch { } })
+    this.ultraJitterGains.clear()
+    this.ultraReorderBuffers.clear()
+    this.ultraLastDecodedTs.clear()
+    this.ultraCustomUsers.clear()
+    this.ultraCustomUnderruns.clear()
+    this.ultraCustomBufferMs.clear()
+    this.ultraCustomTargetMs.clear()
+    this.ultraCustomSpeaking.clear()
+    this.ultraCustomGotFrame.clear()
+    this.ultraCustomHandedOver.clear()
+
+    if (this.ultraOutputContext && this.ultraOutputContext.state !== 'closed') {
+      void this.ultraOutputContext.close().catch(() => {})
+      this.ultraOutputContext = null
+    }
+    this.ultraJitterModuleContext = null
+    this.ultraJitterLoadingContext = null
+    this.ultraJitterModulePromise = null
+
     this.ultraCustomEngaging.clear()
     this.ultraCustomFailed.clear()
     this.ultraCustomFailCount.clear()
@@ -5971,6 +6212,7 @@ export class WebRTCManager {
     this.ultraHiResends.clear()
     this.pendingCandidates.clear()
     this.pendingRenegotiation.clear()
+    this.pendingIceRestart.clear()
     this.peerSignalingQueues.clear()
     this.isMakingOffer.clear()
     this.isSettingRemoteAnswerPending.clear()
@@ -5979,6 +6221,26 @@ export class WebRTCManager {
     this.userStreamAudioTrackIds.clear()
     this.userVoiceStreamIds.clear()
     this.userScreenStreamIds.clear()
+
+    this.userSourceNodes.forEach(s => { try { s.disconnect() } catch { } })
+    this.userSourceNodes.clear()
+    this.userGainNodes.forEach(g => { try { g.disconnect() } catch { } })
+    this.userGainNodes.clear()
+    this.userLimiterNodes.forEach(l => { try { l.disconnect() } catch { } })
+    this.userLimiterNodes.clear()
+    this.userPannerNodes.forEach(p => { try { p.disconnect() } catch { } })
+    this.userPannerNodes.clear()
+    this.voiceSeatOrder = []
+
+    this.streamGainNodes.forEach(g => { try { g.disconnect() } catch { } })
+    this.streamGainNodes.clear()
+    this.streamSourceNodes.forEach(s => { try { s.disconnect() } catch { } })
+    this.streamSourceNodes.clear()
+    this.streamLimiterNodes.forEach(l => { try { l.disconnect() } catch { } })
+    this.streamLimiterNodes.clear()
+    this.streamDelayNodes.forEach(d => { try { d.disconnect() } catch { } })
+    this.streamDelayNodes.clear()
+
     this.audioElements.forEach(el => { try { el.pause(); el.srcObject = null } catch { } })
     this.audioElements.clear()
     this.streamAudioElements.forEach(el => { try { el.pause(); el.srcObject = null } catch { } })

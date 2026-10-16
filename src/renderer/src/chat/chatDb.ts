@@ -56,7 +56,7 @@ export async function loadPending(ownerId: string): Promise<ChatMessage[]> {
   const index = tx.objectStore(STORE_NAME).index('ownerCreatedAt');
   const range = IDBKeyRange.bound([ownerId, 0], [ownerId, Number.MAX_SAFE_INTEGER]);
   const messages = await requestValue(index.getAll(range));
-  return messages.filter(message => message.senderId === ownerId && message.delivery !== 'delivered');
+  return messages.filter(message => message.senderId === ownerId && (message.delivery === 'pending' || message.delivery === 'sent'));
 }
 
 export async function pruneExpired(ownerId: string): Promise<void> {

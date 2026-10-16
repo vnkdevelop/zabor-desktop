@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CaretDown, Check } from '@phosphor-icons/react';
+import { animate, play, stagger, utils, EASE, springs, prefersReducedMotion } from '../../lib/anime';
+import { usePresence } from '../../hooks/usePresence';
 
 export interface GlassSelectOption {
   value: string;
@@ -31,11 +33,60 @@ export function GlassSelect({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const popupRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const caretRef = useRef<HTMLSpanElement>(null);
 
   const selectedOption = options.find((opt) => opt.value === value);
   const displayLabel = selectedOption?.label ?? placeholder ?? value;
+
+  const { mounted, ref: presenceRef } = usePresence(isOpen, {
+    onEnter: (el) => {
+      play(el, {
+        opacity: [0, 1],
+        translateY: [direction === 'up' ? 6 : -6, 0],
+        scale: [0.98, 1],
+        duration: 220,
+        ease: EASE
+      });
+      const rows = Array.from(el.querySelectorAll<HTMLElement>('[data-select-item]'));
+      if (rows.length) {
+        play(rows, {
+          opacity: [0, 1],
+          translateY: [direction === 'up' ? 4 : -4, 0],
+          duration: 180,
+          ease: EASE,
+          delay: stagger(18)
+        });
+      }
+      const check = el.querySelector<HTMLElement>('[data-select-check]');
+      if (check) play(check, { scale: [0, 1], ease: springs.pop });
+    },
+    onExit: (el) =>
+      play(el, {
+        opacity: [1, 0],
+        translateY: [0, direction === 'up' ? 6 : -6],
+        scale: [1, 0.98],
+        duration: 140,
+        ease: EASE
+      })
+  });
+
+  const pressTo = (scale: number) => {
+    const el = triggerRef.current;
+    if (!el || prefersReducedMotion()) return;
+    animate(el, { scale, ease: springs.press });
+  };
+
+  useEffect(() => {
+    const el = caretRef.current;
+    if (!el) return;
+    if (prefersReducedMotion()) {
+      utils.set(el, { rotate: isOpen ? 180 : 0 });
+      return;
+    }
+    animate(el, { rotate: isOpen ? 180 : 0, ease: springs.knob });
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -192,7 +243,7 @@ export function GlassSelect({
     <div
       ref={containerRef}
       className={`relative ${compact ? 'w-auto shrink-0 min-w-[130px]' : 'w-full'} ${
-        isOpen ? 'z-30' : 'z-0'
+        mounted ? 'z-30' : 'z-0'
       } ${className}`}
     >
       <button
@@ -201,9 +252,12 @@ export function GlassSelect({
         disabled={disabled}
         onClick={() => !disabled && setIsOpen((prev) => !prev)}
         onKeyDown={handleTriggerKeyDown}
+        onPointerDown={() => !disabled && pressTo(0.97)}
+        onPointerUp={() => !disabled && pressTo(1)}
+        onPointerLeave={() => !disabled && pressTo(1)}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        className={`group relative flex items-center justify-between text-left transition-all duration-150 outline-none select-none active:scale-[0.99] ${
+        className={`group relative flex items-center justify-between text-left transition-colors duration-150 outline-none select-none ${
           compact
             ? 'w-full glass-field text-white rounded-xl px-3 py-2 text-sm font-semibold'
             : 'w-full glass-field text-white rounded-xl px-3.5 py-3 text-[14px]'
@@ -212,24 +266,32 @@ export function GlassSelect({
         }`}
       >
         <span className="truncate pr-2 lowercase font-medium">{displayLabel}</span>
-        <CaretDown
-          weight="bold"
-          size={compact ? 13 : 15}
-          className={`text-textMuted shrink-0 ml-2 transition-transform duration-200 ${
-            isOpen ? 'rotate-180 text-primary' : 'group-hover:text-white'
-          }`}
-        />
+        <span ref={caretRef} className="ml-2 shrink-0 inline-flex" style={{ willChange: 'transform' }}>
+          <CaretDown
+            weight="bold"
+            size={compact ? 13 : 15}
+            className={`transition-colors duration-200 ${
+              isOpen ? 'text-primary' : 'text-textMuted group-hover:text-white'
+            }`}
+          />
+        </span>
       </button>
 
-      {isOpen && (
+      {mounted && (
         <div
-          ref={popupRef}
+          ref={(el) => {
+            popupRef.current = el;
+            presenceRef.current = el;
+          }}
           className={`absolute z-50 ${
             compact ? 'min-w-[140px] right-0' : 'left-0 right-0'
           } ${
             direction === 'up' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
-          } glass-sheet rounded-xl p-1.5 shadow-none overflow-hidden animate-fade-in`}
-          style={{ willChange: 'transform, opacity' }}
+          } glass-sheet rounded-xl p-1.5 shadow-none overflow-hidden opacity-0`}
+          style={{
+            transformOrigin: direction === 'up' ? 'bottom center' : 'top center',
+            willChange: 'transform, opacity'
+          }}
         >
           <div
             ref={listRef}
@@ -266,7 +328,9 @@ export function GlassSelect({
                 >
                   <span className="truncate pr-2 lowercase">{opt.label}</span>
                   {isSelected && (
-                    <Check weight="bold" size={14} className="text-primary shrink-0 ml-2" />
+                    <span data-select-check className="shrink-0 ml-2 inline-flex" style={{ willChange: 'transform' }}>
+                      <Check weight="bold" size={14} className="text-primary" />
+                    </span>
                   )}
                 </button>
               );

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DownloadSimple, ArrowSquareOut, File, Paperclip, PaperPlaneRight, Trash, Copy, Broom, PhoneCall, X, Info } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +6,7 @@ import { useAppStore, type User } from '../../store/useAppStore';
 import { useChatStore } from '../../store/useChatStore';
 import type { ChatMessage } from '../../chat/types';
 import { chatPeer } from '../../services/chatPeer';
+import { animate, play, utils, springs, stagger, EASE_OUT, EASE_IN, DUR, prefersReducedMotion } from '../../lib/anime';
 
 interface ChatPanelProps {
   currentUser: User;
@@ -117,6 +118,7 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
   const storedMessages = useChatStore(state => state.messages[friend.id]);
   const messages = storedMessages ?? EMPTY_MESSAGES;
   const connected = useChatStore(state => state.connections[friend.id] ?? false);
+  const route = useChatStore(state => state.routes[friend.id] ?? 'unknown');
   const [value, setValue] = useState('');
   const [dragging, setDragging] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
@@ -124,10 +126,54 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sendRef = useRef<HTMLButtonElement>(null);
+  const staggerFriendRef = useRef<string | null>(null);
+  const prevLenRef = useRef(0);
 
   useEffect(() => { void chatPeer.open(friend.id); }, [friend.id]);
   useEffect(() => () => chatPeer.keepWarm(friend.id), [friend.id]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }); }, [messages.length]);
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    if (prefersReducedMotion()) { utils.set(el, { opacity: 1, scale: 1, translateY: 0 }); return; }
+    utils.set(el, { opacity: 0, scale: 0.985, translateY: 8 });
+    void play(el, { opacity: [0, 1], scale: [0.985, 1], translateY: [8, 0], duration: DUR.base, ease: EASE_OUT });
+  }, []);
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const total = messages.length;
+    if (staggerFriendRef.current !== friend.id) {
+      staggerFriendRef.current = friend.id;
+      prevLenRef.current = total;
+      if (prefersReducedMotion()) return;
+      const bubbles = Array.from(container.querySelectorAll<HTMLElement>('[data-bubble]'));
+      const incoming = bubbles.filter(node => node.getAttribute('data-dir') === 'in');
+      const outgoing = bubbles.filter(node => node.getAttribute('data-dir') === 'out');
+      if (incoming.length) {
+        utils.set(incoming, { opacity: 0, translateX: -16 });
+        animate(incoming, { opacity: [0, 1], translateX: [-16, 0], duration: DUR.base, ease: EASE_OUT, delay: stagger(30) });
+      }
+      if (outgoing.length) {
+        utils.set(outgoing, { opacity: 0, translateX: 16 });
+        animate(outgoing, { opacity: [0, 1], translateX: [16, 0], duration: DUR.base, ease: EASE_OUT, delay: stagger(30) });
+      }
+      return;
+    }
+    if (total <= prevLenRef.current) { prevLenRef.current = total; return; }
+    const added = total - prevLenRef.current;
+    prevLenRef.current = total;
+    if (prefersReducedMotion()) return;
+    const all = Array.from(container.querySelectorAll<HTMLElement>('[data-bubble]'));
+    all.slice(-added).forEach(node => {
+      const fromX = node.getAttribute('data-dir') === 'out' ? 16 : -16;
+      utils.set(node, { opacity: 0, translateX: fromX });
+      animate(node, { opacity: [0, 1], translateX: [fromX, 0], duration: DUR.base, ease: EASE_OUT });
+    });
+  }, [friend.id, messages.length]);
   useEffect(() => {
     const markRead = () => { if (document.visibilityState === 'visible') void chatPeer.markVisibleAsRead(friend.id); };
     markRead();
@@ -169,6 +215,7 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
     if (!canSend) return;
     const text = value;
     setValue('');
+    void play(sendRef.current, { scale: [0.9, 1], ease: springs.press });
     await chatPeer.sendText(friend.id, text);
   };
 
@@ -229,13 +276,19 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
   };
 
   return (
-    <div className="absolute inset-3 z-[80] bg-panelBg border border-white/[0.07] border-t-white/[0.14] rounded-panel flex flex-col overflow-hidden animate-fade-in" onDragEnter={handleDragEnter} onDragOver={event => event.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+    <div ref={rootRef} className="absolute inset-3 z-[80] bg-panelBg border border-white/[0.07] border-t-white/[0.14] rounded-panel flex flex-col overflow-hidden" onDragEnter={handleDragEnter} onDragOver={event => event.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}>
       <div className="h-16 px-4 grid grid-cols-[40px_minmax(0,1fr)_40px] items-center gap-3 border-b border-white/[0.07] shrink-0">
         <div className="group relative flex items-center justify-center" aria-label={t('chat.information')}>
           <Info weight="bold" size={18} className="text-white/30 transition-colors group-hover:text-white/70" />
           <div role="tooltip" className="pointer-events-none absolute left-0 top-[calc(100%+12px)] z-[100] w-64 rounded-[14px] border border-white/[0.07] border-t-white/[0.14] bg-panelBg/95 p-3 text-left opacity-0 backdrop-blur-xl transition-opacity group-hover:opacity-100">
             <div className="text-sm font-medium text-white">{t('chat.retentionHint')}</div>
             <div className="mt-2 text-xs text-textMuted">{t('chat.encryptionHint')}</div>
+            {connected && route !== 'unknown' && (
+              <div className="mt-2 pt-2 border-t border-white/[0.06] text-xs text-primaryText/90 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block"></span>
+                <span>{route === 'p2p' ? t('chat.routeP2p') : route === 'turn' ? t('chat.routeTurn') : t('chat.routeRelay')}</span>
+              </div>
+            )}
           </div>
         </div>
         <div className="min-w-0 flex flex-col items-center justify-center">
@@ -256,7 +309,7 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
         </button>
       </div>
 
-      <div className="chat-scroll flex-1 min-h-0 overflow-y-auto p-4">
+      <div ref={scrollRef} className="chat-scroll flex-1 min-h-0 overflow-y-auto p-4">
         {messages.length === 0 ? (
           <div className="h-full flex items-center justify-center text-textMuted font-medium">{t('chat.empty')}</div>
         ) : (
@@ -266,6 +319,8 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
               return (
                 <div key={message.id} className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
                   <div
+                    data-bubble
+                    data-dir={own ? 'out' : 'in'}
                     onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setMenu({ x: Math.min(event.clientX, window.innerWidth - 208), y: Math.min(event.clientY, window.innerHeight - 180), message }); }}
                     className={`max-w-[72%] rounded-[14px] px-4 py-3 border ${own ? 'bg-primary/20 border-primary/30' : 'bg-surface/70 border-white/[0.07]'}`}
                   >
@@ -309,7 +364,7 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
           <Paperclip weight="bold" size={20} />
         </button>
         <textarea value={value} onChange={event => setValue(event.target.value.slice(0, 4000))} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} rows={1} placeholder={t('chat.placeholder')} className="glass-field flex-1 resize-none min-h-11 max-h-32 px-4 py-3 text-sm rounded-[14px]" />
-        <button onClick={() => void send()} disabled={!canSend} className="w-11 h-11 rounded-[14px] bg-primary/90 hover:opacity-90 disabled:opacity-40 text-white flex items-center justify-center transition-transform active:scale-95">
+        <button ref={sendRef} onClick={() => void send()} disabled={!canSend} className="w-11 h-11 rounded-[14px] bg-primary/90 hover:opacity-90 disabled:opacity-40 text-white flex items-center justify-center transition-transform active:scale-95">
           <PaperPlaneRight weight="bold" size={20} />
         </button>
       </div>

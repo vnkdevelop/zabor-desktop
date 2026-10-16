@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { PhoneCall } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
 import type { User } from '../../store/useAppStore';
 import { AvatarImg } from '../Shared/AvatarImg';
+import { animate, play, utils, springs, prefersReducedMotion } from '../../lib/anime';
 
 type Position = { x: number; y: number };
 
@@ -13,6 +14,7 @@ export function ActiveSessionPip({ callUser, onOpen }: { callUser: User; onOpen:
   const pointerRef = useRef<{ id: number; x: number; y: number; originX: number; originY: number; moved: boolean } | null>(null);
   const [position, setPosition] = useState<Position>({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const iconRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
     positionRef.current = position;
@@ -33,6 +35,21 @@ export function ActiveSessionPip({ callUser, onOpen }: { callUser: User; onOpen:
     };
     window.addEventListener('resize', constrain);
     return () => window.removeEventListener('resize', constrain);
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = buttonRef.current;
+    if (!el) return;
+    if (prefersReducedMotion()) { utils.set(el, { opacity: 1 }); return; }
+    utils.set(el, { opacity: 0 });
+    void play(el, { opacity: [0, 1], scale: [0.9, 1], ease: springs.pip });
+  }, []);
+
+  useEffect(() => {
+    const el = iconRef.current;
+    if (!el || prefersReducedMotion()) return;
+    const breath = animate(el, { scale: [1, 1.12, 1], opacity: [1, 0.6, 1], duration: 1600, ease: 'inOutSine', loop: true });
+    return () => { breath?.pause?.(); };
   }, []);
 
   const constrainPosition = (x: number, y: number) => {
@@ -88,7 +105,7 @@ export function ActiveSessionPip({ callUser, onOpen }: { callUser: User; onOpen:
     >
       <div className="w-11 h-11 shrink-0"><AvatarImg src={callUser.avatarBase64} size={44} bgColor={callUser.avatarColor} animate={false} /></div>
       <div className="min-w-0 flex-1"><div className="font-bold text-white text-sm truncate">{callUser.displayName}</div><div className="text-xs text-textMuted">{t('chat.activeCall')}</div></div>
-      <PhoneCall weight="bold" size={18} className="text-primaryText shrink-0" />
+      <PhoneCall ref={iconRef} weight="bold" size={18} className="text-primaryText shrink-0" />
     </button>
   );
 }

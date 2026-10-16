@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, ArrowSquareOut, DownloadSimple, Sparkle, ArrowRight, CheckCircle, Warning, CircleNotch } from '@phosphor-icons/react';
+import { X, ArrowSquareOut, DownloadSimple, Sparkle, ArrowRight, CheckCircle, Warning } from '@phosphor-icons/react';
 import { useAppStore } from '../../store/useAppStore';
+import { play, animate, utils, springs, EASE_OUT, DUR, prefersReducedMotion } from '../../lib/anime';
 
 interface UpdateModalProps {
   onClose: () => void;
@@ -15,6 +16,41 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   const updateError = useAppStore(state => state.updateError);
   const setUpdateStatus = useAppStore(state => state.setUpdateStatus);
   const setUpdateError = useAppStore(state => state.setUpdateError);
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const badgeRef = useRef<HTMLDivElement>(null);
+  const arrowRef = useRef<HTMLSpanElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const badge = badgeRef.current;
+    const arrow = arrowRef.current;
+    const card = cardRef.current;
+    if (prefersReducedMotion()) {
+      if (root) utils.set(root, { opacity: 1, scale: 1, translateY: 0 });
+      if (badge) utils.set(badge, { opacity: 1, scale: 1, rotate: 0 });
+      if (arrow) utils.set(arrow, { opacity: 1, scaleX: 1 });
+      if (card) utils.set(card, { opacity: 1, scale: 1, translateY: 0 });
+      return;
+    }
+    if (root) {
+      utils.set(root, { opacity: 0, scale: 0.96, translateY: 8 });
+      animate(root, { opacity: [0, 1], scale: [0.96, 1], translateY: [8, 0], duration: DUR.enter, ease: EASE_OUT });
+    }
+    if (badge) {
+      utils.set(badge, { opacity: 0, scale: 0.6, rotate: -25 });
+      void play(badge, { opacity: [0, 1], scale: [0.6, 1], rotate: [-25, 0], ease: springs.pop, delay: 60 });
+    }
+    if (arrow) {
+      utils.set(arrow, { opacity: 0, scaleX: 0.2 });
+      void play(arrow, { opacity: [0, 1], scaleX: [0.2, 1], duration: DUR.base, ease: EASE_OUT, delay: 150 });
+    }
+    if (card) {
+      utils.set(card, { opacity: 0, scale: 0.95, translateY: 6 });
+      void play(card, { opacity: [0, 1], scale: [0.95, 1], translateY: [6, 0], duration: DUR.base, ease: EASE_OUT, delay: 120 });
+    }
+  }, [updateStatus]);
 
   if (!updateInfo) return null;
 
@@ -65,30 +101,13 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   const isDownloaded = updateStatus === 'downloaded';
   const isInstalling = updateStatus === 'installing';
 
-  if (isInstalling) {
-    return (
-      <div className="glass-modal w-[420px] max-w-full p-8 flex flex-col items-center text-center relative overflow-hidden animate-modal-in">
-        <div className="w-14 h-14 rounded-2xl bg-primary/20 flex items-center justify-center text-primary mb-5">
-          <CircleNotch weight="bold" size={30} className="animate-spin" />
-        </div>
-        <h2 className="text-xl font-bold text-white leading-tight mb-2">
-          {t('modals.update.installingTitle', 'устанавливаю обновление')}
-        </h2>
-        <p className="text-sm text-textMuted leading-relaxed">
-          {t('modals.update.installingDesc', 'закрываю zabor и обновляю. приложение перезапустится само на новой версии.')}
-        </p>
-        <div className="w-full h-1.5 rounded-full bg-black/40 overflow-hidden relative mt-6">
-          <div className="h-full w-1/3 bg-primary/90 rounded-full animate-update-indeterminate" />
-        </div>
-      </div>
-    );
-  }
+  if (isDownloading || isInstalling) return null;
 
   return (
-    <div className="glass-modal w-[520px] max-w-full p-6 flex flex-col relative overflow-hidden animate-modal-in">
+    <div ref={rootRef} className="glass-modal w-[520px] max-w-full p-6 flex flex-col relative overflow-hidden opacity-0" style={{ willChange: 'transform, opacity' }}>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-primary/20 flex items-center justify-center text-primary">
+          <div ref={badgeRef} className="w-8 h-8 rounded-xl bg-primary/20 flex items-center justify-center text-primary opacity-0" style={{ willChange: 'transform, opacity' }}>
             <Sparkle weight="bold" size={18} />
           </div>
           <div>
@@ -97,7 +116,9 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
             </h2>
             <div className="flex items-center gap-2 mt-0.5 text-xs font-semibold text-textMuted">
               <span>v{updateInfo.currentVersion}</span>
-              <ArrowRight weight="bold" size={12} className="text-primary" />
+              <span ref={arrowRef} className="opacity-0 inline-flex" style={{ transformOrigin: 'left center', willChange: 'transform, opacity' }}>
+                <ArrowRight weight="bold" size={12} className="text-primary" />
+              </span>
               <span className="text-primaryText font-bold">v{updateInfo.version}</span>
               {updateInfo.fileSize > 0 && (
                 <>
@@ -162,7 +183,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
       )}
 
       {isDownloaded && (
-        <div className="mb-5 p-3.5 rounded-xl bg-success/10 border border-success/20 flex items-center gap-3">
+        <div ref={cardRef} className="mb-5 p-3.5 rounded-xl bg-success/10 border border-success/20 flex items-center gap-3 opacity-0" style={{ willChange: 'transform, opacity' }}>
           <CheckCircle weight="bold" size={22} className="text-success shrink-0" />
           <div className="text-xs text-white">
             <p className="font-bold">{t('modals.update.downloadedTitle', 'обновление готово к установке')}</p>
@@ -174,7 +195,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
       )}
 
       {updateStatus === 'error' && updateError && (
-        <div className="mb-5 p-3.5 rounded-xl bg-danger/10 border border-danger/20 flex items-center gap-3">
+        <div ref={cardRef} className="mb-5 p-3.5 rounded-xl bg-danger/10 border border-danger/20 flex items-center gap-3 opacity-0" style={{ willChange: 'transform, opacity' }}>
           <Warning weight="bold" size={22} className="text-danger shrink-0" />
           <div className="text-xs text-danger flex-1 truncate">
             <p className="font-bold">{t('modals.update.errorTitle', 'не удалось загрузить обновление')}</p>

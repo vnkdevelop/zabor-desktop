@@ -135,7 +135,10 @@
     "encryption": "encryption",
     "information": "chat information",
     "retentionHint": "chats are cleared every 14 days",
-    "encryptionHint": "protected with end-to-end encryption"
+    "encryptionHint": "protected with end-to-end encryption",
+    "routeP2p": "direct p2p connection",
+    "routeTurn": "secure turn gateway",
+    "routeRelay": "server relay (text)"
   },
   "auth": {
     "login": "login",
@@ -155,7 +158,17 @@
     "cropTitle": "crop avatar",
     "captcha": "code from image",
     "captchaPlaceholder": "characters",
-    "refreshCaptcha": "refresh"
+    "refreshCaptcha": "refresh",
+    "stepLogin": "login",
+    "stepConfirm": "confirm",
+    "stepSetup": "setup"
+  },
+  "titlebar": {
+    "wordmark": "zabor",
+    "minimize": "minimize",
+    "maximize": "maximize",
+    "restore": "restore",
+    "close": "close"
   },
   "main": {
     "tabs": {
@@ -267,6 +280,8 @@
       "whatsNew": "what's new",
       "noNotes": "a new version of zabor is available with improvements and fixes.",
       "downloading": "downloading update...",
+      "downloadingTitle": "downloading update",
+      "downloadingDesc": "downloading the new version. please keep this window open.",
       "downloadedTitle": "update ready to install",
       "downloadedDesc": "zabor will close and run the installer.",
       "installingTitle": "installing update",

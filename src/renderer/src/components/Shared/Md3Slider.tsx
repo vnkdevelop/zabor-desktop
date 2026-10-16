@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { SpeakerHigh, SpeakerSlash } from '@phosphor-icons/react';
+import { animate, utils, springs, EASE_OUT, DUR, prefersReducedMotion } from '../../lib/anime';
 
 export function Md3Slider({
   min,
@@ -27,6 +28,15 @@ export function Md3Slider({
   const [localValue, setLocalValue] = useState(value);
   const lastPropsValue = useRef(value);
   const lastNonZeroValue = useRef(value > 0 ? value : 100);
+  const trackRootRef = useRef<HTMLDivElement>(null);
+  const thumbRef = useRef<HTMLDivElement>(null);
+  const haloRef = useRef<HTMLDivElement>(null);
+  const iconHighRef = useRef<HTMLSpanElement>(null);
+  const iconSlashRef = useRef<HTMLSpanElement>(null);
+  const lastPctRef = useRef(0);
+  const interactingRef = useRef(false);
+  const releaseRef = useRef<() => void>(() => {});
+  const firstMuteRun = useRef(true);
 
   useEffect(() => {
     if (value !== lastPropsValue.current) {
@@ -38,7 +48,84 @@ export function Md3Slider({
     }
   }, [value]);
 
-  const pct = ((localValue - min) / (max - min)) * 100;
+  const toPct = (v: number) => ((v - min) / (max - min)) * 100;
+  const isMuted = localValue === 0;
+
+  useLayoutEffect(() => {
+    const p = toPct(value);
+    lastPctRef.current = p;
+    if (trackRootRef.current) utils.set(trackRootRef.current, { '--slider-pct': p + '%' });
+    if (thumbRef.current) utils.set(thumbRef.current, { scale: 1 });
+    if (haloRef.current) utils.set(haloRef.current, { scale: 1, opacity: 0 });
+    if (iconHighRef.current) utils.set(iconHighRef.current, { opacity: isMuted ? 0 : 1, scale: isMuted ? 0.6 : 1 });
+    if (iconSlashRef.current) utils.set(iconSlashRef.current, { opacity: isMuted ? 1 : 0, scale: isMuted ? 1 : 0.6 });
+  }, []);
+
+  useEffect(() => {
+    const to = toPct(value);
+    const from = lastPctRef.current;
+    if (from === to) return;
+    lastPctRef.current = to;
+    if (interactingRef.current || prefersReducedMotion()) {
+      if (trackRootRef.current) utils.set(trackRootRef.current, { '--slider-pct': to + '%' });
+    } else if (trackRootRef.current) {
+      animate(trackRootRef.current, { '--slider-pct': [from + '%', to + '%'], ease: springs.slider });
+    }
+  }, [value, min, max]);
+
+  useEffect(() => {
+    if (firstMuteRun.current) {
+      firstMuteRun.current = false;
+      return;
+    }
+    const toHigh = { opacity: isMuted ? 0 : 1, scale: isMuted ? 0.6 : 1 };
+    const toSlash = { opacity: isMuted ? 1 : 0, scale: isMuted ? 1 : 0.6 };
+    if (prefersReducedMotion()) {
+      if (iconHighRef.current) utils.set(iconHighRef.current, toHigh);
+      if (iconSlashRef.current) utils.set(iconSlashRef.current, toSlash);
+    } else {
+      if (iconHighRef.current) animate(iconHighRef.current, { ...toHigh, duration: DUR.micro, ease: EASE_OUT });
+      if (iconSlashRef.current) animate(iconSlashRef.current, { ...toSlash, duration: DUR.micro, ease: EASE_OUT });
+    }
+  }, [isMuted]);
+
+  const grab = () => {
+    interactingRef.current = true;
+    if (prefersReducedMotion()) {
+      if (thumbRef.current) utils.set(thumbRef.current, { scale: 1.25 });
+      if (haloRef.current) utils.set(haloRef.current, { scale: 2.4, opacity: 0.16 });
+      return;
+    }
+    if (thumbRef.current) animate(thumbRef.current, { scale: 1.25, ease: springs.press });
+    if (haloRef.current) animate(haloRef.current, { scale: 2.4, opacity: 0.16, duration: DUR.micro, ease: EASE_OUT });
+  };
+
+  const release = () => {
+    interactingRef.current = false;
+    if (prefersReducedMotion()) {
+      if (thumbRef.current) utils.set(thumbRef.current, { scale: 1 });
+      if (haloRef.current) utils.set(haloRef.current, { scale: 1, opacity: 0 });
+      return;
+    }
+    if (thumbRef.current) animate(thumbRef.current, { scale: 1, ease: springs.press });
+    if (haloRef.current) animate(haloRef.current, { scale: 1, opacity: 0, duration: DUR.micro, ease: EASE_OUT });
+  };
+
+  useEffect(() => {
+    releaseRef.current = release;
+  });
+
+  useEffect(() => {
+    const handleUp = () => {
+      if (interactingRef.current) releaseRef.current();
+    };
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+    return () => {
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+    };
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = Number(e.target.value);
@@ -46,6 +133,9 @@ export function Md3Slider({
     if (val > 0) {
       lastNonZeroValue.current = val;
     }
+    const p = toPct(val);
+    lastPctRef.current = p;
+    if (trackRootRef.current) utils.set(trackRootRef.current, { '--slider-pct': p + '%' });
     onChange(val);
   };
 
@@ -80,27 +170,60 @@ export function Md3Slider({
         {showMuteButton && (
           <button
             onClick={handleMuteClick}
-            className="text-textMuted hover:text-white transition-all duration-200 flex items-center justify-center w-10 h-10 rounded-xl bg-surface/50"
+            className="relative text-textMuted hover:text-white transition-all duration-200 flex items-center justify-center w-10 h-10 rounded-xl bg-surface/50"
           >
-            {localValue === 0 ? (
-              <SpeakerSlash weight="bold" size={20} className="text-danger" />
-            ) : (
+            <span ref={iconHighRef} className="absolute inset-0 flex items-center justify-center">
               <SpeakerHigh weight="bold" size={20} className="text-white" />
-            )}
+            </span>
+            <span ref={iconSlashRef} className="absolute inset-0 flex items-center justify-center">
+              <SpeakerSlash weight="bold" size={20} className="text-danger" />
+            </span>
           </button>
         )}
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={localValue}
-          onChange={handleChange}
-          onMouseUp={handleDragEnd}
-          onTouchEnd={handleDragEnd}
-          className="md3-range w-full"
-          style={{ '--slider-pct': `${pct}%` } as React.CSSProperties}
-        />
+        <div
+          ref={trackRootRef}
+          className="relative w-full h-10"
+        >
+          <div
+            className="absolute left-0 right-0 rounded-full"
+            style={{
+              top: '50%',
+              height: 4,
+              marginTop: -2,
+              background:
+                'linear-gradient(to right, rgb(var(--z-primary)) var(--slider-pct, 0%), rgba(255,255,255,0.08) var(--slider-pct, 0%))',
+              pointerEvents: 'none'
+            }}
+          />
+          <div
+            className="absolute w-5 h-5"
+            style={{ left: 'var(--slider-pct, 0%)', top: '50%', marginLeft: -10, marginTop: -10, pointerEvents: 'none' }}
+          >
+            <div
+              ref={haloRef}
+              className="absolute inset-0 rounded-full"
+              style={{ background: 'rgb(var(--z-primary))', opacity: 0, pointerEvents: 'none', willChange: 'transform, opacity' }}
+            />
+            <div
+              ref={thumbRef}
+              className="absolute inset-0 rounded-full"
+              style={{ background: 'rgb(var(--z-primary))', pointerEvents: 'none', willChange: 'transform' }}
+            />
+          </div>
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={localValue}
+            onChange={handleChange}
+            onMouseUp={handleDragEnd}
+            onTouchEnd={handleDragEnd}
+            onPointerDown={grab}
+            aria-label={label || undefined}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 m-0"
+          />
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Sliders, Sparkle } from '@phosphor-icons/react';
 import { Md3Switch } from '../Shared/Md3Switch';
@@ -9,6 +9,7 @@ import {
   webrtc,
   type SmartNoiseModel
 } from '../../services/webrtc';
+import { animate, utils, springs, EASE, EASE_OUT, DUR, prefersReducedMotion } from '../../lib/anime';
 
 export type NoiseSuppressionMode = 'smart' | 'manual';
 export type CalibrationPhase = 'idle' | 'preparing' | 'voice' | 'checking';
@@ -71,12 +72,36 @@ export function NoiseSuppressionSettings({
 }: NoiseSuppressionSettingsProps) {
   const { t } = useTranslation();
   const [internalMicLevelDb, setInternalMicLevelDb] = useState(-100);
+  const phraseRef = useRef<HTMLSpanElement>(null);
+  const checkRef = useRef<SVGSVGElement>(null);
+  const ringRef = useRef<HTMLSpanElement>(null);
 
   const needsMeter = isEnabled && mode === 'manual';
   useEffect(() => {
     if (!needsMeter || externalMicLevel !== undefined) return;
     return webrtc.subscribeMicLevel(setInternalMicLevelDb);
   }, [needsMeter, externalMicLevel]);
+
+  useEffect(() => {
+    const el = phraseRef.current;
+    if (!el || !isCalibrating) return;
+    if (prefersReducedMotion()) {
+      utils.set(el, { opacity: 1, translateY: 0 });
+      return;
+    }
+    animate(el, { opacity: [0, 1], translateY: [5, 0], duration: DUR.base, ease: EASE });
+  }, [calibrationPhase, calibrationCountdown, isCalibrating]);
+
+  useEffect(() => {
+    if (!calibrationSuccess) return;
+    if (checkRef.current) {
+      if (prefersReducedMotion()) utils.set(checkRef.current, { scale: 1, rotate: 0, opacity: 0.2 });
+      else animate(checkRef.current, { scale: [0, 1], rotate: [-45, 0], opacity: [0, 0.2], ease: springs.pop });
+    }
+    if (ringRef.current && !prefersReducedMotion()) {
+      animate(ringRef.current, { scale: [0.6, 1.3], opacity: [0.5, 0], duration: 520, ease: EASE_OUT });
+    }
+  }, [calibrationSuccess]);
 
   const micLevelDb = Math.max(-100, Math.min(0, externalMicLevel ?? internalMicLevelDb));
   const threshold = Math.max(MIN_THRESHOLD_DB, Math.min(MAX_THRESHOLD_DB, manualThreshold));
@@ -308,12 +333,13 @@ export function NoiseSuppressionSettings({
                       {isCalibrating ? (
                         <div className="flex items-center justify-center gap-2">
                           <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-primaryText border-t-transparent" />
-                          <span className="text-center leading-snug">{calibrationText}</span>
+                          <span ref={phraseRef} className="text-center leading-snug" style={{ willChange: 'transform, opacity' }}>{calibrationText}</span>
                         </div>
                       ) : calibrationSuccess ? (
                         <>
+                          <span ref={ringRef} className="pointer-events-none absolute inset-0 m-auto h-9 w-9 rounded-full bg-primaryHover/40" style={{ opacity: 0, willChange: 'transform, opacity' }} />
                           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                            <Check size={52} weight="bold" className="animate-checkmark-pop text-primaryHover" />
+                            <Check ref={checkRef} size={52} weight="bold" className="text-primaryHover" style={{ opacity: 0, willChange: 'transform, opacity' }} />
                           </div>
                           <span className="relative z-10 font-bold tracking-wide text-white">{t('settings.audio.calibrationSuccess', 'успешно')}</span>
                         </>

@@ -137,7 +137,10 @@
     "encryption": "шифрование",
     "information": "информация о чате",
     "retentionHint": "чаты очищаются каждые 14 дней",
-    "encryptionHint": "защищено сквозным шифрованием"
+    "encryptionHint": "защищено сквозным шифрованием",
+    "routeP2p": "прямое p2p-соединение",
+    "routeTurn": "защищённый turn-шлюз",
+    "routeRelay": "серверная доставка (текст)"
   },
   "auth": {
     "login": "логин",
@@ -157,7 +160,17 @@
     "cropTitle": "обрезка аватара",
     "captcha": "код с картинки",
     "captchaPlaceholder": "символы",
-    "refreshCaptcha": "обновить"
+    "refreshCaptcha": "обновить",
+    "stepLogin": "логин",
+    "stepConfirm": "подтверждение",
+    "stepSetup": "профиль"
+  },
+  "titlebar": {
+    "wordmark": "zabor",
+    "minimize": "свернуть",
+    "maximize": "развернуть",
+    "restore": "восстановить",
+    "close": "закрыть"
   },
   "main": {
     "tabs": {
@@ -269,6 +282,8 @@
       "whatsNew": "что нового",
       "noNotes": "вышла новая версия zabor с улучшениями и исправлениями.",
       "downloading": "скачивание обновления...",
+      "downloadingTitle": "скачиваю обновление",
+      "downloadingDesc": "загружаю новую версию. пожалуйста, не закрывайте окно.",
       "downloadedTitle": "обновление готово к установке",
       "downloadedDesc": "zabor закроется и запустит установщик.",
       "installingTitle": "устанавливаю обновление",

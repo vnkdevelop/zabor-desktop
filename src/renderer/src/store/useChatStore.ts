@@ -2,11 +2,14 @@ import { create } from 'zustand';
 import { deleteMessage, loadConversation, pruneExpired, saveMessage } from '../chat/chatDb';
 import type { ChatMessage } from '../chat/types';
 
+export type ChatRoute = 'p2p' | 'turn' | 'signalr' | 'unknown';
+
 interface ChatState {
   selectedFriendId: string | null;
   messages: Record<string, ChatMessage[]>;
   loaded: Record<string, boolean>;
   connections: Record<string, boolean>;
+  routes: Record<string, ChatRoute>;
   unread: Record<string, boolean>;
   selectFriend: (friendId: string | null) => void;
   markUnread: (friendId: string) => void;
@@ -17,6 +20,7 @@ interface ChatState {
   updateDeliveries: (ownerId: string, friendId: string, messageIds: string[], delivery: ChatMessage['delivery']) => Promise<void>;
   remove: (ownerId: string, friendId: string, messageId: string) => Promise<void>;
   setConnection: (friendId: string, connected: boolean) => void;
+  setRoute: (friendId: string, route: ChatRoute) => void;
   cleanup: (ownerId: string) => Promise<void>;
   reset: () => void;
 }
@@ -32,6 +36,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
   loaded: {},
   connections: {},
+  routes: {},
   unread: {},
   selectFriend: selectedFriendId => set(state => {
     const clearsUnread = Boolean(selectedFriendId) && state.unread[selectedFriendId!] === true;
@@ -95,6 +100,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setConnection: (friendId, connected) => set(state => (state.connections[friendId] ?? false) === connected
     ? state
     : { connections: { ...state.connections, [friendId]: connected } }),
+  setRoute: (friendId, route) => set(state => (state.routes[friendId] ?? 'unknown') === route
+    ? state
+    : { routes: { ...state.routes, [friendId]: route } }),
   cleanup: async ownerId => {
     await pruneExpired(ownerId);
     set(state => {
@@ -104,6 +112,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   reset: () => {
     inFlightLoads.clear();
-    set({ selectedFriendId: null, messages: {}, loaded: {}, connections: {}, unread: {} });
+    set({ selectedFriendId: null, messages: {}, loaded: {}, connections: {}, routes: {}, unread: {} });
   }
 }));

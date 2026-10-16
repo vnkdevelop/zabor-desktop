@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { X, Desktop, AppWindow, Camera, Check } from '@phosphor-icons/react'
 import { useTranslation } from 'react-i18next'
-import { motion, AnimatePresence } from 'framer-motion'
+import { animate, play, utils, spring, EASE, DUR, prefersReducedMotion } from '../../lib/anime'
+import { usePresence } from '../../hooks/usePresence'
 
 interface Source {
   id: string
@@ -24,6 +25,90 @@ const cleanName = (srcName: string, index: number, isScreen: boolean, screenLabe
     return parts[parts.length - 1].trim()
   }
   return srcName.trim()
+}
+
+const PairSettings = ({
+  show,
+  includeAudio,
+  onToggleAudio,
+  quality,
+  onSetQuality
+}: {
+  show: boolean
+  includeAudio: boolean
+  onToggleAudio: (checked: boolean) => void
+  quality: 'low' | 'high'
+  onSetQuality: (next: 'low' | 'high') => void
+}) => {
+  const { t } = useTranslation()
+  const indicatorRef = useRef<HTMLDivElement>(null)
+  const { mounted, ref } = usePresence(show, {
+    onEnter: (el) => play(el, { opacity: [0, 1], translateY: [6, 0], duration: DUR.base, ease: EASE }),
+    onExit: (el) => play(el, { opacity: [1, 0], translateY: [0, 6], duration: 160, ease: EASE })
+  })
+
+  useLayoutEffect(() => {
+    const el = indicatorRef.current
+    if (!el) return
+    const to = quality === 'low' ? '0%' : '100%'
+    if (prefersReducedMotion()) {
+      utils.set(el, { translateX: to })
+      return
+    }
+    animate(el, { translateX: to, ease: spring({ stiffness: 300, damping: 22 }) })
+  }, [quality, mounted])
+
+  if (!mounted) return null
+
+  return (
+    <div ref={ref} style={{ willChange: 'transform, opacity' }} className="overflow-hidden">
+      <div className="bg-black/35 border border-[#303035]/70 rounded-2xl p-4 flex flex-col gap-3 my-0.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-textMuted tracking-[0.14em]">
+            {t('stream.shareAudio', 'передавать звук?')}
+          </span>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeAudio}
+              onChange={(e) => onToggleAudio(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-8 h-5 bg-white/[0.06] border border-[#303035]/70 rounded-full relative transition-colors peer-checked:bg-primaryHover peer-checked:border-primaryHover after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#303035] after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:after:translate-x-3 peer-checked:after:bg-white" />
+          </label>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-textMuted tracking-[0.14em]">
+            {t('stream.quality', 'качество')}
+          </span>
+          <div className="flex items-center bg-white/[0.06] border border-[#303035]/70 rounded-full p-1 relative shrink-0 w-28 h-8">
+            <button
+              type="button"
+              onClick={() => onSetQuality('low')}
+              className={`flex-1 flex items-center justify-center h-full rounded-full text-xs font-bold z-10 transition-all duration-200 ${quality === 'low' ? 'text-white' : 'text-textMuted hover:text-white'
+                }`}
+            >
+              {t('stream.qualityLow', 'low')}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSetQuality('high')}
+              className={`flex-1 flex items-center justify-center h-full rounded-full text-xs font-bold z-10 transition-all duration-200 ${quality === 'high' ? 'text-white' : 'text-textMuted hover:text-white'
+                }`}
+            >
+              {t('stream.qualityHigh', 'high')}
+            </button>
+            <div
+              ref={indicatorRef}
+              style={{ willChange: 'transform' }}
+              className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] bg-primaryHover rounded-full"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
@@ -257,65 +342,13 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
                     {pair.length === 1 && <div />}
                   </div>
 
-                  <AnimatePresence initial={false}>
-                    {isSelectedInPair && !selectedSourceId?.startsWith('camera:') && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-                        className="overflow-hidden"
-                      >
-                        <div className="bg-black/35 border border-[#303035]/70 rounded-2xl p-4 flex flex-col gap-3 my-0.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-textMuted tracking-[0.14em]">
-                              {t('stream.shareAudio', 'передавать звук?')}
-                            </span>
-                            <label className="flex items-center gap-2 cursor-pointer select-none">
-                              <input
-                                type="checkbox"
-                                checked={includeAudio}
-                                onChange={(e) => setIncludeAudio(e.target.checked)}
-                                className="sr-only peer"
-                              />
-                              <div className="w-8 h-5 bg-white/[0.06] border border-[#303035]/70 rounded-full relative transition-colors peer-checked:bg-primaryHover peer-checked:border-primaryHover after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#303035] after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:after:translate-x-3 peer-checked:after:bg-white" />
-                            </label>
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-textMuted tracking-[0.14em]">
-                              {t('stream.quality', 'качество')}
-                            </span>
-                            <div className="flex items-center bg-white/[0.06] border border-[#303035]/70 rounded-full p-1 relative shrink-0 w-28 h-8">
-                              <button
-                                type="button"
-                                onClick={() => setQuality('low')}
-                                className={`flex-1 flex items-center justify-center h-full rounded-full text-xs font-bold z-10 transition-all duration-200 ${quality === 'low' ? 'text-white' : 'text-textMuted hover:text-white'
-                                  }`}
-                              >
-                                {t('stream.qualityLow', 'low')}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setQuality('high')}
-                                className={`flex-1 flex items-center justify-center h-full rounded-full text-xs font-bold z-10 transition-all duration-200 ${quality === 'high' ? 'text-white' : 'text-textMuted hover:text-white'
-                                  }`}
-                              >
-                                {t('stream.qualityHigh', 'high')}
-                              </button>
-                              <div
-                                style={{
-                                  transform: quality === 'low' ? 'translateX(0)' : 'translateX(100%)',
-                                  willChange: 'transform'
-                                }}
-                                className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] bg-primaryHover rounded-full transition-transform duration-200 ease-out"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  <PairSettings
+                    show={isSelectedInPair && !selectedSourceId?.startsWith('camera:')}
+                    includeAudio={includeAudio}
+                    onToggleAudio={setIncludeAudio}
+                    quality={quality}
+                    onSetQuality={setQuality}
+                  />
                 </div>
               )
             })}

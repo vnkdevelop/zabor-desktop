@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, SpeakerSlash, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck, Desktop, CornersIn, CornersOut, Sparkle, Trash, ArrowsClockwise, ChatCircle } from '@phosphor-icons/react';
+import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, SpeakerSlash, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck, Desktop, CornersIn, CornersOut, Sparkle, Trash, ArrowsClockwise, ChatCircle, Info } from '@phosphor-icons/react';
 import { useTranslation, Trans } from 'react-i18next';
 
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
@@ -24,10 +24,13 @@ import { StreamCard } from './components/Stream/StreamCard';
 import { NoiseSuppressionSettings, type CalibrationPhase, type SmartNoiseModel } from './components/Settings/NoiseSuppressionSettings';
 import { MIC_TEST_PANEL_GAP_PX, MicTestPanel } from './components/Settings/MicTestPanel';
 import { UpdateModal } from './components/Modals/UpdateModal';
+import { UpdateProgressOverlay } from './components/Modals/UpdateProgressOverlay';
 import { ChatPanel } from './components/Chat/ChatPanel';
 import { ActiveSessionPip } from './components/Chat/ActiveSessionPip';
 import { chatPeer } from './services/chatPeer';
 import { useChatStore } from './store/useChatStore';
+import { animate, play, enter, createTimeline, stagger, utils, springs, EASE, EASE_OUT, EASE_IN, DUR, prefersReducedMotion, spring } from './lib/anime';
+import { usePresence } from './hooks/usePresence';
 
 const lastNonZeroUserVolumes = new Map<string, number>();
 const lastNonZeroVolumes = new Map<string, number>();
@@ -38,6 +41,71 @@ const getChannelMaxUsers = (ch?: VoiceChannel | null): number => {
   const max = ch?.maxUsers;
   return typeof max === 'number' && max > 0 ? max : DEFAULT_CHANNEL_MAX_USERS;
 };
+
+const DROP_SPRING = spring({ stiffness: 55, damping: 14, mass: 1 });
+
+function ModalOverlay({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const lastChildrenRef = useRef(children);
+  if (open) lastChildrenRef.current = children;
+  const { mounted, ref } = usePresence(open, {
+    onEnter: (el) => {
+      const panel = el.querySelector<HTMLElement>('.glass-modal');
+      if (prefersReducedMotion()) {
+        utils.set(el, { opacity: 1 });
+        if (panel) utils.set(panel, { opacity: 1, scale: 1, translateY: 0 });
+        return;
+      }
+      utils.set(el, { opacity: 0 });
+      if (panel) utils.set(panel, { opacity: 0, scale: 0.96, translateY: 8 });
+      const tl = createTimeline();
+      tl.add(el, { opacity: [0, 1], duration: DUR.slow, ease: EASE }, 0);
+      if (panel) tl.add(panel, { opacity: [0, 1], scale: [0.96, 1], translateY: [8, 0], duration: DUR.slow, ease: EASE }, 0);
+    },
+    onExit: (el) => {
+      const panel = el.querySelector<HTMLElement>('.glass-modal');
+      return Promise.all([
+        play(el, { opacity: [1, 0], duration: 160, ease: EASE }),
+        panel ? play(panel, { opacity: [1, 0], scale: [1, 0.97], duration: 160, ease: EASE }) : Promise.resolve(),
+      ]).then(() => undefined);
+    },
+  });
+  if (!mounted) return null;
+  return (
+    <div ref={ref} className="fixed inset-0 z-[100000] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 pt-[3.75rem]" style={{ opacity: 0, willChange: 'opacity' }}>
+      {open ? children : lastChildrenRef.current}
+    </div>
+  );
+}
+
+function Toast({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const lastChildrenRef = useRef(children);
+  if (open) lastChildrenRef.current = children;
+  const { mounted, ref } = usePresence(open, {
+    onEnter: (el) => {
+      const icon = el.querySelector<HTMLElement>('[data-toast-icon]');
+      if (prefersReducedMotion()) {
+        utils.set(el, { opacity: 1, translateY: 0 });
+        if (icon) utils.set(icon, { scale: 1 });
+        return;
+      }
+      utils.set(el, { opacity: 0, translateY: 40 });
+      void play(el, { opacity: [0, 1], translateY: [40, 0], ease: springs.card });
+      if (icon) {
+        utils.set(icon, { scale: 0 });
+        void play(icon, { scale: [0, 1], ease: springs.pop, delay: 80 });
+      }
+    },
+    onExit: (el) => play(el, { opacity: [1, 0], translateY: [0, 24], duration: DUR.base, ease: 'inCubic' }),
+  });
+  if (!mounted) return null;
+  return (
+    <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000000]">
+      <div ref={ref} style={{ opacity: 0, willChange: 'transform, opacity' }}>
+        {open ? children : lastChildrenRef.current}
+      </div>
+    </div>
+  );
+}
 
 const VoiceUserCard = memo(({ user, cardSize, isIdle, t, handleContextMenu, webrtcConnections, currentUserId }: {
   user: User;
@@ -176,15 +244,72 @@ const CallUserCard = memo(({ currentCallUser, callStatus, cardSize, webrtcConnec
 });
 CallUserCard.displayName = 'CallUserCard';
 
+const SpeakingAvatar = memo(({ user, handleContextMenu }: { user: User; handleContextMenu: any }) => {
+  const isSpeaking = useSpeakingStore(state => state.speaking[user.id] ?? false);
+  return (
+    <div className="relative group flex items-center">
+      <div
+        onContextMenu={e => handleContextMenu(e, 'voiceUser', user)}
+        className={`w-12 h-12 rounded-full border-2 transition-all duration-200 overflow-hidden bg-[#121217] relative cursor-pointer ${isSpeaking ? 'border-[#3BA55C] scale-110' : 'border-[#303035]/70'
+          }`}
+      >
+        <AvatarImg src={user.avatarBase64} size={48} bgColor={user.avatarColor} animate={false} />
+      </div>
+      <div className="absolute left-14 bg-[#09090B]/90 backdrop-blur-md border border-[#303035]/80 px-3.5 py-1.5 rounded-full pointer-events-none opacity-0 -translate-x-3 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 ease-out z-50 whitespace-nowrap">
+        <span className="text-white font-bold text-[13px]">{user.displayName}</span>
+      </div>
+    </div>
+  );
+});
+SpeakingAvatar.displayName = 'SpeakingAvatar';
+
 export default function App() {
   const { t, i18n } = useTranslation();
   const store = useAppStore();
-  const speakingMap = useSpeakingStore(state => state.speaking);
 
   const [isAuth, setIsAuth] = useState(false);
   const [language, setLanguage] = useState(i18n.language || 'ru');
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'channels' | 'friends'>('channels');
+  const tabIndicatorRef = useRef<HTMLDivElement>(null);
+  const tabFillRef = useRef<HTMLDivElement>(null);
+  const tabRingRef = useRef<HTMLSpanElement>(null);
+  const tabChannelsLabelRef = useRef<HTMLSpanElement>(null);
+  const tabFriendsLabelRef = useRef<HTMLSpanElement>(null);
+  const prevTabRef = useRef(activeTab);
+  useEffect(() => {
+    const outer = tabIndicatorRef.current;
+    const fill = tabFillRef.current;
+    if (!outer || !fill) return;
+    const target = activeTab === 'friends' ? outer.offsetWidth + 4 : 0;
+    const changed = prevTabRef.current !== activeTab;
+    prevTabRef.current = activeTab;
+    if (!changed || prefersReducedMotion()) {
+      utils.set(outer, { translateX: target });
+      utils.set(fill, { scaleX: 1 });
+      if (tabRingRef.current) utils.set(tabRingRef.current, { opacity: 0 });
+      if (tabChannelsLabelRef.current) utils.set(tabChannelsLabelRef.current, { scale: 1 });
+      if (tabFriendsLabelRef.current) utils.set(tabFriendsLabelRef.current, { scale: 1 });
+      return;
+    }
+    utils.remove(outer);
+    utils.remove(fill);
+    fill.style.transformOrigin = activeTab === 'friends' ? 'right center' : 'left center';
+    utils.set(fill, { scaleX: 1 });
+    const startX = activeTab === 'friends' ? 0 : outer.offsetWidth + 4;
+    const pressX = activeTab === 'friends' ? target + 4 : target - 4;
+    animate(outer, { translateX: [startX, pressX, target], duration: 520, ease: 'outCubic' });
+    animate(fill, { scaleX: [1, 0.83, 1.04, 0.99, 1], duration: 680, delay: 70, ease: 'inOutSine' });
+    if (tabRingRef.current) {
+      utils.remove(tabRingRef.current);
+      animate(tabRingRef.current, { opacity: [0, 0.6, 0], duration: DUR.slow, ease: EASE_OUT });
+    }
+    const activeLabel = activeTab === 'friends' ? tabFriendsLabelRef.current : tabChannelsLabelRef.current;
+    if (activeLabel) {
+      utils.remove(activeLabel);
+      animate(activeLabel, { scale: [1, 1.04, 1], duration: DUR.base, ease: springs.pop });
+    }
+  }, [activeTab]);
   const [showStreamPicker, setShowStreamPicker] = useState(false);
   const [volumeType, setVolumeType] = useState<'voice' | 'stream'>('voice');
   const [showOverlays, setShowOverlays] = useState(true);
@@ -270,6 +395,16 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
+
+  useEffect(() => {
+    const s = store.updateStatus;
+    const { modals, setModal } = useAppStore.getState();
+    if (s === 'downloading' || s === 'installing') {
+      if (modals.update) setModal('update', false);
+    } else if (s === 'downloaded' || s === 'error') {
+      if (!modals.update) setModal('update', true);
+    }
+  }, [store.updateStatus]);
 
   const handleManualCheckUpdates = useCallback(async () => {
     setManualUpdateChecking(true);
@@ -418,6 +553,29 @@ export default function App() {
     type: 'channel' | 'friend' | 'voiceUser' | 'channelMember' | 'stream'; item: any;
   } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const ctxMenuSnapshotRef = useRef(contextMenu);
+  if (contextMenu?.visible) ctxMenuSnapshotRef.current = contextMenu;
+  const ctxMenuPresence = usePresence(!!contextMenu?.visible, {
+    onEnter: (el) => {
+      const rows = Array.from(el.querySelectorAll<HTMLElement>('[data-ctx-row]'));
+      if (prefersReducedMotion()) {
+        utils.set(el, { opacity: 1, translateY: 0, scale: 1 });
+        if (rows.length) utils.set(rows, { opacity: 1, translateX: 0 });
+        return;
+      }
+      utils.set(el, { opacity: 0, translateY: -6, scale: 0.96 });
+      if (rows.length) utils.set(rows, { opacity: 0, translateX: -6 });
+      const tl = createTimeline();
+      tl.add(el, { opacity: [0, 1], translateY: [-6, 0], scale: [0.96, 1], duration: DUR.base, ease: EASE_OUT }, 0);
+      if (rows.length) tl.add(rows, { opacity: [0, 1], translateX: [-6, 0], duration: 200, ease: EASE_OUT, delay: stagger(26) }, 40);
+    },
+    onExit: (el) => play(el, { opacity: [1, 0], scale: [1, 0.96], duration: DUR.micro, ease: EASE }),
+  });
+  const setContextMenuRef = useCallback((el: HTMLDivElement | null) => {
+    contextMenuRef.current = el;
+    (ctxMenuPresence.ref as React.MutableRefObject<HTMLDivElement | null>).current = el;
+  }, [ctxMenuPresence.ref]);
+  const ctxMenuData = contextMenu ?? ctxMenuSnapshotRef.current;
   const [showInvitesPanel, setShowInvitesPanel] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'general' | 'audio' | 'privacy'>('general');
   const [relayOnlyIce, setRelayOnlyIce] = useState(() => webrtc.isRelayOnlyIce());
@@ -555,10 +713,71 @@ export default function App() {
   const attemptAutoLoginRef = useRef<() => void>(() => { });
   const loginInputRef = useRef<HTMLInputElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
+  const authOverlayRef = useRef<HTMLDivElement>(null);
+  const authCardRef = useRef<HTMLDivElement>(null);
+  const authErrorRef = useRef<HTMLParagraphElement>(null);
+  const prevAuthStepRef = useRef<'login' | 'confirm' | 'setup' | null>(null);
+  const prevAuthErrorRef = useRef<string>('');
+  useEffect(() => {
+    if (isAuth) return;
+    const overlay = authOverlayRef.current;
+    const card = authCardRef.current;
+    if (overlay) void play(overlay, { opacity: [0, 1], duration: DUR.base, ease: EASE });
+    if (card) {
+      void enter(card, { y: 16, scale: 0.96, duration: 500 });
+      const kids = Array.from(card.children) as HTMLElement[];
+      if (kids.length) {
+        if (prefersReducedMotion()) utils.set(kids, { opacity: 1, translateY: 0 });
+        else {
+          utils.set(kids, { opacity: 0, translateY: 8 });
+          animate(kids, { opacity: [0, 1], translateY: [8, 0], duration: DUR.slow, ease: EASE, delay: stagger(60, { start: 260 }) });
+        }
+      }
+    }
+  }, [isAuth]);
+  useLayoutEffect(() => {
+    const card = authCardRef.current;
+    const prev = prevAuthStepRef.current;
+    prevAuthStepRef.current = authStep;
+    if (prev === null || prev === authStep || !card) return;
+    const order = ['login', 'confirm', 'setup'];
+    const dir = order.indexOf(authStep) > order.indexOf(prev) ? 24 : -24;
+    if (prefersReducedMotion()) { utils.set(card, { translateX: 0, opacity: 1 }); return; }
+    utils.set(card, { translateX: dir, opacity: 0 });
+    void play(card, { translateX: [dir, 0], opacity: [0, 1], duration: DUR.base, ease: EASE });
+  }, [authStep]);
+  useEffect(() => {
+    const el = authErrorRef.current;
+    const prev = prevAuthErrorRef.current;
+    prevAuthErrorRef.current = error;
+    if (!error || error === prev) return;
+    if (el) {
+      if (prefersReducedMotion()) utils.set(el, { opacity: 1, translateY: 0 });
+      else { utils.set(el, { opacity: 0, translateY: -6 }); void play(el, { opacity: [0, 1], translateY: [-6, 0], duration: DUR.base, ease: EASE }); }
+    }
+    const card = authCardRef.current;
+    if (card && !prefersReducedMotion()) animate(card, { translateX: [0, -8, 8, -6, 6, 0], duration: 400, ease: EASE_OUT });
+  }, [error]);
 
   const [controlsShake, setControlsShake] = useState(false);
   const [adminBlockToast, setAdminBlockToast] = useState<string | null>(null);
   const adminBlockTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const adminBlockRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = adminBlockRef.current;
+    if (!el) return;
+    const hiding = adminBlockToast === '__hiding__';
+    if (prefersReducedMotion()) {
+      utils.set(el, { translateX: '-50%', translateY: hiding ? '-110%' : '0%', opacity: hiding ? 0 : 1 });
+      return;
+    }
+    if (hiding) {
+      void play(el, { translateX: ['-50%', '-50%'], translateY: ['0%', '-110%'], opacity: [1, 0], duration: DUR.base, ease: 'inCubic' });
+    } else {
+      utils.remove(el);
+      animate(el, { translateX: ['-50%', '-50%'], translateY: ['-110%', '0%'], opacity: [0, 1], ease: DROP_SPRING });
+    }
+  }, [adminBlockToast]);
   const settingsRef = useRef({
     inputVolume: 100, outputVolume: 100,
     selectedInput: 'default', selectedOutput: 'default',
@@ -715,6 +934,7 @@ export default function App() {
     setSelectedInput(normalizedInput);
     if (webrtc.isUltraLowLatency()) {
       setNoiseSuppression(false);
+      webrtc.setNoiseSuppression(false);
       try {
         const raw = localStorage.getItem('zabor_pre_ultra_low_settings');
         const prev = raw ? JSON.parse(raw) : {};
@@ -722,7 +942,9 @@ export default function App() {
         localStorage.setItem('zabor_pre_ultra_low_settings', JSON.stringify(prev));
       } catch { }
     } else {
-      setNoiseSuppression(s.noiseSuppression ?? true);
+      const ns = s.noiseSuppression ?? true;
+      setNoiseSuppression(ns);
+      webrtc.setNoiseSuppression(ns);
     }
 
     const mode = s.micThresholdMode ?? 'auto';
@@ -1920,9 +2142,10 @@ export default function App() {
     const currentStore = useAppStore.getState();
     const requestId = ++membersRequestIdRef.current;
     currentStore.setSelectedChannelForMembers(ch);
-    currentStore.setChannelMembers(currentStore.channelMembersCache[ch.id] || []);
+    const cached = currentStore.channelMembersCache[ch.id];
+    currentStore.setChannelMembers(cached || []);
     currentStore.setModal('channelMembers', true);
-    setIsChannelMembersLoading(true);
+    setIsChannelMembersLoading(!cached);
 
     try {
       const members = await signalRService.getChannelMembersList(ch.id);
@@ -1943,7 +2166,18 @@ export default function App() {
     const requestId = ++inviteRequestIdRef.current;
     const currentStore = useAppStore.getState();
     currentStore.setSelectedChannelForInvite(ch);
-    setInviteLoadingChannelId(ch.id);
+
+    const cached = currentStore.channelMembersCache[ch.id];
+    if (cached) {
+      if (cached.length >= getChannelMaxUsers(ch)) {
+        currentStore.setModal('channelInviteFull', true);
+        return;
+      }
+      currentStore.setModal('inviteToChannel', true);
+    } else {
+      setInviteLoadingChannelId(ch.id);
+    }
+
     try {
       const members = await signalRService.getChannelMembersList(ch.id);
       if (requestId !== inviteRequestIdRef.current || !Array.isArray(members)) return;
@@ -1951,10 +2185,13 @@ export default function App() {
       if (latestStore.currentChannelId !== ch.id) return;
       latestStore.setChannelMembersCache(ch.id, members);
       if (members.length >= getChannelMaxUsers(ch)) {
+        latestStore.setModal('inviteToChannel', false);
         latestStore.setModal('channelInviteFull', true);
         return;
       }
-      latestStore.setModal('inviteToChannel', true);
+      if (!cached) {
+        latestStore.setModal('inviteToChannel', true);
+      }
     } catch (error) {
       console.error('Failed to prepare channel invite list', error);
     } finally {
@@ -2075,12 +2312,17 @@ export default function App() {
   const handleContextMenu = useCallback((e: React.MouseEvent, type: 'channel' | 'friend' | 'voiceUser' | 'channelMember' | 'stream', item: any) => {
     e.preventDefault();
     if ((type === 'voiceUser' || type === 'channelMember' || type === 'stream') && item.id === store.currentUser?.id) return;
+    if (type === 'channelMember') {
+      const canInvite = store.currentChannelId === store.selectedChannelForMembers?.id;
+      const canKick = store.selectedChannelForMembers?.ownerId === store.currentUser?.id;
+      if (!canInvite && !canKick) return;
+    }
     const menuWidth = 192;
     const menuHeight = 180;
     const x = Math.max(8, Math.min(e.clientX, window.innerWidth - menuWidth - 8));
     const y = Math.max(8, Math.min(e.clientY, window.innerHeight - menuHeight - 8));
     setContextMenu({ visible: true, x, y, type, item });
-  }, [store.currentUser?.id]);
+  }, [store.currentUser?.id, store.currentChannelId, store.selectedChannelForMembers?.id, store.selectedChannelForMembers?.ownerId]);
 
   const loadDevices = useCallback(async () => {
     try {
@@ -2295,12 +2537,10 @@ export default function App() {
   }, []);
 
   const renderModal = useCallback((key: keyof typeof store.modals, content: React.ReactNode) => {
-    if (!store.modals[key]) return null;
-
     return (
-      <div className="fixed inset-0 z-[100000] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 pt-[3.75rem]">
+      <ModalOverlay open={store.modals[key]}>
         {content}
-      </div>
+      </ModalOverlay>
     );
   }, [store.modals]);
 
@@ -2428,11 +2668,11 @@ export default function App() {
     <>
       <div id="mouse-glow" />
       {!isAuth && (
-        <div className="fixed inset-0 z-[100000] flex flex-col bg-appBg text-textMain animate-fade-in select-none">
+        <div ref={authOverlayRef} className="fixed inset-0 z-[100000] flex flex-col bg-appBg text-textMain select-none" style={{ opacity: 0, willChange: 'opacity' }}>
           <TitleBar />
           <div className="flex-1 flex items-center justify-center p-4">
             {authStep === 'login' && (
-              <div className="glass-modal p-10 w-[400px] flex flex-col">
+              <div ref={authCardRef} className="glass-modal p-10 w-[400px] flex flex-col">
                 <h1 className="text-4xl font-black text-center mb-8 tracking-wider text-white">zabor</h1>
                 <label className="text-xs font-bold text-textMuted mb-2 tracking-wider">{t('auth.login')}</label>
                 <input
@@ -2464,12 +2704,12 @@ export default function App() {
                     {showPassword ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}
                   </button>
                 </div>
-                {error && <p className="text-danger text-sm mb-4 text-center font-medium">{error}</p>}
+                {error && <p ref={authErrorRef} className="text-danger text-sm mb-4 text-center font-medium">{error}</p>}
                 <button onClick={handleAuth} disabled={isLoading} className="bg-primary/90 text-white font-bold py-3 rounded-xl disabled:opacity-50 hover:opacity-90 transition-opacity">{isLoading ? t('auth.loading') : t('auth.continue')}</button>
               </div>
             )}
             {authStep === 'confirm' && (
-              <div className="glass-modal p-8 w-[400px] text-center">
+              <div ref={authCardRef} className="glass-modal p-8 w-[400px] text-center">
                 <h2 className="text-2xl font-bold mb-4 text-white">{t('auth.accountNotFound')}</h2>
                 <p className="text-textMuted mb-8">{t('auth.createNewProfile')}</p>
                 <div className="flex gap-4">
@@ -2479,7 +2719,7 @@ export default function App() {
               </div>
             )}
             {authStep === 'setup' && (
-              <div className="glass-modal p-8 w-[400px] flex flex-col">
+              <div ref={authCardRef} className="glass-modal p-8 w-[400px] flex flex-col">
                 <h1 className="text-2xl font-bold text-center mb-1 text-white">{t('auth.createProfile')}</h1>
                 <p className="text-sm text-textMuted text-center mb-5">{t('auth.howOthersSeeYou')}</p>
                 <label className="w-[88px] h-[88px] rounded-full mx-auto mb-5 flex items-center justify-center cursor-pointer relative hover:opacity-80 transition-opacity">
@@ -2521,7 +2761,7 @@ export default function App() {
                     <ArrowsClockwise weight="bold" size={16} className={`text-textMuted group-hover:text-white transition-colors shrink-0 ${isCaptchaLoading ? 'animate-spin text-primary' : ''}`} />
                   </div>
                 </div>
-                {error && <p className="text-danger text-sm mb-4 text-center font-medium">{error}</p>}
+                {error && <p ref={authErrorRef} className="text-danger text-sm mb-4 text-center font-medium">{error}</p>}
                 <button onClick={handleAuth} disabled={isLoading} className="bg-primary/90 text-white font-bold py-3 rounded-xl disabled:opacity-50 hover:opacity-90 active:scale-[0.98] transition-all">{isLoading ? t('auth.creating') : t('auth.create')}</button>
               </div>
             )}
@@ -2752,18 +2992,28 @@ export default function App() {
                 </div>
 
                 <div className="bg-white/[0.045] rounded-full mx-4 my-2 p-1 flex relative shrink-0">
-                  <button onClick={() => { selectChatFriend(null); setActiveTab('channels'); }} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}>{t('main.tabs.channels')}</button>
+                  <button onClick={() => { selectChatFriend(null); setActiveTab('channels'); }} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${activeTab === 'channels' ? 'text-white' : 'text-textMuted hover:text-white'}`}><span ref={tabChannelsLabelRef} className="inline-block" style={{ willChange: 'transform' }}>{t('main.tabs.channels')}</span></button>
                   <button onClick={() => setActiveTab('friends')} className={`flex-1 py-2.5 rounded-full font-bold text-sm z-10 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 ${activeTab === 'friends' ? 'text-white' : 'text-textMuted hover:text-white'}`}>
-                    <span>{t('main.tabs.friends')}</span>
+                    <span ref={tabFriendsLabelRef} className="inline-block" style={{ willChange: 'transform' }}>{t('main.tabs.friends')}</span>
                     {hasUnreadChats && <span className="w-2 h-2 rounded-full bg-primary shrink-0" />}
                   </button>
                   <div
-                    style={{
-                      transform: activeTab === 'channels' ? 'translateX(0)' : 'translateX(calc(100% + 4px))',
-                      willChange: 'transform'
-                    }}
-                    className="absolute top-1 bottom-1 left-1 w-[calc(50%-6px)] bg-white/[0.09] rounded-full transition-transform duration-300 ease-out"
-                  />
+                    ref={tabIndicatorRef}
+                    className="absolute top-1 bottom-1 left-1 w-[calc(50%-6px)] pointer-events-none"
+                    style={{ willChange: 'transform' }}
+                  >
+                    <div
+                      ref={tabFillRef}
+                      className="relative w-full h-full bg-white/[0.09] rounded-full border border-primary/40"
+                      style={{ willChange: 'transform' }}
+                    >
+                      <span
+                        ref={tabRingRef}
+                        className="absolute inset-0 rounded-full border border-primary pointer-events-none"
+                        style={{ opacity: 0 }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -2930,23 +3180,9 @@ export default function App() {
                         </div>
 
                         <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${showOverlays ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
-                          {callUsersList.map(user => {
-                            const isSpeaking = speakingMap[user.id] ?? false;
-                            return (
-                              <div key={user.id} className="relative group flex items-center">
-                                <div
-                                  onContextMenu={e => handleContextMenu(e, 'voiceUser', user)}
-                                  className={`w-12 h-12 rounded-full border-2 transition-all duration-200 overflow-hidden bg-[#121217] relative cursor-pointer ${isSpeaking ? 'border-[#3BA55C] scale-110' : 'border-[#303035]/70'
-                                    }`}
-                                >
-                                  <AvatarImg src={user.avatarBase64} size={48} bgColor={user.avatarColor} animate={false} />
-                                </div>
-                                <div className="absolute left-14 bg-[#09090B]/90 backdrop-blur-md border border-[#303035]/80 px-3.5 py-1.5 rounded-full pointer-events-none opacity-0 -translate-x-3 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 ease-out z-50 whitespace-nowrap">
-                                  <span className="text-white font-bold text-[13px]">{user.displayName}</span>
-                                </div>
-                              </div>
-                            );
-                          })}
+                          {callUsersList.map(user => (
+                            <SpeakingAvatar key={user.id} user={user} handleContextMenu={handleContextMenu} />
+                          ))}
                         </div>
 
                         <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${showOverlays ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}>
@@ -3217,23 +3453,9 @@ export default function App() {
                         </div>
 
                         <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${showOverlays ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
-                          {sorted.map(user => {
-                            const isSpeaking = speakingMap[user.id] ?? false;
-                            return (
-                              <div key={user.id} className="relative group flex items-center">
-                                <div
-                                  onContextMenu={e => handleContextMenu(e, 'voiceUser', user)}
-                                  className={`w-12 h-12 rounded-full border-2 transition-all duration-200 overflow-hidden bg-[#121217] relative cursor-pointer ${isSpeaking ? 'border-[#3BA55C] scale-110' : 'border-[#303035]/70'
-                                    }`}
-                                >
-                                  <AvatarImg src={user.avatarBase64} size={48} bgColor={user.avatarColor} animate={false} />
-                                </div>
-                                <div className="absolute left-14 bg-[#09090B]/90 backdrop-blur-md border border-[#303035]/80 px-3.5 py-1.5 rounded-full pointer-events-none opacity-0 -translate-x-3 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 ease-out z-50 whitespace-nowrap">
-                                  <span className="text-white font-bold text-[13px]">{user.displayName}</span>
-                                </div>
-                              </div>
-                            );
-                          })}
+                          {sorted.map(user => (
+                            <SpeakingAvatar key={user.id} user={user} handleContextMenu={handleContextMenu} />
+                          ))}
                         </div>
 
                         <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${showOverlays ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}>
@@ -3939,7 +4161,16 @@ export default function App() {
               </div>
             )}
             {store.channelMembers.map(m => (
-              <div key={m.id} onContextMenu={e => handleContextMenu(e, 'channelMember', m)} className="flex items-center gap-3 p-3 glass-row glass-row-hover rounded-xl transition-colors cursor-pointer animate-fade-in">
+              <div
+                key={m.id}
+                onClick={() => {
+                  setContextMenu(null);
+                  store.setSelectedProfileUser(m, 'channelMembers');
+                  store.setModal('profile', true);
+                }}
+                onContextMenu={e => handleContextMenu(e, 'channelMember', m)}
+                className="flex items-center gap-3 p-3 glass-row glass-row-hover rounded-xl transition-colors cursor-pointer animate-fade-in"
+              >
                 <div className="relative w-[47px] h-[47px] shrink-0">
                   <AvatarImg src={m.avatarBase64} size={47} bgColor={m.avatarColor} />
                   <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-[3px] border-surface ${m.isOnline ? 'bg-success' : 'bg-gray-500'}`} />
@@ -4625,10 +4856,12 @@ export default function App() {
         <UpdateModal onClose={() => store.setModal('update', false)} />
       )}
 
-      {offlineToast && createPortal(
-        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000000] animate-toast-in">
+      <UpdateProgressOverlay />
+
+      {createPortal(
+        <Toast open={offlineToast != null}>
           <div className="bg-[#09090B]/85 backdrop-blur-2xl border border-danger/40 rounded-modal px-8 py-5 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-full bg-danger/20 flex items-center justify-center shrink-0">
+            <div data-toast-icon className="w-10 h-10 rounded-full bg-danger/20 flex items-center justify-center shrink-0" style={{ willChange: 'transform' }}>
               {offlineToast === t('toasts.noAnswer', 'не отвечает') ? (
                 <PhoneOff weight="bold" size={20} className="text-danger" />
               ) : (
@@ -4640,29 +4873,28 @@ export default function App() {
               <p className="text-danger/90 font-medium text-sm mt-0.5">{offlineToast}</p>
             </div>
           </div>
-        </div>,
+        </Toast>,
         document.body
       )}
 
-      {store.systemToast && createPortal(
-        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000000] animate-toast-in">
+      {createPortal(
+        <Toast open={store.systemToast != null}>
           <div className="bg-[#09090B]/85 backdrop-blur-2xl border border-warning/40 rounded-modal px-8 py-5 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center shrink-0">
-              <MicOff weight="bold" size={20} className="text-warning" />
+            <div data-toast-icon className="w-10 h-10 rounded-full bg-warning/20 flex items-center justify-center shrink-0" style={{ willChange: 'transform' }}>
+              <Info weight="bold" size={20} className="text-warning" />
             </div>
             <div>
               <p className="text-white font-bold text-base leading-tight">{t('toasts.notification', 'уведомление')}</p>
               <p className="text-warning/90 font-medium text-sm mt-0.5">{store.systemToast}</p>
             </div>
           </div>
-        </div>,
+        </Toast>,
         document.body
       )}
 
       {adminBlockToast && createPortal((() => {
-        const isHiding = adminBlockToast === '__hiding__';
         return (
-          <div className={`fixed top-14 left-1/2 z-[1000000] ${isHiding ? 'animate-admin-block-out' : 'animate-admin-block-in'}`}>
+          <div ref={adminBlockRef} className="fixed top-14 left-1/2 z-[1000000]" style={{ transform: 'translate(-50%, -110%)', opacity: 0, willChange: 'transform, opacity' }}>
             <div className="bg-[#09090B]/85 backdrop-blur-2xl border border-danger/50 rounded-modal px-8 py-6 flex items-center gap-5">
               <div className="w-12 h-12 rounded-2xl bg-danger/20 flex items-center justify-center shrink-0">
                 <MicOff weight="bold" size={24} className="text-danger" />
@@ -4678,64 +4910,63 @@ export default function App() {
 
       {renderCropper()}
 
-      {contextMenu?.visible && (
+      {ctxMenuPresence.mounted && ctxMenuData && (
         <div
-          ref={contextMenuRef}
-          className="fixed z-[999999] glass-sheet py-2 w-48 animate-fade-in select-none"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
+          ref={setContextMenuRef}
+          className="fixed z-[999999] glass-sheet py-2 w-48 select-none"
+          style={{ top: ctxMenuData.y, left: ctxMenuData.x, opacity: 0, transformOrigin: 'top left', willChange: 'transform, opacity' }}
           onClick={e => e.stopPropagation()}
           onContextMenu={e => e.stopPropagation()}
         >
-          {contextMenu.type === 'channel' ? (
+          {ctxMenuData.type === 'channel' ? (
             <>
-              {contextMenu.item.ownerId === store.currentUser?.id && (
-                <button onClick={() => { setEditChannelId(contextMenu.item.id); setEditChannelName(contextMenu.item.name); store.setModal('channelEdit', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Edit2 weight="bold" size={16} /> {t('contextMenu.rename', 'переименовать')}</button>
+              {ctxMenuData.item.ownerId === store.currentUser?.id && (
+                <button data-ctx-row onClick={() => { setEditChannelId(ctxMenuData.item.id); setEditChannelName(ctxMenuData.item.name); store.setModal('channelEdit', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Edit2 weight="bold" size={16} /> {t('contextMenu.rename', 'переименовать')}</button>
               )}
-              <button onClick={() => { signalRService.quitAccessChannel(contextMenu.item.id); setContextMenu(null); }} className="group w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1">
+              <button data-ctx-row onClick={() => { signalRService.quitAccessChannel(ctxMenuData.item.id); setContextMenu(null); }} className="group w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1">
                 <div className="transition-transform duration-200 group-hover:translate-x-1">
                   <LeaveIcon weight="bold" size={16} />
                 </div>
                 {t('contextMenu.leaveChannel', 'выйти из канала')}</button>
             </>
-          ) : contextMenu.type === 'channelMember' ? (
+          ) : ctxMenuData.type === 'channelMember' ? (
             <>
-              <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'channelMembers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Settings weight="bold" size={16} /> {t('contextMenu.profile', 'профиль')}</button>
-              {contextMenu.item.id !== store.currentUser?.id && store.currentChannelId === store.selectedChannelForMembers?.id && (
-                <button onClick={() => {
-                  if (sentInvites.has(contextMenu.item.id)) return;
-                  if (!contextMenu.item.isOnline) {
+              {ctxMenuData.item.id !== store.currentUser?.id && store.currentChannelId === store.selectedChannelForMembers?.id && (
+                <button data-ctx-row onClick={() => {
+                  if (sentInvites.has(ctxMenuData.item.id)) return;
+                  if (!ctxMenuData.item.isOnline) {
                     setOfflineToast(t('profile.userOffline', 'пользователь не в сети'));
                     setTimeout(() => setOfflineToast(null), 3000);
                   } else if (store.selectedChannelForMembers) {
-                    signalRService.callToChannel(contextMenu.item.id, store.selectedChannelForMembers.id, store.selectedChannelForMembers.name);
-                    addSentInvite(contextMenu.item.id);
+                    signalRService.callToChannel(ctxMenuData.item.id, store.selectedChannelForMembers.id, store.selectedChannelForMembers.name);
+                    addSentInvite(ctxMenuData.item.id);
                   }
                   setContextMenu(null);
                 }}
-                  disabled={sentInvites.has(contextMenu.item.id)}
-                  className={`w-full text-left px-4 py-2 flex items-center gap-3 font-medium mt-1 ${sentInvites.has(contextMenu.item.id) ? 'text-success cursor-default animate-invite-pulse' : 'text-white hover:bg-surfaceHover/80'
+                  disabled={sentInvites.has(ctxMenuData.item.id)}
+                  className={`w-full text-left px-4 py-2 flex items-center gap-3 font-medium ${sentInvites.has(ctxMenuData.item.id) ? 'text-success cursor-default animate-invite-pulse' : 'text-white hover:bg-surfaceHover/80'
                     }`}>
-                  <Phone weight="bold" size={16} /> {sentInvites.has(contextMenu.item.id) ? t('contextMenu.inviting', 'зовём...') : t('contextMenu.invite', 'позвать в канал')}
+                  <Phone weight="bold" size={16} /> {sentInvites.has(ctxMenuData.item.id) ? t('contextMenu.inviting', 'зовём...') : t('contextMenu.invite', 'позвать в канал')}
                 </button>
               )}
-              {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && contextMenu.item.id !== store.currentUser?.id && (
-                <button onClick={() => { store.setUserToKick(contextMenu.item); store.setModal('kickConfirm', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1"><UserX weight="bold" size={16} /> {t('contextMenu.kick', 'исключить')}</button>
+              {store.selectedChannelForMembers?.ownerId === store.currentUser?.id && ctxMenuData.item.id !== store.currentUser?.id && (
+                <button data-ctx-row onClick={() => { store.setUserToKick(ctxMenuData.item); store.setModal('kickConfirm', true); setContextMenu(null); }} className={`w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover/80 flex items-center gap-3 font-medium ${store.currentChannelId === store.selectedChannelForMembers?.id ? 'mt-1' : ''}`}><UserX weight="bold" size={16} /> {t('contextMenu.kick', 'исключить')}</button>
               )}
             </>
-          ) : contextMenu.type === 'voiceUser' ? (
+          ) : ctxMenuData.type === 'voiceUser' ? (
             <>
-              <button onClick={() => { setVolumeUser(contextMenu.item); setVolumeType('voice'); setVolumeUserValue(store.userVolumes[contextMenu.item.id] ?? 100); store.setModal('userVolume', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Volume2 weight="bold" size={16} /> {t('contextMenu.volume', 'громкость')}</button>
-              <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'voiceUsers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1"><Settings weight="bold" size={16} /> {t('contextMenu.profile', 'профиль')}</button>
+              <button data-ctx-row onClick={() => { setVolumeUser(ctxMenuData.item); setVolumeType('voice'); setVolumeUserValue(store.userVolumes[ctxMenuData.item.id] ?? 100); store.setModal('userVolume', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Volume2 weight="bold" size={16} /> {t('contextMenu.volume', 'громкость')}</button>
+              <button data-ctx-row onClick={() => { store.setSelectedProfileUser(ctxMenuData.item, 'voiceUsers'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1"><Settings weight="bold" size={16} /> {t('contextMenu.profile', 'профиль')}</button>
             </>
-          ) : contextMenu.type === 'stream' ? (
+          ) : ctxMenuData.type === 'stream' ? (
             <>
-              <button onClick={() => { setVolumeUser(contextMenu.item); setVolumeType('stream'); setVolumeUserValue(store.streamVolumes[contextMenu.item.id] ?? 100); store.setModal('userVolume', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Volume2 weight="bold" size={16} /> {t('contextMenu.streamVolume', 'громкость трансляции')}</button>
+              <button data-ctx-row onClick={() => { setVolumeUser(ctxMenuData.item); setVolumeType('stream'); setVolumeUserValue(store.streamVolumes[ctxMenuData.item.id] ?? 100); store.setModal('userVolume', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Volume2 weight="bold" size={16} /> {t('contextMenu.streamVolume', 'громкость трансляции')}</button>
             </>
           ) : (
             <>
-              <button onClick={() => { store.setSelectedProfileUser(contextMenu.item, 'friends'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Settings weight="bold" size={16} /> {t('contextMenu.profile', 'профиль')}</button>
-              <button onClick={async () => {
-                const friend = contextMenu.item;
+              <button data-ctx-row onClick={() => { store.setSelectedProfileUser(ctxMenuData.item, 'friends'); store.setModal('profile', true); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-white hover:bg-surfaceHover/80 flex items-center gap-3 font-medium"><Settings weight="bold" size={16} /> {t('contextMenu.profile', 'профиль')}</button>
+              <button data-ctx-row onClick={async () => {
+                const friend = ctxMenuData.item;
                 setContextMenu(null);
                 if (!friend.isOnline) {
                   setOfflineToast(t('profile.userOffline', 'пользователь не в сети'));
@@ -4750,7 +4981,7 @@ export default function App() {
                   if (selectedChatFriend?.id === friend.id) setCallView('chat');
                 }
               }} className="w-full text-left px-4 py-2 text-success hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1"><Phone weight="bold" size={16} /> {t('contextMenu.call', 'позвонить')}</button>
-              <button onClick={() => { signalRService.removeFriend(contextMenu.item.id); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1"><UserMinus weight="bold" size={16} /> {t('contextMenu.remove', 'удалить')}</button>
+              <button data-ctx-row onClick={() => { signalRService.removeFriend(ctxMenuData.item.id); setContextMenu(null); }} className="w-full text-left px-4 py-2 text-danger hover:bg-surfaceHover/80 flex items-center gap-3 font-medium mt-1"><UserMinus weight="bold" size={16} /> {t('contextMenu.remove', 'удалить')}</button>
             </>
           )}
         </div>

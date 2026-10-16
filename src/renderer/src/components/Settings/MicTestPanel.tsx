@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pause, Play } from '@phosphor-icons/react';
 import { MIC_TEST_SILENCE_DBFS, webrtc } from '../../services/webrtc';
+import { animate, utils, springs, prefersReducedMotion } from '../../lib/anime';
 
 export interface MicTestPanelProps {
   isEnabled: boolean;
@@ -27,6 +28,11 @@ export function MicTestPanel({ isEnabled, isActive, onHeightChange }: MicTestPan
   const [scrubbing, setScrubbing] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const recordBtnRef = useRef<HTMLButtonElement>(null);
+  const dotRef = useRef<HTMLSpanElement>(null);
+  const thumbRef = useRef<HTMLSpanElement>(null);
+  const pulseAnimRef = useRef<ReturnType<typeof animate> | null>(null);
+  const dotAnimRef = useRef<ReturnType<typeof animate> | null>(null);
 
   const isVisible = isEnabled && isActive;
   const visibleRef = useRef(isVisible);
@@ -138,12 +144,23 @@ export function MicTestPanel({ isEnabled, isActive, onHeightChange }: MicTestPan
     return Math.max(0, Math.min(1, ratio)) * webrtc.getMicTestDuration();
   }, []);
 
+  const popThumb = useCallback((to: number) => {
+    const el = thumbRef.current;
+    if (!el) return;
+    if (prefersReducedMotion()) {
+      utils.set(el, { scale: to });
+      return;
+    }
+    animate(el, { scale: to, ease: springs.press });
+  }, []);
+
   const handleSeekPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (webrtc.getMicTestDuration() <= 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     setScrubbing(true);
     setPosition(secondsFromClientX(event.clientX));
-  }, [secondsFromClientX]);
+    popThumb(1.5);
+  }, [secondsFromClientX, popThumb]);
 
   const handleSeekPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!scrubbing) return;
@@ -160,7 +177,8 @@ export function MicTestPanel({ isEnabled, isActive, onHeightChange }: MicTestPan
     setPosition(target);
     webrtc.seekMicTest(target);
     setPlaying(webrtc.isMicTestPlaying());
-  }, [scrubbing, secondsFromClientX]);
+    popThumb(1);
+  }, [scrubbing, secondsFromClientX, popThumb]);
 
   const handleSeekKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     const total = webrtc.getMicTestDuration();
@@ -173,6 +191,37 @@ export function MicTestPanel({ isEnabled, isActive, onHeightChange }: MicTestPan
     setPosition(target);
     setPlaying(webrtc.isMicTestPlaying());
   }, []);
+
+  useEffect(() => {
+    const btn = recordBtnRef.current;
+    if ((stage === 'arming' || stage === 'recording') && btn && !prefersReducedMotion()) {
+      pulseAnimRef.current = animate(btn, { scale: [1, 1.03], loop: true, alternate: true, duration: 900, ease: 'inOutQuad' });
+    }
+    return () => {
+      pulseAnimRef.current?.pause();
+      pulseAnimRef.current = null;
+      if (btn) btn.style.transform = '';
+    };
+  }, [stage]);
+
+  useEffect(() => {
+    const dot = dotRef.current;
+    if (stage === 'recording' && dot && !prefersReducedMotion()) {
+      dotAnimRef.current = animate(dot, { scale: [1, 1.55], opacity: [1, 0.4], loop: true, alternate: true, duration: 760, ease: 'inOutSine' });
+    }
+    return () => {
+      dotAnimRef.current?.pause();
+      dotAnimRef.current = null;
+      if (dot) utils.set(dot, { scale: 1, opacity: 1 });
+    };
+  }, [stage]);
+
+  useEffect(() => {
+    if (stage === 'ready' && thumbRef.current) {
+      if (prefersReducedMotion()) utils.set(thumbRef.current, { scale: 1 });
+      else animate(thumbRef.current, { scale: [0, 1], ease: springs.pop });
+    }
+  }, [stage]);
 
   const progress = duration > 0 ? Math.max(0, Math.min(100, (position / duration) * 100)) : 0;
   const issueText = issue === 'silent'
@@ -222,24 +271,28 @@ export function MicTestPanel({ isEnabled, isActive, onHeightChange }: MicTestPan
                 style={{ width: `${progress}%` }}
               />
               <span
-                className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+                className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2"
                 style={{ left: `${progress}%` }}
-              />
+              >
+                <span ref={thumbRef} className="block h-full w-full rounded-full bg-white" style={{ willChange: 'transform' }} />
+              </span>
             </div>
           </div>
         </div>
       ) : (
         <button
+          ref={recordBtnRef}
           type="button"
           onClick={() => void startRecording()}
           disabled={stage !== 'idle'}
           tabIndex={isVisible ? 0 : -1}
+          style={{ willChange: 'transform' }}
           className={`flex h-9 w-full items-center justify-center gap-1.5 rounded-xl text-xs font-bold transition-colors duration-200 ${stage === 'idle'
             ? 'bg-primary/90 text-white hover:bg-primaryHover active:scale-[0.99]'
-            : 'animate-invite-pulse cursor-default bg-primary/20 text-primaryText'
+            : 'cursor-default bg-primary/20 text-primaryText'
             }`}
         >
-          {stage === 'recording' && <span className="h-2 w-2 shrink-0 rounded-full bg-primaryHover" />}
+          {stage === 'recording' && <span ref={dotRef} className="h-2 w-2 shrink-0 rounded-full bg-primaryHover" style={{ willChange: 'transform, opacity' }} />}
           <span>
             {stage === 'recording'
               ? t('settings.audio.micTestTalk', 'болтайте')

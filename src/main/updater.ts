@@ -461,13 +461,15 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
       const window = getMainWindow();
       if (window && !window.isDestroyed()) {
         try {
-          window.hide();
+          if (window.isMinimized()) window.restore();
+          window.show();
+          window.focus();
         } catch {}
       }
 
       setTimeout(() => {
         app.exit(0);
-      }, 600);
+      }, 1500);
 
       return { success: true };
     } catch (err: any) {

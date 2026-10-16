@@ -2,7 +2,7 @@ import { useAppStore } from '../store/useAppStore';
 import { useChatStore } from '../store/useChatStore';
 import { loadPending } from '../chat/chatDb';
 import type { ChatChunkHeader, ChatControlPacket, ChatMessage, ChatWireMessage, PickedChatFile } from '../chat/types';
-import { chatPublicKey, decryptChatPayload, deriveChatKey, encryptChatPayload } from '../chat/chatCrypto';
+import { chatPublicKey, decryptChatPayload, deriveChatKey, encryptChatPayload, resetChatIdentity } from '../chat/chatCrypto';
 
 const CHAT_SDP_PREFIX = 'zabor-chat:';
 const CHUNK_BYTES = 48 * 1024;
@@ -25,6 +25,9 @@ const PING_INTERVAL_MS = 20_000;
 const MAX_SYNC_RANGES = 64;
 const DELIVERY_RETRY_BASE_MS = 5_000;
 const MAX_DELIVERY_RETRIES = 5;
+const DISCONNECT_GRACE_MS = 4_000;
+const NEGOTIATION_GRACE_MS = CONNECT_TIMEOUT_MS + 2_000;
+const KEY_REQUEST_INTERVAL_MS = 5_000;
 
 export interface ChatPeerDiagnostics {
   connectedAt: number | null;
@@ -39,6 +42,7 @@ interface ChatSignaling {
   sendAnswer: (targetId: string, answer: string) => void;
   sendIceCandidate: (targetId: string, candidate: string) => void;
   sendFallback?: (targetId: string, packet: string) => Promise<boolean>;
+  isReady?: () => boolean;
 }
 
 let signaling: ChatSignaling | null = null;
@@ -103,7 +107,15 @@ class ChatPeerManager {
     this.initializedOwnerId = ownerId;
     await useChatStore.getState().cleanup(ownerId);
     for (const friend of useAppStore.getState().friends) {
-      if (friend.isOnline) void this.connect(friend.id);
+      if (friend.isOnline) {
+        if (signaling?.isReady?.() ?? true) {
+          useChatStore.getState().setConnection(friend.id, true);
+        }
+        if (!this.cryptoKeys.has(friend.id)) {
+          void this.sendKey(friend.id);
+        }
+        void this.connect(friend.id);
+      }
     }
     if (!this.retentionTimer) {
       this.retentionTimer = setInterval(() => {
@@ -120,7 +132,14 @@ class ChatPeerManager {
     if (!ownerId || !state.friends.some(friend => friend.id === friendId)) return;
     await useChatStore.getState().load(ownerId, friendId);
     void this.markVisibleAsRead(friendId);
-    if (!state.friends.find(friend => friend.id === friendId)?.isOnline) return;
+    const friend = state.friends.find(f => f.id === friendId);
+    if (!friend?.isOnline) return;
+    if (signaling?.isReady?.() ?? true) {
+      useChatStore.getState().setConnection(friendId, true);
+    }
+    if (!this.cryptoKeys.has(friendId)) {
+      void this.sendKey(friendId);
+    }
     await this.connect(friendId);
   }
 
@@ -139,8 +158,15 @@ class ChatPeerManager {
   public async handleOnline(friendId: string): Promise<void> {
     const ownerId = this.ownerId();
     if (!ownerId || !this.isFriend(friendId)) return;
-    await loadPending(ownerId);
+    if (signaling?.isReady?.() ?? true) {
+      useChatStore.getState().setConnection(friendId, true);
+    }
+    if (!this.cryptoKeys.has(friendId)) {
+      void this.sendKey(friendId);
+    }
+    void this.flushDeletionQueue(friendId);
     await this.connect(friendId);
+    void this.flushPending(friendId);
   }
 
   public handleOffline(friendId: string): void {
@@ -149,6 +175,8 @@ class ChatPeerManager {
     this.reconnectTimers.delete(friendId);
     this.disconnect(friendId);
     useChatStore.getState().setConnection(friendId, false);
+    useChatStore.getState().setRoute(friendId, 'unknown');
+    this.diagnostics.set(friendId, { ...this.getDiagnostics(friendId), route: 'unknown' });
   }
 
   public keepWarm(friendId: string): void {
@@ -336,6 +364,7 @@ class ChatPeerManager {
     this.initializedOwnerId = null;
     if (this.retentionTimer) clearInterval(this.retentionTimer);
     this.retentionTimer = null;
+    resetChatIdentity();
     useChatStore.getState().reset();
   }
 
@@ -373,7 +402,15 @@ class ChatPeerManager {
     };
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'failed') {
-        useChatStore.getState().setConnection(friendId, false);
+        const friend = useAppStore.getState().friends.find(f => f.id === friendId);
+        if (friend?.isOnline && (signaling?.isReady?.() ?? true)) {
+          useChatStore.getState().setConnection(friendId, true);
+          useChatStore.getState().setRoute(friendId, 'signalr');
+          this.diagnostics.set(friendId, { ...this.getDiagnostics(friendId), route: 'signalr' });
+        } else {
+          useChatStore.getState().setConnection(friendId, false);
+          useChatStore.getState().setRoute(friendId, 'unknown');
+        }
         void this.restartIce(friendId).catch(() => {
           this.disconnect(friendId);
           this.scheduleReconnect(friendId);
@@ -381,7 +418,15 @@ class ChatPeerManager {
         return;
       }
       if (pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
-        useChatStore.getState().setConnection(friendId, false);
+        const friend = useAppStore.getState().friends.find(f => f.id === friendId);
+        if (friend?.isOnline && (signaling?.isReady?.() ?? true)) {
+          useChatStore.getState().setConnection(friendId, true);
+          useChatStore.getState().setRoute(friendId, 'signalr');
+          this.diagnostics.set(friendId, { ...this.getDiagnostics(friendId), route: 'signalr' });
+        } else {
+          useChatStore.getState().setConnection(friendId, false);
+          useChatStore.getState().setRoute(friendId, 'unknown');
+        }
         this.disconnect(friendId);
         this.scheduleReconnect(friendId);
       }
@@ -418,11 +463,29 @@ class ChatPeerManager {
       void this.sendKey(friendId);
     };
     channel.onclose = () => {
-      useChatStore.getState().setConnection(friendId, false);
+      const friend = useAppStore.getState().friends.find(f => f.id === friendId);
+      if (friend?.isOnline && (signaling?.isReady?.() ?? true)) {
+        useChatStore.getState().setConnection(friendId, true);
+        useChatStore.getState().setRoute(friendId, 'signalr');
+        this.diagnostics.set(friendId, { ...this.getDiagnostics(friendId), route: 'signalr' });
+      } else {
+        useChatStore.getState().setConnection(friendId, false);
+        useChatStore.getState().setRoute(friendId, 'unknown');
+      }
+      this.channels.delete(friendId);
       this.scheduleReconnect(friendId);
     };
     channel.onerror = () => {
-      useChatStore.getState().setConnection(friendId, false);
+      const friend = useAppStore.getState().friends.find(f => f.id === friendId);
+      if (friend?.isOnline && (signaling?.isReady?.() ?? true)) {
+        useChatStore.getState().setConnection(friendId, true);
+        useChatStore.getState().setRoute(friendId, 'signalr');
+        this.diagnostics.set(friendId, { ...this.getDiagnostics(friendId), route: 'signalr' });
+      } else {
+        useChatStore.getState().setConnection(friendId, false);
+        useChatStore.getState().setRoute(friendId, 'unknown');
+      }
+      this.channels.delete(friendId);
       this.scheduleReconnect(friendId);
     };
     let receiveQueue = Promise.resolve();
@@ -454,9 +517,9 @@ class ChatPeerManager {
         const trusted = localStorage.getItem(fingerprintKey);
         if (trusted && trusted !== fingerprint) return;
         if (!trusted) localStorage.setItem(fingerprintKey, fingerprint);
-        const firstKey = !this.cryptoKeys.has(friendId);
+        const hadKey = this.cryptoKeys.has(friendId);
         this.cryptoKeys.set(friendId, await deriveChatKey(packet.publicKey));
-        if (firstKey) await this.sendKey(friendId);
+        if (!packet.reply && !hadKey) await this.sendKey(friendId, true);
         await this.flushSecurePackets(friendId);
       } catch { }
       return;
@@ -761,9 +824,22 @@ class ChatPeerManager {
       type: 'message',
       message: this.toWire(message)
     } satisfies Omit<ChatControlPacket, 'version' | 'senderId' | 'targetId'>;
-    const fallbackTimer = message.kind === 'text' ? setTimeout(() => void this.sendFallback(message.targetId, packet, message.id), FALLBACK_DELAY_MS) : null;
-    const sent = await this.sendControl(message.targetId, packet);
-    if (fallbackTimer) clearTimeout(fallbackTimer);
+
+    const channel = this.channels.get(message.targetId);
+    let sent = false;
+
+    if (channel?.readyState === 'open') {
+      sent = await this.sendControl(message.targetId, packet);
+    } else {
+      void this.connect(message.targetId);
+      const openedChannel = await this.waitForChannel(message.targetId, FALLBACK_DELAY_MS);
+      if (openedChannel?.readyState === 'open') {
+        sent = await this.sendControl(message.targetId, packet);
+      } else {
+        sent = await this.sendFallback(message.targetId, packet, message.id);
+      }
+    }
+
     const current = this.findMessage(message.targetId, message.id);
     if (current && sent && current.delivery !== 'delivered' && current.delivery !== 'read') {
       await useChatStore.getState().upsert({ ...current, delivery: 'sent' });
@@ -781,30 +857,45 @@ class ChatPeerManager {
       queued.push(packet);
       this.pendingSecurePackets.set(friendId, queued.slice(-256));
       await this.sendKey(friendId);
-      return false;
+      return true;
     }
     const envelope = packet.type === 'key' ? packet : { type: 'encrypted' as const, payload: await encryptChatPayload(key!, JSON.stringify({ ...packet, version: 1, senderId: ownerId, targetId: friendId })) };
     const encoded = JSON.stringify({ ...envelope, version: 1, senderId: ownerId, targetId: friendId });
     if (encoded.length > MAX_CONTROL_BYTES) return false;
     const sent = await fallback(friendId, encoded);
     if (sent) {
+      useChatStore.getState().setRoute(friendId, 'signalr');
       this.diagnostics.set(friendId, { ...this.getDiagnostics(friendId), route: 'signalr' });
     }
     return sent;
   }
 
-  private async sendKey(friendId: string): Promise<void> {
+  private async sendKey(friendId: string, reply = false): Promise<void> {
     const fallback = signaling?.sendFallback;
     const ownerId = this.ownerId();
     if (!fallback || !ownerId) return;
-    const packet: ChatControlPacket = { version: 1, senderId: ownerId, targetId: friendId, type: 'key', publicKey: await chatPublicKey() };
+    const packet: ChatControlPacket = { version: 1, senderId: ownerId, targetId: friendId, type: 'key', publicKey: await chatPublicKey(), reply };
     await fallback(friendId, JSON.stringify(packet));
   }
 
   private async flushSecurePackets(friendId: string): Promise<void> {
+    void this.flushDeletionQueue(friendId);
     const queued = this.pendingSecurePackets.get(friendId) ?? [];
     this.pendingSecurePackets.delete(friendId);
-    for (const packet of queued) await this.sendFallback(friendId, packet, packet.messageId ?? packet.message?.id);
+    for (const packet of queued) {
+      const msgId = packet.messageId ?? packet.message?.id;
+      const sent = await this.sendFallback(friendId, packet, msgId);
+      if (sent && msgId) {
+        const ownerId = this.ownerId();
+        if (ownerId) {
+          const current = this.findMessage(friendId, msgId);
+          if (current && current.delivery === 'pending') {
+            await useChatStore.getState().upsert({ ...current, delivery: 'sent' });
+            this.scheduleDeliveryRetry(msgId);
+          }
+        }
+      }
+    }
   }
 
   private wireChunkBytes(friendId: string): number {
@@ -834,6 +925,11 @@ class ChatPeerManager {
     this.outgoingCancels.delete(message.id);
     this.outgoingActive.add(message.id);
     try {
+      const activeChannel = this.fileChannels.get(friendId) ?? this.channels.get(friendId);
+      if (!activeChannel || activeChannel.readyState !== 'open') {
+        void this.connect(friendId);
+        await this.waitForChannel(friendId, 4000);
+      }
       if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-begin', messageId: message.id, transferId }, empty)) {
         await this.sendControl(friendId, { type: 'file-unavailable', messageId: message.id });
         return;
@@ -869,21 +965,21 @@ class ChatPeerManager {
   private async sendControl(friendId: string, packet: Omit<ChatControlPacket, 'version' | 'senderId' | 'targetId'>): Promise<boolean> {
     const ownerId = this.ownerId();
     if (!ownerId || !this.isFriend(friendId)) return false;
-    let channel = this.channels.get(friendId);
-    if (channel?.readyState !== 'open') {
+    const channel = this.channels.get(friendId);
+    if (channel?.readyState === 'open') {
       try {
-        await this.connect(friendId);
-        await this.waitForChannel(friendId);
+        channel.send(JSON.stringify({ version: 1, senderId: ownerId, targetId: friendId, ...packet }));
+        return true;
       } catch {
-        if (packet.type === 'file-cancel') return false;
-        if (packet.message?.kind === 'file') return false;
-        return this.sendFallback(friendId, packet, packet.messageId ?? packet.message?.id);
+        // Fall through to fallback
       }
-      channel = this.channels.get(friendId);
     }
-    if (channel?.readyState !== 'open') return false;
-    channel.send(JSON.stringify({ version: 1, senderId: ownerId, targetId: friendId, ...packet }));
-    return true;
+    if (packet.type === 'file-cancel') return false;
+    if (packet.message?.kind === 'file') return false;
+    if (packet.type === 'file-request') return false;
+
+    void this.connect(friendId);
+    return this.sendFallback(friendId, packet, packet.messageId ?? packet.message?.id);
   }
 
   private async sendOrQueueDeletion(friendId: string, packet: Pick<ChatControlPacket, 'type' | 'messageId'>): Promise<void> {
@@ -971,11 +1067,15 @@ class ChatPeerManager {
     }
   }
 
-  private async waitForChannel(friendId: string): Promise<void> {
-    const deadline = Date.now() + CONNECT_TIMEOUT_MS;
-    while (Date.now() < deadline && this.channels.get(friendId)?.readyState !== 'open') {
+  private async waitForChannel(friendId: string, timeoutMs: number = CONNECT_TIMEOUT_MS): Promise<RTCDataChannel | null> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const ch = this.channels.get(friendId);
+      if (ch?.readyState === 'open') return ch;
       await new Promise<void>(resolve => setTimeout(resolve, 50));
     }
+    const finalCh = this.channels.get(friendId);
+    return finalCh?.readyState === 'open' ? finalCh : null;
   }
 
   private createMessage(ownerId: string, friendId: string, kind: 'text' | 'file', text: string, file: ChatMessage['file']): ChatMessage {
@@ -1124,7 +1224,19 @@ class ChatPeerManager {
     this.clearDeliveryRetry(messageId, false);
     const attempt = (this.deliveryAttempts.get(messageId) ?? 0) + 1;
     this.deliveryAttempts.set(messageId, attempt);
-    if (attempt >= MAX_DELIVERY_RETRIES) return;
+    if (attempt >= MAX_DELIVERY_RETRIES) {
+      const ownerId = this.ownerId();
+      if (ownerId) {
+        for (const messages of Object.values(useChatStore.getState().messages)) {
+          const message = messages.find(item => item.id === messageId && item.senderId === ownerId);
+          if (message && (message.delivery === 'pending' || message.delivery === 'sent')) {
+            void useChatStore.getState().upsert({ ...message, delivery: 'failed' });
+            break;
+          }
+        }
+      }
+      return;
+    }
     const delay = Math.round(Math.min(60_000, DELIVERY_RETRY_BASE_MS * 2 ** (attempt - 1)) * (0.8 + Math.random() * 0.4));
     this.deliveryTimers.set(messageId, setTimeout(() => {
       this.deliveryTimers.delete(messageId);
@@ -1159,6 +1271,7 @@ class ChatPeerManager {
         route = local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'turn' : 'p2p';
       });
       this.diagnostics.set(friendId, { ...this.getDiagnostics(friendId), route });
+      useChatStore.getState().setRoute(friendId, route);
     } catch { }
   }
 }

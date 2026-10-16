@@ -49,6 +49,7 @@ export interface ChatControlPacket {
   sentAt?: number;
   publicKey?: JsonWebKey;
   payload?: string;
+  reply?: boolean;
 }
 
 export interface ChatChunkHeader {

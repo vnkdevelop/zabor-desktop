@@ -13,7 +13,7 @@ function relaxCspForDevServer() {
     name: 'zabor-relax-csp-for-dev-server',
     apply: 'serve' as const,
     transformIndexHtml(html: string) {
-      return html.replace("script-src 'self' 'unsafe-eval'", "script-src 'self' 'unsafe-eval' 'unsafe-inline'")
+      return html.replace("script-src 'self' 'wasm-unsafe-eval'", "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'")
     }
   }
 }
