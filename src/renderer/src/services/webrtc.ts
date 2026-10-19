@@ -15,6 +15,7 @@ import {
   preloadNoiseAssets,
   type DeepFilterPayload
 } from './audio-assets'
+import { WebRtcVadSidecar } from './webrtc-vad'
 
 export const VAD_CALIBRATION_ENABLED: boolean = false
 const FIXED_SILERO_THRESHOLD = 0.4
@@ -657,7 +658,7 @@ export class WebRTCManager {
   private processedSource: MediaStreamAudioSourceNode | null = null
   private micRumbleFilters: BiquadFilterNode[] = []
   private micOutputTap: AudioNode | null = null
-  private micTestCaptureModules = new WeakSet<AudioContext>()
+  private micTestCapturePromises = new WeakMap<AudioContext, Promise<void>>()
   private micTestRun: Promise<MicTestClip> | null = null
   private micTestBuffer: AudioBuffer | null = null
   private micTestContext: AudioContext | null = null
@@ -680,6 +681,7 @@ export class WebRTCManager {
   private lastMicCaptureError: string | null = null
   private lastReportedMicError: string | null = null
   private vadWorker: Worker | null = null
+  private webRtcVadSidecar: WebRtcVadSidecar | null = null
   private vadProbabilityHandler: ((data: {
     probability: number
     sequence?: number
@@ -1569,11 +1571,69 @@ export class WebRTCManager {
     return guards
   }
 
+  public getActiveVadBranch(): 'silero' | 'manual-gate' | 'webrtc-vad' {
+    if (this.speechAnalyzerEnabled && !this.isManualGateMode()) {
+      return 'silero'
+    }
+    if (this.isManualGateMode()) {
+      return 'manual-gate'
+    }
+    return 'webrtc-vad'
+  }
+
+  private isManualGateMode(): boolean {
+    return !this.ultraLowLatency && this.noiseSuppression && this.thresholdMode === 'manual'
+  }
+
+  private async updateVadBranch(): Promise<void> {
+    const branch = this.getActiveVadBranch()
+    const me = useAppStore.getState().currentUser
+    const streamToTap = this.localStream || this.rawStream
+
+    if (branch === 'silero') {
+      if (this.webRtcVadSidecar) {
+        this.webRtcVadSidecar.stop()
+        this.webRtcVadSidecar = null
+      }
+      if (this.micNode) {
+        this.applyAnalyzerToWorklet()
+      }
+    } else if (branch === 'manual-gate') {
+      if (this.webRtcVadSidecar) {
+        this.webRtcVadSidecar.stop()
+        this.webRtcVadSidecar = null
+      }
+      if (!this.calibrationForcesAnalyzer) {
+        this.terminateVadWorker()
+      }
+    } else {
+      if (!this.calibrationForcesAnalyzer) {
+        this.terminateVadWorker()
+      }
+      if (this.micNode) {
+        this.micNode.port.postMessage({ type: 'setConfig', sileroVadEnabled: false })
+      }
+      if (streamToTap && this.processedContext && this.processedContext.state !== 'closed') {
+        if (!this.webRtcVadSidecar) {
+          this.webRtcVadSidecar = new WebRtcVadSidecar((isSpeaking) => {
+            if (this.getActiveVadBranch() === 'webrtc-vad') {
+              this.applyLocalSpeaking(isSpeaking)
+            }
+          })
+          const isMuted = me?.isMuted || me?.isServerMuted || false
+          this.webRtcVadSidecar.setMuted(isMuted)
+          await this.webRtcVadSidecar.start(this.processedContext, streamToTap)
+        }
+      }
+    }
+  }
+
   private applyLocalSpeaking(isSpeaking: boolean) {
     if (isSpeaking && this.calibrationSuppressesSpeaking) return
     const store = useAppStore.getState()
     const inActiveSession = Boolean(store.currentChannelId || store.currentCallUser)
     if (!inActiveSession && isSpeaking) return
+    if ((store.currentUser?.isMuted || store.currentUser?.isServerMuted) && isSpeaking) return
     if (isSpeaking === this.localSpeakingState) return
     this.localSpeakingState = isSpeaking
     const me = store.currentUser
@@ -1690,7 +1750,9 @@ export class WebRTCManager {
     const gateNode = this.manualGateNode
     gateNode.port.onmessage = (event) => {
       if (event.data.type === 'vad') {
-        this.applyLocalSpeaking(Boolean(event.data.isSpeaking))
+        if (this.getActiveVadBranch() === 'manual-gate') {
+          this.applyLocalSpeaking(Boolean(event.data.isSpeaking))
+        }
       } else if (event.data.type === 'micLevelDb') {
         this.publishMicLevel(Number(event.data.db))
       }
@@ -1766,7 +1828,9 @@ export class WebRTCManager {
       const graphEpoch = this.vadEpoch
       this.micNode.port.onmessage = (event) => {
         if (event.data.type === 'vad') {
-          this.applyLocalSpeaking(Boolean(event.data.isSpeaking))
+          if (this.getActiveVadBranch() === 'silero') {
+            this.applyLocalSpeaking(Boolean(event.data.isSpeaking))
+          }
         } else if (event.data.type === 'audio16k') {
           if (this.vadWorker) {
             const audioFrame = event.data.audio as Float32Array
@@ -1991,6 +2055,10 @@ export class WebRTCManager {
       try { this.manualGateNode.port.close() } catch { }
       this.manualGateNode = null
     }
+    if (this.webRtcVadSidecar) {
+      this.webRtcVadSidecar.stop()
+      this.webRtcVadSidecar = null
+    }
     this.voiceProbeCollector = null
     this.micNodeReady = false
     const ctxToClose = this.processedContext
@@ -2041,6 +2109,8 @@ export class WebRTCManager {
     if (modeChanged) this.warmUpSmartNoiseSuppression()
     if (modeChanged && this.localStream) {
       void this.updateSettings(this.currentDeviceId, this.noiseSuppression)
+    } else if (modeChanged) {
+      void this.updateVadBranch()
     }
   }
 
@@ -2149,6 +2219,7 @@ export class WebRTCManager {
     }
     this.warmUpSmartNoiseSuppression(enabled)
     if (this.localStream) void this.updateSettings(this.currentDeviceId, enabled)
+    else void this.updateVadBranch()
   }
 
   public getSmartNoiseModel(): SmartNoiseModel {
@@ -2185,6 +2256,7 @@ export class WebRTCManager {
       } else if (!enabled && !this.calibrationForcesAnalyzer) {
         this.terminateVadWorker()
       }
+      void this.updateVadBranch()
       return
     }
     if (!enabled && !this.calibrationForcesAnalyzer) {
@@ -2218,144 +2290,44 @@ export class WebRTCManager {
   private setupVAD(stream: MediaStream, userId: string, isLocal: boolean) {
     this.clearVAD(userId)
 
+    if (isLocal) {
+      return
+    }
+
     try {
-      if (isLocal) {
-        if (this.hasSpeakingWorklet()) {
-          return
-        }
-        if (!this.processedContext || this.processedContext.state === 'closed') {
-          this.processedContext = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
-        }
-        const contextToUse = this.processedContext
-        if (contextToUse.state === 'suspended') contextToUse.resume().catch(() => { })
-
-        const source = contextToUse.createMediaStreamSource(stream)
-        const bp1 = contextToUse.createBiquadFilter()
-        bp1.type = 'highpass'
-        bp1.frequency.value = 85
-        bp1.Q.value = 0.5
-
-        const bp2 = contextToUse.createBiquadFilter()
-        bp2.type = 'lowpass'
-        bp2.frequency.value = 8000
-        bp2.Q.value = 0.5
-
-        const analyser = contextToUse.createAnalyser()
-        analyser.fftSize = 256
-        analyser.smoothingTimeConstant = 0
-
-        source.connect(bp1)
-        bp1.connect(bp2)
-        bp2.connect(analyser)
-
-        const vadNodes: AudioNode[] = [source, bp1, bp2, analyser]
-        const buf = new Float32Array(analyser.fftSize)
-        let lastVoice = 0
-        let wasSpeaking = false
-        let silenceFrames = 0
-        let hasWarnedSilence = false
-
-        const check = () => {
-          const store = useAppStore.getState()
-          if (store.currentUser?.isMuted || store.currentUser?.isServerMuted) {
-            if (wasSpeaking) {
-              wasSpeaking = false
-              this.localSpeakingState = false
-              store.setSpeakingStatus(userId, false)
-              signalRService.setSpeakingState(false)
-            }
-            silenceFrames = 0
-            return
-          }
-
-          if (contextToUse.state === 'suspended') {
-            contextToUse.resume().catch(() => { })
-          }
-
-          analyser.getFloatTimeDomainData(buf)
-          let peak = 0, sumSq = 0
-          for (let i = 0; i < buf.length; i++) {
-            const sample = buf[i]
-            const s = Math.abs(sample)
-            if (s > peak) peak = s
-            sumSq += sample * sample
-          }
-          const gainScale = this.ultraLowLatency ? 1 : this.effectiveInputGain()
-          const rms = Math.sqrt(sumSq / buf.length) * gainScale
-          const scaledPeak = peak * gainScale
-
-          if (peak < 0.0001) {
-            silenceFrames++
-          } else {
-            silenceFrames = 0
-            hasWarnedSilence = false
-          }
-
-          if (silenceFrames > 450 && !hasWarnedSilence) {
-            const toastMsg = i18n.t('toasts.micNotHearing', 'вас не слышно, проверьте микрофон')
-            store.setSystemToast(toastMsg)
-            setTimeout(() => {
-              const currentStore = useAppStore.getState()
-              if (currentStore.systemToast === toastMsg) {
-                currentStore.setSystemToast(null)
-              }
-            }, 4000)
-            hasWarnedSilence = true
-          }
-
-          const now = Date.now()
-          const isVoice = rms >= 0.0015 || scaledPeak >= 0.005
-          if (isVoice) {
-            lastVoice = now
-          }
-
-          const speaking = (now - lastVoice) < 180
-          if (speaking !== wasSpeaking) {
-            wasSpeaking = speaking
-            this.localSpeakingState = speaking
-            store.setSpeakingStatus(userId, speaking)
-            signalRService.setSpeakingState(speaking)
-          }
-        }
-
-        const timer = setInterval(check, 10)
-        this.speakingIntervals.set(userId, { timer, stream, nodes: vadNodes })
-        check()
-      } else {
-        let wasSpeaking = false
-        let lastSoundAt = 0
-        const releaseHoldMs = 200
-        const check = () => {
-          const pc = this.peerConnections.get(userId)
-          if (!pc) return
-          const voiceTrackId = this.userVoiceTrackIds.get(userId)
-          const streamAudioTrackId = this.userStreamAudioTrackIds.get(userId)
-          const audioReceivers = pc.getReceivers().filter(r => r.track && r.track.kind === 'audio')
-          const receiver =
-            (voiceTrackId ? audioReceivers.find(r => r.track!.id === voiceTrackId) : undefined)
-            ?? audioReceivers.find(r => r.track!.id !== streamAudioTrackId)
-            ?? audioReceivers[0]
-          if (!receiver) return
-          try {
-            const syncSources = receiver.getSynchronizationSources()
-            if (syncSources && syncSources.length > 0) {
-              const latestSource = syncSources[0]
-              const currentPlayoutLevel = latestSource.audioLevel
-              if (currentPlayoutLevel !== undefined) {
-                const now = Date.now()
-                if (currentPlayoutLevel > 0.001) lastSoundAt = now
-                const isRemoteSpeaking = now - lastSoundAt <= releaseHoldMs
-                if (isRemoteSpeaking !== wasSpeaking) {
-                  wasSpeaking = isRemoteSpeaking
-                  useAppStore.getState().setSpeakingStatus(userId, isRemoteSpeaking)
-                }
+      let wasSpeaking = false
+      let lastSoundAt = 0
+      const releaseHoldMs = 200
+      const check = () => {
+        const pc = this.peerConnections.get(userId)
+        if (!pc) return
+        const voiceTrackId = this.userVoiceTrackIds.get(userId)
+        const streamAudioTrackId = this.userStreamAudioTrackIds.get(userId)
+        const audioReceivers = pc.getReceivers().filter(r => r.track && r.track.kind === 'audio')
+        const receiver =
+          (voiceTrackId ? audioReceivers.find(r => r.track!.id === voiceTrackId) : undefined)
+          ?? audioReceivers.find(r => r.track!.id !== streamAudioTrackId)
+          ?? audioReceivers[0]
+        if (!receiver) return
+        try {
+          const syncSources = receiver.getSynchronizationSources()
+          if (syncSources && syncSources.length > 0) {
+            const latestSource = syncSources[0]
+            const currentPlayoutLevel = latestSource.audioLevel
+            if (currentPlayoutLevel !== undefined) {
+              const now = Date.now()
+              if (currentPlayoutLevel > 0.001) lastSoundAt = now
+              const isRemoteSpeaking = now - lastSoundAt <= releaseHoldMs
+              if (isRemoteSpeaking !== wasSpeaking) {
+                wasSpeaking = isRemoteSpeaking
+                useAppStore.getState().setSpeakingStatus(userId, isRemoteSpeaking)
               }
             }
-          } catch { }
-        }
-        const timer = setInterval(check, 20)
-        this.speakingIntervals.set(userId, { timer, stream, nodes: [] })
+          }
+        } catch { }
       }
+      const timer = setInterval(check, 20)
+      this.speakingIntervals.set(userId, { timer, stream, nodes: [] })
     } catch (e) {
       console.error('[VAD] setup failed', e)
     }
@@ -3154,9 +3126,16 @@ export class WebRTCManager {
   }
 
   private async ensureMicTestCaptureModule(ctx: AudioContext): Promise<void> {
-    if (this.micTestCaptureModules.has(ctx)) return
-    await ctx.audioWorklet.addModule(micTestCaptureProcessorUrl)
-    this.micTestCaptureModules.add(ctx)
+    if (ctx.state === 'closed') return
+    let promise = this.micTestCapturePromises.get(ctx)
+    if (!promise) {
+      promise = ctx.audioWorklet.addModule(micTestCaptureProcessorUrl).catch(err => {
+        this.micTestCapturePromises.delete(ctx)
+        throw err
+      })
+      this.micTestCapturePromises.set(ctx, promise)
+    }
+    await promise
   }
 
   private ensureMicTestPlayback(sampleRate: number): { ctx: AudioContext; gain: GainNode } {
@@ -3232,6 +3211,19 @@ export class WebRTCManager {
       if (!ctx || ctx.state === 'closed') return
       await this.ensureMicTestCaptureModule(ctx)
     } catch (error) {
+      const currentCtx = this.processedContext
+      if (currentCtx && currentCtx !== ctx && currentCtx.state !== 'closed') {
+        try {
+          await this.ensureMicTestCaptureModule(currentCtx)
+          return
+        } catch { }
+      }
+      const isAbort =
+        (error instanceof DOMException && (error.name === 'AbortError' || error.code === 20)) ||
+        (error instanceof Error && error.name === 'AbortError')
+      if (isAbort || !currentCtx || currentCtx.state === 'closed') {
+        return
+      }
       console.warn('[WebRTC] Mic test could not warm up:', error)
     }
   }
@@ -3440,9 +3432,7 @@ export class WebRTCManager {
         await safeResumeContext(this.processedContext)
         this.startSilenceMonitor()
         const me = useAppStore.getState().currentUser
-        if (me && this.rawStream && !this.hasSpeakingWorklet() && !this.speakingIntervals.has(me.id)) {
-          this.setupVAD(this.rawStream, me.id, true)
-        }
+        await this.updateVadBranch()
         const isMuted = me?.isMuted || me?.isServerMuted || false
         this.toggleMute(isMuted)
         console.log(`[WebRTC] startLocalStream reused existing stream in ${Math.round(performance.now() - startedAt)}ms`)
@@ -3509,7 +3499,7 @@ export class WebRTCManager {
         this.startSilenceMonitor()
 
         const me = useAppStore.getState().currentUser
-        if (me && this.rawStream && !this.hasSpeakingWorklet()) this.setupVAD(this.rawStream, me.id, true)
+        await this.updateVadBranch()
 
         const isMuted = me?.isMuted || me?.isServerMuted || false
         this.toggleMute(isMuted)
@@ -3621,6 +3611,7 @@ export class WebRTCManager {
     this.thresholdMode = mode
     localStorage.setItem('zabor_threshold_mode', mode)
     if (this.localStream) await this.updateSettings(this.currentDeviceId, this.noiseSuppression)
+    else await this.updateVadBranch()
   }
 
   public stopLocalStream() {
@@ -3736,6 +3727,12 @@ export class WebRTCManager {
     }
     if (this.manualGateNode) {
       this.manualGateNode.port.postMessage({ type: 'setConfig', isMuted })
+    }
+    if (this.webRtcVadSidecar) {
+      this.webRtcVadSidecar.setMuted(isMuted)
+    }
+    if (isMuted) {
+      this.applyLocalSpeaking(false)
     }
     if (this.localStream) {
       this.localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted })
@@ -4751,7 +4748,120 @@ export class WebRTCManager {
     return { rttMs, concealmentRate, jitterTargetMs, frameMs }
   }
 
+  private attachRemoteVideo(userId: string, track: MediaStreamTrack, stream?: MediaStream) {
+    if (track.readyState === 'ended') return
+    const currentStream = useAppStore.getState().remoteVideoStreams[userId]
+    if (currentStream && currentStream.getVideoTracks().includes(track)) return
+
+    const videoStream = stream || new MediaStream([track])
+    useAppStore.getState().setRemoteVideoStream(userId, videoStream)
+    track.onended = () => {
+      this.cleanupRemoteStream(userId)
+    }
+  }
+
+  private attachRemoteStreamAudio(userId: string, track: MediaStreamTrack, receiver?: RTCRtpReceiver, stream?: MediaStream) {
+    if (track.readyState === 'ended') return
+    if (this.userStreamAudioTrackIds.get(userId) === track.id) return
+
+    this.initOutputMixer()
+    this.userStreamAudioTrackIds.set(userId, track.id)
+    const streamId = stream?.id || (track as any).streamId
+    if (streamId) this.userScreenStreamIds.set(userId, streamId)
+    if (receiver) this.isolateReceiverLatency(receiver)
+    track.onended = () => {
+      this.cleanupRemoteStreamAudio(userId)
+    }
+    track.contentHint = 'music'
+
+    let streamPull = this.streamAudioElements.get(userId)
+    if (!streamPull) {
+      streamPull = new Audio()
+      streamPull.autoplay = true
+      streamPull.muted = true
+      this.streamAudioElements.set(userId, streamPull)
+    }
+    streamPull.srcObject = stream || new MediaStream([track])
+    void streamPull.play().catch(() => { })
+
+    if (this.streamSourceNodes.has(userId)) {
+      try { this.streamSourceNodes.get(userId)?.disconnect() } catch { }
+      try { this.streamDelayNodes.get(userId)?.disconnect() } catch { }
+      try { this.streamGainNodes.get(userId)?.disconnect() } catch { }
+      try { this.streamLimiterNodes.get(userId)?.disconnect() } catch { }
+    }
+
+    const source = this.outputMixContext!.createMediaStreamSource(new MediaStream([track]))
+    const delay = new DelayNode(this.outputMixContext!, { maxDelayTime: 1.0, delayTime: 0 })
+    const gain = this.outputMixContext!.createGain()
+    const limiter = this.createPlaybackLimiter(PLAYBACK_STREAM_LIMIT_DB, 2, 20, 0.002, 0.080)
+    source.connect(delay)
+    delay.connect(limiter)
+    limiter.connect(gain)
+    gain.connect(this.outputBusGain!)
+
+    this.streamSourceNodes.set(userId, source)
+    this.streamDelayNodes.set(userId, delay)
+    this.streamGainNodes.set(userId, gain)
+    this.streamLimiterNodes.set(userId, limiter)
+    this.streamSyncOffsetEma.delete(userId)
+    this.streamSyncSkew.delete(userId)
+    this.updateRemoteStreamVolume(userId)
+    this.startStreamSyncMonitoring()
+  }
+
+  public syncRemoteVideoStream(userId: string): void {
+    const pc = this.peerConnections.get(userId)
+    if (!pc || pc.connectionState === 'closed') return
+
+    const store = useAppStore.getState()
+    const user = store.voiceUsers.find(u => u.id === userId) || (store.currentCallUser?.id === userId ? store.currentCallUser : null)
+    const isUserStreaming = Boolean(user?.isStreaming)
+
+    for (const receiver of pc.getReceivers()) {
+      const track = receiver.track
+      if (track && track.kind === 'video' && track.readyState !== 'ended') {
+        if (!track.onunmute) {
+          track.onunmute = () => {
+            this.syncRemoteVideoStream(userId)
+          }
+        }
+        if (isUserStreaming || !track.muted) {
+          this.attachRemoteVideo(userId, track)
+        }
+      }
+    }
+
+    const knownVoiceTrackId = this.userVoiceTrackIds.get(userId)
+    const audioReceivers = pc.getReceivers().filter(r => r.track && r.track.kind === 'audio')
+    const screenAudioReceiver = audioReceivers.find(r => r.track && r.track.id !== knownVoiceTrackId && r.track.readyState !== 'ended')
+    if (screenAudioReceiver?.track) {
+      if (!screenAudioReceiver.track.onunmute) {
+        screenAudioReceiver.track.onunmute = () => {
+          this.syncRemoteVideoStream(userId)
+        }
+      }
+      if (isUserStreaming || !screenAudioReceiver.track.muted) {
+        if (this.userStreamAudioTrackIds.get(userId) !== screenAudioReceiver.track.id) {
+          const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
+          this.attachRemoteStreamAudio(userId, screenAudioReceiver.track, screenAudioReceiver, remoteVideoStream)
+        }
+      }
+    }
+  }
+
   private setupPeerHandlers(pc: RTCPeerConnection, userId: string) {
+    try {
+      pc.getTransceivers().forEach(transceiver => {
+        const track = transceiver.receiver.track
+        if (track && track.kind === 'video') {
+          track.onunmute = () => {
+            this.syncRemoteVideoStream(userId)
+          }
+        }
+      })
+    } catch { }
+
     pc.ontrack = (event) => {
       if (userId === useAppStore.getState().currentUser?.id) {
         event.track.stop()
@@ -4762,10 +4872,7 @@ export class WebRTCManager {
       this.initOutputMixer()
 
       if (event.track.kind === 'video') {
-        useAppStore.getState().setRemoteVideoStream(userId, stream)
-        event.track.onended = () => {
-          this.cleanupRemoteStream(userId)
-        }
+        this.attachRemoteVideo(userId, event.track, stream)
         return
       }
 
@@ -4793,48 +4900,7 @@ export class WebRTCManager {
       }
 
       if (isScreenShareAudio) {
-        this.userStreamAudioTrackIds.set(userId, event.track.id)
-        if (streamId) this.userScreenStreamIds.set(userId, streamId)
-        this.isolateReceiverLatency(event.receiver)
-        event.track.onended = () => {
-          this.cleanupRemoteStreamAudio(userId)
-        }
-        event.track.contentHint = 'music'
-
-        let streamPull = this.streamAudioElements.get(userId)
-        if (!streamPull) {
-          streamPull = new Audio()
-          streamPull.autoplay = true
-          streamPull.muted = true
-          this.streamAudioElements.set(userId, streamPull)
-        }
-        streamPull.srcObject = stream
-        void streamPull.play().catch(() => { })
-
-        if (this.streamSourceNodes.has(userId)) {
-          try { this.streamSourceNodes.get(userId)?.disconnect() } catch { }
-          try { this.streamDelayNodes.get(userId)?.disconnect() } catch { }
-          try { this.streamGainNodes.get(userId)?.disconnect() } catch { }
-          try { this.streamLimiterNodes.get(userId)?.disconnect() } catch { }
-        }
-
-        const source = this.outputMixContext!.createMediaStreamSource(new MediaStream([event.track]))
-        const delay = new DelayNode(this.outputMixContext!, { maxDelayTime: 1.0, delayTime: 0 })
-        const gain = this.outputMixContext!.createGain()
-        const limiter = this.createPlaybackLimiter(PLAYBACK_STREAM_LIMIT_DB, 2, 20, 0.002, 0.080)
-        source.connect(delay)
-        delay.connect(limiter)
-        limiter.connect(gain)
-        gain.connect(this.outputBusGain!)
-
-        this.streamSourceNodes.set(userId, source)
-        this.streamDelayNodes.set(userId, delay)
-        this.streamGainNodes.set(userId, gain)
-        this.streamLimiterNodes.set(userId, limiter)
-        this.streamSyncOffsetEma.delete(userId)
-        this.streamSyncSkew.delete(userId)
-        this.updateRemoteStreamVolume(userId)
-        this.startStreamSyncMonitoring()
+        this.attachRemoteStreamAudio(userId, event.track, event.receiver, stream)
       } else {
         this.userVoiceTrackIds.set(userId, event.track.id)
         if (streamId) this.userVoiceStreamIds.set(userId, streamId)
@@ -5926,6 +5992,7 @@ export class WebRTCManager {
         }
         signalRService.sendWebRTCAnswer(senderId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: (offer as { epoch?: number }).epoch }))
         this.flushPendingRenegotiation(senderId)
+        this.syncRemoteVideoStream(senderId)
 
         if (this.localVideoStream) {
           const senders = pc.getSenders()
@@ -5967,6 +6034,7 @@ export class WebRTCManager {
             this.rollbackCount.delete(senderId)
             await this.drainPendingCandidates(senderId)
             this.flushPendingRenegotiation(senderId)
+            this.syncRemoteVideoStream(senderId)
           } else if (pc.signalingState !== 'stable') {
             this.startIceTimeout(senderId)
           }

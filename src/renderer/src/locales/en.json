@@ -481,5 +481,19 @@
     "captchaRequired": "enter code from image",
     "invalidCaptcha": "invalid code from image",
     "expiredCaptcha": "code expired, refresh image"
+  },
+  "updater": {
+    "title": "zabor",
+    "version": "version",
+    "downloading": "downloading update...",
+    "installing": "installing update...",
+    "installingDesc": "the app will restart automatically",
+    "errorTitle": "failed to download update",
+    "errorUnknown": "an unexpected error occurred",
+    "retry": "retry",
+    "cancel": "cancel",
+    "close": "close",
+    "mb": "mb",
+    "pleaseWait": "please wait..."
   }
 }

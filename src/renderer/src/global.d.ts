@@ -103,6 +103,7 @@ declare global {
       getAppVersion: () => Promise<string>;
       checkForUpdates: () => Promise<UpdateCheckResult>;
       getUpdateStatus: () => Promise<UpdateSnapshot>;
+      openUpdaterWindow?: () => Promise<boolean>;
       startUpdateDownload: (
         downloadUrl: string,
         version: string
@@ -112,6 +113,7 @@ declare global {
       openExternalUrl: (url: string) => Promise<boolean>;
       onUpdateAvailable: (callback: (info: UpdateInfo) => void) => () => void;
       onUpdateDownloadProgress: (callback: (progress: UpdateProgress) => void) => () => void;
+      onUpdateProgress?: (callback: (progress: UpdateProgress) => void) => () => void;
       onUpdateDownloaded: (callback: (data: { filePath: string }) => void) => () => void;
       onUpdateError: (callback: (error: string) => void) => () => void;
       onUpdateInstalling: (callback: () => void) => () => void;
@@ -123,3 +125,20 @@ declare module '*.mp3' {
   const src: string;
   export default src;
 }
+
+declare module '@echogarden/fvad-wasm' {
+  export interface FvadModule {
+    _fvad_new(): number;
+    _fvad_free(inst: number): void;
+    _fvad_reset(inst: number): void;
+    _fvad_set_mode(inst: number, mode: number): number;
+    _fvad_set_sample_rate(inst: number, sampleRate: number): number;
+    _fvad_process(inst: number, framePtr: number, length: number): number;
+    _malloc(size: number): number;
+    _free(ptr: number): void;
+    HEAP16: Int16Array;
+    HEAPU8: Uint8Array;
+  }
+  export default function fvad(options?: Record<string, unknown>): Promise<FvadModule>;
+}
+

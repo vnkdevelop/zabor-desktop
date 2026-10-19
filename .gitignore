@@ -30,7 +30,6 @@ electron.vite.config.*.mjs
 graphify-out/
 .graphifyignore
 /sandbox/
-/build/
 
 # AI Assistants & LLM rules
 .claude/

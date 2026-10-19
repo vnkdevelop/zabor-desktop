@@ -1,23 +1,37 @@
-name: Build
+name: Build & CI
 
 on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
+  release:
+    types:
+      - published
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: read
 
 jobs:
-  build:
+  verify:
+    name: Verify Code, Audio & Compilation
     runs-on: windows-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Ensure Windows Audio Service is running
+        shell: powershell
+        run: |
+          Get-Service audiosrv | Select-Object -Property Status, StartType
+          Start-Service audiosrv -ErrorAction SilentlyContinue
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -28,6 +42,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify DeepFilterNet Wasm & Models
+        run: node scripts/fetch-deepfilter-assets.cjs
+
+      - name: Typecheck TypeScript
+        run: npm run typecheck
+
+      - name: Run Test Suite (Audio Devices, Microphones, WebRTC, Core)
+        run: npm test
+
       - name: Build application
         run: npm run build
         env:
@@ -36,3 +59,63 @@ jobs:
           # не выдаёт, и такая сборка честно остаётся неофициальной.
           ZABOR_CLIENT_SECRET: ${{ github.event_name == 'push' && secrets.ZABOR_CLIENT_DEV_SECRET || '' }}
           ZABOR_CLIENT_CHANNEL: dev
+
+  release:
+    name: Package & Publish Windows Release
+    needs: verify
+    if: (github.event_name == 'release' && github.event.action == 'published') || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure Windows Audio Service is running
+        shell: powershell
+        run: |
+          Get-Service audiosrv | Select-Object -Property Status, StartType
+          Start-Service audiosrv -ErrorAction SilentlyContinue
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify DeepFilterNet Wasm & Models
+        run: node scripts/fetch-deepfilter-assets.cjs
+
+      - name: Build Windows Installer (dist:win)
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SHA-256 Checksums
+        shell: powershell
+        run: |
+          Get-FileHash release\ZABOR-Setup-*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))" } | Out-File -FilePath release\checksums.sha256 -Encoding utf8
+          Get-Content release\checksums.sha256
+
+      - name: Upload Installer Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zabor-windows-installer
+          path: |
+            release/ZABOR-Setup-*.exe
+            release/latest.yml
+            release/checksums.sha256
+          if-no-files-found: warn
+
+      - name: Attach Release Assets
+        if: (github.event_name == 'release' && github.event.action == 'published') || startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/ZABOR-Setup-*.exe
+            release/latest.yml
+            release/checksums.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

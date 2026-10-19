@@ -144,13 +144,14 @@ class ManualGateProcessor extends AudioWorkletProcessor {
     }
 
     const blockRms = Math.sqrt(squares / frames)
-    const effectiveLevel = Math.max(blockRms, blockPeak * 0.45)
-    const blockDb = 20 * Math.log10(Math.max(effectiveLevel, 0.000001))
+    const crestFactor = blockPeak / Math.max(0.000001, blockRms)
+    const isTransient = crestFactor > 3.8
+    const blockDb = 20 * Math.log10(Math.max(blockRms, 0.000001))
     const gateMuted = this.isMuted && !this.monitorWhileMuted
     if (gateMuted) {
       this.gateOpen = false
       this.holdRemaining = 0
-    } else if (blockDb >= this.thresholdDb) {
+    } else if (blockDb >= this.thresholdDb && !isTransient) {
       this.gateOpen = true
       this.holdRemaining = this.HOLD_SAMPLES
     } else if (this.gateOpen) {
@@ -205,7 +206,8 @@ class ManualGateProcessor extends AudioWorkletProcessor {
         : shapedRms
     }
 
-    this.reportSpeaking(this.gateOpen && !this.isMuted)
+    const isSpeaking = !gateMuted && !this.isMuted && this.meterDb >= this.thresholdDb
+    this.reportSpeaking(isSpeaking)
 
     for (let channel = 1; channel < output.length; channel++) output[channel].set(outputChannel)
     return true

@@ -1,0 +1,107 @@
+﻿ZABOR END USER AGREEMENT AND PRIVACY POLICY
+
+Version dated 10 September 2026
+
+Read this agreement before installing or using zabor. By clicking “I Agree”, installing, or using the application, you confirm that you have read, understood, and accepted it. If you disagree, click “Cancel” and do not install the application.
+
+1. General terms
+
+1.1. This agreement governs the zabor desktop application and the communication features available through it (the “Service”). The application developer and rightsholder is vnkdevelop (the “Developer”).
+
+1.2. The Service is software for user communication, including voice communication, channels, friend lists, direct messages, file transfers, and other available features.
+
+1.3. The Service is provided for non-commercial and research purposes. This agreement is not a public offer for paid services.
+
+1.4. If the law of your country does not permit you to accept this agreement independently, you may use the Service only with consent from your legal representative.
+
+2. Account and profile data
+
+2.1. An account is required for certain features. A user chooses a username, display name, password, and profile colour or image. The username and display name must be pseudonymous and must not identify the user.
+
+2.2. You must not place your full legal name, telephone number, email address, postal address, passport details, geolocation, or any other information that directly or indirectly identifies a person in a username, display name, profile image, or other field.
+
+2.3. You are responsible for protecting your password, all actions taken through your account, and promptly stopping unauthorised access. Accounts may not be transferred to another person.
+
+2.4. The Developer may reject registration, require a name change, or restrict an account when its data violates this agreement, third-party rights, or applicable law.
+
+3. Acceptable use
+
+3.1. You must use the Service lawfully and respect the rights of others.
+
+3.2. Prohibited uses include unlawful material or conduct; threats, harassment, or hateful conduct; child sexual exploitation; malware distribution; spam; fraud; impersonation; infringement of copyright or other rights; attempts to gain unauthorised access, disrupt the Service, or bypass its safeguards; automated data harvesting; and use for mass surveillance.
+
+3.3. You retain rights to your content and grant only the technically necessary, non-exclusive, processing-limited permission to transmit it to recipients and operate the feature you select.
+
+3.4. You are solely responsible for the legality of your content, required consents, and consequences of sending information to recipients. The Developer does not initiate conversations, choose recipients, or undertake to pre-screen user content.
+
+3.5. You are discouraged from transmitting your own or another person's personal data, confidential information, or secrets. If you do so, it is on your own initiative and responsibility.
+
+4. Privacy and data processing
+
+4.1. The Service is not designed to collect legal names, email addresses, telephone numbers, passport details, or precise geolocation and does not request them during registration. You must not provide such information.
+
+4.2. To create and operate an account, the server technically requires the pseudonymous username and display name you select, the result of cryptographic password processing, and other technical identifiers or keys required for authentication and communication. The server must not store the password in plain text.
+
+4.3. During a network connection, servers, network operators, and intermediaries inevitably receive an IP address to route the connection. The Developer does not use an IP address for profiling or include it in the user profile. Ordinary access logs should be disabled or anonymised; short-lived processing and security logs are permitted only as needed to operate the Service, prevent attacks, comply with law, or investigate an incident, with the shortest practicable retention.
+
+4.4. The Service does not use advertising trackers and must not collect data for advertising profiles or device fingerprinting. Diagnostic information may be processed on the user's device; transmission to the Developer is permitted only through a separate user action or when clearly disclosed before transmission.
+
+4.5. Direct-message and file content may be transmitted directly between user devices, and history may be stored locally on those devices. When the hide-IP setting is disabled, a direct connection may disclose the user's network address to the other party; when it is enabled, the application forces TURN relay transport so that no direct ICE route is sent to the other party. In that mode, the relay server technically receives the IP address for the duration of the connection but must not retain it in persistent logs. Protection depends on the feature and network configuration actually used; the lack of a permanent server copy does not guarantee absolute anonymity or prevent a recipient from copying content.
+
+4.6. Voice, video, screen sharing, messages, and files are processed to the extent and for the time required to deliver them to recipients selected by the user. Relay servers may technically participate in transmitting traffic. Recipients may save, record, or redistribute what they receive; consider this before sending.
+
+4.7. Local application data remains on the user's device until removed through the application, uninstalling with data removal selected, or manual cleanup. Device backups and recipient actions are outside the Developer's control.
+
+4.8. Connections may use servers in the Russian Federation, Germany, or other countries. Cross-border transfers may occur only to the extent compatible with applicable law. This agreement does not waive mandatory localisation, notice, security, or lawful-government-request requirements.
+
+4.9. The Developer may disclose available information where strictly required by law, a binding court order, or a mandatory lawful request from a competent authority, and only to the required extent.
+
+4.10. You may stop using the Service, remove local data during uninstall, and request account deletion by a method available in the application. If none is available, send a request through the Developer's published contact channel.
+
+5. Security
+
+5.1. The Developer takes reasonable organisational and technical measures, but no transmission or storage system can guarantee absolute security.
+
+5.2. You must use a strong unique password, install updates from a trusted source, and avoid sharing secrets with unknown persons.
+
+5.3. The terms “end-to-end encryption”, “zero knowledge”, or equivalent guarantees apply only to features for which they are supported by the actual architecture and technical documentation.
+
+6. Intellectual property
+
+6.1. Rights in the application and its branding belong to their respective rightsholders. You receive a limited right to install and use the application under this agreement and the applicable software licence.
+
+6.2. zabor source code is stated to be distributed under GNU General Public License version 3 (GPL-3.0-only). The GPL governs copying, modification, and distribution of the covered code and is not overridden by this agreement. Trademarks, user content, and services may be governed separately.
+
+7. Availability and updates
+
+7.1. The Service is provided “as is” and “as available”. To the fullest extent permitted by law, the Developer disclaims warranties of uninterrupted operation, error-free operation, data preservation, fitness for a particular purpose, or continued availability of any feature.
+
+7.2. The Developer may issue updates and alter or discontinue features for security, compatibility, and project development. Materially new terms will be separately presented where required by law.
+
+7.3. You are responsible for necessary backups of local data where export is available and does not violate another person's rights.
+
+8. Limitation of liability
+
+8.1. To the extent permitted by law, the Developer is not liable for indirect loss, lost profit, lost data, user or third-party conduct, network failures, blocking, malicious files, or disclosure by the user or recipient.
+
+8.2. Nothing in this agreement excludes or limits liability that applicable law does not permit to be excluded or limited, or removes mandatory consumer rights.
+
+9. Restriction and termination
+
+9.1. The Developer may temporarily restrict or terminate access for a breach of this agreement or law, a security threat, a binding requirement from a competent authority, or project discontinuation.
+
+9.2. You may stop using the Service and uninstall it at any time. Uninstalling does not remove copies previously saved by other users.
+
+10. Governing law and disputes
+
+10.1. This agreement is governed by the law of the Russian Federation without displacing mandatory protections provided by the law of the user's country of residence.
+
+10.2. Before filing proceedings, the parties should attempt to resolve a dispute through a written request sent to the Developer's published contact channel. Jurisdiction is determined by applicable procedural law.
+
+11. Final terms
+
+11.1. If one provision is invalid, the remaining provisions remain effective. A failure to enforce a right is not a waiver.
+
+11.2. The current agreement must be available before installation. Consent to this version is requested during the initial interactive installation; an automatic update of an already installed version does not by itself request consent again.
+
+11.3. The Developer publishes legally required details, contact information, actual retention periods, server information, and processing practices as applicable to the actual operating model and keeps them current.

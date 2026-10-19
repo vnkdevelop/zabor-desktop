@@ -212,6 +212,7 @@ async function readBundledAsset(relativePath: string): Promise<Uint8Array | null
 }
 
 let mainWindow: BrowserWindow | null = null;
+let updaterWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let quitRequested = false;
@@ -245,6 +246,12 @@ function getMainWindowHandle(): string | null {
 function requestQuit(): void {
   if (isQuitting || quitRequested) return;
   quitRequested = true;
+  if (updaterWindow && !updaterWindow.isDestroyed()) {
+    try {
+      updaterWindow.destroy();
+    } catch {}
+    updaterWindow = null;
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
       mainWindow.webContents.send('before-quit');
@@ -583,6 +590,84 @@ function createWindow(): void {
   });
 }
 
+function createUpdaterWindow(): BrowserWindow {
+  if (updaterWindow && !updaterWindow.isDestroyed()) {
+    if (updaterWindow.isMinimized()) updaterWindow.restore();
+    updaterWindow.show();
+    updaterWindow.focus();
+    return updaterWindow;
+  }
+
+  updaterWindow = new BrowserWindow({
+    width: 420,
+    height: 240,
+    frame: false,
+    alwaysOnTop: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    center: true,
+    backgroundColor: '#09090B',
+    show: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+      devTools: isDev
+    }
+  });
+
+  updaterWindow.once('ready-to-show', () => {
+    if (!updaterWindow || updaterWindow.isDestroyed()) return;
+    updaterWindow.show();
+    updaterWindow.focus();
+  });
+
+  updaterWindow.on('closed', () => {
+    updaterWindow = null;
+  });
+
+  updaterWindow.webContents.on('will-navigate', (event) => {
+    event.preventDefault();
+  });
+
+  updaterWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const scheme = new URL(url).protocol;
+      if (scheme === 'https:' || scheme === 'http:') shell.openExternal(url);
+    } catch {}
+    return { action: 'deny' };
+  });
+
+  if (!isDev) {
+    updaterWindow.webContents.on('before-input-event', (event, input) => {
+      const key = input.key.toLowerCase();
+      if (
+        (input.control && input.shift && (key === 'i' || key === 'j' || key === 'c')) ||
+        ((input.meta || input.control) && input.alt && (key === 'i' || key === 'j')) ||
+        key === 'f12'
+      ) {
+        event.preventDefault();
+      }
+    });
+
+    updaterWindow.webContents.on('devtools-opened', () => {
+      updaterWindow?.webContents.closeDevTools();
+    });
+  }
+
+  const updaterLoad = isDev && process.env['ELECTRON_RENDERER_URL']
+    ? updaterWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#updater`)
+    : updaterWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'updater' });
+
+  updaterLoad.catch((error) => {
+    console.error('[UpdaterWindow] Failed to load updater window:', error);
+  });
+
+  return updaterWindow;
+}
+
 app.whenReady().then(() => {
   if (!isDev) {
     Menu.setApplicationMenu(null);
@@ -613,7 +698,13 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.on('window-close', () => {
+  ipcMain.on('window-close', (event) => {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (senderWindow && updaterWindow && senderWindow === updaterWindow) {
+      updaterWindow.close();
+      return;
+    }
+
     const settings = loadAppSettings();
     if (settings.minimizeToTray) {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -622,6 +713,19 @@ app.whenReady().then(() => {
     } else {
       requestQuit();
     }
+  });
+
+  ipcMain.handle('open-updater-window', () => {
+    createUpdaterWindow();
+    return true;
+  });
+
+  ipcMain.handle('close-updater-window', () => {
+    if (updaterWindow && !updaterWindow.isDestroyed()) {
+      updaterWindow.close();
+      return true;
+    }
+    return false;
   });
 
   ipcMain.on('app-quit', () => {
@@ -833,7 +937,7 @@ app.whenReady().then(() => {
 
   createWindow();
   createTray();
-  setupUpdater(() => mainWindow);
+  setupUpdater(() => mainWindow, createUpdaterWindow);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

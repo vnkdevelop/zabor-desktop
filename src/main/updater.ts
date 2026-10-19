@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell, ipcMain } from 'electron';
 import { join } from 'path';
-import { createWriteStream, mkdirSync, existsSync, rmSync, createReadStream } from 'fs';
+import { createWriteStream, mkdirSync, existsSync, rmSync, createReadStream, writeFileSync } from 'fs';
 import { spawn, execFile } from 'child_process';
 import { createHash } from 'crypto';
 
@@ -58,8 +58,8 @@ export function cleanUpdateDirectory(): void {
 }
 
 export function isNewerVersion(remote: string, current: string): boolean {
-  const cleanRemote = remote.replace(/^v/i, '').trim();
-  const cleanCurrent = current.replace(/^v/i, '').trim();
+  const cleanRemote = (remote || '').trim().replace(/^v/i, '');
+  const cleanCurrent = (current || '').trim().replace(/^v/i, '');
 
   const rParts = cleanRemote.split(/[-+]/)[0].split('.').map(n => parseInt(n, 10) || 0);
   const cParts = cleanCurrent.split(/[-+]/)[0].split('.').map(n => parseInt(n, 10) || 0);
@@ -124,6 +124,13 @@ export async function checkGitHubRelease(): Promise<UpdateCheckResult> {
     const isNewer = isNewerVersion(tagName, currentVersion);
 
     if (!isNewer) {
+      if (updateState.status !== 'downloading' && updateState.status !== 'installing') {
+        updateState.status = 'idle';
+        updateState.updateInfo = null;
+        updateState.progress = null;
+        updateState.error = null;
+        updateState.installerPath = null;
+      }
       return {
         updateAvailable: false,
         currentVersion
@@ -166,14 +173,7 @@ export async function checkGitHubRelease(): Promise<UpdateCheckResult> {
 
 function installerNeedsElevation(): boolean {
   if (process.platform !== 'win32') return false;
-  try {
-    const exePath = app.getPath('exe').toLowerCase();
-    const programFiles = (process.env['PROGRAMFILES'] || 'c:\\program files').toLowerCase();
-    const programFilesX86 = (process.env['PROGRAMFILES(X86)'] || 'c:\\program files (x86)').toLowerCase();
-    return exePath.startsWith(programFiles) || exePath.startsWith(programFilesX86);
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 function hashFile(filePath: string): Promise<string> {
@@ -233,29 +233,200 @@ async function verifyInstaller(filePath: string, expectedSha256: string): Promis
     }
   }
 
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' && UPDATE_SIGNER) {
     const sig = await verifyAuthenticode(filePath);
-    if (UPDATE_SIGNER) {
-      if (!sig.valid) return { ok: false, reason: `signature-${sig.status}` };
-      const subjectMatch = sig.subject.toLowerCase().includes(UPDATE_SIGNER.toLowerCase());
-      if (!subjectMatch) return { ok: false, reason: 'signer-mismatch' };
-    } else if (sig.valid) {
-      console.warn('[updater] installer carries a valid Authenticode signature but no expected signer is pinned; set ZABOR_UPDATE_SIGNER at build time to enforce it');
-    } else {
-      console.warn('[updater] installer is unsigned and no signer is pinned; only SHA-256 (if published) was checked');
-    }
+    if (!sig.valid) return { ok: false, reason: `signature-${sig.status}` };
+    const subjectMatch = sig.subject.toLowerCase().includes(UPDATE_SIGNER.toLowerCase());
+    if (!subjectMatch) return { ok: false, reason: 'signer-mismatch' };
   }
 
   return { ok: true, reason: expectedSha256 ? 'sha256+signature' : 'signature-only' };
 }
 
-export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
+const INSTALL_SPLASH_SCRIPT = `
+[CmdletBinding()]
+param(
+    [int]$ParentPid = 0
+)
+
+Add-Type -AssemblyName PresentationCore,PresentationFramework,WindowsBase
+
+$xaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ZaborUpdater"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStartupLocation="CenterScreen"
+        Width="380" Height="140">
+    <Grid VerticalAlignment="Center" HorizontalAlignment="Center">
+        <Border Width="240" Height="110" CornerRadius="16"
+                Background="#D90A0A0E" BorderBrush="#24FFFFFF" BorderThickness="1">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock Text="zabor" FontSize="26" FontWeight="Black" Foreground="#FFFFFF" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                <Grid Height="4" Width="160" HorizontalAlignment="Center">
+                    <Border CornerRadius="2" Background="#2BFFFFFF"/>
+                    <Canvas ClipToBounds="True">
+                        <Border Name="Indicator" CornerRadius="2" Height="4" Width="50" Background="#FFFFFF">
+                            <Border.Triggers>
+                                <EventTrigger RoutedEvent="Loaded">
+                                    <BeginStoryboard>
+                                        <Storyboard RepeatBehavior="Forever">
+                                            <DoubleAnimation Storyboard.TargetProperty="(Canvas.Left)"
+                                                             From="-50" To="160"
+                                                             Duration="0:0:1.1"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Border.Triggers>
+                        </Border>
+                    </Canvas>
+                </Grid>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
+'@
+
+try {
+    $reader = [System.Xml.XmlNodeReader]::new([xml]$xaml)
+    $window = [System.Windows.Markup.XamlReader]::Load($reader)
+
+    $window.Add_MouseLeftButtonDown({ $window.DragMove() })
+    $window.Add_KeyDown({ if ($_.Key -eq [System.Windows.Input.Key]::Escape) { $window.Close() } })
+
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromMilliseconds(500)
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    $timer.Add_Tick({
+        if ($stopwatch.Elapsed.TotalSeconds -gt 600) {
+            $window.Close()
+            return
+        }
+
+        if ($stopwatch.Elapsed.TotalSeconds -gt 6) {
+            try {
+                $setupProcs = Get-Process -Name "ZABOR-Setup*" -ErrorAction SilentlyContinue
+                if ($setupProcs) {
+                    return
+                }
+
+                if ($stopwatch.Elapsed.TotalSeconds -gt 10) {
+                    $procs = Get-Process -Name "ZABOR" -ErrorAction SilentlyContinue
+                    if ($procs) {
+                        $newProc = if ($ParentPid -gt 0) {
+                            $procs | Where-Object { $_.Id -ne $ParentPid }
+                        } else {
+                            $procs
+                        }
+                        if ($newProc) {
+                            $window.Close()
+                            return
+                        }
+                    }
+
+                    if ($stopwatch.Elapsed.TotalSeconds -gt 15) {
+                        $window.Close()
+                        return
+                    }
+                }
+            } catch {}
+        }
+    })
+
+    $timer.Start()
+    [void]$window.ShowDialog()
+} catch {
+}
+`;
+
+export function launchInstallSplash(): void {
+  if (process.platform !== 'win32') return;
+
+  try {
+    const devPath = join(app.getAppPath(), 'build', 'ZaborUpdater.exe');
+    const prodPath = typeof process.resourcesPath === 'string' ? join(process.resourcesPath, 'ZaborUpdater.exe') : '';
+    const updaterExe = (prodPath && existsSync(prodPath)) ? prodPath : existsSync(devPath) ? devPath : null;
+
+    if (updaterExe) {
+      try {
+        const tempExe = join(app.getPath('temp'), 'ZaborUpdater.exe');
+        copyFileSync(updaterExe, tempExe);
+        const child = spawn(tempExe, [String(process.pid)], {
+          detached: true,
+          stdio: 'ignore'
+        });
+        child.on('error', (err) => {
+          console.warn('[installSplash] Failed to spawn ZaborUpdater from temp:', err);
+        });
+        child.unref();
+        return;
+      } catch {
+        const child = spawn(updaterExe, [String(process.pid)], {
+          detached: true,
+          stdio: 'ignore'
+        });
+        child.on('error', (err) => {
+          console.warn('[installSplash] Failed to spawn ZaborUpdater window:', err);
+        });
+        child.unref();
+        return;
+      }
+    }
+
+    const scriptPath = join(app.getPath('temp'), 'zabor-install-splash.ps1');
+    writeFileSync(scriptPath, INSTALL_SPLASH_SCRIPT.trim(), 'utf-8');
+
+    const currentPid = process.pid;
+    const child = spawn(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-WindowStyle',
+        'Hidden',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        scriptPath,
+        '-ParentPid',
+        String(currentPid)
+      ],
+      {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true
+      }
+    );
+
+    child.on('error', (err) => {
+      console.warn('[installSplash] Failed to spawn splash window:', err);
+    });
+
+    child.unref();
+  } catch (err) {
+    console.warn('[installSplash] Error launching splash window:', err);
+  }
+}
+
+export function setupUpdater(
+  getMainWindow: () => BrowserWindow | null,
+  openUpdaterWindow?: () => BrowserWindow | null
+): void {
   cleanUpdateDirectory();
 
   const sendToWindow = (channel: string, payload?: unknown): void => {
-    const window = getMainWindow();
-    if (window && !window.isDestroyed()) {
-      window.webContents.send(channel, payload);
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed()) {
+        try {
+          win.webContents.send(channel, payload);
+        } catch {}
+      }
     }
   };
 
@@ -270,6 +441,14 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
       updateState.updateInfo = result.updateInfo;
       updateState.progress = null;
       updateState.error = null;
+    } else if (!result.updateAvailable) {
+      if (updateState.status !== 'downloading' && updateState.status !== 'installing') {
+        updateState.status = 'idle';
+        updateState.updateInfo = null;
+        updateState.progress = null;
+        updateState.error = null;
+        updateState.installerPath = null;
+      }
     }
     return result;
   });
@@ -302,6 +481,14 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
       return { success: false, message: 'Invalid download url' };
     }
 
+    if (openUpdaterWindow) {
+      try {
+        openUpdaterWindow();
+      } catch (err) {
+        console.warn('[updater] Failed to open updater window:', err);
+      }
+    }
+
     cleanUpdateDirectory();
 
     const tempDir = getUpdateTempDir();
@@ -328,6 +515,7 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
         ? updateState.updateInfo.sha256
         : '';
     downloadAbortController = new AbortController();
+    let fileStream: ReturnType<typeof createWriteStream> | null = null;
 
     try {
       const response = await fetch(downloadUrl, {
@@ -343,7 +531,8 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
       let transferred = 0;
 
       const reader = response.body.getReader();
-      const fileStream = createWriteStream(targetPath);
+      fileStream = createWriteStream(targetPath);
+      fileStream.on('error', () => {});
 
       while (true) {
         const { done, value } = await reader.read();
@@ -359,8 +548,9 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
       }
 
       await new Promise<void>((resolve, reject) => {
-        fileStream.end(() => resolve());
+        if (!fileStream) return resolve();
         fileStream.on('error', reject);
+        fileStream.end(() => resolve());
       });
 
       updateState.status = 'downloaded';
@@ -373,6 +563,12 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
     } catch (err: any) {
       downloadAbortController = null;
       updateState.installerPath = null;
+      if (fileStream) {
+        try {
+          fileStream.destroy();
+        } catch {}
+        fileStream = null;
+      }
       cleanUpdateDirectory();
       if (updateState.status === 'downloading') {
         updateState.status = 'error';
@@ -405,8 +601,13 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
 
     const installerPath = updateState.installerPath;
 
+    launchInstallSplash();
+
     const verification = await verifyInstaller(installerPath, updateState.expectedSha256);
     if (!verification.ok) {
+      try {
+        exec('taskkill /F /IM ZaborUpdater.exe');
+      } catch {}
       updateState.status = 'error';
       updateState.error = `installer-verification-failed:${verification.reason}`;
       updateState.installerPath = null;
@@ -415,14 +616,32 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
       return { success: false, message: `Installer verification failed: ${verification.reason}` };
     }
 
-    const installerArgs = ['/S', '--updated'];
+    const installerArgs = ['/S', '--updated', '--keep-app-data', '--force-run'];
 
     try {
+      updateState.status = 'installing';
+      sendToWindow('update-installing');
+
+      try {
+        if (typeof app.releaseSingleInstanceLock === 'function') {
+          app.releaseSingleInstanceLock();
+        }
+      } catch {}
+
+      const windows = BrowserWindow.getAllWindows();
+      for (const win of windows) {
+        if (!win.isDestroyed()) {
+          try {
+            win.destroy();
+          } catch {}
+        }
+      }
+
       if (process.platform === 'win32') {
         if (installerNeedsElevation()) {
-          const prodElevate = join(process.resourcesPath, 'elevate.exe');
+          const prodElevate = typeof process.resourcesPath === 'string' ? join(process.resourcesPath, 'elevate.exe') : '';
           const devElevate = join(app.getAppPath(), 'release', 'win-unpacked', 'resources', 'elevate.exe');
-          const elevatePath = existsSync(prodElevate) ? prodElevate : existsSync(devElevate) ? devElevate : null;
+          const elevatePath = (prodElevate && existsSync(prodElevate)) ? prodElevate : existsSync(devElevate) ? devElevate : null;
 
           if (elevatePath) {
             const child = spawn(elevatePath, [installerPath, ...installerArgs], {
@@ -433,7 +652,7 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
             child.on('error', () => {});
             child.unref();
           } else {
-            const psScript = `Start-Process -FilePath "${installerPath.replace(/"/g, '`"')}" -ArgumentList '/S','--updated' -Verb RunAs`;
+            const psScript = `Start-Process -FilePath "${installerPath.replace(/"/g, '`"')}" -ArgumentList '/S','--updated','--keep-app-data','--force-run' -Verb RunAs`;
             const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psScript], {
               detached: true,
               stdio: 'ignore',
@@ -455,21 +674,9 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
         await shell.openPath(installerPath);
       }
 
-      updateState.status = 'installing';
-      sendToWindow('update-installing');
-
-      const window = getMainWindow();
-      if (window && !window.isDestroyed()) {
-        try {
-          if (window.isMinimized()) window.restore();
-          window.show();
-          window.focus();
-        } catch {}
-      }
-
       setTimeout(() => {
         app.exit(0);
-      }, 1500);
+      }, 150);
 
       return { success: true };
     } catch (err: any) {
@@ -490,6 +697,14 @@ export function setupUpdater(getMainWindow: () => BrowserWindow | null): void {
         updateState.error = null;
       }
       sendToWindow('update-available', result.updateInfo);
+    } else if (!result.updateAvailable) {
+      if (updateState.status !== 'downloading' && updateState.status !== 'installing') {
+        updateState.status = 'idle';
+        updateState.updateInfo = null;
+        updateState.progress = null;
+        updateState.error = null;
+        updateState.installerPath = null;
+      }
     }
   }, 4000);
 }

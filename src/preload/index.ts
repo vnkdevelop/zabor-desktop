@@ -76,6 +76,7 @@ const windowControls = {
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),
   checkForUpdates: (): Promise<any> => ipcRenderer.invoke('check-for-updates'),
   getUpdateStatus: (): Promise<any> => ipcRenderer.invoke('get-update-status'),
+  openUpdaterWindow: (): Promise<boolean> => ipcRenderer.invoke('open-updater-window'),
   startUpdateDownload: (downloadUrl: string, version: string): Promise<{ success: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('start-update-download', downloadUrl, version),
   cancelUpdateDownload: (): Promise<boolean> => ipcRenderer.invoke('cancel-update-download'),
@@ -88,6 +89,11 @@ const windowControls = {
     return () => { ipcRenderer.removeListener('update-available', listener) }
   },
   onUpdateDownloadProgress: (callback: (progress: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: any) => callback(progress)
+    ipcRenderer.on('update-download-progress', listener)
+    return () => { ipcRenderer.removeListener('update-download-progress', listener) }
+  },
+  onUpdateProgress: (callback: (progress: any) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: any) => callback(progress)
     ipcRenderer.on('update-download-progress', listener)
     return () => { ipcRenderer.removeListener('update-download-progress', listener) }

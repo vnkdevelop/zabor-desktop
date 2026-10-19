@@ -94,9 +94,6 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
   private readonly DECISION_DELAY_FRAMES = 24
   private readonly LOOKAHEAD_DELAY_FRAMES = 1
   private readonly SPEECH_PREROLL_FRAMES = 14
-  private readonly ANALYZERLESS_HOLD_FRAMES = 30
-  private readonly ANALYZERLESS_SNR_RATIO = 2
-  private analyzerlessHoldFrames = 0
   private gateOpen = false
   private noiseProbHigh = 0.05
   private vadFixedThreshold = 0
@@ -437,7 +434,6 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
             this.speechRingCount = 0
             this.gateGain = 0
             this.gateHoldFrames = 0
-            this.analyzerlessHoldFrames = 0
             this.gateOpen = false
             this.speechRingSpeech.fill(0)
             this.speechRingFrameIds.fill(-1)
@@ -1068,6 +1064,10 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
 
     const measureWhileMuted = this.isMuted && (this.calibrationFramesLeft > 0 || this.monitorWhileMuted)
     if (this.isMuted && !measureWhileMuted) {
+      if (this.lastVadSent) {
+        this.port.postMessage({ type: 'vad', isSpeaking: false })
+        this.lastVadSent = false
+      }
       outputChannel.fill(0)
       return true
     }
@@ -1252,13 +1252,13 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
       }
 
       if (this.thresholdMode === 'manual') {
-        if (currentDb >= this.manualThresholdDb) {
+        if (!inTransient && currentDb >= this.manualThresholdDb) {
           if (this.manualVadHoldFrames === 0) {
             this.markBufferedSpeechFrom(this.audioFrameId - this.SPEECH_PREROLL_FRAMES)
           }
           this.manualVadHoldFrames = this.MANUAL_HOLD_FRAMES
         } else if (this.manualVadHoldFrames > 0) {
-          if (currentDb >= this.manualThresholdDb - 8) {
+          if (!inTransient && currentDb >= this.manualThresholdDb - 8) {
             this.manualVadHoldFrames = this.MANUAL_HOLD_FRAMES
           } else {
             this.manualVadHoldFrames--
@@ -1266,28 +1266,11 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
         }
       }
 
-      const analyzerlessGate = this.thresholdMode !== 'manual' && !this.sileroVadHealthy
-      if (analyzerlessGate) {
-        const analyzerlessSpeech = !inTransient &&
-          this.voicingHoldWindows > 0 &&
-          currentRms >= Math.max(this.AUDIBLE_MIN_RMS, this.noiseRmsHigh * this.ANALYZERLESS_SNR_RATIO)
-        if (analyzerlessSpeech) {
-          if (this.analyzerlessHoldFrames === 0) {
-            this.markBufferedSpeechFrom(this.audioFrameId - this.SPEECH_PREROLL_FRAMES)
-          }
-          this.analyzerlessHoldFrames = this.ANALYZERLESS_HOLD_FRAMES
-        } else if (this.analyzerlessHoldFrames > 0) {
-          this.analyzerlessHoldFrames--
-        }
-      } else if (this.analyzerlessHoldFrames > 0) {
-        this.analyzerlessHoldFrames--
-      }
-
       const isSpeaking = this.thresholdMode === 'manual'
         ? this.manualVadHoldFrames > 0
-        : analyzerlessGate
-          ? this.analyzerlessHoldFrames > 0
-          : this.speechSegmentOpen || this.analyzerlessHoldFrames > 0
+        : this.sileroVadEnabled
+          ? this.speechSegmentOpen
+          : true
       this.gateOpen = isSpeaking
 
       const writeIndex = this.speechRingWriteIndex
@@ -1308,12 +1291,6 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
       const readIndex = (writeIndex - delayFrames + this.speechRingSpeech.length) % this.speechRingSpeech.length
       const hasDelayedFrame = this.speechRingCount > delayFrames
       const delayedIsSpeech = hasDelayedFrame && this.speechRingSpeech[readIndex] === 1
-
-      const reportedSpeaking = measureWhileMuted ? false : isSpeaking
-      if (this.lastVadSent !== reportedSpeaking) {
-        this.port.postMessage({ type: 'vad', isSpeaking: reportedSpeaking })
-        this.lastVadSent = reportedSpeaking
-      }
 
       const delayedFrame = this.speechRingFrames[readIndex]
       let engineFrame = delayedFrame
@@ -1611,6 +1588,28 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
         this.processedFrame.fill(0)
         this.gateGain = 0
       }
+
+      let outboundSpeaking = false
+      if (!this.isMuted && !measureWhileMuted && hasDelayedFrame) {
+        let outboundSquares = 0
+        for (let i = 0; i < this.FRAME_SIZE; i++) {
+          const sample = this.processedFrame[i]
+          outboundSquares += sample * sample
+        }
+        const outboundRms = Math.sqrt(outboundSquares / this.FRAME_SIZE)
+
+        if (this.sileroVadEnabled) {
+          outboundSpeaking = !this.dfVetoLatched &&
+            this.gateGain > 0.05 &&
+            (delayedIsSpeech || this.gateHoldFrames > 0)
+        }
+      }
+
+      if (this.sileroVadEnabled && this.lastVadSent !== outboundSpeaking) {
+        this.port.postMessage({ type: 'vad', isSpeaking: outboundSpeaking })
+        this.lastVadSent = outboundSpeaking
+      }
+
       this.outputWriteIndex = this.pushToBuffer(this.outputBuffer, this.processedFrame, this.outputWriteIndex, this.outputReadIndex)
     }
 

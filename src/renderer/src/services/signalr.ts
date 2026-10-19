@@ -699,6 +699,7 @@ class SignalRService {
     on("UserStartedStreaming", (userId: string, streamQuality: string) => {
       this.clearStreamDropTimer(userId);
       store().updateUserStatus(userId, { isStreaming: true, streamQuality });
+      webrtc.syncRemoteVideoStream(userId);
     });
 
     on("UserStoppedStreaming", (userId: string) => {

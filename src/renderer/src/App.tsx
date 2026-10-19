@@ -24,7 +24,6 @@ import { StreamCard } from './components/Stream/StreamCard';
 import { NoiseSuppressionSettings, type CalibrationPhase, type SmartNoiseModel } from './components/Settings/NoiseSuppressionSettings';
 import { MIC_TEST_PANEL_GAP_PX, MicTestPanel } from './components/Settings/MicTestPanel';
 import { UpdateModal } from './components/Modals/UpdateModal';
-import { UpdateProgressOverlay } from './components/Modals/UpdateProgressOverlay';
 import { ChatPanel } from './components/Chat/ChatPanel';
 import { ActiveSessionPip } from './components/Chat/ActiveSessionPip';
 import { chatPeer } from './services/chatPeer';
@@ -367,11 +366,7 @@ export default function App() {
         if (snapshot.error) store.setUpdateError(snapshot.error);
         if (snapshot.status && snapshot.status !== 'idle') {
           store.setUpdateStatus(snapshot.status);
-          const inProgress =
-            snapshot.status === 'downloading' ||
-            snapshot.status === 'downloaded' ||
-            snapshot.status === 'installing';
-          if (inProgress || (snapshot.status === 'available' && forceOpenAvailable)) {
+          if (snapshot.status === 'available' && forceOpenAvailable) {
             store.setModal('update', true);
           }
         }
@@ -1059,7 +1054,7 @@ export default function App() {
 
     const streamer = relevantUsers.find(user => user.id === store.activeStreamId);
     const isStreaming = streamer && (
-      streamer.isStreaming || (streamer.id === store.currentUser?.id && !!webrtc.localVideoStream)
+      streamer.isStreaming || (streamer.id === store.currentUser?.id && !!webrtc.localVideoStream) || Boolean(store.remoteVideoStreams[streamer.id])
     );
 
     if (!isStreaming) {
@@ -1130,7 +1125,7 @@ export default function App() {
     }
     let count = store.voiceUsers.length;
     store.voiceUsers.forEach(u => {
-      const isStreaming = u.isStreaming || (u.id === store.currentUser?.id && !!webrtc.localVideoStream);
+      const isStreaming = u.isStreaming || (u.id === store.currentUser?.id && !!webrtc.localVideoStream) || Boolean(store.remoteVideoStreams[u.id]);
       if (isStreaming) count++;
     });
     return count;
@@ -3384,7 +3379,7 @@ export default function App() {
                   const items: any[] = [];
                   sorted.forEach(user => {
                     items.push({ type: 'user', id: `user-${user.id}`, user });
-                    const isStreaming = user.isStreaming || (user.id === store.currentUser?.id && !!webrtc.localVideoStream);
+                    const isStreaming = user.isStreaming || (user.id === store.currentUser?.id && !!webrtc.localVideoStream) || Boolean(store.remoteVideoStreams[user.id]);
                     if (isStreaming) {
                       const stream = user.id === store.currentUser?.id ? webrtc.localVideoStream : (store.remoteVideoStreams[user.id] ?? null);
                       items.push({ type: 'stream', id: `stream-${user.id}`, user, stream });
@@ -4855,8 +4850,6 @@ export default function App() {
       {renderModal('update',
         <UpdateModal onClose={() => store.setModal('update', false)} />
       )}
-
-      <UpdateProgressOverlay />
 
       {createPortal(
         <Toast open={offlineToast != null}>

@@ -62,6 +62,13 @@ refuses to build if the bytes change.
 - Licence: MIT, copyright (c) Microsoft Corporation
 - Upstream: <https://github.com/microsoft/onnxruntime>
 
+## WebRTC VAD (fvad-wasm)
+
+- Bundled through the npm package `@echogarden/fvad-wasm` (BSD-3-Clause),
+  <https://github.com/echogarden-project/fvad-wasm>
+- WebRTC VAD / libfvad itself is BSD-3-Clause, Daniel Pirch / The WebRTC project authors
+- Purpose: standalone Google WebRTC Voice Activity Detection (mode 2) for local audio activity indication
+
 ## External services used at runtime
 
 These are not bundled with the application; they are contacted over the network when

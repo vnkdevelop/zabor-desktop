@@ -62,6 +62,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
 
   const handleStartDownload = async () => {
     if (!updateInfo.downloadUrl) return;
+    onClose();
     setUpdateStatus('downloading');
     setUpdateError(null);
     try {
