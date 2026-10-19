@@ -64,15 +64,21 @@
 !macroend
 
 !macro preInit
-  ${if} ${Silent}
-    ; Запуск окна прогресса ZaborUpdater в самом начале работы инсталлятора, до любых проверок
-    FindWindow $0 "" "ZaborUpdater"
-    ${if} $0 == 0
-      InitPluginsDir
-      File /oname=$PLUGINSDIR\ZaborUpdater.exe "${BUILD_RESOURCES_DIR}\ZaborUpdater.exe"
-      Exec '"$PLUGINSDIR\ZaborUpdater.exe"'
+  !ifndef BUILD_UNINSTALLER
+    ${if} ${Silent}
+      ${GetParameters} $R0
+      ${GetOptions} $R0 "--updated" $R1
+      ${IfNot} ${Errors}
+        ; Запуск окна прогресса ZaborUpdater в самом начале работы инсталлятора, до любых проверок
+        FindWindow $0 "" "ZaborUpdater"
+        ${if} $0 == 0
+          InitPluginsDir
+          File /oname=$PLUGINSDIR\ZaborUpdater.exe "${BUILD_RESOURCES_DIR}\ZaborUpdater.exe"
+          Exec '"$PLUGINSDIR\ZaborUpdater.exe"'
+        ${endif}
+      ${EndIf}
     ${endif}
-  ${endif}
+  !endif
 !macroend
 
 !macro customCheckAppRunning
@@ -84,15 +90,19 @@
 !macroend
 
 !macro customInit
-  ${if} ${Silent}
-    ; Запуск окна прогресса ZaborUpdater, если оно еще не открыто
-    FindWindow $0 "" "ZaborUpdater"
-    ${if} $0 == 0
-      InitPluginsDir
-      File /oname=$PLUGINSDIR\ZaborUpdater.exe "${BUILD_RESOURCES_DIR}\ZaborUpdater.exe"
-      Exec '"$PLUGINSDIR\ZaborUpdater.exe"'
+  !ifndef BUILD_UNINSTALLER
+    ${if} ${isUpdated}
+      ${if} ${Silent}
+        ; Запуск окна прогресса ZaborUpdater, если оно еще не открыто
+        FindWindow $0 "" "ZaborUpdater"
+        ${if} $0 == 0
+          InitPluginsDir
+          File /oname=$PLUGINSDIR\ZaborUpdater.exe "${BUILD_RESOURCES_DIR}\ZaborUpdater.exe"
+          Exec '"$PLUGINSDIR\ZaborUpdater.exe"'
+        ${endif}
+      ${endif}
     ${endif}
-  ${endif}
+  !endif
 
   ; === ПРОВЕРКА РЕЖИМА ОБНОВЛЕНИЯ ===
   ${if} ${isUpdated}

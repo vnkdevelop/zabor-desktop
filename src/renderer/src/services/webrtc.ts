@@ -1586,45 +1586,47 @@ export class WebRTCManager {
   }
 
   private async updateVadBranch(): Promise<void> {
-    const branch = this.getActiveVadBranch()
-    const me = useAppStore.getState().currentUser
-    const streamToTap = this.localStream || this.rawStream
+    try {
+      const branch = this.getActiveVadBranch()
+      const me = useAppStore.getState().currentUser
+      const streamToTap = this.micOutputTap || this.rawStream || this.localStream
 
-    if (branch === 'silero') {
-      if (this.webRtcVadSidecar) {
-        this.webRtcVadSidecar.stop()
-        this.webRtcVadSidecar = null
-      }
-      if (this.micNode) {
-        this.applyAnalyzerToWorklet()
-      }
-    } else if (branch === 'manual-gate') {
-      if (this.webRtcVadSidecar) {
-        this.webRtcVadSidecar.stop()
-        this.webRtcVadSidecar = null
-      }
-      if (!this.calibrationForcesAnalyzer) {
-        this.terminateVadWorker()
-      }
-    } else {
-      if (!this.calibrationForcesAnalyzer) {
-        this.terminateVadWorker()
-      }
-      if (this.micNode) {
-        this.micNode.port.postMessage({ type: 'setConfig', sileroVadEnabled: false })
-      }
-      if (streamToTap && this.processedContext && this.processedContext.state !== 'closed') {
-        if (!this.webRtcVadSidecar) {
-          this.webRtcVadSidecar = new WebRtcVadSidecar((isSpeaking) => {
-            if (this.getActiveVadBranch() === 'webrtc-vad') {
-              this.applyLocalSpeaking(isSpeaking)
-            }
-          })
+      if (branch === 'silero') {
+        if (this.webRtcVadSidecar) {
+          this.webRtcVadSidecar.stop()
+        }
+        if (this.micNode) {
+          this.applyAnalyzerToWorklet()
+        }
+      } else if (branch === 'manual-gate') {
+        if (this.webRtcVadSidecar) {
+          this.webRtcVadSidecar.stop()
+        }
+        if (!this.calibrationForcesAnalyzer) {
+          this.terminateVadWorker()
+        }
+      } else {
+        if (!this.calibrationForcesAnalyzer) {
+          this.terminateVadWorker()
+        }
+        if (this.micNode) {
+          this.micNode.port.postMessage({ type: 'setConfig', sileroVadEnabled: false })
+        }
+        if (streamToTap && this.processedContext && this.processedContext.state !== 'closed') {
+          if (!this.webRtcVadSidecar) {
+            this.webRtcVadSidecar = new WebRtcVadSidecar((isSpeaking) => {
+              if (this.getActiveVadBranch() === 'webrtc-vad') {
+                this.applyLocalSpeaking(isSpeaking)
+              }
+            })
+          }
           const isMuted = me?.isMuted || me?.isServerMuted || false
           this.webRtcVadSidecar.setMuted(isMuted)
           await this.webRtcVadSidecar.start(this.processedContext, streamToTap)
         }
       }
+    } catch (e) {
+      console.warn('[WebRTC] updateVadBranch failed gracefully:', e)
     }
   }
 
@@ -3432,7 +3434,7 @@ export class WebRTCManager {
         await safeResumeContext(this.processedContext)
         this.startSilenceMonitor()
         const me = useAppStore.getState().currentUser
-        await this.updateVadBranch()
+        void this.updateVadBranch().catch(() => {})
         const isMuted = me?.isMuted || me?.isServerMuted || false
         this.toggleMute(isMuted)
         console.log(`[WebRTC] startLocalStream reused existing stream in ${Math.round(performance.now() - startedAt)}ms`)
@@ -3499,7 +3501,7 @@ export class WebRTCManager {
         this.startSilenceMonitor()
 
         const me = useAppStore.getState().currentUser
-        await this.updateVadBranch()
+        void this.updateVadBranch().catch(() => {})
 
         const isMuted = me?.isMuted || me?.isServerMuted || false
         this.toggleMute(isMuted)
@@ -3587,7 +3589,8 @@ export class WebRTCManager {
         const screenAudioTracks = this.localVideoStream ? this.localVideoStream.getAudioTracks() : []
         for (const pc of this.peerConnections.values()) {
           const sender = pc.getSenders().find(s => s.track && s.track === oldAudioTrack)
-            ?? pc.getSenders().find(s => s.track?.kind === 'audio' && !screenAudioTracks.includes(s.track))
+            ?? pc.getSenders().find(s => s.track && s.track.kind === 'audio' && !screenAudioTracks.includes(s.track))
+            ?? pc.getSenders().find(s => (!s.track || s.track.kind === 'audio') && (!s.track || !screenAudioTracks.includes(s.track)))
           const newTrack = this.localStream?.getAudioTracks()[0]
           if (sender && newTrack) {
             await sender.replaceTrack(newTrack).catch(() => { })

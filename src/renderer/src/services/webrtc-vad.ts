@@ -1,8 +1,21 @@
 import fvad from '@echogarden/fvad-wasm'
 import type { FvadModule } from '@echogarden/fvad-wasm'
+import { FVAD_WASM_BASE64 } from './fvad-binary'
 
 export async function createWebRtcVadModule(): Promise<FvadModule> {
-  return fvad()
+  let wasmBinary: ArrayBuffer
+  if (typeof Buffer !== 'undefined') {
+    wasmBinary = Buffer.from(FVAD_WASM_BASE64, 'base64').buffer
+  } else {
+    const binaryStr = atob(FVAD_WASM_BASE64)
+    const len = binaryStr.length
+    const bytes = new Uint8Array(len)
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryStr.charCodeAt(i)
+    }
+    wasmBinary = bytes.buffer
+  }
+  return fvad({ wasmBinary })
 }
 
 export interface WebRtcVadDetectorOptions {
@@ -26,31 +39,36 @@ export class WebRtcVadDetector {
   constructor(options?: WebRtcVadDetectorOptions) {
     this.sampleRate = options?.sampleRate ?? 48000
     this.mode = options?.mode ?? 2
-    this.frameLength = Math.round(this.sampleRate * 0.01)
+    this.frameLength = Math.round(this.sampleRate * 0.01) // 480 samples @ 48kHz (10ms)
     const hangoverMs = options?.hangoverMs ?? 150
     this.hangoverFrames = Math.max(1, Math.round(hangoverMs / 10))
   }
 
   public async init(): Promise<void> {
     if (this.mod && this.handle) return
-    this.mod = await createWebRtcVadModule()
-    this.handle = this.mod._fvad_new()
-    if (!this.handle) {
-      throw new Error('Failed to create WebRTC VAD instance')
-    }
+    try {
+      this.mod = await createWebRtcVadModule()
+      this.handle = this.mod._fvad_new()
+      if (!this.handle) {
+        throw new Error('Failed to create WebRTC VAD instance')
+      }
 
-    const modeResult = this.mod._fvad_set_mode(this.handle, this.mode)
-    if (modeResult !== 0) {
-      throw new Error(`Failed to set WebRTC VAD mode to ${this.mode}`)
-    }
+      const modeResult = this.mod._fvad_set_mode(this.handle, this.mode)
+      if (modeResult !== 0) {
+        throw new Error(`Failed to set WebRTC VAD mode to ${this.mode}`)
+      }
 
-    const rateResult = this.mod._fvad_set_sample_rate(this.handle, this.sampleRate)
-    if (rateResult !== 0) {
-      throw new Error(`Failed to set WebRTC VAD sample rate to ${this.sampleRate}`)
-    }
+      const rateResult = this.mod._fvad_set_sample_rate(this.handle, this.sampleRate)
+      if (rateResult !== 0) {
+        throw new Error(`Failed to set WebRTC VAD sample rate to ${this.sampleRate}`)
+      }
 
-    this.pcmPtr = this.mod._malloc(this.frameLength * 2)
-    this.isDestroyed = false
+      this.pcmPtr = this.mod._malloc(this.frameLength * 2)
+      this.isDestroyed = false
+    } catch (e) {
+      console.warn('[WebRtcVadDetector] Failed to initialize:', e)
+      this.destroy()
+    }
   }
 
   public isReady(): boolean {
@@ -92,9 +110,11 @@ export class WebRtcVadDetector {
 
   public reset(): void {
     if (this.isReady()) {
-      this.mod!._fvad_reset(this.handle)
-      this.mod!._fvad_set_sample_rate(this.handle, this.sampleRate)
-      this.mod!._fvad_set_mode(this.handle, this.mode)
+      try {
+        this.mod!._fvad_reset(this.handle)
+        this.mod!._fvad_set_sample_rate(this.handle, this.sampleRate)
+        this.mod!._fvad_set_mode(this.handle, this.mode)
+      } catch { }
       this.remainingHangoverFrames = 0
       this.lastSpeakingState = false
     }
@@ -104,15 +124,11 @@ export class WebRtcVadDetector {
     if (this.isDestroyed) return
     this.isDestroyed = true
     if (this.mod && this.pcmPtr) {
-      try {
-        this.mod._free(this.pcmPtr)
-      } catch { }
+      try { this.mod._free(this.pcmPtr) } catch { }
       this.pcmPtr = 0
     }
     if (this.mod && this.handle) {
-      try {
-        this.mod._fvad_free(this.handle)
-      } catch { }
+      try { this.mod._fvad_free(this.handle) } catch { }
       this.handle = 0
     }
     this.mod = null
@@ -121,12 +137,10 @@ export class WebRtcVadDetector {
 
 export class WebRtcVadSidecar {
   private detector: WebRtcVadDetector | null = null
-  private context: AudioContext | null = null
   private source: MediaStreamAudioSourceNode | null = null
-  private processor: ScriptProcessorNode | null = null
-  private silentGain: GainNode | null = null
-  private readonly accumulator = new Float32Array(480)
-  private accumulatedSamples = 0
+  private analyser: AnalyserNode | null = null
+  private pollTimer: any = null
+  private readonly timeBuf = new Float32Array(1024)
   private onSpeakingChange: ((isSpeaking: boolean) => void) | null = null
   private isMuted = false
   private isActive = false
@@ -136,62 +150,50 @@ export class WebRtcVadSidecar {
     this.onSpeakingChange = onSpeakingChange
   }
 
-  public async start(context: AudioContext, stream: MediaStream): Promise<void> {
+  public async start(context: AudioContext, target: AudioNode | MediaStream): Promise<void> {
     this.stop()
-    this.context = context
-    this.detector = new WebRtcVadDetector({ sampleRate: 48000, mode: 2, hangoverMs: 150 })
-    await this.detector.init()
-
     if (!context || context.state === 'closed') return
 
     try {
-      this.source = context.createMediaStreamSource(stream)
-    } catch {
-      return
-    }
+      if (!this.detector || !this.detector.isReady()) {
+        this.detector = new WebRtcVadDetector({ sampleRate: 48000, mode: 2, hangoverMs: 150 })
+        await this.detector.init()
+      }
 
-    if (typeof context.createScriptProcessor === 'function') {
-      try {
-        this.processor = context.createScriptProcessor(512, 1, 1)
-        this.silentGain = context.createGain()
-        this.silentGain.gain.value = 0
+      if (!this.detector.isReady()) return
 
-        this.processor.onaudioprocess = (event) => {
-          if (!this.isActive || !this.detector) return
-          if (this.isMuted) {
-            this.report(false)
-            return
-          }
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 1024
+      analyser.smoothingTimeConstant = 0
+      this.analyser = analyser
 
-          const input = event.inputBuffer.getChannelData(0)
-          let inputOffset = 0
-          while (inputOffset < input.length) {
-            const needed = 480 - this.accumulatedSamples
-            const available = input.length - inputOffset
-            const toCopy = Math.min(needed, available)
+      if (target instanceof MediaStream) {
+        this.source = context.createMediaStreamSource(target)
+        this.source.connect(analyser)
+      } else if (target instanceof AudioNode) {
+        target.connect(analyser)
+      } else {
+        return
+      }
 
-            this.accumulator.set(
-              input.subarray(inputOffset, inputOffset + toCopy),
-              this.accumulatedSamples
-            )
-            this.accumulatedSamples += toCopy
-            inputOffset += toCopy
-
-            if (this.accumulatedSamples === 480) {
-              const isSpeaking = this.detector.process(this.accumulator)
-              this.report(isSpeaking)
-              this.accumulatedSamples = 0
-            }
-          }
+      this.isActive = true
+      this.pollTimer = setInterval(() => {
+        if (!this.isActive || !this.detector || !this.detector.isReady() || !this.analyser) return
+        if (this.isMuted) {
+          this.report(false)
+          return
         }
 
-        this.source.connect(this.processor)
-        this.processor.connect(this.silentGain)
-        this.silentGain.connect(context.destination)
-      } catch { }
+        try {
+          this.analyser.getFloatTimeDomainData(this.timeBuf)
+          const voice1 = this.detector.process(this.timeBuf.subarray(0, 480))
+          const voice2 = this.detector.process(this.timeBuf.subarray(480, 960))
+          this.report(voice1 || voice2)
+        } catch { }
+      }, 20)
+    } catch (e) {
+      console.warn('[WebRtcVadSidecar] start failed gracefully:', e)
     }
-
-    this.isActive = true
   }
 
   private report(isSpeaking: boolean): void {
@@ -205,7 +207,6 @@ export class WebRtcVadSidecar {
   public setMuted(muted: boolean): void {
     this.isMuted = muted
     if (muted) {
-      this.accumulatedSamples = 0
       this.detector?.reset()
       this.report(false)
     }
@@ -223,31 +224,27 @@ export class WebRtcVadSidecar {
 
   public stop(): void {
     this.isActive = false
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer)
+      this.pollTimer = null
+    }
     if (this.source) {
-      try {
-        this.source.disconnect()
-      } catch { }
+      try { this.source.disconnect() } catch { }
       this.source = null
     }
-    if (this.processor) {
-      try {
-        this.processor.onaudioprocess = null
-        this.processor.disconnect()
-      } catch { }
-      this.processor = null
+    if (this.analyser) {
+      try { this.analyser.disconnect() } catch { }
+      this.analyser = null
     }
-    if (this.silentGain) {
-      try {
-        this.silentGain.disconnect()
-      } catch { }
-      this.silentGain = null
-    }
+    this.report(false)
+    this.lastReportedSpeaking = null
+  }
+
+  public destroy(): void {
+    this.stop()
     if (this.detector) {
       this.detector.destroy()
       this.detector = null
     }
-    this.accumulatedSamples = 0
-    this.report(false)
-    this.lastReportedSpeaking = null
   }
 }
