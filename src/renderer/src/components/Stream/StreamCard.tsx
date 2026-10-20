@@ -191,7 +191,7 @@ export const StreamCard = ({
   }, [isCapturing, stream, snapshot, isLocal])
 
   useEffect(() => {
-    setHasFirstFrame(false)
+    if (!stream) setHasFirstFrame(false)
   }, [stream])
 
   const videoOnlyStream = useMemo(() => {

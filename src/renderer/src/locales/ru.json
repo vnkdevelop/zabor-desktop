@@ -4,7 +4,8 @@
     "tabs": {
       "general": "общие",
       "audio": "звук",
-      "privacy": "безопасность"
+      "privacy": "конфиденциальность",
+      "account": "аккаунт"
     },
     "general": {
       "system": "система",
@@ -91,7 +92,14 @@
       "deleteAccountPrompt": "для подтверждения введите «подтверждаю»:",
       "deleteAccountConfirmWord": "подтверждаю",
       "deleteAccountConfirmBtn": "удалить навсегда",
-      "deleteAccountFailed": "не удалось удалить аккаунт"
+      "deleteAccountFailed": "не удалось удалить аккаунт",
+      "confirmTitle": "точно ли вы хотите поменять пароль?",
+      "confirmWarning": "после смены пароля используйте новый пароль для входа в аккаунт.",
+      "confirmButton": "точно поменять",
+      "samePassword": "новый пароль совпадает с текущим",
+      "newPasswordValue": "новый пароль:",
+      "showPassword": "показать пароль",
+      "hidePassword": "скрыть пароль"
     }
   },
   "presence": {
@@ -131,16 +139,32 @@
     "copy": "копировать",
     "clearFile": "очистить файл",
     "deleteMessage": "удалить сообщение",
-    "delivery": { "pending": "ожидает", "sent": "отправлено", "delivered": "доставлено", "read": "прочитано", "failed": "ошибка" },
-    "file": { "deletedBySender": "файл удалён отправителем", "deletedByYou": "вы удалили файл", "failed": "не удалось передать, нажмите для повтора" },
-    "units": { "b": "б", "kb": "кб", "mb": "мб", "gb": "гб" },
+    "delivery": {
+      "pending": "ожидает",
+      "sent": "отправлено",
+      "delivered": "доставлено",
+      "read": "прочитано",
+      "failed": "ошибка"
+    },
+    "file": {
+      "deletedBySender": "файл удалён отправителем",
+      "deletedByYou": "вы удалили файл",
+      "failed": "не удалось передать, нажмите для повтора"
+    },
+    "units": {
+      "b": "б",
+      "kb": "кб",
+      "mb": "мб",
+      "gb": "гб"
+    },
     "encryption": "шифрование",
     "information": "информация о чате",
     "retentionHint": "чаты очищаются каждые 14 дней",
     "encryptionHint": "защищено сквозным шифрованием",
     "routeP2p": "прямое p2p-соединение",
     "routeTurn": "защищённый turn-шлюз",
-    "routeRelay": "серверная доставка (текст)"
+    "routeRelay": "серверная доставка (текст)",
+    "copySelected": "скопировать выделенное"
   },
   "auth": {
     "login": "логин",
@@ -437,7 +461,8 @@
     "micUnknownError": "неизвестная ошибка микрофона",
     "channelJoinFailed": "не удалось войти в канал: сервер не ответил. попробуйте снова.",
     "relayUnavailable": "скрытие IP включено, но сервер ретрансляции недоступен — соединение не будет установлено.",
-    "ipPolicyRestart": "настройка ip полностью применится после перезапуска zabor."
+    "ipPolicyRestart": "настройка ip полностью применится после перезапуска zabor.",
+    "passwordChanged": "пароль успешно изменён"
   },
   "stream": {
     "pickerTitle": "выбор источника",

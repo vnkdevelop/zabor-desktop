@@ -4,7 +4,8 @@
     "tabs": {
       "general": "general",
       "audio": "audio",
-      "privacy": "privacy"
+      "privacy": "privacy",
+      "account": "account"
     },
     "general": {
       "system": "system",
@@ -91,7 +92,14 @@
       "deleteAccountPrompt": "to confirm, type «confirm»:",
       "deleteAccountConfirmWord": "confirm",
       "deleteAccountConfirmBtn": "delete permanently",
-      "deleteAccountFailed": "failed to delete account"
+      "deleteAccountFailed": "failed to delete account",
+      "confirmTitle": "are you sure you want to change your password?",
+      "confirmWarning": "after changing your password, use the new password to log in.",
+      "confirmButton": "confirm change",
+      "samePassword": "new password matches current password",
+      "newPasswordValue": "new password:",
+      "showPassword": "show password",
+      "hidePassword": "hide password"
     }
   },
   "presence": {
@@ -129,16 +137,32 @@
     "copy": "copy",
     "clearFile": "clear file",
     "deleteMessage": "delete message",
-    "delivery": { "pending": "pending", "sent": "sent", "delivered": "delivered", "read": "read", "failed": "failed" },
-    "file": { "deletedBySender": "file deleted by sender", "deletedByYou": "you deleted the file", "failed": "transfer failed, tap to retry" },
-    "units": { "b": "b", "kb": "kb", "mb": "mb", "gb": "gb" },
+    "delivery": {
+      "pending": "pending",
+      "sent": "sent",
+      "delivered": "delivered",
+      "read": "read",
+      "failed": "failed"
+    },
+    "file": {
+      "deletedBySender": "file deleted by sender",
+      "deletedByYou": "you deleted the file",
+      "failed": "transfer failed, tap to retry"
+    },
+    "units": {
+      "b": "b",
+      "kb": "kb",
+      "mb": "mb",
+      "gb": "gb"
+    },
     "encryption": "encryption",
     "information": "chat information",
     "retentionHint": "chats are cleared every 14 days",
     "encryptionHint": "protected with end-to-end encryption",
     "routeP2p": "direct p2p connection",
     "routeTurn": "secure turn gateway",
-    "routeRelay": "server relay (text)"
+    "routeRelay": "server relay (text)",
+    "copySelected": "copy selected"
   },
   "auth": {
     "login": "login",
@@ -435,7 +459,8 @@
     "micUnknownError": "unknown microphone error",
     "channelJoinFailed": "could not join the channel: the server did not respond. please try again.",
     "relayUnavailable": "IP hiding is on, but the relay server is unreachable — the connection will not be established.",
-    "ipPolicyRestart": "the ip setting fully applies after you restart zabor."
+    "ipPolicyRestart": "the ip setting fully applies after you restart zabor.",
+    "passwordChanged": "password successfully changed"
   },
   "stream": {
     "pickerTitle": "select source",

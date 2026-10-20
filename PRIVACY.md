@@ -1,6 +1,6 @@
 # Политика в отношении обработки персональных данных ZABOR / ZABOR Privacy Policy
 
-> Редакция от 26 сентября 2026 года. Предыдущая редакция — от 11 сентября 2026 года.
+> Редакция от 20 октября 2026 года. Предыдущая редакция — от 26 сентября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -54,17 +54,17 @@
 - состояние доставки и прочтения;
 - размер и контрольная сумма передаваемых файлов.
 
-**Содержание сообщений, файлов, голоса, видео и трансляции экрана Оператору недоступно** — см. раздел 4.
+**Содержание сообщений и файлов Оператору недоступно; голос, видео и трансляции экрана не записываются и не сохраняются на сервере** — см. раздел 4.
 
-### 4. Что не обрабатывается на сервере
+### 4. Что не обрабатывается и не хранится на сервере
 
 1. **Содержание сообщений.** Текст сообщений передаётся в зашифрованном виде, ключи формируются на устройствах участников и не передаются Оператору. Сервер не располагает средствами расшифрования.
-2. **Голос, видео, трансляция экрана.** Передаются напрямую между участниками по технологии WebRTC. Через сервер проходят только сигнальные сообщения, необходимые для установления соединения.
+2. **Голос, видео, трансляция экрана.** Голосовая связь и трансляции экрана при 1–2 активных зрителях передаются напрямую между участниками по технологии WebRTC (P2P), а через сервер проходят только сигнальные сообщения. При просмотре трансляции экрана 3 и более активными зрителями (`>= 3`) медиапоток трансляции экрана передаётся транзитом через медиа-узел селективной пересылки (SFU) Оператора в оперативной памяти для раздачи зрителям и **не декодируется, не записывается и не сохраняется** на сервере.
 3. **Содержимое передаваемых файлов.** Файлы передаются напрямую между участниками; при этом Оператор обрабатывает метаданные, указанные в разделе 3.3.
 
-Прикладное шифрование (AES-GCM с ключом, выведенным по ECDH) применяется, когда сообщение передаётся через сервер Оператора; при прямом соединении используется транспортное шифрование WebRTC. В обоих случаях содержание Оператору недоступно, но механизмы защиты различаются — это описано в [CRYPTO-NOTICE.md](CRYPTO-NOTICE.md) и [docs/chat-data-flow.md](docs/chat-data-flow.md).
+Прикладное шифрование (AES-GCM с ключом, выведенным по ECDH) применяется, когда сообщение передаётся через сервер Оператора; при прямом соединении используется транспортное шифрование WebRTC. В обоих случаях содержание сообщений Оператору недоступно, но механизмы защиты различаются — это описано в [CRYPTO-NOTICE.md](CRYPTO-NOTICE.md) и [docs/chat-data-flow.md](docs/chat-data-flow.md).
 
-Для ряда соединений используется ретрансляция трафика (TURN), при которой ретранслирующий узел технически видит сетевые адреса участников.
+Для ряда соединений используется ретрансляция трафика (TURN), а при 3 и более зрителях трансляции экрана — медиа-узел селективной пересылки (SFU); в этих случаях соответствующий узел технически видит сетевые адреса подключившихся к нему участников.
 
 ### 5. Цели и правовые основания обработки
 
@@ -188,17 +188,17 @@ When using the built-in messaging feature, the Controller processes **metadata o
 - delivery and read state;
 - size and checksum of transferred files.
 
-**The content of messages, files, voice, video and screen shares is not available to the Controller** — see section 4.
+**The content of messages and files is not available to the Controller; voice, video and screen shares are neither recorded nor stored on the server** — see section 4.
 
-### 4. What the server does not process
+### 4. What the server does not process or store
 
 1. **Message content.** Message text is transmitted encrypted; keys are generated on participants' devices and are never transmitted to the Controller. The server holds no means of decryption.
-2. **Voice, video, screen shares.** Transmitted directly between participants using WebRTC. Only the signaling messages needed to establish a connection traverse the server.
+2. **Voice, video, screen shares.** Voice calls and screen shares watched by 1–2 active viewers are transmitted directly between participants using WebRTC (P2P), with only signaling messages traversing the server. When a screen share is watched by 3 or more active viewers (`>= 3`), the screen-share media stream is forwarded in transit through the Controller's Selective Forwarding Unit (SFU) media node in volatile memory for distribution to viewers and is **neither decoded, recorded, nor stored** on the server.
 3. **Contents of transferred files.** Files are transferred directly between participants; the Controller processes the metadata listed in section 3.3.
 
-Application-layer encryption (AES-GCM with a key derived via ECDH) is applied when a message is transmitted through the Controller's server; on a direct connection, WebRTC transport encryption is used. In both cases the content is unavailable to the Controller, but the protection mechanisms differ — this is described in [CRYPTO-NOTICE.md](CRYPTO-NOTICE.md) and [docs/chat-data-flow.md](docs/chat-data-flow.md).
+Application-layer encryption (AES-GCM with a key derived via ECDH) is applied when a message is transmitted through the Controller's server; on a direct connection, WebRTC transport encryption is used. In both cases message content is unavailable to the Controller, but the protection mechanisms differ — this is described in [CRYPTO-NOTICE.md](CRYPTO-NOTICE.md) and [docs/chat-data-flow.md](docs/chat-data-flow.md).
 
-Some connections use traffic relaying (TURN), where the relaying node technically sees participants' network addresses.
+Some connections use traffic relaying (TURN), and screen shares with 3 or more viewers use a Selective Forwarding Unit (SFU) media node; in those cases the respective node technically sees the network addresses of participants connected to it.
 
 ### 5. Purposes and legal bases
 

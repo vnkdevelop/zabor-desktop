@@ -512,6 +512,8 @@ export default function App() {
   const [newPassword, setNewPassword] = useState('');
   const [showPrivacyPass, setShowPrivacyPass] = useState(false);
   const [privacyError, setPrivacyError] = useState('');
+  const [privacyStep, setPrivacyStep] = useState<'input' | 'confirm'>('input');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [offlineToast, setOfflineToast] = useState<string | null>(null);
 
   const [volumeUser, setVolumeUser] = useState<User | null>(null);
@@ -572,7 +574,7 @@ export default function App() {
   }, [ctxMenuPresence.ref]);
   const ctxMenuData = contextMenu ?? ctxMenuSnapshotRef.current;
   const [showInvitesPanel, setShowInvitesPanel] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'general' | 'audio' | 'privacy'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'audio' | 'privacy' | 'account'>('general');
   const [relayOnlyIce, setRelayOnlyIce] = useState(() => webrtc.isRelayOnlyIce());
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -1601,6 +1603,8 @@ export default function App() {
     setError('');
     setPrivacyError('');
     setShowPrivacyPass(false);
+    setPrivacyStep('input');
+    setIsChangingPassword(false);
 
     setEditProfileAvatarBase64(null);
     setEditProfileAvatarColor('#C81E70');
@@ -1963,24 +1967,62 @@ export default function App() {
     setNewPassword('');
     setPrivacyError('');
     setShowPrivacyPass(false);
+    setPrivacyStep('input');
+    setIsChangingPassword(false);
     store.setModal('privacy', false);
   }, [store]);
+
+  const handleRequestChangePassword = useCallback(() => {
+    setPrivacyError('');
+    const passErr = validateInput(newPassword);
+    if (passErr) {
+      setPrivacyError(passErr);
+      return;
+    }
+    if (newPassword === password) {
+      setPrivacyError(t('settings.privacy.samePassword', 'новый пароль совпадает с текущим'));
+      return;
+    }
+    setPrivacyStep('confirm');
+  }, [newPassword, password, validateInput, t]);
 
   const changePassword = useCallback(async () => {
     setPrivacyError('');
     const passErr = validateInput(newPassword);
-    if (passErr) { setPrivacyError(passErr); return; }
-    if (newPassword && newPassword !== password) {
+    if (passErr) {
+      setPrivacyStep('input');
+      setPrivacyError(passErr);
+      return;
+    }
+    if (newPassword === password) {
+      setPrivacyStep('input');
+      setPrivacyError(t('settings.privacy.samePassword', 'новый пароль совпадает с текущим'));
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
       const success = await signalRService.changePassword(newPassword);
       if (success) {
         setPassword(newPassword);
         credentialsRef.current = { ...credentialsRef.current, password: newPassword };
         saveLocalCache();
         closeChangePasswordModal();
+        const successMsg = t('toasts.passwordChanged', 'пароль успешно изменён');
+        store.setSystemToast(successMsg);
+        setTimeout(() => {
+          if (useAppStore.getState().systemToast === successMsg) {
+            useAppStore.getState().setSystemToast(null);
+          }
+        }, 3000);
+      } else {
+        setPrivacyError(t('settings.privacy.changePasswordFailed', 'не удалось сменить пароль'));
       }
-      else setPrivacyError(t('settings.privacy.changePasswordFailed', 'не удалось сменить пароль'));
+    } catch {
+      setPrivacyError(t('settings.privacy.changePasswordFailed', 'не удалось сменить пароль'));
+    } finally {
+      setIsChangingPassword(false);
     }
-  }, [newPassword, password, validateInput, saveLocalCache, closeChangePasswordModal, t]);
+  }, [newPassword, password, validateInput, saveLocalCache, closeChangePasswordModal, store, t]);
 
   const handleDeleteAccount = useCallback(async () => {
     const expectedWord = t('settings.privacy.deleteAccountConfirmWord', 'подтверждаю').trim().toLowerCase();
@@ -2692,8 +2734,10 @@ export default function App() {
                     className="w-full glass-field text-white rounded-xl p-3 outline-none focus:ring-2 focus:ring-primary pr-10 disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                   <button
+                    type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     disabled={isLoading}
+                    title={showPassword ? t('settings.privacy.hidePassword', 'скрыть пароль') : t('settings.privacy.showPassword', 'показать пароль')}
                     className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {showPassword ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}
@@ -3820,6 +3864,7 @@ export default function App() {
             <button onClick={() => setSettingsTab('general')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'general' ? 'bg-primary/90 text-white' : 'bg-surface/70 text-textMuted hover:text-white'}`}>{t('settings.tabs.general')}</button>
             <button onClick={() => setSettingsTab('audio')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'audio' ? 'bg-primary/90 text-white' : 'bg-surface/70 text-textMuted hover:text-white'}`}>{t('settings.tabs.audio')}</button>
             <button onClick={() => setSettingsTab('privacy')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'privacy' ? 'bg-primary/90 text-white' : 'bg-surface/70 text-textMuted hover:text-white'}`}>{t('settings.tabs.privacy')}</button>
+            <button onClick={() => setSettingsTab('account')} className={`px-4 py-2 rounded-xl font-bold text-sm transition-colors ${settingsTab === 'account' ? 'bg-primary/90 text-white' : 'bg-surface/70 text-textMuted hover:text-white'}`}>{t('settings.tabs.account')}</button>
           </div>
           <div className="p-6 overflow-y-auto flex-1" style={{ scrollbarGutter: 'stable' }}>
             {settingsTab === 'general' && (
@@ -4031,6 +4076,10 @@ export default function App() {
                     }} />
                   </div>
                 </div>
+              </div>
+            )}
+            {settingsTab === 'account' && (
+              <div className="space-y-6">
                 <div>
                   <button
                     onClick={() => store.setModal('privacy', true)}
@@ -4308,20 +4357,81 @@ export default function App() {
       {store.modals.privacy && (
         <div className="fixed inset-0 z-[100000] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 pt-[3.75rem]">
           <div className="glass-modal p-8 w-[400px]">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-white">{t('settings.privacy.changePasswordTitle', 'сменить пароль')}</h2>
-              <button onClick={closeChangePasswordModal} className="group text-textMuted hover:text-white transition-colors duration-200 p-1.5 rounded-lg hover:bg-surface/70"><X weight="bold" size={24} /></button>
-            </div>
-            <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.privacy.newPassword')}</label>
-            <div className="relative mb-6">
-              <input type={showPrivacyPass ? 'text' : 'password'} value={newPassword} onChange={e => { setNewPassword(e.target.value); setPrivacyError(''); }} maxLength={25} onKeyDown={e => e.key === 'Enter' && changePassword()} placeholder={t('settings.privacy.passwordHint')} className="w-full glass-field text-white rounded-xl p-3 outline-none pr-10 focus:ring-2 focus:ring-primary" />
-              <button onClick={() => setShowPrivacyPass(!showPrivacyPass)} className="absolute right-3 top-3 text-textMuted hover:text-white transition-colors">{showPrivacyPass ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}</button>
-            </div>
-            {privacyError && <p className="text-danger text-sm mb-4 font-medium">{privacyError}</p>}
-            <div className="flex gap-4">
-              <button onClick={closeChangePasswordModal} className="flex-1 bg-surface/70 text-white py-3 rounded-xl font-bold hover:bg-surfaceHover/80 transition-colors">{t('common.cancel')}</button>
-              <button onClick={changePassword} className="flex-1 bg-primary/90 text-white py-3 rounded-xl font-bold hover:opacity-90 transition-opacity">{t('settings.privacy.changePassword')}</button>
-            </div>
+            {privacyStep === 'input' ? (
+              <>
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-bold text-white">{t('settings.privacy.changePasswordTitle', 'сменить пароль')}</h2>
+                  <button onClick={closeChangePasswordModal} className="group text-textMuted hover:text-white transition-colors duration-200 p-1.5 rounded-lg hover:bg-surface/70"><X weight="bold" size={24} /></button>
+                </div>
+                <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.privacy.newPassword')}</label>
+                <div className="relative mb-6">
+                  <input
+                    type={showPrivacyPass ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={e => { setNewPassword(e.target.value); setPrivacyError(''); }}
+                    maxLength={25}
+                    onKeyDown={e => e.key === 'Enter' && handleRequestChangePassword()}
+                    placeholder={t('settings.privacy.passwordHint')}
+                    className="w-full glass-field text-white rounded-xl p-3 outline-none pr-12 focus:ring-2 focus:ring-primary"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPrivacyPass(!showPrivacyPass)}
+                    title={showPrivacyPass ? t('settings.privacy.hidePassword', 'скрыть пароль') : t('settings.privacy.showPassword', 'показать пароль')}
+                    className="absolute right-2.5 top-2.5 p-1 text-textMuted hover:text-white rounded-lg hover:bg-white/[0.06] transition-colors"
+                  >
+                    {showPrivacyPass ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}
+                  </button>
+                </div>
+                {privacyError && <p className="text-danger text-sm mb-4 font-medium">{privacyError}</p>}
+                <div className="flex gap-4">
+                  <button onClick={closeChangePasswordModal} className="flex-1 bg-surface/70 text-white py-3 rounded-xl font-bold hover:bg-surfaceHover/80 active:scale-[0.98] transition-all">{t('common.cancel')}</button>
+                  <button onClick={handleRequestChangePassword} className="flex-1 bg-primary/90 text-white py-3 rounded-xl font-bold hover:opacity-90 active:scale-[0.98] transition-all">{t('settings.privacy.changePassword')}</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xl font-bold text-white">{t('settings.privacy.confirmTitle', 'точно ли вы хотите поменять пароль?')}</h2>
+                  <button onClick={closeChangePasswordModal} disabled={isChangingPassword} className="group text-textMuted hover:text-white transition-colors duration-200 p-1.5 rounded-lg hover:bg-surface/70 disabled:opacity-40"><X weight="bold" size={24} /></button>
+                </div>
+                <p className="text-sm text-textMuted mb-5 leading-relaxed">
+                  {t('settings.privacy.confirmWarning', 'после смены пароля используйте новый пароль для входа в аккаунт.')}
+                </p>
+                <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">{t('settings.privacy.newPasswordValue', 'новый пароль:')}</label>
+                <div className="relative mb-6">
+                  <div className="w-full glass-field text-white rounded-xl p-3 pr-12 font-mono text-sm break-all select-none flex items-center min-h-[46px]">
+                    {showPrivacyPass ? newPassword : '•'.repeat(newPassword.length)}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPrivacyPass(!showPrivacyPass)}
+                    title={showPrivacyPass ? t('settings.privacy.hidePassword', 'скрыть пароль') : t('settings.privacy.showPassword', 'показать пароль')}
+                    className="absolute right-2.5 top-2 p-1 text-textMuted hover:text-white rounded-lg hover:bg-white/[0.06] transition-colors"
+                  >
+                    {showPrivacyPass ? <EyeOff weight="bold" size={20} /> : <Eye weight="bold" size={20} />}
+                  </button>
+                </div>
+                {privacyError && <p className="text-danger text-sm mb-4 font-medium">{privacyError}</p>}
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setPrivacyStep('input')}
+                    disabled={isChangingPassword}
+                    className="flex-1 bg-surface/70 text-white py-3 rounded-xl font-bold hover:bg-surfaceHover/80 active:scale-[0.98] transition-all disabled:opacity-50"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button
+                    onClick={changePassword}
+                    disabled={isChangingPassword}
+                    className="flex-1 bg-primary/90 text-white py-3 rounded-xl font-bold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
+                  >
+                    {isChangingPassword ? t('auth.loading', 'загрузка...') : t('settings.privacy.confirmButton', 'точно поменять')}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

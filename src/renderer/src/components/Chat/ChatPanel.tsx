@@ -92,7 +92,8 @@ function renderMessageContent(text: string) {
               }
             }
           }}
-          className="text-blue-400 hover:text-blue-300 underline underline-offset-2 break-all cursor-pointer transition-colors"
+          draggable={false}
+          className="text-blue-400 hover:text-blue-300 underline underline-offset-2 break-all cursor-pointer transition-colors select-text"
           title={part.url}
           target="_blank"
           rel="noopener noreferrer"
@@ -101,7 +102,7 @@ function renderMessageContent(text: string) {
         </a>
       );
     }
-    return <span key={index}>{part.content}</span>;
+    return <span key={index} className="select-text cursor-text">{part.content}</span>;
   });
 }
 
@@ -123,7 +124,7 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
   const [dragging, setDragging] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
   const dragDepth = useRef(0);
-  const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage; selectedText?: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -321,13 +322,30 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
                   <div
                     data-bubble
                     data-dir={own ? 'out' : 'in'}
-                    onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setMenu({ x: Math.min(event.clientX, window.innerWidth - 208), y: Math.min(event.clientY, window.innerHeight - 180), message }); }}
+                    onContextMenu={event => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const selection = window.getSelection();
+                      const rawSelected = selection ? selection.toString() : '';
+                      const isInside = Boolean(
+                        rawSelected &&
+                        selection &&
+                        selection.rangeCount > 0 &&
+                        event.currentTarget.contains(selection.getRangeAt(0).commonAncestorContainer)
+                      );
+                      setMenu({
+                        x: Math.min(event.clientX, window.innerWidth - 208),
+                        y: Math.min(event.clientY, window.innerHeight - 180),
+                        message,
+                        selectedText: isInside ? rawSelected : undefined
+                      });
+                    }}
                     className={`max-w-[72%] rounded-[14px] px-4 py-3 border ${own ? 'bg-primary/20 border-primary/30' : 'bg-surface/70 border-white/[0.07]'}`}
                   >
                     {message.kind === 'text' ? (
-                      <p className="text-white text-sm whitespace-pre-wrap break-words select-text">{renderMessageContent(message.text)}</p>
+                      <p className="text-white text-sm whitespace-pre-wrap break-words select-text cursor-text">{renderMessageContent(message.text)}</p>
                     ) : message.file && (
-                      <div className="flex items-center gap-3 min-w-[240px]">
+                      <div className="flex items-center gap-3 min-w-[240px] select-none">
                         <div className="w-10 h-10 rounded-xl bg-white/[0.06] flex items-center justify-center shrink-0"><File weight="bold" size={20} /></div>
                         <div className="min-w-0 flex-1">
                           <div className="text-white text-sm font-semibold truncate">{message.file.name}</div>
@@ -347,7 +365,7 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
                         )}
                       </div>
                     )}
-                    <div className="mt-1.5 text-[10px] text-white/35 text-right">
+                    <div className="mt-1.5 text-[10px] text-white/35 text-right select-none">
                       {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{own ? ` · ${t(`chat.delivery.${message.delivery}`)}` : ''}
                     </div>
                   </div>
@@ -370,8 +388,19 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
       </div>
 
       {menu && createPortal(
-        <div ref={menuRef} className="fixed z-[999999] glass-sheet py-2 w-48 rounded-[14px]" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }}>
-          {menu.message.kind === 'text' && <button onClick={() => { void navigator.clipboard.writeText(menu.message.text); setMenu(null); }} className="w-full text-left px-4 py-2 flex items-center gap-3 text-white hover:bg-surfaceHover/80"><Copy weight="bold" size={16} />{t('chat.copy')}</button>}
+        <div ref={menuRef} className="fixed z-[999999] glass-sheet py-2 w-48 rounded-[14px] select-none" style={{ left: menu.x, top: menu.y }} onClick={event => event.stopPropagation()} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }}>
+          {menu.message.kind === 'text' && (
+            <>
+              {menu.selectedText ? (
+                <>
+                  <button onClick={() => { void navigator.clipboard.writeText(menu.selectedText!); setMenu(null); }} className="w-full text-left px-4 py-2 flex items-center gap-3 text-white hover:bg-surfaceHover/80 select-none"><Copy weight="bold" size={16} />{t('chat.copySelected')}</button>
+                  <button onClick={() => { void navigator.clipboard.writeText(menu.message.text); setMenu(null); }} className="w-full text-left px-4 py-2 flex items-center gap-3 text-white hover:bg-surfaceHover/80 select-none"><Copy weight="bold" size={16} />{t('chat.copy')}</button>
+                </>
+              ) : (
+                <button onClick={() => { void navigator.clipboard.writeText(menu.message.text); setMenu(null); }} className="w-full text-left px-4 py-2 flex items-center gap-3 text-white hover:bg-surfaceHover/80 select-none"><Copy weight="bold" size={16} />{t('chat.copy')}</button>
+              )}
+            </>
+          )}
           {menu.message.file?.storedName && <button onClick={() => { void chatPeer.clearFile(menu.message); setMenu(null); }} className="w-full text-left px-4 py-2 flex items-center gap-3 text-white hover:bg-surfaceHover/80"><Broom weight="bold" size={16} />{t('chat.clearFile')}</button>}
           <button onClick={() => { void chatPeer.deleteLocal(menu.message); setMenu(null); }} className="w-full text-left px-4 py-2 flex items-center gap-3 text-danger hover:bg-surfaceHover/80"><Trash weight="bold" size={16} />{t('chat.deleteMessage')}</button>
         </div>,

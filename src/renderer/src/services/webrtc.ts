@@ -569,6 +569,22 @@ export class WebRTCManager {
   private viewerStates: Map<string, 'watching' | 'preview'> = new Map()
   private viewInterestTimer: NodeJS.Timeout | null = null
   private reportedViewStates: Map<string, 'watching' | 'preview'> = new Map()
+  private sfuPubConnection: RTCPeerConnection | null = null
+  private sfuPubEpoch = 0
+  private sfuPubActive = false
+  private sfuPubPauseTimer: NodeJS.Timeout | null = null
+  private sfuPubCloseTimer: NodeJS.Timeout | null = null
+  private sfuPubWatchdogTimer: NodeJS.Timeout | null = null
+  private pendingSfuPublish: { epoch: number; nodeId: string } | null = null
+  private isStartingScreenShare = false
+  private sfuFallbackPeers: Set<string> = new Set()
+  private sfuSubConnections: Map<string, RTCPeerConnection> = new Map()
+  private sfuSubEpochs: Map<string, number> = new Map()
+  private sfuSubWatchdogTimers: Map<string, NodeJS.Timeout> = new Map()
+  private streamDeliveryModes: Map<string, { mode: 'p2p' | 'sfu'; epoch: number; nodeId?: string }> = new Map()
+  private p2pStreamsBackup: Map<string, MediaStream> = new Map()
+  private p2pAudioBackup: Map<string, { track: MediaStreamTrack; receiver?: RTCRtpReceiver; stream?: MediaStream }> = new Map()
+  private sfuPreviewTearDownTimers: Map<string, NodeJS.Timeout> = new Map()
 
   private peerConnections: Map<string, RTCPeerConnection> = new Map()
   private lastPacketsLost: Map<string, number> = new Map()
@@ -3588,12 +3604,18 @@ export class WebRTCManager {
         await this.startLocalStream(deviceId, useNS, true)
         const screenAudioTracks = this.localVideoStream ? this.localVideoStream.getAudioTracks() : []
         for (const pc of this.peerConnections.values()) {
+          const micTransceiver = pc.getTransceivers().find(t =>
+            t.receiver.track.kind === 'audio' &&
+            (!t.sender.track || !screenAudioTracks.includes(t.sender.track))
+          )
           const sender = pc.getSenders().find(s => s.track && s.track === oldAudioTrack)
             ?? pc.getSenders().find(s => s.track && s.track.kind === 'audio' && !screenAudioTracks.includes(s.track))
-            ?? pc.getSenders().find(s => (!s.track || s.track.kind === 'audio') && (!s.track || !screenAudioTracks.includes(s.track)))
+            ?? micTransceiver?.sender
           const newTrack = this.localStream?.getAudioTracks()[0]
           if (sender && newTrack) {
-            await sender.replaceTrack(newTrack).catch(() => { })
+            await sender.replaceTrack(newTrack).catch(err => {
+              console.warn('[WebRTC] replaceTrack failed in executeUpdateSettings:', err)
+            })
             this.configureAudioSender(sender)
           }
         }
@@ -4751,20 +4773,35 @@ export class WebRTCManager {
     return { rttMs, concealmentRate, jitterTargetMs, frameMs }
   }
 
-  private attachRemoteVideo(userId: string, track: MediaStreamTrack, stream?: MediaStream) {
+  private attachRemoteVideo(userId: string, track: MediaStreamTrack, stream?: MediaStream, isSfu = false) {
     if (track.readyState === 'ended') return
+    const videoStream = stream || new MediaStream([track])
+    if (!isSfu) {
+      this.p2pStreamsBackup.set(userId, videoStream)
+      if (this.sfuSubConnections.has(userId) && useAppStore.getState().remoteVideoStreams[userId]) {
+        return
+      }
+    }
     const currentStream = useAppStore.getState().remoteVideoStreams[userId]
     if (currentStream && currentStream.getVideoTracks().includes(track)) return
 
-    const videoStream = stream || new MediaStream([track])
     useAppStore.getState().setRemoteVideoStream(userId, videoStream)
     track.onended = () => {
-      this.cleanupRemoteStream(userId)
+      const active = useAppStore.getState().remoteVideoStreams[userId]
+      if (active && active.getVideoTracks().includes(track)) {
+        this.cleanupRemoteStream(userId)
+      }
     }
   }
 
-  private attachRemoteStreamAudio(userId: string, track: MediaStreamTrack, receiver?: RTCRtpReceiver, stream?: MediaStream) {
+  private attachRemoteStreamAudio(userId: string, track: MediaStreamTrack, receiver?: RTCRtpReceiver, stream?: MediaStream, isSfu = false) {
     if (track.readyState === 'ended') return
+    if (!isSfu) {
+      this.p2pAudioBackup.set(userId, { track, receiver, stream })
+      if (this.sfuSubConnections.has(userId) && this.userStreamAudioTrackIds.has(userId)) {
+        return
+      }
+    }
     if (this.userStreamAudioTrackIds.get(userId) === track.id) return
 
     this.initOutputMixer()
@@ -4773,7 +4810,9 @@ export class WebRTCManager {
     if (streamId) this.userScreenStreamIds.set(userId, streamId)
     if (receiver) this.isolateReceiverLatency(receiver)
     track.onended = () => {
-      this.cleanupRemoteStreamAudio(userId)
+      if (this.userStreamAudioTrackIds.get(userId) === track.id) {
+        this.cleanupRemoteStreamAudio(userId)
+      }
     }
     track.contentHint = 'music'
 
@@ -4814,12 +4853,16 @@ export class WebRTCManager {
   }
 
   public syncRemoteVideoStream(userId: string): void {
-    const pc = this.peerConnections.get(userId)
-    if (!pc || pc.connectionState === 'closed') return
-
     const store = useAppStore.getState()
     const user = store.voiceUsers.find(u => u.id === userId) || (store.currentCallUser?.id === userId ? store.currentCallUser : null)
     const isUserStreaming = Boolean(user?.isStreaming)
+    if (isUserStreaming) {
+      this.reportedViewStates.delete(userId)
+      this.scheduleStreamViewInterestReport(60)
+    }
+
+    const pc = this.peerConnections.get(userId)
+    if (!pc || pc.connectionState === 'closed') return
 
     for (const receiver of pc.getReceivers()) {
       const track = receiver.track
@@ -5156,8 +5199,19 @@ export class WebRTCManager {
 
   public async startScreenShare(sourceId: string, quality: 'high' | 'low' | 'camera', includeAudio: boolean) {
     this.currentStreamQuality = quality
+    const savedViewerStates = new Map(this.viewerStates)
+    const savedPendingSfu = this.pendingSfuPublish ?? (this.sfuPubEpoch > 0 ? { epoch: this.sfuPubEpoch, nodeId: '' } : null)
+    const wasSfuActive = this.sfuPubActive
+    this.isStartingScreenShare = true
     if (this.localVideoStream) {
       this.stopScreenShare()
+    }
+    this.viewerStates = savedViewerStates
+    if (!this.pendingSfuPublish && savedPendingSfu) {
+      this.pendingSfuPublish = savedPendingSfu
+    }
+    if (wasSfuActive) {
+      this.sfuPubActive = true
     }
     const width = quality === 'high' ? 1920 : 1280
     const height = quality === 'high' ? 1080 : 720
@@ -5211,9 +5265,25 @@ export class WebRTCManager {
 
       if (videoTrack) {
         videoTrack.contentHint = 'motion'
+        videoTrack.onended = () => {
+          if (this.localVideoStream === stream && !this.isStartingScreenShare) {
+            const st = useAppStore.getState()
+            const myId = st.currentUser?.id
+            if (myId) {
+              if (st.activeStreamId === myId) {
+                st.setActiveStreamId(null)
+                if (st.isStreamFullscreen) st.setStreamFullscreen(false)
+              }
+              st.updateUserStatus(myId, { isStreaming: false, streamQuality: undefined })
+            }
+            this.stopScreenShare()
+            void signalRService.stopStream()
+          }
+        }
       }
 
       for (const [userId, pc] of this.peerConnections.entries()) {
+        const keepP2PActive = !this.sfuPubActive || this.sfuFallbackPeers.has(userId)
         if (videoTrack) {
           const videoTransceiver = pc.getTransceivers().find(t => t.receiver.track.kind === 'video' && !t.stopped)
           let sender: RTCRtpSender
@@ -5228,37 +5298,54 @@ export class WebRTCManager {
             sender = pc.addTrack(videoTrack, stream)
           }
           try {
+            const params = sender.getParameters()
+            if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
             if (!isCamera) {
-              const params = sender.getParameters()
-              if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
               params.degradationPreference = 'maintain-framerate'
               params.encodings[0].maxBitrate = quality === 'high' ? 6000000 : 2500000
               params.encodings[0].maxFramerate = quality === 'high' ? 60 : 30
               params.encodings[0].networkPriority = 'high'
-              sender.setParameters(params).catch(() => { })
             }
+            params.encodings[0].active = keepP2PActive
+            sender.setParameters(params).catch(() => { })
           } catch { }
         }
         if (audioTrack) {
           const audioTransceivers = pc.getTransceivers().filter(t => t.receiver.track.kind === 'audio' && !t.stopped)
           const screenAudioTransceiver = audioTransceivers.length > 1 ? audioTransceivers[1] : null
+          let aSender: RTCRtpSender
           if (screenAudioTransceiver) {
             screenAudioTransceiver.direction = 'sendrecv'
             await screenAudioTransceiver.sender.replaceTrack(audioTrack)
             try {
               (screenAudioTransceiver.sender as any).setStreams(stream)
             } catch { }
-            this.configureAudioSender(screenAudioTransceiver.sender)
+            aSender = screenAudioTransceiver.sender
           } else {
-            this.configureAudioSender(pc.addTrack(audioTrack, stream))
+            aSender = pc.addTrack(audioTrack, stream)
+          }
+          this.configureAudioSender(aSender)
+          if (!keepP2PActive) {
+            try {
+              const params = aSender.getParameters()
+              if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+              params.encodings[0].active = false
+              aSender.setParameters(params).catch(() => { })
+            } catch { }
           }
         }
         await this.renegotiatePeer(pc, userId)
       }
 
+      this.isStartingScreenShare = false
+      if (this.pendingSfuPublish) {
+        const pending = this.pendingSfuPublish
+        void this.handleSfuPublishRequired(pending.epoch, pending.nodeId)
+      }
       this.startStatsMonitoring()
       return true
     } catch (e) {
+      this.isStartingScreenShare = false
       this.stopScreenShare()
       throw e
     }
@@ -5269,6 +5356,12 @@ export class WebRTCManager {
       clearInterval(this.statsInterval)
       this.statsInterval = null
     }
+
+    if (!this.isStartingScreenShare) {
+      this.pendingSfuPublish = null
+      this.sfuFallbackPeers.clear()
+    }
+    this.closeSfuPublisher()
 
     const localVideo = this.localVideoStream
     const videoTracks = localVideo ? localVideo.getVideoTracks() : []
@@ -5296,6 +5389,7 @@ export class WebRTCManager {
       try {
         this.localVideoStream.getTracks().forEach(track => {
           try {
+            track.onended = null
             track.enabled = false
             track.stop()
           } catch { }
@@ -5469,7 +5563,7 @@ export class WebRTCManager {
     if (!ctx) return
 
     for (const userId of this.streamGainNodes.keys()) {
-      const pc = this.peerConnections.get(userId)
+      const pc = this.sfuSubConnections.get(userId) ?? this.peerConnections.get(userId)
       const delayNode = this.streamDelayNodes.get(userId)
       if (!pc || !delayNode || pc.connectionState !== 'connected') continue
 
@@ -5576,24 +5670,31 @@ export class WebRTCManager {
     const normalized = state === 'preview' ? 'preview' : 'watching'
     if (this.viewerStates.get(viewerId) === normalized) return
     this.viewerStates.set(viewerId, normalized)
-    if (this.localVideoStream && this.currentStreamQuality !== 'camera') {
+    if (this.localVideoStream && this.currentStreamQuality !== 'camera' && !this.sfuPubActive) {
       void this.applyVideoProfile(viewerId)
     }
   }
 
-  public scheduleStreamViewInterestReport() {
+  public scheduleStreamViewInterestReport(delayMs = 80) {
     if (this.viewInterestTimer) clearTimeout(this.viewInterestTimer)
     this.viewInterestTimer = setTimeout(() => {
       this.viewInterestTimer = null
       this.reportStreamViewInterest()
-    }, 300)
+    }, delayMs)
   }
 
   private reportStreamViewInterest() {
     const store = useAppStore.getState()
     const currentUserId = store.currentUser?.id
     const watchedId = store.activeStreamId
-    const streamingPeers = Object.keys(store.remoteVideoStreams)
+    const streamingSet = new Set<string>(Object.keys(store.remoteVideoStreams))
+    for (const u of store.voiceUsers) {
+      if (u.isStreaming && u.id !== currentUserId) streamingSet.add(u.id)
+    }
+    if (store.currentCallUser?.isStreaming && store.currentCallUser.id !== currentUserId) {
+      streamingSet.add(store.currentCallUser.id)
+    }
+    const streamingPeers = [...streamingSet]
 
     for (const peerId of [...this.reportedViewStates.keys()]) {
       if (!streamingPeers.includes(peerId)) this.reportedViewStates.delete(peerId)
@@ -5601,8 +5702,8 @@ export class WebRTCManager {
 
     for (const peerId of streamingPeers) {
       if (peerId === currentUserId) continue
-      if (!this.peerConnections.has(peerId)) continue
       const desired: 'watching' | 'preview' = peerId === watchedId ? 'watching' : 'preview'
+      this.reconcileSfuSubscriptionForPeer(peerId, desired)
       if (this.reportedViewStates.get(peerId) === desired) continue
       this.reportedViewStates.set(peerId, desired)
       signalRService.sendStreamViewState(peerId, desired)
@@ -5621,7 +5722,7 @@ export class WebRTCManager {
   private static readonly LADDER_CLEAN_TO_RECOVER = 3
 
   private videoProfileFor(userId: string) {
-    if (this.viewerStates.get(userId) === 'preview') return WebRTCManager.PREVIEW_VIDEO_PROFILE
+    if (userId !== '__sfu__' && this.viewerStates.get(userId) === 'preview') return WebRTCManager.PREVIEW_VIDEO_PROFILE
     const isHigh = this.currentStreamQuality === 'high'
     const maxStep = WebRTCManager.VIDEO_LADDER.length - 1
     const step = Math.max(0, Math.min(maxStep, this.lossLadderStep.get(userId) ?? 0))
@@ -5634,7 +5735,7 @@ export class WebRTCManager {
   }
 
   private async applyVideoProfile(userId: string, pc?: RTCPeerConnection | null) {
-    const connection = pc ?? this.peerConnections.get(userId)
+    const connection = pc ?? (userId === '__sfu__' ? this.sfuPubConnection : this.peerConnections.get(userId))
     if (!connection) return
     const sender = connection.getSenders().find(s => s.track?.kind === 'video')
     if (!sender) return
@@ -5704,7 +5805,11 @@ export class WebRTCManager {
     if (this.statsInterval) clearInterval(this.statsInterval)
     this.statsInterval = setInterval(async () => {
       if (this.currentStreamQuality === 'camera') return
-      for (const [userId, pc] of this.peerConnections.entries()) {
+      const entries: Array<[string, RTCPeerConnection]> = this.sfuPubActive && this.sfuPubConnection
+        ? [['__sfu__', this.sfuPubConnection]]
+        : [...this.peerConnections.entries()]
+
+      for (const [userId, pc] of entries) {
         if (pc.connectionState !== 'connected') continue
         try {
           const stats = await pc.getStats()
@@ -5841,18 +5946,29 @@ export class WebRTCManager {
           if (track.kind === 'video') {
             try {
               const isCamera = this.currentStreamQuality === 'camera'
+              const params = sender.getParameters()
+              if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
               if (!isCamera) {
-                const params = sender.getParameters()
-                if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
                 params.degradationPreference = 'maintain-framerate'
                 params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
                 params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
                 params.encodings[0].networkPriority = 'high'
-                sender.setParameters(params).catch(() => { })
               }
+              if (this.sfuPubActive) {
+                params.encodings[0].active = false
+              }
+              sender.setParameters(params).catch(() => { })
             } catch { }
           } else if (track.kind === 'audio') {
             this.configureAudioSender(sender)
+            if (this.sfuPubActive) {
+              try {
+                const params = sender.getParameters()
+                if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+                params.encodings[0].active = false
+                sender.setParameters(params).catch(() => { })
+              } catch { }
+            }
           }
         })
       } else {
@@ -5937,18 +6053,29 @@ export class WebRTCManager {
             if (track.kind === 'video') {
               try {
                 const isCamera = this.currentStreamQuality === 'camera'
+                const params = sender.getParameters()
+                if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
                 if (!isCamera) {
-                  const params = sender.getParameters()
-                  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
                   params.degradationPreference = 'maintain-framerate'
                   params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
                   params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
                   params.encodings[0].networkPriority = 'high'
-                  sender.setParameters(params).catch(() => { })
                 }
+                if (this.sfuPubActive) {
+                  params.encodings[0].active = false
+                }
+                sender.setParameters(params).catch(() => { })
               } catch { }
             } else if (track.kind === 'audio') {
               this.configureAudioSender(sender)
+              if (this.sfuPubActive) {
+                try {
+                  const params = sender.getParameters()
+                  if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+                  params.encodings[0].active = false
+                  sender.setParameters(params).catch(() => { })
+                } catch { }
+              }
             }
           })
         }
@@ -6141,7 +6268,17 @@ export class WebRTCManager {
     if (panner) { try { panner.disconnect() } catch { }; this.userPannerNodes.delete(userId) }
     this.applyVoiceSeats()
 
-    this.cleanupRemoteStreamAudio(userId)
+    if (!options.preserveRemoteVideo) {
+      this.closeSfuSubscriber(userId, false)
+      this.streamDeliveryModes.delete(userId)
+      this.p2pStreamsBackup.delete(userId)
+      this.p2pAudioBackup.delete(userId)
+      this.cleanupRemoteStreamAudio(userId)
+      useAppStore.getState().setRemoteVideoStream(userId, null)
+    } else if (!this.sfuSubConnections.has(userId)) {
+      this.cleanupRemoteStreamAudio(userId)
+    }
+
     const voiceTrackId = this.userVoiceTrackIds.get(userId)
     if (voiceTrackId) {
       this.ultraJitterTargetMs.delete(voiceTrackId)
@@ -6149,10 +6286,6 @@ export class WebRTCManager {
     }
     this.userVoiceTrackIds.delete(userId)
     this.userVoiceStreamIds.delete(userId)
-
-    if (!options.preserveRemoteVideo) {
-      useAppStore.getState().setRemoteVideoStream(userId, null)
-    }
 
     this.pendingCandidates.delete(userId)
     this.pendingRenegotiation.delete(userId)
@@ -6216,13 +6349,584 @@ export class WebRTCManager {
   }
 
   public cleanupRemoteStream(userId: string) {
+    this.closeSfuSubscriber(userId, false)
+    this.streamDeliveryModes.delete(userId)
+    this.p2pStreamsBackup.delete(userId)
+    this.p2pAudioBackup.delete(userId)
     this.cleanupRemoteStreamAudio(userId)
     useAppStore.getState().setRemoteVideoStream(userId, null)
+  }
+
+  private waitForIceGatheringComplete(pc: RTCPeerConnection, timeoutMs = 1200): Promise<void> {
+    if (pc.iceGatheringState === 'complete') return Promise.resolve()
+    return new Promise<void>(resolve => {
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        pc.removeEventListener('icegatheringstatechange', onState)
+        resolve()
+      }
+      const onState = () => {
+        if (pc.iceGatheringState === 'complete') done()
+      }
+      const timer = setTimeout(done, timeoutMs)
+      pc.addEventListener('icegatheringstatechange', onState)
+    })
+  }
+
+  private waitForFirstVideoFrame(stream: MediaStream, timeoutMs = 550): Promise<void> {
+    const track = stream.getVideoTracks()[0]
+    if (!track || track.readyState === 'ended') return Promise.resolve()
+    return new Promise<void>(resolve => {
+      let settled = false
+      const video = document.createElement('video')
+      video.muted = true
+      video.playsInline = true
+      video.autoplay = true
+      video.srcObject = new MediaStream([track])
+      const anyVideo = video as HTMLVideoElement & {
+        requestVideoFrameCallback?: (cb: () => void) => number
+        cancelVideoFrameCallback?: (h: number) => void
+      }
+      let frameHandle = 0
+      const done = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (frameHandle && typeof anyVideo.cancelVideoFrameCallback === 'function') {
+          try { anyVideo.cancelVideoFrameCallback(frameHandle) } catch { }
+        }
+        video.removeEventListener('loadeddata', done)
+        video.removeEventListener('playing', done)
+        try {
+          video.pause()
+          video.srcObject = null
+        } catch { }
+        resolve()
+      }
+      const timer = setTimeout(done, timeoutMs)
+      if (typeof anyVideo.requestVideoFrameCallback === 'function') {
+        frameHandle = anyVideo.requestVideoFrameCallback(done)
+      } else {
+        video.addEventListener('loadeddata', done, { once: true })
+        video.addEventListener('playing', done, { once: true })
+      }
+      void video.play().catch(() => { })
+    })
+  }
+
+  private closeSfuPublisher() {
+    if (this.sfuPubPauseTimer) {
+      clearTimeout(this.sfuPubPauseTimer)
+      this.sfuPubPauseTimer = null
+    }
+    if (this.sfuPubCloseTimer) {
+      clearTimeout(this.sfuPubCloseTimer)
+      this.sfuPubCloseTimer = null
+    }
+    if (this.sfuPubWatchdogTimer) {
+      clearTimeout(this.sfuPubWatchdogTimer)
+      this.sfuPubWatchdogTimer = null
+    }
+    this.sfuPubActive = false
+    this.sfuPubEpoch = 0
+    if (this.sfuPubConnection) {
+      const pc = this.sfuPubConnection
+      this.sfuPubConnection = null
+      try {
+        pc.onconnectionstatechange = null
+        pc.oniceconnectionstatechange = null
+        pc.close()
+      } catch { }
+    }
+    this.lastPacketsLost.delete('__sfu__')
+    this.lastPacketsSent.delete('__sfu__')
+    this.lastFramesDropped.delete('__sfu__')
+    this.lossLadderStep.delete('__sfu__')
+    this.lossBreachCount.delete('__sfu__')
+    this.lossCleanCount.delete('__sfu__')
+    this.lossBaselineRtt.delete('__sfu__')
+    this.appliedVideoProfiles.delete('__sfu__')
+  }
+
+  private async setP2PScreenSendersActive(active: boolean) {
+    const localVideo = this.localVideoStream
+    if (!localVideo) return
+    const videoTrack = localVideo.getVideoTracks()[0] ?? null
+    const micTrack = this.localStream?.getAudioTracks()[0] ?? null
+    const screenAudioTrack = localVideo.getAudioTracks().find(t => t !== micTrack) ?? null
+
+    for (const [peerId, pc] of this.peerConnections.entries()) {
+      if (pc.connectionState === 'closed') continue
+      const targetActive = active || this.sfuFallbackPeers.has(peerId)
+      try {
+        const transceivers = pc.getTransceivers()
+        const videoTransceiver = transceivers.find(t => t.receiver.track.kind === 'video' && !t.stopped)
+        if (videoTransceiver) {
+          const sender = videoTransceiver.sender
+          if (targetActive && videoTrack) {
+            if (sender.track !== videoTrack) {
+              await sender.replaceTrack(videoTrack).catch(() => { })
+            }
+          }
+          const params = sender.getParameters()
+          if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+          params.encodings[0].active = targetActive
+          await sender.setParameters(params).catch(() => { })
+          if (targetActive && this.currentStreamQuality !== 'camera') {
+            this.appliedVideoProfiles.delete(peerId)
+            await this.applyVideoProfile(peerId, pc)
+          }
+        }
+
+        const audioTransceivers = transceivers.filter(t => t.receiver.track.kind === 'audio' && !t.stopped)
+        const screenAudioTransceiver = audioTransceivers.length > 1 ? audioTransceivers[1] : null
+        if (screenAudioTransceiver) {
+          const sender = screenAudioTransceiver.sender
+          if (targetActive && screenAudioTrack && sender.track !== screenAudioTrack) {
+            await sender.replaceTrack(screenAudioTrack).catch(() => { })
+          }
+          const params = sender.getParameters()
+          if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+          params.encodings[0].active = targetActive
+          await sender.setParameters(params).catch(() => { })
+        }
+      } catch { }
+    }
+  }
+
+  public async handleViewerSfuFallback(viewerId: string, epoch: number) {
+    if (!viewerId || !this.localVideoStream || this.sfuPubEpoch !== epoch) return
+    this.sfuFallbackPeers.add(viewerId)
+    const pc = this.peerConnections.get(viewerId)
+    if (!pc || pc.connectionState === 'closed') return
+    const videoTrack = this.localVideoStream.getVideoTracks()[0] ?? null
+    const micTrack = this.localStream?.getAudioTracks()[0] ?? null
+    const screenAudioTrack = this.localVideoStream.getAudioTracks().find(t => t !== micTrack) ?? null
+    try {
+      const transceivers = pc.getTransceivers()
+      const videoTransceiver = transceivers.find(t => t.receiver.track.kind === 'video' && !t.stopped)
+      if (videoTransceiver) {
+        const sender = videoTransceiver.sender
+        if (videoTrack && sender.track !== videoTrack) {
+          await sender.replaceTrack(videoTrack).catch(() => { })
+        }
+        const params = sender.getParameters()
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+        params.encodings[0].active = true
+        await sender.setParameters(params).catch(() => { })
+        if (this.currentStreamQuality !== 'camera') {
+          this.appliedVideoProfiles.delete(viewerId)
+          await this.applyVideoProfile(viewerId, pc)
+        }
+      }
+      const audioTransceivers = transceivers.filter(t => t.receiver.track.kind === 'audio' && !t.stopped)
+      const screenAudioTransceiver = audioTransceivers.length > 1 ? audioTransceivers[1] : null
+      if (screenAudioTransceiver) {
+        const sender = screenAudioTransceiver.sender
+        if (screenAudioTrack && sender.track !== screenAudioTrack) {
+          await sender.replaceTrack(screenAudioTrack).catch(() => { })
+        }
+        const params = sender.getParameters()
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+        params.encodings[0].active = true
+        await sender.setParameters(params).catch(() => { })
+      }
+    } catch { }
+  }
+
+  public async handleSfuPublishRequired(epoch: number, _nodeId: string) {
+    this.pendingSfuPublish = { epoch, nodeId: _nodeId }
+    if (!this.localVideoStream || this.isStartingScreenShare) return
+    this.pendingSfuPublish = null
+    this.sfuFallbackPeers.clear()
+    if (this.sfuPubCloseTimer) {
+      clearTimeout(this.sfuPubCloseTimer)
+      this.sfuPubCloseTimer = null
+    }
+    if (this.sfuPubWatchdogTimer) {
+      clearTimeout(this.sfuPubWatchdogTimer)
+      this.sfuPubWatchdogTimer = null
+    }
+    if (this.sfuPubConnection && this.sfuPubEpoch === epoch && this.sfuPubConnection.connectionState !== 'failed' && this.sfuPubConnection.connectionState !== 'closed') {
+      return
+    }
+    if (this.sfuPubConnection) {
+      try {
+        this.sfuPubConnection.onconnectionstatechange = null
+        this.sfuPubConnection.oniceconnectionstatechange = null
+        this.sfuPubConnection.close()
+      } catch { }
+      this.sfuPubConnection = null
+    }
+
+    this.sfuPubEpoch = epoch
+    await this.ensureIceServers()
+    if (!this.localVideoStream || this.sfuPubEpoch !== epoch || this.isStartingScreenShare) return
+
+    const pc = new (RTCPeerConnection as any)(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS) as RTCPeerConnection
+    this.sfuPubConnection = pc
+
+    const videoTrack = this.localVideoStream.getVideoTracks()[0]
+    const micTrack = this.localStream?.getAudioTracks()[0]
+    const screenAudioTrack = this.localVideoStream.getAudioTracks().find(t => t !== micTrack)
+
+    if (videoTrack) {
+      const vSender = pc.addTrack(videoTrack, this.localVideoStream)
+      try {
+        if (this.currentStreamQuality !== 'camera') {
+          const params = vSender.getParameters()
+          if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+          params.degradationPreference = 'maintain-framerate'
+          params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
+          params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
+          params.encodings[0].networkPriority = 'high'
+          params.encodings[0].active = true
+          vSender.setParameters(params).catch(() => { })
+        }
+      } catch { }
+    }
+
+    if (screenAudioTrack) {
+      const aSender = pc.addTrack(screenAudioTrack, this.localVideoStream)
+      this.configureAudioSender(aSender)
+    }
+
+    let notifiedReady = false
+    const onStateChange = () => {
+      if (this.sfuPubConnection !== pc || this.sfuPubEpoch !== epoch) return
+      const st = pc.connectionState
+      const iceSt = pc.iceConnectionState
+      if (st === 'connected' || iceSt === 'connected' || iceSt === 'completed') {
+        if (this.sfuPubWatchdogTimer) {
+          clearTimeout(this.sfuPubWatchdogTimer)
+          this.sfuPubWatchdogTimer = null
+        }
+        if (!notifiedReady) {
+          notifiedReady = true
+          void signalRService.sfuPublishReady(epoch)
+        }
+      } else if (st === 'failed' || iceSt === 'failed') {
+        if (this.sfuPubWatchdogTimer) {
+          clearTimeout(this.sfuPubWatchdogTimer)
+          this.sfuPubWatchdogTimer = null
+        }
+        const me = useAppStore.getState().currentUser?.id
+        if (me) void signalRService.sfuReportFailure(me, epoch)
+      }
+    }
+    pc.onconnectionstatechange = onStateChange
+    pc.oniceconnectionstatechange = onStateChange
+
+    this.sfuPubWatchdogTimer = setTimeout(() => {
+      this.sfuPubWatchdogTimer = null
+      if (this.sfuPubConnection === pc && this.sfuPubEpoch === epoch && !notifiedReady) {
+        const me = useAppStore.getState().currentUser?.id
+        if (me) void signalRService.sfuReportFailure(me, epoch)
+      }
+    }, 6500)
+
+    try {
+      const offer = await pc.createOffer(SILENCE_SUPPRESSION_OFF)
+      const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, false, 20)
+      await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
+      await this.waitForIceGatheringComplete(pc, 1200)
+      if (this.sfuPubConnection !== pc || this.sfuPubEpoch !== epoch) return
+
+      const res = await signalRService.sfuPublish(epoch, pc.localDescription!.sdp, Boolean(screenAudioTrack))
+      if (this.sfuPubConnection !== pc || this.sfuPubEpoch !== epoch) return
+      if (!res || !res.ok || !res.answerSdp) {
+        const me = useAppStore.getState().currentUser?.id
+        if (me) void signalRService.sfuReportFailure(me, epoch)
+        return
+      }
+
+      await pc.setRemoteDescription({ type: 'answer', sdp: res.answerSdp })
+      onStateChange()
+    } catch {
+      const me = useAppStore.getState().currentUser?.id
+      if (me && this.sfuPubEpoch === epoch) {
+        void signalRService.sfuReportFailure(me, epoch)
+      }
+    }
+  }
+
+  public async handleStreamDeliveryModeChanged(dto: any) {
+    const streamerId: string = dto?.streamerId ?? dto?.StreamerId ?? ''
+    const mode: 'p2p' | 'sfu' = (dto?.mode ?? dto?.Mode) === 'sfu' ? 'sfu' : 'p2p'
+    const epoch = Number(dto?.epoch ?? dto?.Epoch ?? 0)
+    const nodeId: string | undefined = dto?.nodeId ?? dto?.NodeId
+    if (!streamerId) return
+
+    const prev = this.streamDeliveryModes.get(streamerId)
+    if (prev && prev.epoch > epoch) return
+    this.streamDeliveryModes.set(streamerId, { mode, epoch, nodeId })
+
+    const store = useAppStore.getState()
+    const currentUserId = store.currentUser?.id
+
+    if (streamerId === currentUserId) {
+      if (mode === 'sfu') {
+        if (this.sfuPubCloseTimer) {
+          clearTimeout(this.sfuPubCloseTimer)
+          this.sfuPubCloseTimer = null
+        }
+        this.sfuPubActive = true
+        if (this.sfuPubPauseTimer) clearTimeout(this.sfuPubPauseTimer)
+        this.sfuPubPauseTimer = setTimeout(() => {
+          this.sfuPubPauseTimer = null
+          if (this.sfuPubActive) {
+            void this.setP2PScreenSendersActive(false)
+          }
+        }, 350)
+      } else {
+        if (this.sfuPubPauseTimer) {
+          clearTimeout(this.sfuPubPauseTimer)
+          this.sfuPubPauseTimer = null
+        }
+        this.sfuPubActive = false
+        this.sfuFallbackPeers.clear()
+        await this.setP2PScreenSendersActive(true)
+        if (this.sfuPubCloseTimer) clearTimeout(this.sfuPubCloseTimer)
+        this.sfuPubCloseTimer = setTimeout(() => {
+          this.sfuPubCloseTimer = null
+          if (!this.sfuPubActive) {
+            this.closeSfuPublisher()
+          }
+        }, 650)
+      }
+      return
+    }
+
+    const isWatching = store.activeStreamId === streamerId
+    const hasStream = Boolean(store.remoteVideoStreams[streamerId])
+
+    if (mode === 'sfu') {
+      if (isWatching) {
+        await this.subscribeToSfuStream(streamerId, epoch, false)
+      } else if (!hasStream) {
+        await this.subscribeToSfuStream(streamerId, epoch, true)
+      }
+    } else {
+      await this.switchViewerFromSfuToP2P(streamerId)
+    }
+  }
+
+  private reconcileSfuSubscriptionForPeer(streamerId: string, desired: 'watching' | 'preview') {
+    const delivery = this.streamDeliveryModes.get(streamerId)
+    if (!delivery || delivery.mode !== 'sfu') return
+
+    const previewTimer = this.sfuPreviewTearDownTimers.get(streamerId)
+    if (previewTimer) {
+      clearTimeout(previewTimer)
+      this.sfuPreviewTearDownTimers.delete(streamerId)
+    }
+
+    if (desired === 'watching') {
+      const existingPc = this.sfuSubConnections.get(streamerId)
+      const existingEpoch = this.sfuSubEpochs.get(streamerId)
+      if (!existingPc || existingEpoch !== delivery.epoch || existingPc.connectionState === 'failed' || existingPc.connectionState === 'closed') {
+        void this.subscribeToSfuStream(streamerId, delivery.epoch, false)
+      } else {
+        void signalRService.sfuRequestKeyframe(streamerId)
+      }
+    } else {
+      if (this.sfuSubConnections.has(streamerId)) {
+        const t = setTimeout(() => {
+          this.sfuPreviewTearDownTimers.delete(streamerId)
+          if (useAppStore.getState().activeStreamId !== streamerId) {
+            this.closeSfuSubscriber(streamerId, true)
+          }
+        }, 2600)
+        this.sfuPreviewTearDownTimers.set(streamerId, t)
+      }
+    }
+  }
+
+  private async subscribeToSfuStream(streamerId: string, epoch: number, forPreviewSnapshot = false) {
+    const existingPc = this.sfuSubConnections.get(streamerId)
+    const existingEpoch = this.sfuSubEpochs.get(streamerId)
+    if (existingPc && existingEpoch === epoch && existingPc.connectionState !== 'failed' && existingPc.connectionState !== 'closed') {
+      return
+    }
+    this.closeSfuSubscriber(streamerId, false)
+
+    await this.ensureIceServers()
+    const currentDelivery = this.streamDeliveryModes.get(streamerId)
+    if (!currentDelivery || currentDelivery.mode !== 'sfu' || currentDelivery.epoch !== epoch) return
+
+    const pc = new (RTCPeerConnection as any)(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS) as RTCPeerConnection
+    this.sfuSubConnections.set(streamerId, pc)
+    this.sfuSubEpochs.set(streamerId, epoch)
+
+    pc.addTransceiver('video', { direction: 'recvonly' })
+    pc.addTransceiver('audio', { direction: 'recvonly' })
+
+    const sfuCombinedStream = new MediaStream()
+    let videoAttached = false
+    let subConnected = false
+
+    pc.ontrack = (event) => {
+      if (this.sfuSubConnections.get(streamerId) !== pc) return
+      sfuCombinedStream.addTrack(event.track)
+
+      if (event.track.kind === 'video') {
+        void (async () => {
+          await this.waitForFirstVideoFrame(sfuCombinedStream, 550)
+          if (this.sfuSubConnections.get(streamerId) !== pc) return
+          videoAttached = true
+          this.attachRemoteVideo(streamerId, event.track, sfuCombinedStream, true)
+          if (forPreviewSnapshot && useAppStore.getState().activeStreamId !== streamerId) {
+            const t = setTimeout(() => {
+              this.sfuPreviewTearDownTimers.delete(streamerId)
+              if (useAppStore.getState().activeStreamId !== streamerId) {
+                this.closeSfuSubscriber(streamerId, true)
+              }
+            }, 2600)
+            this.sfuPreviewTearDownTimers.set(streamerId, t)
+          }
+        })()
+      } else if (event.track.kind === 'audio') {
+        this.attachRemoteStreamAudio(streamerId, event.track, event.receiver, sfuCombinedStream, true)
+      }
+    }
+
+    const onStateChange = () => {
+      if (this.sfuSubConnections.get(streamerId) !== pc) return
+      const st = pc.connectionState
+      const iceSt = pc.iceConnectionState
+      if (st === 'connected' || iceSt === 'connected' || iceSt === 'completed') {
+        subConnected = true
+        const wd = this.sfuSubWatchdogTimers.get(streamerId)
+        if (wd) {
+          clearTimeout(wd)
+          this.sfuSubWatchdogTimers.delete(streamerId)
+        }
+        void signalRService.sfuRequestKeyframe(streamerId)
+      } else if (st === 'failed' || iceSt === 'failed') {
+        const wd = this.sfuSubWatchdogTimers.get(streamerId)
+        if (wd) {
+          clearTimeout(wd)
+          this.sfuSubWatchdogTimers.delete(streamerId)
+        }
+        void this.switchViewerFromSfuToP2P(streamerId)
+        void signalRService.sfuReportFailure(streamerId, epoch)
+      }
+    }
+    pc.onconnectionstatechange = onStateChange
+    pc.oniceconnectionstatechange = onStateChange
+
+    const watchdog = setTimeout(() => {
+      this.sfuSubWatchdogTimers.delete(streamerId)
+      if (this.sfuSubConnections.get(streamerId) === pc && !subConnected) {
+        void this.switchViewerFromSfuToP2P(streamerId)
+        void signalRService.sfuReportFailure(streamerId, epoch)
+      }
+    }, 6500)
+    this.sfuSubWatchdogTimers.set(streamerId, watchdog)
+
+    try {
+      const offer = await pc.createOffer(SILENCE_SUPPRESSION_OFF)
+      const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, false, 20)
+      await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
+      await this.waitForIceGatheringComplete(pc, 1200)
+      if (this.sfuSubConnections.get(streamerId) !== pc) return
+
+      const res = await signalRService.sfuSubscribe(streamerId, epoch, pc.localDescription!.sdp)
+      if (this.sfuSubConnections.get(streamerId) !== pc) return
+      if (!res || !res.ok || !res.answerSdp) {
+        void this.switchViewerFromSfuToP2P(streamerId)
+        void signalRService.sfuReportFailure(streamerId, epoch)
+        return
+      }
+
+      await pc.setRemoteDescription({ type: 'answer', sdp: res.answerSdp })
+      setTimeout(() => {
+        if (this.sfuSubConnections.get(streamerId) === pc && !videoAttached) {
+          void signalRService.sfuRequestKeyframe(streamerId)
+        }
+      }, 300)
+    } catch {
+      if (this.sfuSubConnections.get(streamerId) === pc) {
+        void this.switchViewerFromSfuToP2P(streamerId)
+        void signalRService.sfuReportFailure(streamerId, epoch)
+      }
+    }
+  }
+
+  private async switchViewerFromSfuToP2P(streamerId: string) {
+    const p2pPc = this.peerConnections.get(streamerId)
+    let p2pVideoStream = this.p2pStreamsBackup.get(streamerId)
+    if ((!p2pVideoStream || p2pVideoStream.getVideoTracks().every(t => t.readyState === 'ended')) && p2pPc && p2pPc.connectionState !== 'closed') {
+      const vRec = p2pPc.getReceivers().find(r => r.track && r.track.kind === 'video' && r.track.readyState !== 'ended')
+      if (vRec?.track) {
+        p2pVideoStream = new MediaStream([vRec.track])
+        this.p2pStreamsBackup.set(streamerId, p2pVideoStream)
+      }
+    }
+
+    if (p2pVideoStream) {
+      await this.waitForFirstVideoFrame(p2pVideoStream, 450)
+    }
+
+    this.closeSfuSubscriber(streamerId, false)
+
+    if (p2pVideoStream && p2pVideoStream.getVideoTracks()[0]) {
+      this.attachRemoteVideo(streamerId, p2pVideoStream.getVideoTracks()[0], p2pVideoStream, false)
+    }
+    const audioBackup = this.p2pAudioBackup.get(streamerId)
+    if (audioBackup && audioBackup.track.readyState !== 'ended') {
+      this.attachRemoteStreamAudio(streamerId, audioBackup.track, audioBackup.receiver, audioBackup.stream, false)
+    } else {
+      this.syncRemoteVideoStream(streamerId)
+    }
+  }
+
+  private closeSfuSubscriber(streamerId: string, notifyServer = false) {
+    const previewTimer = this.sfuPreviewTearDownTimers.get(streamerId)
+    if (previewTimer) {
+      clearTimeout(previewTimer)
+      this.sfuPreviewTearDownTimers.delete(streamerId)
+    }
+    const wdTimer = this.sfuSubWatchdogTimers.get(streamerId)
+    if (wdTimer) {
+      clearTimeout(wdTimer)
+      this.sfuSubWatchdogTimers.delete(streamerId)
+    }
+    this.sfuSubEpochs.delete(streamerId)
+    const pc = this.sfuSubConnections.get(streamerId)
+    if (pc) {
+      this.sfuSubConnections.delete(streamerId)
+      try {
+        pc.ontrack = null
+        pc.onconnectionstatechange = null
+        pc.oniceconnectionstatechange = null
+        pc.close()
+      } catch { }
+      if (notifyServer) {
+        void signalRService.sfuUnsubscribe(streamerId)
+      }
+    }
   }
 
   public leaveAll() {
     this.stopAudioHealthMonitoring()
     this.stopStreamSyncMonitoring()
+    this.pendingSfuPublish = null
+    this.sfuFallbackPeers.clear()
+    this.closeSfuPublisher()
+    for (const streamerId of [...this.sfuSubConnections.keys()]) {
+      this.closeSfuSubscriber(streamerId, false)
+    }
+    this.sfuSubWatchdogTimers.forEach(t => clearTimeout(t))
+    this.sfuSubWatchdogTimers.clear()
+    this.sfuPreviewTearDownTimers.forEach(t => clearTimeout(t))
+    this.sfuPreviewTearDownTimers.clear()
+    this.streamDeliveryModes.clear()
+    this.p2pStreamsBackup.clear()
+    this.p2pAudioBackup.clear()
     if (this.viewInterestTimer) {
       clearTimeout(this.viewInterestTimer)
       this.viewInterestTimer = null

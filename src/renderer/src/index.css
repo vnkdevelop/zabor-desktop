@@ -419,9 +419,16 @@ body * {
 
 input,
 textarea,
-[contenteditable="true"] {
-  -webkit-user-select: text;
-  user-select: text;
+[contenteditable="true"],
+.select-text,
+.select-text * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+::selection {
+  background-color: rgba(200, 30, 112, 0.45);
+  color: #ffffff;
 }
 
 @keyframes shake-horizontal {

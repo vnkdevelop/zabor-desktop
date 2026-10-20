@@ -139,12 +139,12 @@ describe('Tier 4: Real-World Scenarios', () => {
 
       // Verify installer process was spawned detached and unrefed
       const installerProc = spawnedProcesses.find(p =>
-        (p.args && p.args.includes('/S')) || (p.command && p.command.includes('/S'))
+        (p.args && p.args.some(a => String(a).includes('/S'))) || (p.command && p.command.includes('/S'))
       );
       assert.ok(installerProc, 'Installer process should be spawned');
       assert.ok(installerProc.unrefCalled, 'Child installer process must be unrefed to detach cleanly');
       assert.ok(
-        installerProc.args.includes('/S') || (installerProc.command && installerProc.command.includes('/S')),
+        installerProc.args.some(a => String(a).includes('/S')) || (installerProc.command && installerProc.command.includes('/S')),
         'Installer must be launched in silent mode (/S)'
       );
 

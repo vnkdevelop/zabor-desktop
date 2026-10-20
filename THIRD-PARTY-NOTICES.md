@@ -92,6 +92,17 @@ network addresses, which is disclosed in [PRIVACY.md](PRIVACY.md) section 7.
 - Purpose: relaying encrypted traffic when a direct connection cannot be established
 - The relaying node necessarily sees participants' network addresses
 
+## SFU (Selective Forwarding Unit)
+
+- SFU media node addresses and signalling are issued at runtime by the ZABOR backend
+  server when a screen share has 3 or more active viewers (`>= 3`)
+- Server component built with Pion WebRTC (`github.com/pion/webrtc/v4`, MIT Licence,
+  copyright (c) 2018–2026 Sean DuBois and Pion contributors, <https://github.com/pion/webrtc>)
+- Purpose: receiving a single screen-share upstream from the presenter and forwarding
+  RTP packets in memory to 3 or more active viewers
+- The SFU media node necessarily sees the network addresses of the presenter and
+  subscribed viewers
+
 ## MIT licence text
 
 Applies to every component above that is listed as MIT, with the copyright notice given in

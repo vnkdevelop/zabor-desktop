@@ -855,6 +855,15 @@ class SignalRService {
     on("ReceiveStreamViewState", (sId: string, state: string) => {
       webrtc.applyViewerState(sId, state === 'preview' ? 'preview' : 'watching');
     });
+    on("StreamSfuPublishRequired", (epoch: number, nodeId: string) => {
+      void webrtc.handleSfuPublishRequired(epoch, nodeId);
+    });
+    on("StreamDeliveryModeChanged", (dto: any) => {
+      void webrtc.handleStreamDeliveryModeChanged(dto);
+    });
+    on("StreamViewerSfuFallback", (viewerId: string, epoch: number) => {
+      void webrtc.handleViewerSfuFallback(viewerId, Number(epoch));
+    });
 
     on("ForceLogout", async () => {
       try { await window.windowControls?.clearSession?.(); await window.windowControls?.wipeAppData?.(); } catch { }
@@ -1994,6 +2003,42 @@ class SignalRService {
   }
   public sendStreamViewState(targetId: string, state: 'watching' | 'preview'): void {
     if (this.sessionReady && this.isConnected()) this.connection?.send("SendStreamViewState", targetId, state).catch(() => { });
+  }
+  public async sfuPublish(epoch: number, offerSdp: string, hasAudio: boolean): Promise<{ ok: boolean; answerSdp?: string; nodeId?: string; error?: string } | null> {
+    if (!this.sessionReady || !this.isConnected()) return null;
+    try {
+      return await this.invokeWithTimeout("SfuPublish", 10000, epoch, offerSdp, hasAudio);
+    } catch {
+      return null;
+    }
+  }
+  public async sfuPublishReady(epoch: number): Promise<void> {
+    if (this.sessionReady && this.isConnected()) {
+      await this.connection?.send("SfuPublishReady", epoch).catch(() => { });
+    }
+  }
+  public async sfuSubscribe(streamerId: string, epoch: number, offerSdp: string): Promise<{ ok: boolean; answerSdp?: string; nodeId?: string; error?: string } | null> {
+    if (!this.sessionReady || !this.isConnected()) return null;
+    try {
+      return await this.invokeWithTimeout("SfuSubscribe", 10000, streamerId, epoch, offerSdp);
+    } catch {
+      return null;
+    }
+  }
+  public async sfuUnsubscribe(streamerId: string): Promise<void> {
+    if (this.sessionReady && this.isConnected()) {
+      await this.connection?.send("SfuUnsubscribe", streamerId).catch(() => { });
+    }
+  }
+  public async sfuRequestKeyframe(streamerId: string): void | Promise<void> {
+    if (this.sessionReady && this.isConnected()) {
+      await this.connection?.send("SfuRequestKeyframe", streamerId).catch(() => { });
+    }
+  }
+  public async sfuReportFailure(streamerId: string, epoch: number): Promise<void> {
+    if (this.sessionReady && this.isConnected()) {
+      await this.connection?.send("SfuReportFailure", streamerId, epoch).catch(() => { });
+    }
   }
 }
 

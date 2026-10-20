@@ -1,6 +1,6 @@
 # Условия использования сервиса ZABOR / ZABOR Terms of Service
 
-> Редакция от 26 сентября 2026 года. Предыдущая редакция — от 11 сентября 2026 года.
+> Редакция от 20 октября 2026 года. Предыдущая редакция — от 26 сентября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 >
@@ -81,11 +81,11 @@
 ### 7. Данные пользователей
 
 1. Сервер хранит: имя пользователя, хеш пароля, отображаемое имя, аватар, цвет аватара, текст «о себе», настройки звука, данные достижений, статус присутствия, время последнего входа и настройку его видимости.
-2. **Голос, видео и трансляции экрана передаются напрямую между участниками по технологии WebRTC (P2P) и не проходят через сервер Оператора.** Через сервер передаются только сигнальные сообщения, необходимые для установления соединения. При прямом соединении участники звонка получают сетевые адреса друг друга — это неотъемлемое свойство P2P-связи.
+2. **Голос, видео и трансляции экрана.** Голосовая связь и трансляции экрана при 1–2 активных зрителях передаются напрямую между участниками по технологии WebRTC (P2P). При прямом соединении участники звонка получают сетевые адреса друг друга — это неотъемлемое свойство P2P-связи. Когда трансляцию экрана смотрят 3 и более активных зрителей (`>= 3`), медиапоток трансляции экрана переключается на селективную пересылку через медиа-узел (SFU) Оператора для разгрузки канала отправителя; при этом пакеты пересылаются в оперативной памяти без декодирования, записи и хранения на сервере.
 3. **Сообщения и файлы.** При использовании встроенного обмена сообщениями сервер обрабатывает только метаданные, необходимые для доставки: пару участников, время и порядковые номера сообщений, состояние доставки и прочтения, а также размер и контрольную сумму файлов. **Содержание сообщений и файлов серверу недоступно** — см. раздел 8.
 4. **Хранение на устройстве.** История сообщений хранится локально на устройстве пользователя и удаляется автоматически по истечении 14 суток. Полученные файлы хранятся в каталоге данных приложения до их удаления пользователем.
 5. **Удаление сообщения в интерфейсе удаляет его на устройстве пользователя.** Копия, уже переданная собеседнику, находится на его устройстве и Оператором не удаляется и не может быть удалена.
-6. **Резервный маршрут и ретрансляция.** Если прямое соединение не установлено, зашифрованные пакеты сообщений передаются через сервер Оператора; содержимое при этом остаётся недоступным. Для части соединений применяется ретрансляция трафика (TURN), при которой сетевые адреса участников технически видит ретранслирующий узел. Для определения маршрутов используются внешние службы установления соединений (STUN).
+6. **Резервный маршрут, ретрансляция и селективная пересылка.** Если прямое соединение не установлено, зашифрованные пакеты сообщений передаются через сервер Оператора; содержимое при этом остаётся недоступным. Для части соединений применяется ретрансляция трафика (TURN), а для трансляции экрана при 3 и более зрителях — медиа-узел селективной пересылки (SFU); в этих случаях сетевые адреса подключившихся участников технически видит соответствующий узел. Для определения маршрутов используются внешние службы установления соединений (STUN).
 7. Оператор не продаёт и не передаёт данные третьим лицам, за исключением случаев, предусмотренных законом.
 8. Сервер ведёт технические журналы подключений, включая версию и канал сборки приложения, время подключения и результат проверки подписи. Журналы используются для диагностики и защиты Сервиса.
 9. Удаление учётной записи возможно по обращению к Оператору.
@@ -204,11 +204,11 @@ Responsibility for content transmitted through the Service rests with the user w
 ### 7. User data
 
 1. The server stores: username, password hash, display name, avatar, avatar colour, "about me" text, audio settings, achievement data, presence status, last-seen time and its visibility setting.
-2. **Voice, video and screen shares are transmitted directly between participants over WebRTC (P2P) and do not pass through the Operator's server.** Only the signaling messages needed to establish a connection traverse the server. In a direct connection, call participants learn each other's network addresses — this is inherent to P2P communication.
+2. **Voice, video and screen shares.** Voice calls and screen shares watched by 1–2 active viewers are transmitted directly between participants over WebRTC (P2P). In a direct connection, call participants learn each other's network addresses — this is inherent to P2P communication. When a screen share is watched by 3 or more active viewers (`>= 3`), the screen-share media stream switches to selective forwarding through the Operator's media node (SFU) to offload the sender's upstream; packets are forwarded in volatile memory without decoding, recording, or storage on the server.
 3. **Messages and files.** When the built-in messaging feature is used, the server processes only the metadata required for delivery: the pair of participants, send time and message sequence numbers, delivery and read state, and the size and checksum of files. **The content of messages and files is not available to the server** — see section 8.
 4. **On-device storage.** Message history is stored locally on the user's device and is deleted automatically after 14 days. Received files are stored in the application data directory until deleted by the user.
 5. **Deleting a message in the interface deletes it on the user's device.** A copy already delivered to the other participant resides on their device and is not, and cannot be, deleted by the Operator.
-6. **Fallback route and relaying.** Where a direct connection is not established, encrypted message packets are transmitted through the Operator's server; their content remains unavailable. Some connections use traffic relaying (TURN), where participants' network addresses are technically visible to the relaying node. External connection-establishment services (STUN) are used to determine routes.
+6. **Fallback route, relaying and selective forwarding.** Where a direct connection is not established, encrypted message packets are transmitted through the Operator's server; their content remains unavailable. Some connections use traffic relaying (TURN), and screen shares with 3 or more viewers use a Selective Forwarding Unit (SFU) media node; in those cases the network addresses of connected participants are technically visible to the respective node. External connection-establishment services (STUN) are used to determine routes.
 7. The Operator does not sell or transfer data to third parties except as required by law.
 8. The server keeps technical connection logs, including application version and build channel, connection time and signature verification result. Logs are used for diagnostics and to protect the Service.
 9. Account deletion is available on request to the Operator.

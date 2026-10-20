@@ -1,6 +1,6 @@
 # Криптография в ZABOR: состав и свойства / ZABOR Cryptography Notice
 
-> Редакция от 25 сентября 2026 года.
+> Редакция от 20 октября 2026 года. Предыдущая редакция — от 25 сентября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -12,13 +12,13 @@
 
 ### 1. Назначение
 
-Криптография в ZABOR применяется для защиты **обмена сообщениями, файлами и служебными пакетами** между участниками, а также для защиты **данных сессии и закрытого ключа переписки**, хранящихся локально на устройстве пользователя. Прочие локально хранимые данные — история сообщений и полученные файлы — в состоянии покоя не шифруются (см. п. 4.4). Защита голосового и видеотракта обеспечивается штатными средствами WebRTC (DTLS-SRTP для медиапотока RTP; в режиме низкой задержки голос может дополнительно передаваться по каналу данных WebRTC — SCTP поверх DTLS) и в настоящем документе не рассматривается. В обоих случаях это штатный транспорт WebRTC; отдельная криптозащита прикладного уровня для голоса не добавляется и не убирается.
+Криптография в ZABOR применяется для защиты **обмена сообщениями, файлами и служебными пакетами** между участниками, а также для защиты **данных сессии и закрытого ключа переписки**, хранящихся локально на устройстве пользователя. Прочие локально хранимые данные — история сообщений и полученные файлы — в состоянии покоя не шифруются (см. п. 4.4). Защита голосового и видеотракта обеспечивается штатными средствами WebRTC (DTLS-SRTP для медиапотока RTP; в режиме низкой задержки голос может дополнительно передаваться по каналу данных WebRTC — SCTP поверх DTLS) и в настоящем документе подробно не рассматривается. При трансляции экрана с 1–2 зрителями соединение DTLS-SRTP устанавливается напрямую между участниками (P2P), а при 3 и более активных зрителях (`>= 3`) — между участниками и серверным медиа-узлом селективной пересылки (SFU), который пересылает пакеты RTP в оперативной памяти без декодирования и без сохранения. Отдельная криптозащита прикладного уровня (E2EE поверх RTP) для голоса и видео не добавляется.
 
 ### 2. Применяемые алгоритмы
 
 | Назначение | Алгоритм | Реализация | Где применяется |
 | --- | --- | --- | --- |
-| Защита прямого соединения | DTLS-SRTP | WebRTC | Прямой маршрут (P2P) |
+| Защита медиапотока и прямого соединения | DTLS-SRTP | WebRTC | Прямой маршрут (P2P) и соединение с медиа-узлом SFU (при >= 3 зрителях стрима) |
 | Согласование ключа обмена сообщениями | ECDH, кривая P-256 | Web Crypto API | Только резервный маршрут |
 | Шифрование сообщений и служебных пакетов | AES-GCM, ключ 256 бит, 96-битный вектор инициализации | Web Crypto API | Только резервный маршрут |
 | Генерация вектора инициализации | `crypto.getRandomValues` | Web Crypto API | Резервный маршрут |
@@ -49,7 +49,7 @@
 4. **Защита локальных данных зависит от операционной системы.** Ключ переписки и данные сессии шифруются средствами ОС; при отсутствии такой возможности в системе защита не применяется.
 5. **Метаданные не защищаются.** Оператору доступны сведения о том, кто с кем, когда и в каком объёме обменивается сообщениями (см. раздел 3.3 [PRIVACY.md](PRIVACY.md)).
 6. **Резервный маршрут использует сервер.** При невозможности прямого соединения шифрованные пакеты передаются через сервер, который видит метаданные, но не содержимое.
-7. **На прямом маршруте отпечаток DTLS не сверяется вне канала сигнализации.** Согласование транспортных ключей WebRTC проходит через сервер сигнализации, а средства сверки отпечатка между участниками в интерфейсе не предусмотрены; поэтому активный сервер сигнализации способен выступить посредником (MITM) на прямом маршруте, включая голосовой и видеотракт. Заявление о том, что сервер не видит содержимого прямого соединения, относится к пассивному серверу.
+7. **На прямом маршруте отпечаток DTLS не сверяется вне канала сигнализации, а в режиме SFU узел пересылает RTP-пакеты стрима.** Согласование транспортных ключей WebRTC проходит через сервер сигнализации, а средства сверки отпечатка между участниками в интерфейсе не предусмотрены; поэтому активный сервер сигнализации способен выступить посредником (MITM) на прямом маршруте, включая голосовой и видеотракт. Кроме того, при просмотре трансляции экрана 3 и более активными зрителями (`>= 3`) поток трансляции экрана передаётся через медиа-узел SFU Оператора, который является стороной транспортного соединения DTLS-SRTP и перешифровывает пакеты RTP в оперативной памяти для каждого зрителя (без записи и хранения на сервере).
 
 ### 5. Ключи и их местонахождение
 
@@ -76,13 +76,13 @@
 
 ### 1. Purpose
 
-Cryptography in ZABOR protects the **exchange of messages, files and control packets** between participants, and protects the **session data and the private messaging key** stored locally on the user's device. Other locally stored data — message history and received files — is not encrypted at rest (see section 4.4). Protection of the voice and video path is provided by native WebRTC facilities (DTLS-SRTP for the RTP media stream; in low-latency mode voice may additionally be carried over the WebRTC data channel — SCTP over DTLS) and is not covered by this document. In both cases this is native WebRTC transport; no separate application-layer cryptographic protection for voice is added or removed.
+Cryptography in ZABOR protects the **exchange of messages, files and control packets** between participants, and protects the **session data and the private messaging key** stored locally on the user's device. Other locally stored data — message history and received files — is not encrypted at rest (see section 4.4). Protection of the voice and video path is provided by native WebRTC facilities (DTLS-SRTP for the RTP media stream; in low-latency mode voice may additionally be carried over the WebRTC data channel — SCTP over DTLS) and is not covered in detail by this document. For screen shares watched by 1–2 active viewers, the DTLS-SRTP connection is established directly between participants (P2P); when watched by 3 or more active viewers (`>= 3`), DTLS-SRTP connections are established between participants and the Controller's Selective Forwarding Unit (SFU) media node, which forwards RTP packets in volatile memory without decoding or recording. No separate application-layer cryptographic protection (E2EE over RTP) for voice and video is added.
 
 ### 2. Algorithms used
 
 | Purpose | Algorithm | Implementation | Where applied |
 | --- | --- | --- | --- |
-| Direct connection protection | DTLS-SRTP | WebRTC | Direct route (P2P) |
+| Media stream and direct connection protection | DTLS-SRTP | WebRTC | Direct route (P2P) and SFU media node route (at >= 3 stream viewers) |
 | Messaging key agreement | ECDH, curve P-256 | Web Crypto API | Fallback route only |
 | Message and control packet encryption | AES-GCM, 256-bit key, 96-bit IV | Web Crypto API | Fallback route only |
 | IV generation | `crypto.getRandomValues` | Web Crypto API | Fallback route |
@@ -113,7 +113,7 @@ The Controller states these limitations expressly so that protection claims are 
 4. **Local data protection depends on the operating system.** The messaging key and session data are encrypted with OS facilities; where the system does not provide them, protection is not applied.
 5. **Metadata is not protected.** The Controller can see who exchanges messages with whom, when and in what volume (see section 3.3 of [PRIVACY.md](PRIVACY.md)).
 6. **The fallback route uses the server.** Where a direct connection cannot be established, encrypted packets pass through the server, which sees metadata but not content.
-7. **On the direct route the DTLS fingerprint is not verified outside the signalling channel.** WebRTC transport-key negotiation passes through the signalling server, and the interface provides no means for participants to compare fingerprints; therefore an active signalling server can act as a man in the middle (MITM) on the direct route, including the voice and video path. The statement that the server does not see the content of a direct connection applies to a passive server.
+7. **On the direct route the DTLS fingerprint is not verified outside the signalling channel, and in SFU mode the node forwards stream RTP packets.** WebRTC transport-key negotiation passes through the signalling server, and the interface provides no means for participants to compare fingerprints; therefore an active signalling server can act as a man in the middle (MITM) on the direct route, including the voice and video path. In addition, when a screen share is watched by 3 or more active viewers (`>= 3`), the screen-share stream is routed through the Controller's SFU media node, which terminates the DTLS-SRTP transport connection from the streamer and re-encrypts RTP packets in volatile memory for each viewer (without recording or storage on the server).
 
 ### 5. Keys and their location
 
