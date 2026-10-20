@@ -2,11 +2,14 @@ import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, ArrowSquareOut, DownloadSimple, Sparkle, ArrowRight, CheckCircle, Warning } from '@phosphor-icons/react';
 import { useAppStore } from '../../store/useAppStore';
-import { play, animate, utils, springs, EASE_OUT, DUR, prefersReducedMotion } from '../../lib/anime';
+import { play, animate, spring, utils, springs, EASE_OUT, DUR, prefersReducedMotion } from '../../lib/anime';
 
 interface UpdateModalProps {
   onClose: () => void;
 }
+
+const PROGRESS_BAR_SPRING = spring({ stiffness: 110, damping: 12, mass: 1 });
+const PROGRESS_ENTER_SPRING = spring({ stiffness: 170, damping: 13, mass: 1 });
 
 export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   const { t } = useTranslation();
@@ -15,23 +18,38 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
   const updateStatus = useAppStore(state => state.updateStatus);
   const updateError = useAppStore(state => state.updateError);
   const setUpdateStatus = useAppStore(state => state.setUpdateStatus);
+  const setUpdateProgress = useAppStore(state => state.setUpdateProgress);
   const setUpdateError = useAppStore(state => state.setUpdateError);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const badgeRef = useRef<HTMLDivElement>(null);
   const arrowRef = useRef<HTMLSpanElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const whatsNewRef = useRef<HTMLDivElement>(null);
+  const progressWrapRef = useRef<HTMLDivElement>(null);
+  const progressTrackRef = useRef<HTMLDivElement>(null);
+  const progressFillRef = useRef<HTMLDivElement>(null);
+  const actionBtnWrapRef = useRef<HTMLDivElement>(null);
+  const prevViewModeRef = useRef<'notes' | 'progress'>('notes');
+  const prevBtnModeRef = useRef<'initial' | 'downloading' | 'downloaded'>('initial');
+
+  const isDownloading = updateStatus === 'downloading';
+  const isDownloaded = updateStatus === 'downloaded';
+  const isInstalling = updateStatus === 'installing';
+  const isProgressView = isDownloading || isDownloaded || isInstalling;
+
+  const displayPercent = isDownloaded || isInstalling
+    ? 100
+    : Math.min(100, Math.max(0, updateProgress?.percent ?? 0));
 
   useEffect(() => {
     const root = rootRef.current;
     const badge = badgeRef.current;
     const arrow = arrowRef.current;
-    const card = cardRef.current;
     if (prefersReducedMotion()) {
       if (root) utils.set(root, { opacity: 1, scale: 1, translateY: 0 });
       if (badge) utils.set(badge, { opacity: 1, scale: 1, rotate: 0 });
       if (arrow) utils.set(arrow, { opacity: 1, scaleX: 1 });
-      if (card) utils.set(card, { opacity: 1, scale: 1, translateY: 0 });
       return;
     }
     if (root) {
@@ -46,35 +64,150 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
       utils.set(arrow, { opacity: 0, scaleX: 0.2 });
       void play(arrow, { opacity: [0, 1], scaleX: [0.2, 1], duration: DUR.base, ease: EASE_OUT, delay: 150 });
     }
-    if (card) {
-      utils.set(card, { opacity: 0, scale: 0.95, translateY: 6 });
-      void play(card, { opacity: [0, 1], scale: [0.95, 1], translateY: [6, 0], duration: DUR.base, ease: EASE_OUT, delay: 120 });
+  }, []);
+
+  useEffect(() => {
+    const nextViewMode: 'notes' | 'progress' = isProgressView ? 'progress' : 'notes';
+    const changed = prevViewModeRef.current !== nextViewMode;
+    prevViewModeRef.current = nextViewMode;
+
+    if (nextViewMode === 'progress') {
+      const wrap = progressWrapRef.current;
+      const track = progressTrackRef.current;
+      if (!wrap) return;
+      if (prefersReducedMotion()) {
+        utils.set(wrap, { opacity: 1, scale: 1, translateY: 0 });
+        if (track) utils.set(track, { scaleX: 1, scaleY: 1 });
+        return;
+      }
+      utils.remove(wrap);
+      utils.set(wrap, { opacity: 0, scale: 0.92, translateY: 10 });
+      animate(wrap, {
+        opacity: [0, 1],
+        scale: [0.92, 1],
+        translateY: [10, 0],
+        ease: PROGRESS_ENTER_SPRING
+      });
+      if (track) {
+        utils.remove(track);
+        utils.set(track, { scaleX: 0.85, scaleY: 0.55 });
+        animate(track, {
+          scaleX: [0.85, 1],
+          scaleY: [0.55, 1],
+          ease: springs.pop,
+          delay: 40
+        });
+      }
+    } else if (changed) {
+      const notes = whatsNewRef.current;
+      if (!notes) return;
+      if (prefersReducedMotion()) {
+        utils.set(notes, { opacity: 1, scale: 1, translateY: 0 });
+        return;
+      }
+      utils.remove(notes);
+      utils.set(notes, { opacity: 0, scale: 0.96, translateY: 6 });
+      animate(notes, {
+        opacity: [0, 1],
+        scale: [0.96, 1],
+        translateY: [6, 0],
+        ease: springs.card
+      });
     }
-  }, [updateStatus]);
+  }, [isProgressView]);
+
+  useEffect(() => {
+    if (!isProgressView) return;
+    const fill = progressFillRef.current;
+    if (!fill) return;
+    const targetShift = `${displayPercent / 2}%`;
+    if (prefersReducedMotion()) {
+      utils.set(fill, { translateX: targetShift });
+      return;
+    }
+    utils.remove(fill);
+    animate(fill, {
+      translateX: targetShift,
+      ease: PROGRESS_BAR_SPRING
+    });
+  }, [displayPercent, isProgressView]);
+
+  useEffect(() => {
+    const nextBtnMode: 'initial' | 'downloading' | 'downloaded' =
+      isDownloaded || isInstalling ? 'downloaded' : isDownloading ? 'downloading' : 'initial';
+    if (prevBtnModeRef.current === nextBtnMode) return;
+    prevBtnModeRef.current = nextBtnMode;
+    const btnWrap = actionBtnWrapRef.current;
+    if (!btnWrap) return;
+    if (prefersReducedMotion()) {
+      utils.set(btnWrap, { opacity: 1, scale: 1, translateY: 0 });
+      return;
+    }
+    utils.remove(btnWrap);
+    utils.set(btnWrap, { opacity: 0, scale: 0.88, translateY: 4 });
+    animate(btnWrap, {
+      opacity: [0, 1],
+      scale: [0.88, 1],
+      translateY: [4, 0],
+      ease: springs.pop
+    });
+  }, [isDownloading, isDownloaded, isInstalling]);
+
+  useEffect(() => {
+    if (updateStatus !== 'error' || !updateError) return;
+    const card = cardRef.current;
+    if (!card) return;
+    if (prefersReducedMotion()) {
+      utils.set(card, { opacity: 1, scale: 1, translateY: 0 });
+      return;
+    }
+    utils.set(card, { opacity: 0, scale: 0.95, translateY: 6 });
+    void play(card, { opacity: [0, 1], scale: [0.95, 1], translateY: [6, 0], duration: DUR.base, ease: EASE_OUT });
+  }, [updateStatus, updateError]);
 
   if (!updateInfo) return null;
 
   const formatBytes = (bytes: number): string => {
-    if (!bytes || bytes <= 0) return '0 мб';
+    if (!bytes || bytes <= 0) return `0 ${t('updater.mb', 'мб')}`;
     const mb = bytes / (1024 * 1024);
-    return `${mb.toFixed(1)} мб`;
+    return `${mb.toFixed(1)} ${t('updater.mb', 'мб')}`;
   };
 
   const handleStartDownload = async () => {
     if (!updateInfo.downloadUrl) return;
-    onClose();
+    setUpdateProgress({ percent: 0, transferred: 0, total: updateInfo.fileSize || 0 });
     setUpdateStatus('downloading');
     setUpdateError(null);
     try {
       const res = await window.windowControls.startUpdateDownload(updateInfo.downloadUrl, updateInfo.version);
-      if (!res.success && res.error) {
+      if (!res.success && res.error && useAppStore.getState().updateStatus === 'downloading') {
         setUpdateStatus('error');
         setUpdateError(res.error);
       }
     } catch (err: any) {
-      setUpdateStatus('error');
-      setUpdateError(err?.message || 'ошибка скачивания');
+      if (useAppStore.getState().updateStatus === 'downloading') {
+        setUpdateStatus('error');
+        setUpdateError(err?.message || 'ошибка скачивания');
+      }
     }
+  };
+
+  const handleCancelDownload = async () => {
+    try {
+      await window.windowControls.cancelUpdateDownload();
+    } catch {}
+    setUpdateStatus('available');
+    setUpdateProgress(null);
+    setUpdateError(null);
+  };
+
+  const handleCloseModal = () => {
+    if (isDownloading) {
+      void window.windowControls.cancelUpdateDownload().catch(() => {});
+      setUpdateStatus('available');
+      setUpdateProgress(null);
+    }
+    onClose();
   };
 
   const handleInstall = async () => {
@@ -98,11 +231,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
     }
   };
 
-  const isDownloading = updateStatus === 'downloading';
-  const isDownloaded = updateStatus === 'downloaded';
-  const isInstalling = updateStatus === 'installing';
-
-  if (isDownloading || isInstalling) return null;
+  const totalBytes = (updateProgress && updateProgress.total > 0) ? updateProgress.total : (updateInfo.fileSize || 0);
+  const transferredBytes = isDownloaded || isInstalling
+    ? totalBytes
+    : (updateProgress?.transferred ?? 0);
 
   return (
     <div ref={rootRef} className="glass-modal w-[520px] max-w-full p-6 flex flex-col relative overflow-hidden opacity-0" style={{ willChange: 'transform, opacity' }}>
@@ -132,10 +264,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
         </div>
 
         <button
-          onClick={onClose}
-          disabled={isDownloading}
+          onClick={handleCloseModal}
+          disabled={isInstalling}
           className={`group text-textMuted hover:text-white transition-colors duration-200 p-1.5 rounded-lg hover:bg-surface/70 ${
-            isDownloading ? 'opacity-40 cursor-not-allowed' : ''
+            isInstalling ? 'opacity-40 cursor-not-allowed' : ''
           }`}
           title={t('common.close', 'закрыть')}
         >
@@ -143,55 +275,75 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
         </button>
       </div>
 
-      {updateInfo.releaseNotes ? (
-        <div className="mb-5">
-          <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">
-            {t('modals.update.whatsNew', 'что нового')}
-          </label>
-          <div className="glass-field rounded-xl p-3.5 max-h-[160px] overflow-y-auto text-sm text-white/90 whitespace-pre-wrap leading-relaxed">
-            {updateInfo.releaseNotes}
-          </div>
-        </div>
-      ) : (
-        <div className="mb-5 text-sm text-textMuted">
-          {t('modals.update.noNotes', 'вышла новая версия zabor с улучшениями и исправлениями.')}
-        </div>
-      )}
-
-      {isDownloading && (
-        <div className="mb-5 p-3.5 rounded-xl bg-surface/50 border border-white/[0.06]">
-          <div className="flex items-center justify-between text-xs font-semibold mb-2">
-            <span className="text-white">{t('modals.update.downloading', 'скачивание обновления...')}</span>
-            <span className="text-primaryText font-bold">
-              {updateProgress ? `${updateProgress.percent}%` : '0%'}
+      {isProgressView ? (
+        <div
+          ref={progressWrapRef}
+          className="mb-5 glass-field rounded-xl p-4"
+          style={{ willChange: 'transform, opacity' }}
+        >
+          <div className="flex items-center justify-between text-xs font-bold mb-2.5">
+            <span className="text-white flex items-center gap-2">
+              {(isDownloaded || isInstalling) && (
+                <CheckCircle weight="bold" size={16} className="text-primaryText shrink-0" />
+              )}
+              <span>
+                {isInstalling
+                  ? t('modals.update.installingTitle', 'устанавливаю обновление')
+                  : isDownloaded
+                    ? t('modals.update.downloadedTitle', 'обновление готово к установке')
+                    : t('modals.update.downloading', 'скачивание обновления...')}
+              </span>
+            </span>
+            <span className="text-primaryText font-black text-sm tabular-nums">
+              {displayPercent}%
             </span>
           </div>
 
-          <div className="w-full h-2 rounded-full bg-black/40 overflow-hidden relative">
+          <div
+            ref={progressTrackRef}
+            className="w-full h-2.5 rounded-full bg-black/50 overflow-hidden relative border border-white/[0.07]"
+            style={{ transformOrigin: 'center center', willChange: 'transform' }}
+          >
             <div
-              className="h-full bg-primary/90 rounded-full transition-all duration-150 ease-out"
-              style={{ width: `${updateProgress?.percent || 0}%` }}
-            />
+              ref={progressFillRef}
+              className="absolute inset-y-0 -left-[200%] w-[200%] rounded-full bg-primary overflow-hidden"
+              style={{ transform: 'translateX(0%)', willChange: 'transform' }}
+            >
+              {isDownloading && (
+                <div className="absolute inset-y-0 left-1/2 w-1/4 bg-gradient-to-r from-transparent via-white/35 to-transparent animate-update-indeterminate" />
+              )}
+            </div>
           </div>
 
-          {updateProgress && updateProgress.total > 0 && (
-            <div className="flex justify-between text-[11px] text-textMuted mt-1.5 font-medium">
-              <span>{formatBytes(updateProgress.transferred)}</span>
-              <span>{formatBytes(updateProgress.total)}</span>
+          <div className="flex items-center justify-between text-[11px] text-textMuted mt-2 font-medium tabular-nums">
+            <span>
+              {isDownloaded || isInstalling
+                ? t('modals.update.downloadedDesc', 'zabor закроется и запустит установщик.')
+                : totalBytes > 0
+                  ? `${formatBytes(transferredBytes)} / ${formatBytes(totalBytes)}`
+                  : formatBytes(transferredBytes)}
+            </span>
+            {(isDownloaded || isInstalling) && totalBytes > 0 && (
+              <span>{formatBytes(totalBytes)}</span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div ref={whatsNewRef} className="mb-5" style={{ willChange: 'transform, opacity' }}>
+          {updateInfo.releaseNotes ? (
+            <>
+              <label className="text-xs font-bold text-textMuted mb-2 block tracking-wider">
+                {t('modals.update.whatsNew', 'что нового')}
+              </label>
+              <div className="glass-field rounded-xl p-3.5 max-h-[160px] overflow-y-auto text-sm text-white/90 whitespace-pre-wrap leading-relaxed">
+                {updateInfo.releaseNotes}
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-textMuted">
+              {t('modals.update.noNotes', 'вышла новая версия zabor с улучшениями и исправлениями.')}
             </div>
           )}
-        </div>
-      )}
-
-      {isDownloaded && (
-        <div ref={cardRef} className="mb-5 p-3.5 rounded-xl bg-success/10 border border-success/20 flex items-center gap-3 opacity-0" style={{ willChange: 'transform, opacity' }}>
-          <CheckCircle weight="bold" size={22} className="text-success shrink-0" />
-          <div className="text-xs text-white">
-            <p className="font-bold">{t('modals.update.downloadedTitle', 'обновление готово к установке')}</p>
-            <p className="text-textMuted mt-0.5">
-              {t('modals.update.downloadedDesc', 'zabor закроется и запустит установщик.')}
-            </p>
-          </div>
         </div>
       )}
 
@@ -217,39 +369,43 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ onClose }) => {
 
         <div className="flex-1" />
 
-        <button
-          onClick={onClose}
-          disabled={isDownloading}
-          className={`px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-surface/70 hover:bg-surfaceHover/80 transition-colors ${
-            isDownloading ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-        >
-          {t('modals.update.later', 'позже')}
-        </button>
+        <div ref={actionBtnWrapRef} className="flex items-center gap-3" style={{ willChange: 'transform, opacity' }}>
+          {isDownloading ? (
+            <button
+              onClick={handleCancelDownload}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-surface/70 hover:bg-surfaceHover/80 transition-colors active:scale-[0.98]"
+            >
+              {t('common.cancel', 'отмена')}
+            </button>
+          ) : isDownloaded || isInstalling ? (
+            <button
+              onClick={handleInstall}
+              disabled={isInstalling}
+              className={`px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-primary/90 hover:opacity-90 transition-all flex items-center gap-2 active:scale-[0.98] ${
+                isInstalling ? 'opacity-70 cursor-wait' : ''
+              }`}
+            >
+              <span>{t('modals.update.install', 'установить')}</span>
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={onClose}
+                className="px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-surface/70 hover:bg-surfaceHover/80 transition-colors active:scale-[0.98]"
+              >
+                {t('modals.update.later', 'позже')}
+              </button>
 
-        {isDownloaded ? (
-          <button
-            onClick={handleInstall}
-            className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-success hover:bg-green-600 transition-colors active:scale-[0.98]"
-          >
-            {t('modals.update.install', 'установить')}
-          </button>
-        ) : (
-          <button
-            onClick={handleStartDownload}
-            disabled={isDownloading}
-            className={`px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-primary/90 hover:opacity-90 transition-all flex items-center gap-2 active:scale-[0.98] ${
-              isDownloading ? 'opacity-70 cursor-wait' : ''
-            }`}
-          >
-            <DownloadSimple weight="bold" size={16} />
-            <span>
-              {isDownloading
-                ? t('modals.update.downloadingBtn', 'загрузка...')
-                : t('modals.update.updateNow', 'обновить')}
-            </span>
-          </button>
-        )}
+              <button
+                onClick={handleStartDownload}
+                className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-primary/90 hover:opacity-90 transition-all flex items-center gap-2 active:scale-[0.98]"
+              >
+                <DownloadSimple weight="bold" size={16} />
+                <span>{t('modals.update.updateNow', 'обновить')}</span>
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

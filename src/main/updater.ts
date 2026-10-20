@@ -481,14 +481,6 @@ export function setupUpdater(
       return { success: false, message: 'Invalid download url' };
     }
 
-    if (openUpdaterWindow) {
-      try {
-        openUpdaterWindow();
-      } catch (err) {
-        console.warn('[updater] Failed to open updater window:', err);
-      }
-    }
-
     cleanUpdateDirectory();
 
     const tempDir = getUpdateTempDir();
@@ -575,8 +567,9 @@ export function setupUpdater(
         updateState.error = err?.message || 'Download error';
         updateState.progress = null;
         sendToWindow('update-error', err?.message || 'Download error');
+        return { success: false, error: err?.message };
       }
-      return { success: false, error: err?.message };
+      return { success: false };
     }
   });
 

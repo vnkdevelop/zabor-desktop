@@ -394,9 +394,7 @@ export default function App() {
   useEffect(() => {
     const s = store.updateStatus;
     const { modals, setModal } = useAppStore.getState();
-    if (s === 'downloading' || s === 'installing') {
-      if (modals.update) setModal('update', false);
-    } else if (s === 'downloaded' || s === 'error') {
+    if (s === 'downloaded' || s === 'error') {
       if (!modals.update) setModal('update', true);
     }
   }, [store.updateStatus]);
