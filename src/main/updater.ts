@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell, ipcMain } from 'electron';
 import { join } from 'path';
-import { createWriteStream, mkdirSync, existsSync, rmSync, createReadStream, writeFileSync } from 'fs';
+import { createWriteStream, mkdirSync, existsSync, rmSync, createReadStream, writeFileSync, copyFileSync } from 'fs';
 import { spawn, execFile } from 'child_process';
 import { createHash } from 'crypto';
 
@@ -54,7 +54,30 @@ export function cleanUpdateDirectory(): void {
     if (existsSync(tempDir)) {
       rmSync(tempDir, { recursive: true, force: true });
     }
+    const tempSplash = join(app.getPath('temp'), 'zabor-install-splash.ps1');
+    if (existsSync(tempSplash)) {
+      rmSync(tempSplash, { force: true });
+    }
+    const tempExe = join(app.getPath('temp'), 'ZaborUpdater.exe');
+    if (existsSync(tempExe)) {
+      rmSync(tempExe, { force: true });
+    }
   } catch {}
+}
+
+export function scheduleCleanUpdateDirectory(delayMs: number = 3000, retries: number = 5): void {
+  const attempt = (remaining: number) => {
+    cleanUpdateDirectory();
+    try {
+      const tempDir = getUpdateTempDir();
+      if (existsSync(tempDir) && remaining > 0) {
+        const retryTimer = setTimeout(() => attempt(remaining - 1), 2000);
+        if (typeof retryTimer.unref === 'function') retryTimer.unref();
+      }
+    } catch {}
+  };
+  const initTimer = setTimeout(() => attempt(retries), delayMs);
+  if (typeof initTimer.unref === 'function') initTimer.unref();
 }
 
 export function isNewerVersion(remote: string, current: string): boolean {
@@ -418,6 +441,7 @@ export function setupUpdater(
   openUpdaterWindow?: () => BrowserWindow | null
 ): void {
   cleanUpdateDirectory();
+  scheduleCleanUpdateDirectory(3000, 5);
 
   const sendToWindow = (channel: string, payload?: unknown): void => {
     const windows = BrowserWindow.getAllWindows();
@@ -678,6 +702,7 @@ export function setupUpdater(
   });
 
   setTimeout(async () => {
+    cleanUpdateDirectory();
     const window = getMainWindow();
     if (!window || window.isDestroyed()) return;
 

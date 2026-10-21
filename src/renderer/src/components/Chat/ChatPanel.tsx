@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DownloadSimple, ArrowSquareOut, File, Paperclip, PaperPlaneRight, Trash, Copy, Broom, PhoneCall, X, Info } from '@phosphor-icons/react';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,17 @@ interface ChatPanelProps {
 }
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const BASE_INPUT_HEIGHT = 44;
+const MAX_INPUT_HEIGHT = 132;
+
+function computeChatInputHeight(scrollHeight: number): number {
+  const lines = Math.max(1, Math.round((scrollHeight - 24) / 20));
+  if (lines < 3) return BASE_INPUT_HEIGHT;
+  const step = Math.min(3, Math.floor(lines / 3));
+  if (step === 1) return 74;
+  if (step === 2) return 104;
+  return MAX_INPUT_HEIGHT;
+}
 
 function formatSize(bytes: number, unit: (key: string) => string): string {
   if (bytes < 1024) return `${bytes} ${unit('chat.units.b')}`;
@@ -121,6 +132,64 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
   const connected = useChatStore(state => state.connections[friend.id] ?? false);
   const route = useChatStore(state => state.routes[friend.id] ?? 'unknown');
   const [value, setValue] = useState('');
+  const [inputHeight, setInputHeight] = useState(BASE_INPUT_HEIGHT);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mirrorRef = useRef<HTMLTextAreaElement>(null);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+
+  const updateInputHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+    const mirror = mirrorRef.current;
+    if (!textarea || !mirror) return;
+
+    const text = valueRef.current;
+    if (!text) {
+      setInputHeight(BASE_INPUT_HEIGHT);
+      return;
+    }
+
+    const clientWidth = textarea.clientWidth;
+    if (clientWidth > 0) {
+      mirror.style.width = `${clientWidth}px`;
+    }
+    mirror.value = text;
+    const targetHeight = computeChatInputHeight(mirror.scrollHeight);
+    setInputHeight(prev => (prev !== targetHeight ? targetHeight : prev));
+  }, []);
+
+  useLayoutEffect(() => {
+    updateInputHeight();
+  }, [value, updateInputHeight]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const handleResize = () => {
+      updateInputHeight();
+    };
+
+    window.addEventListener('resize', handleResize);
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(handleResize)
+      : null;
+    resizeObserver?.observe(textarea);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      resizeObserver?.disconnect();
+    };
+  }, [updateInputHeight]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 100;
+    if (isAtBottom) {
+      bottomRef.current?.scrollIntoView({ block: 'end' });
+    }
+  }, [inputHeight]);
   const [dragging, setDragging] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState<File[]>([]);
   const dragDepth = useRef(0);
@@ -216,6 +285,7 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
     if (!canSend) return;
     const text = value;
     setValue('');
+    setInputHeight(BASE_INPUT_HEIGHT);
     void play(sendRef.current, { scale: [0.9, 1], ease: springs.press });
     await chatPeer.sendText(friend.id, text);
   };
@@ -381,7 +451,29 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
         <button onClick={() => void chatPeer.sendFiles(friend.id)} className="w-11 h-11 rounded-[14px] bg-surface/70 hover:bg-surfaceHover/80 text-white flex items-center justify-center transition-transform active:scale-95" title={t('chat.attach')}>
           <Paperclip weight="bold" size={20} />
         </button>
-        <textarea value={value} onChange={event => setValue(event.target.value.slice(0, 4000))} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} rows={1} placeholder={t('chat.placeholder')} className="glass-field flex-1 resize-none min-h-11 max-h-32 px-4 py-3 text-sm rounded-[14px]" />
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={event => setValue(event.target.value.slice(0, 4000))}
+          onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }}
+          rows={1}
+          placeholder={t('chat.placeholder')}
+          style={{ height: `${inputHeight}px` }}
+          className="glass-field flex-1 resize-none min-h-11 max-h-[132px] px-4 py-3 text-sm leading-5 rounded-[14px] break-words overflow-x-hidden overflow-y-auto transition-[height] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]"
+        />
+        <textarea
+          ref={mirrorRef}
+          tabIndex={-1}
+          aria-hidden="true"
+          readOnly
+          rows={1}
+          className="glass-field px-4 py-3 text-sm leading-5 resize-none break-words pointer-events-none fixed -top-[9999px] -left-[9999px] opacity-0 invisible -z-50 select-none overflow-hidden"
+          style={{
+            height: 'auto',
+            minHeight: `${BASE_INPUT_HEIGHT}px`,
+            boxSizing: 'border-box'
+          }}
+        />
         <button ref={sendRef} onClick={() => void send()} disabled={!canSend} className="w-11 h-11 rounded-[14px] bg-primary/90 hover:opacity-90 disabled:opacity-40 text-white flex items-center justify-center transition-transform active:scale-95">
           <PaperPlaneRight weight="bold" size={20} />
         </button>
