@@ -1,4 +1,10 @@
 import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, safeStorage, session } from 'electron';
+
+if (!app || typeof app.whenReady !== 'function') {
+  console.error('\n[ZABOR] Ошибка запуска: проект ZABOR является Electron-приложением и не может быть запущен через обычный Node.js ("node out/main/index.js")!');
+  console.error('[ZABOR] Для запуска используйте команду в терминале: npm run dev (или скрипт sync.bat)\n');
+  process.exit(1);
+}
 import { join } from 'path';
 import { existsSync, rmSync, readFileSync, writeFileSync, promises as fsPromises } from 'fs';
 import { createHmac, randomBytes } from 'crypto';
