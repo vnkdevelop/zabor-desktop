@@ -488,7 +488,9 @@
     "broadcastOf": "{{name}}'s stream",
     "loading": "loading stream",
     "revokeRemoteControlHint": "revoke remote control (click or pause)",
-    "remoteControlActiveHint": "remote control active (ctrl+alt+k to exit)"
+    "remoteControlActiveHint": "remote control active (ctrl+alt+k to exit)",
+    "remoteControlCapture": "take remote control (ctrl+alt+k)",
+    "remoteControlRelease": "release remote control (ctrl+alt+k)"
   },
   "joke": {
     "title": "joke:",

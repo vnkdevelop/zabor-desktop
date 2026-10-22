@@ -4533,7 +4533,15 @@ export class WebRTCManager {
     const isHost = this.localVideoStream !== null
 
     if (isHost) {
-      if (!this.allowRemoteControl) return
+      if (!this.allowRemoteControl) {
+        const ch = this.rcDataChannels.get(userId)
+        if (ch && ch.readyState === 'open') {
+          try {
+            ch.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_REVOKED))
+          } catch { }
+        }
+        return
+      }
 
       if (op === RC_OP_PING) {
         if (this.activeRemoteViewerId === userId) {

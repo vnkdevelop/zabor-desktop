@@ -116,7 +116,7 @@ export const StreamCard = ({
   const rafId = useRef<number | null>(null)
 
   useEffect(() => {
-    if (!isFullscreen || isLocal || !user.allowRemoteControl) {
+    if (!isFullscreen || isLocal) {
       if (isRemoteControlling) {
         webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
         setRemoteControlState({ isControlling: false })
@@ -194,13 +194,13 @@ export const StreamCard = ({
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown, { capture: true })
-    window.addEventListener('keyup', handleKeyUp, { capture: true })
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
     return () => {
-      window.removeEventListener('keydown', handleKeyDown, { capture: true })
-      window.removeEventListener('keyup', handleKeyUp, { capture: true })
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
     }
-  }, [isFullscreen, isLocal, user.allowRemoteControl, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState])
+  }, [isFullscreen, isLocal, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState])
 
   useEffect(() => {
     if (!isFullscreen || isLocal || !isRemoteControlling) return
@@ -260,9 +260,7 @@ export const StreamCard = ({
     if (isRemoteControlling && !isHostActive) {
       e.preventDefault()
       e.stopPropagation()
-      return
     }
-    onContextMenu(e)
   }
 
   const handleWheel = (e: React.WheelEvent<HTMLVideoElement>) => {
@@ -526,11 +524,11 @@ export const StreamCard = ({
               onRatioChange(video.videoWidth / video.videoHeight)
             }
           }}
-          onMouseMove={handleMouseMove}
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
-          onWheel={handleWheel}
-          onContextMenu={handleVideoContextMenu}
+          onMouseMove={isFullscreen && isRemoteControlling ? handleMouseMove : undefined}
+          onMouseDown={isFullscreen && isRemoteControlling ? handleMouseDown : undefined}
+          onMouseUp={isFullscreen && isRemoteControlling ? handleMouseUp : undefined}
+          onWheel={isFullscreen && isRemoteControlling ? handleWheel : undefined}
+          onContextMenu={isFullscreen && isRemoteControlling ? handleVideoContextMenu : undefined}
           className={`w-full h-full object-contain ${
             isRemoteControlling && !isHostActive ? 'cursor-default select-none' : ''
           }`}

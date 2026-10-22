@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, SpeakerSlash, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck, Desktop, CornersIn, CornersOut, Sparkle, Trash, ArrowsClockwise, ChatCircle, Info } from '@phosphor-icons/react';
+import { Gear as Settings, Microphone as Mic, MicrophoneSlash as MicOff, Headphones, PhoneCall as Phone, Eye, EyeSlash as EyeOff, UserMinus, UserMinus as UserX, Camera, Check, X, SignOut as LogOut, UserPlus, Envelope as Mail, PencilSimple as Edit2, SpeakerHigh as Volume2, SpeakerSlash, PhoneDisconnect as PhoneOff, WifiHigh as Wifi, WifiSlash as WifiOff, Users, SignOut as LeaveIcon, Crown, Globe, Trophy, Plus, Key, UserCircleMinus, UserCheck, Desktop, CornersIn, CornersOut, CursorClick, Sparkle, Trash, ArrowsClockwise, ChatCircle, Info } from '@phosphor-icons/react';
 import { useTranslation, Trans } from 'react-i18next';
 
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
@@ -21,6 +21,7 @@ import { GlassSelect } from './components/Shared/GlassSelect';
 import { AvatarImg } from './components/Shared/AvatarImg';
 import { StreamPicker } from './components/Stream/StreamPicker';
 import { RemoteControlPill } from './components/Stream/RemoteControlPill';
+import { RC_OP_PING, RC_OP_RESET } from './services/remoteControl';
 import { StreamCard } from './components/Stream/StreamCard';
 import { NoiseSuppressionSettings, type CalibrationPhase, type SmartNoiseModel } from './components/Settings/NoiseSuppressionSettings';
 import { MIC_TEST_PANEL_GAP_PX, MicTestPanel } from './components/Settings/MicTestPanel';
@@ -2332,6 +2333,22 @@ export default function App() {
     }
   }, [store]);
 
+  const handleToggleRemoteControl = useCallback(() => {
+    const streamerId = store.activeStreamId;
+    if (!streamerId || streamerId === store.currentUser?.id) return;
+    if (store.isRemoteControlRevoked) return;
+
+    const next = !store.isRemoteControlling;
+    if (next) {
+      webrtc.ensureRemoteControlChannelForStreamer(streamerId);
+      store.setRemoteControlState({ isControlling: true, isHostActive: false });
+      webrtc.sendViewerSignal(streamerId, RC_OP_PING);
+    } else {
+      webrtc.sendViewerSignal(streamerId, RC_OP_RESET);
+      store.setRemoteControlState({ isControlling: false });
+    }
+  }, [store]);
+
   const openMyAchievements = useCallback(async () => {
     store.setAchievementsData(null);
     store.setAchievementsViewUserId(null);
@@ -3242,6 +3259,23 @@ export default function App() {
                               <CornersIn weight="bold" size={24} />
                             </div>
                           </button>
+                          {store.activeStreamId && store.activeStreamId !== store.currentUser?.id && (
+                            <button
+                              onClick={handleToggleRemoteControl}
+                              className={`group/rc-btn relative w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ${store.isRemoteControlling ? (store.isHostActive ? "bg-white/20 text-white ring-2 ring-white/30" : "bg-primaryHover text-white ring-2 ring-primary active:scale-95") : "bg-surface/70 hover:bg-surfaceHover/80 text-white hover:scale-105 active:scale-95"}`}
+                              aria-label={store.isRemoteControlling ? t("stream.remoteControlRelease") : t("stream.remoteControlCapture")}
+                            >
+                              <span
+                                role="tooltip"
+                                className="absolute bottom-full left-1/2 mb-3 -translate-x-1/2 pointer-events-none whitespace-nowrap opacity-0 group-hover/rc-btn:opacity-100 delay-0 group-hover/rc-btn:delay-[1000ms] transition-opacity duration-150 bg-[#09090B]/95 border border-[#303035]/70 rounded-md px-2.5 py-1.5 text-[10px] font-bold text-white lowercase"
+                              >
+                                {store.isRemoteControlling ? t("stream.remoteControlRelease") : t("stream.remoteControlCapture")}
+                              </span>
+                              <div className="flex items-center justify-center transition-transform duration-200 group-hover/rc-btn:scale-110">
+                                <CursorClick weight="bold" size={24} />
+                              </div>
+                            </button>
+                          )}
                           <button
                             onClick={toggleMute}
                             className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)
@@ -3515,6 +3549,23 @@ export default function App() {
                               <CornersIn weight="bold" size={24} />
                             </div>
                           </button>
+                          {store.activeStreamId && store.activeStreamId !== store.currentUser?.id && (
+                            <button
+                              onClick={handleToggleRemoteControl}
+                              className={`group/rc-btn relative w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ${store.isRemoteControlling ? (store.isHostActive ? "bg-white/20 text-white ring-2 ring-white/30" : "bg-primaryHover text-white ring-2 ring-primary active:scale-95") : "bg-surface/70 hover:bg-surfaceHover/80 text-white hover:scale-105 active:scale-95"}`}
+                              aria-label={store.isRemoteControlling ? t("stream.remoteControlRelease") : t("stream.remoteControlCapture")}
+                            >
+                              <span
+                                role="tooltip"
+                                className="absolute bottom-full left-1/2 mb-3 -translate-x-1/2 pointer-events-none whitespace-nowrap opacity-0 group-hover/rc-btn:opacity-100 delay-0 group-hover/rc-btn:delay-[1000ms] transition-opacity duration-150 bg-[#09090B]/95 border border-[#303035]/70 rounded-md px-2.5 py-1.5 text-[10px] font-bold text-white lowercase"
+                              >
+                                {store.isRemoteControlling ? t("stream.remoteControlRelease") : t("stream.remoteControlCapture")}
+                              </span>
+                              <div className="flex items-center justify-center transition-transform duration-200 group-hover/rc-btn:scale-110">
+                                <CursorClick weight="bold" size={24} />
+                              </div>
+                            </button>
+                          )}
                           <button
                             onClick={toggleMute}
                             className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)

@@ -20,15 +20,26 @@ export class RemoteControlSimulatorManager {
 
   private resolveExePath(): string {
     const candidates = [
-      join(__dirname, '../../build/ZaborInputSimulator.exe'),
       join(app.getAppPath(), 'build/ZaborInputSimulator.exe'),
-      join(process.resourcesPath || '', 'ZaborInputSimulator.exe')
+      join(__dirname, '../../build/ZaborInputSimulator.exe'),
+      join(process.resourcesPath || '', 'build/ZaborInputSimulator.exe'),
+      join(process.resourcesPath || '', 'ZaborInputSimulator.exe'),
+      join(process.cwd(), 'build/ZaborInputSimulator.exe')
     ];
 
     for (const p of candidates) {
       if (p && existsSync(p)) return p;
     }
     return candidates[0];
+  }
+
+  private safeWrite(line: string): void {
+    if (!this.child || !this.isRunning || !this.child.stdin || this.child.killed || !this.child.stdin.writable) {
+      return;
+    }
+    try {
+      this.child.stdin.write(line, () => {});
+    } catch {}
   }
 
   public start(): boolean {
@@ -44,6 +55,10 @@ export class RemoteControlSimulatorManager {
       this.child = spawn(exePath, [String(process.pid)], {
         stdio: ['pipe', 'pipe', 'ignore'],
         windowsHide: true
+      });
+
+      this.child.stdin?.on('error', (err) => {
+        console.warn('[RemoteControl] stdin error suppressed:', err?.message);
       });
 
       this.child.on('exit', () => {
@@ -73,8 +88,10 @@ export class RemoteControlSimulatorManager {
     this.unregisterPanicHotkeys();
 
     if (this.child) {
+      if (this.isRunning && this.child.stdin && this.child.stdin.writable && !this.child.killed) {
+        this.safeWrite('reset\nexit\n');
+      }
       try {
-        this.child.stdin?.write('reset\nexit\n');
         this.child.kill();
       } catch {}
       this.child = null;
@@ -85,43 +102,27 @@ export class RemoteControlSimulatorManager {
   }
 
   public reset(): void {
-    if (this.child && this.isRunning) {
-      try {
-        this.child.stdin?.write('reset\n');
-      } catch {}
-    }
+    this.safeWrite('reset\n');
   }
 
   public move(absX: number, absY: number): void {
-    if (!this.child || !this.isRunning) return;
     this.lastSimulatedX = Math.round(absX);
     this.lastSimulatedY = Math.round(absY);
-    try {
-      this.child.stdin?.write(`m ${this.lastSimulatedX} ${this.lastSimulatedY}\n`);
-    } catch {}
+    this.safeWrite(`m ${this.lastSimulatedX} ${this.lastSimulatedY}\n`);
   }
 
   public mouseButton(button: number, down: boolean): void {
-    if (!this.child || !this.isRunning) return;
     const cmd = down ? 'd' : 'u';
-    try {
-      this.child.stdin?.write(`${cmd} ${button}\n`);
-    } catch {}
+    this.safeWrite(`${cmd} ${button}\n`);
   }
 
   public mouseWheel(delta: number): void {
-    if (!this.child || !this.isRunning) return;
-    try {
-      this.child.stdin?.write(`w ${Math.round(delta)}\n`);
-    } catch {}
+    this.safeWrite(`w ${Math.round(delta)}\n`);
   }
 
   public key(vk: number, down: boolean): void {
-    if (!this.child || !this.isRunning) return;
     const cmd = down ? 'kd' : 'ku';
-    try {
-      this.child.stdin?.write(`${cmd} ${vk}\n`);
-    } catch {}
+    this.safeWrite(`${cmd} ${vk}\n`);
   }
 
   public getScreenResolution(): { width: number; height: number; x: number; y: number } {
@@ -188,19 +189,14 @@ export class RemoteControlSimulatorManager {
             }
           }
         }
-
-        // Check for physical mouse clicks
-        if (this.child && this.child.stdin) {
-          this.child.stdin.write('check_click\n');
-        }
       } catch {}
     }, 40);
 
-    // Listen to simulator stdout for check_click
+    // Listen to simulator stdout for physical click notification
     if (this.child?.stdout) {
       this.child.stdout.on('data', (data: Buffer) => {
         const str = data.toString().trim();
-        if (str.includes('1')) {
+        if (str.includes('click') || str.includes('1')) {
           const win = this.getWindow();
           if (win && !win.isDestroyed()) {
             win.webContents.send('remote-control:host-activity', { type: 'click' });

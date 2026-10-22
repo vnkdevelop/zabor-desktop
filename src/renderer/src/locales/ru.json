@@ -490,7 +490,9 @@
     "broadcastOf": "трансляция {{name}}",
     "loading": "загрузка трансляции",
     "revokeRemoteControlHint": "отозвать удаленное управление (клик или pause)",
-    "remoteControlActiveHint": "удаленное управление активно (ctrl+alt+k для отключения)"
+    "remoteControlActiveHint": "удаленное управление активно (ctrl+alt+k для отключения)",
+    "remoteControlCapture": "перехватить управление (ctrl+alt+k)",
+    "remoteControlRelease": "отпустить управление (ctrl+alt+k)"
   },
   "joke": {
     "title": "шутейка:",

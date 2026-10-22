@@ -82,12 +82,34 @@ namespace ZaborInputSimulator {
                     try {
                         var parent = Process.GetProcessById(parentPid);
                         parent.WaitForExit();
-                    } catch {}
-                    ResetAll();
-                    Environment.Exit(0);
+                        ResetAll();
+                        Environment.Exit(0);
+                    } catch {
+                        // Do not exit if process handle cannot be obtained. Stdin pipe will handle exit.
+                    }
                 }) { IsBackground = true };
                 watchdog.Start();
             }
+
+            // Autonomous physical click watcher to detect host physical clicks without stdin polling
+            var clickWatcher = new Thread(() => {
+                bool wasPressed = false;
+                while (true) {
+                    Thread.Sleep(30);
+                    bool isPressed = (GetAsyncKeyState(0x01) & 0x8000) != 0 ||
+                                     (GetAsyncKeyState(0x02) & 0x8000) != 0 ||
+                                     (GetAsyncKeyState(0x04) & 0x8000) != 0;
+                    if (isPressed && !wasPressed && !isLeftDown && !isRightDown && !isMiddleDown) {
+                        try {
+                            Console.WriteLine("click");
+                        } catch {
+                            break;
+                        }
+                    }
+                    wasPressed = isPressed;
+                }
+            }) { IsBackground = true };
+            clickWatcher.Start();
 
             // Ensure clean start
             ResetAll();
