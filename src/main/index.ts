@@ -4,6 +4,7 @@ import { existsSync, rmSync, readFileSync, writeFileSync, promises as fsPromises
 import { createHmac, randomBytes } from 'crypto';
 import { setupUpdater } from './updater';
 import { disposeChatFileWriters, registerChatFileHandlers } from './chatFiles';
+import { RemoteControlSimulatorManager } from './remoteControlSimulator';
 
 declare const __ZABOR_CLIENT_SECRET__: string;
 declare const __ZABOR_CLIENT_CHANNEL__: string;
@@ -937,6 +938,42 @@ app.whenReady().then(() => {
 
   createWindow();
   createTray();
+  const remoteControlSimulator = new RemoteControlSimulatorManager(() => mainWindow);
+
+  ipcMain.handle('remote-control:start', () => {
+    return remoteControlSimulator.start();
+  });
+
+  ipcMain.handle('remote-control:stop', () => {
+    remoteControlSimulator.stop();
+    return true;
+  });
+
+  ipcMain.handle('remote-control:reset', () => {
+    remoteControlSimulator.reset();
+    return true;
+  });
+
+  ipcMain.handle('remote-control:get-screen', () => {
+    return remoteControlSimulator.getScreenResolution();
+  });
+
+  ipcMain.on('remote-control:move', (_event, absX: number, absY: number) => {
+    remoteControlSimulator.move(absX, absY);
+  });
+
+  ipcMain.on('remote-control:mouse-button', (_event, button: number, down: boolean) => {
+    remoteControlSimulator.mouseButton(button, down);
+  });
+
+  ipcMain.on('remote-control:mouse-wheel', (_event, delta: number) => {
+    remoteControlSimulator.mouseWheel(delta);
+  });
+
+  ipcMain.on('remote-control:key', (_event, vk: number, down: boolean) => {
+    remoteControlSimulator.key(vk, down);
+  });
+
   setupUpdater(() => mainWindow, createUpdaterWindow);
 
   app.on('activate', () => {

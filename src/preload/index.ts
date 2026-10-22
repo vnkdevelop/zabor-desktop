@@ -112,6 +112,26 @@ const windowControls = {
     const listener = () => callback()
     ipcRenderer.on('update-installing', listener)
     return () => { ipcRenderer.removeListener('update-installing', listener) }
+  },
+  remoteControlStart: (): Promise<boolean> => ipcRenderer.invoke('remote-control:start'),
+  remoteControlStop: (): Promise<boolean> => ipcRenderer.invoke('remote-control:stop'),
+  remoteControlReset: (): Promise<boolean> => ipcRenderer.invoke('remote-control:reset'),
+  remoteControlGetScreen: (): Promise<{ width: number; height: number; x: number; y: number }> =>
+    ipcRenderer.invoke('remote-control:get-screen'),
+  remoteControlMove: (absX: number, absY: number) => ipcRenderer.send('remote-control:move', absX, absY),
+  remoteControlMouseButton: (button: number, down: boolean) =>
+    ipcRenderer.send('remote-control:mouse-button', button, down),
+  remoteControlMouseWheel: (delta: number) => ipcRenderer.send('remote-control:mouse-wheel', delta),
+  remoteControlKey: (vk: number, down: boolean) => ipcRenderer.send('remote-control:key', vk, down),
+  onRemoteControlHostActivity: (callback: (data: { type: 'move' | 'click'; dist?: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('remote-control:host-activity', listener)
+    return () => { ipcRenderer.removeListener('remote-control:host-activity', listener) }
+  },
+  onRemoteControlPanicRevoke: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('remote-control:panic-revoke', listener)
+    return () => { ipcRenderer.removeListener('remote-control:panic-revoke', listener) }
   }
 }
 

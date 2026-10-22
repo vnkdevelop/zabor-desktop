@@ -20,6 +20,7 @@ import { Md3Switch } from './components/Shared/Md3Switch';
 import { GlassSelect } from './components/Shared/GlassSelect';
 import { AvatarImg } from './components/Shared/AvatarImg';
 import { StreamPicker } from './components/Stream/StreamPicker';
+import { RemoteControlPill } from './components/Stream/RemoteControlPill';
 import { StreamCard } from './components/Stream/StreamCard';
 import { NoiseSuppressionSettings, type CalibrationPhase, type SmartNoiseModel } from './components/Settings/NoiseSuppressionSettings';
 import { MIC_TEST_PANEL_GAP_PX, MicTestPanel } from './components/Settings/MicTestPanel';
@@ -2306,25 +2307,28 @@ export default function App() {
       }
       webrtc.stopScreenShare();
       await signalRService.stopStream();
-      store.updateUserStatus(myId, { isStreaming: false, streamQuality: undefined });
+      store.setStreamRemoteControlAllowed(false);
+      store.updateUserStatus(myId, { isStreaming: false, streamQuality: undefined, allowRemoteControl: false });
     } catch (e) {
       console.error(e);
     }
   }, [store]);
 
-  const handleStartStream = useCallback(async (sourceId: string, quality: 'low' | 'high' | 'camera', includeAudio: boolean) => {
+  const handleStartStream = useCallback(async (sourceId: string, quality: 'low' | 'high' | 'camera', includeAudio: boolean, allowRemoteControl = false) => {
     try {
       setShowStreamPicker(false);
       const ok = await signalRService.startStream(quality);
       if (ok) {
-        await webrtc.startScreenShare(sourceId, quality, includeAudio);
-        store.updateUserStatus(store.currentUser?.id || '', { isStreaming: true, streamQuality: quality });
+        store.setStreamRemoteControlAllowed(allowRemoteControl);
+        await webrtc.startScreenShare(sourceId, quality, includeAudio, allowRemoteControl);
+        store.updateUserStatus(store.currentUser?.id || '', { isStreaming: true, streamQuality: quality, allowRemoteControl });
       }
     } catch (e) {
       console.error(e);
       webrtc.stopScreenShare();
       await signalRService.stopStream();
-      store.updateUserStatus(store.currentUser?.id || '', { isStreaming: false, streamQuality: undefined });
+      store.setStreamRemoteControlAllowed(false);
+      store.updateUserStatus(store.currentUser?.id || '', { isStreaming: false, streamQuality: undefined, allowRemoteControl: false });
     }
   }, [store]);
 
@@ -5087,6 +5091,8 @@ export default function App() {
           )}
         </div>
       )}
+
+      <RemoteControlPill />
 
       {showStreamPicker && (
         <div className="fixed inset-0 z-[100000] bg-black/70 backdrop-blur-md flex items-center justify-center p-3 pt-[3.75rem]">

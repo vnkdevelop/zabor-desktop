@@ -7,7 +7,7 @@
   "license": "GPL-3.0-only",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/helpers/register-hooks.mjs --test --test-concurrency=1 tests/tier1-feature-coverage.test.mjs tests/tier2-boundary-corner-cases.test.mjs tests/tier3-cross-feature-combinations.test.mjs tests/tier4-real-world-lifecycle.test.mjs tests/tier5-webrtc-stream-lifecycle.test.mjs tests/tier6-audio-devices-microphone.test.mjs tests/tier7-webrtc-vad-hierarchy.test.mjs",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/helpers/register-hooks.mjs --test --test-concurrency=1 tests/tier1-feature-coverage.test.mjs tests/tier2-boundary-corner-cases.test.mjs tests/tier3-cross-feature-combinations.test.mjs tests/tier4-real-world-lifecycle.test.mjs tests/tier5-webrtc-stream-lifecycle.test.mjs tests/tier6-audio-devices-microphone.test.mjs tests/tier7-webrtc-vad-hierarchy.test.mjs tests/tier8-remote-control.test.mjs",
     "start": "node scripts/fetch-deepfilter-assets.cjs && cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite dev",
     "dev": "node scripts/fetch-deepfilter-assets.cjs && cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite dev",
     "dev:4k": "cross-env ZABOR_SCALE_FACTOR=2 npm run dev",
@@ -74,6 +74,10 @@
       {
         "from": "build/ZaborUpdater.exe",
         "to": "ZaborUpdater.exe"
+      },
+      {
+        "from": "build/ZaborInputSimulator.exe",
+        "to": "ZaborInputSimulator.exe"
       }
     ],
     "copyright": "Copyright © 2026 ZABOR",

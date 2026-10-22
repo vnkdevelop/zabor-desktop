@@ -4,6 +4,37 @@ import { animate, spring, utils, prefersReducedMotion } from '../../lib/anime'
 import { useTranslation } from 'react-i18next'
 import { User, useAppStore } from '../../store/useAppStore'
 import { AvatarImg } from '../Shared/AvatarImg'
+import { webrtcService } from '../../services/webrtc'
+import {
+  RC_OP_PING,
+  RC_OP_RESET,
+  getWinVkCode,
+  isShortcutSafe
+} from '../../services/remoteControl'
+
+function getVideoRenderRect(video: HTMLVideoElement) {
+  const cw = video.clientWidth
+  const ch = video.clientHeight
+  const vw = video.videoWidth
+  const vh = video.videoHeight
+  if (!vw || !vh || !cw || !ch) {
+    return { left: 0, top: 0, width: cw, height: ch }
+  }
+  const videoRatio = vw / vh
+  const elemRatio = cw / ch
+  let renderW = cw
+  let renderH = ch
+  let offsetX = 0
+  let offsetY = 0
+  if (elemRatio > videoRatio) {
+    renderW = ch * videoRatio
+    offsetX = (cw - renderW) / 2
+  } else {
+    renderH = cw / videoRatio
+    offsetY = (ch - renderH) / 2
+  }
+  return { left: offsetX, top: offsetY, width: renderW, height: renderH }
+}
 
 const StreamLoadingDots = ({ compact, label }: { compact: boolean; label: string }) => (
   <div
@@ -75,6 +106,171 @@ export const StreamCard = ({
 
   const mode = isFullscreen ? 'fullscreen' : (isFocused ? 'focused' : 'normal')
   const compactPill = cardSize.w <= 200
+
+  const isRemoteControlling = useAppStore((state) => state.isRemoteControlling)
+  const isHostActive = useAppStore((state) => state.isHostActive)
+  const isRemoteControlRevoked = useAppStore((state) => state.isRemoteControlRevoked)
+  const setRemoteControlState = useAppStore((state) => state.setRemoteControlState)
+
+  const pendingMove = useRef<{ x: number; y: number } | null>(null)
+  const rafId = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!isFullscreen || isLocal || !user.allowRemoteControl) {
+      if (isRemoteControlling) {
+        webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
+        setRemoteControlState({ isControlling: false })
+      }
+      return
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (isRemoteControlRevoked) return
+        const next = !isRemoteControlling
+        if (next) {
+          webrtcService.ensureRemoteControlChannelForStreamer(user.id)
+          setRemoteControlState({ isControlling: true, isHostActive: false })
+        } else {
+          webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
+          setRemoteControlState({ isControlling: false })
+        }
+        return
+      }
+
+      if (isRemoteControlling && e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
+        setRemoteControlState({ isControlling: false })
+        return
+      }
+
+      if (isRemoteControlling && !isHostActive) {
+        const vk = getWinVkCode(e)
+        const modifiers = {
+          alt: e.altKey,
+          ctrl: e.ctrlKey,
+          shift: e.shiftKey,
+          win: e.metaKey
+        }
+        if (isShortcutSafe(vk, modifiers)) {
+          e.preventDefault()
+          e.stopPropagation()
+          let modBits = 0
+          if (e.shiftKey) modBits |= 1
+          if (e.ctrlKey) modBits |= 2
+          if (e.altKey) modBits |= 4
+          if (e.metaKey) modBits |= 8
+          webrtcService.sendViewerKey(user.id, vk, true, modBits)
+        }
+      }
+    }
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (isRemoteControlling && !isHostActive) {
+        if (e.ctrlKey && e.altKey && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) {
+          return
+        }
+        const vk = getWinVkCode(e)
+        const modifiers = {
+          alt: e.altKey,
+          ctrl: e.ctrlKey,
+          shift: e.shiftKey,
+          win: e.metaKey
+        }
+        if (isShortcutSafe(vk, modifiers)) {
+          e.preventDefault()
+          e.stopPropagation()
+          let modBits = 0
+          if (e.shiftKey) modBits |= 1
+          if (e.ctrlKey) modBits |= 2
+          if (e.altKey) modBits |= 4
+          if (e.metaKey) modBits |= 8
+          webrtcService.sendViewerKey(user.id, vk, false, modBits)
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    window.addEventListener('keyup', handleKeyUp, { capture: true })
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true })
+      window.removeEventListener('keyup', handleKeyUp, { capture: true })
+    }
+  }, [isFullscreen, isLocal, user.allowRemoteControl, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState])
+
+  useEffect(() => {
+    if (!isFullscreen || isLocal || !isRemoteControlling) return
+    const timer = setInterval(() => {
+      webrtcService.sendViewerSignal(user.id, RC_OP_PING)
+    }, 1500)
+    return () => clearInterval(timer)
+  }, [isFullscreen, isLocal, isRemoteControlling, user.id])
+
+  useEffect(() => {
+    return () => {
+      if (rafId.current !== null) {
+        cancelAnimationFrame(rafId.current)
+        rafId.current = null
+      }
+    }
+  }, [isRemoteControlling])
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLVideoElement>) => {
+    if (!isRemoteControlling || isHostActive || !videoRef.current) return
+    const video = videoRef.current
+    const rect = video.getBoundingClientRect()
+    const renderRect = getVideoRenderRect(video)
+    const clientX = e.clientX - rect.left - renderRect.left
+    const clientY = e.clientY - rect.top - renderRect.top
+    const xNorm = clientX / renderRect.width
+    const yNorm = clientY / renderRect.height
+    if (xNorm >= 0 && xNorm <= 1 && yNorm >= 0 && yNorm <= 1) {
+      pendingMove.current = { x: xNorm, y: yNorm }
+      if (rafId.current === null) {
+        rafId.current = requestAnimationFrame(() => {
+          rafId.current = null
+          if (pendingMove.current) {
+            webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
+            pendingMove.current = null
+          }
+        })
+      }
+    }
+  }
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLVideoElement>) => {
+    if (!isRemoteControlling || isHostActive) return
+    e.preventDefault()
+    e.stopPropagation()
+    webrtcService.sendViewerMouseButton(user.id, e.button, true)
+  }
+
+  const handleMouseUp = (e: React.MouseEvent<HTMLVideoElement>) => {
+    if (!isRemoteControlling || isHostActive) return
+    e.preventDefault()
+    e.stopPropagation()
+    webrtcService.sendViewerMouseButton(user.id, e.button, false)
+  }
+
+  const handleVideoContextMenu = (e: React.MouseEvent<HTMLVideoElement>) => {
+    if (isRemoteControlling && !isHostActive) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    onContextMenu(e)
+  }
+
+  const handleWheel = (e: React.WheelEvent<HTMLVideoElement>) => {
+    if (!isRemoteControlling || isHostActive) return
+    e.preventDefault()
+    e.stopPropagation()
+    webrtcService.sendViewerMouseWheel(user.id, Math.round(e.deltaY), Math.round(e.deltaX))
+  }
 
   useEffect(() => {
     if (isLocal || !stream) return
@@ -330,9 +526,26 @@ export const StreamCard = ({
               onRatioChange(video.videoWidth / video.videoHeight)
             }
           }}
-          className="w-full h-full object-contain"
+          onMouseMove={handleMouseMove}
+          onMouseDown={handleMouseDown}
+          onMouseUp={handleMouseUp}
+          onWheel={handleWheel}
+          onContextMenu={handleVideoContextMenu}
+          className={`w-full h-full object-contain ${
+            isRemoteControlling && !isHostActive ? 'cursor-default select-none' : ''
+          }`}
         />
       </div>
+
+      {isFullscreen && isRemoteControlling && (
+        <div
+          className={`absolute inset-0 pointer-events-none z-30 transition-colors duration-200 ${
+            isHostActive
+              ? 'ring-2 ring-inset ring-white/20'
+              : 'ring-2 ring-inset ring-primary'
+          }`}
+        />
+      )}
 
       {!hasFirstFrame && (
         <>

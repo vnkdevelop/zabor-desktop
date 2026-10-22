@@ -470,6 +470,7 @@
     "screen": "screen",
     "camera": "camera",
     "shareAudio": "share audio?",
+    "allowRemoteControl": "allow remote control",
     "quality": "quality",
     "qualityLow": "low",
     "qualityHigh": "high",
@@ -485,7 +486,9 @@
     "exitFullscreenHint": "return to focus mode (F)",
     "streamLabel": "{{name}}'s stream",
     "broadcastOf": "{{name}}'s stream",
-    "loading": "loading stream"
+    "loading": "loading stream",
+    "revokeRemoteControlHint": "revoke remote control (click or pause)",
+    "remoteControlActiveHint": "remote control active (ctrl+alt+k to exit)"
   },
   "joke": {
     "title": "joke:",

@@ -472,6 +472,7 @@
     "screen": "экран",
     "camera": "камера",
     "shareAudio": "передавать звук?",
+    "allowRemoteControl": "разрешить удаленное управление",
     "quality": "качество",
     "qualityLow": "low",
     "qualityHigh": "high",
@@ -487,7 +488,9 @@
     "fullscreenHint": "развернуть на весь экран (F)",
     "exitFullscreenHint": "вернуться в режим фокуса (F)",
     "broadcastOf": "трансляция {{name}}",
-    "loading": "загрузка трансляции"
+    "loading": "загрузка трансляции",
+    "revokeRemoteControlHint": "отозвать удаленное управление (клик или pause)",
+    "remoteControlActiveHint": "удаленное управление активно (ctrl+alt+k для отключения)"
   },
   "joke": {
     "title": "шутейка:",

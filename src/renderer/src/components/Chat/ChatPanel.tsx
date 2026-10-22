@@ -113,7 +113,7 @@ function renderMessageContent(text: string) {
         </a>
       );
     }
-    return <span key={index} className="select-text cursor-text">{part.content}</span>;
+    return <span key={index} className="select-text cursor-default">{part.content}</span>;
   });
 }
 
@@ -413,7 +413,7 @@ export function ChatPanel({ currentUser, friend, onCall, onOpenProfile }: ChatPa
                     className={`max-w-[72%] rounded-[14px] px-4 py-3 border ${own ? 'bg-primary/20 border-primary/30' : 'bg-surface/70 border-white/[0.07]'}`}
                   >
                     {message.kind === 'text' ? (
-                      <p className="text-white text-sm whitespace-pre-wrap break-words select-text cursor-text">{renderMessageContent(message.text)}</p>
+                      <p className="text-white text-sm whitespace-pre-wrap break-words select-text cursor-default">{renderMessageContent(message.text)}</p>
                     ) : message.file && (
                       <div className="flex items-center gap-3 min-w-[240px] select-none">
                         <div className="w-10 h-10 rounded-xl bg-white/[0.06] flex items-center justify-center shrink-0"><File weight="bold" size={20} /></div>

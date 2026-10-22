@@ -13,7 +13,7 @@ interface Source {
 
 interface StreamPickerProps {
   onClose: () => void
-  onSelect: (sourceId: string, quality: 'low' | 'high' | 'camera', includeAudio: boolean) => void
+  onSelect: (sourceId: string, quality: 'low' | 'high' | 'camera', includeAudio: boolean, allowRemoteControl: boolean) => void
 }
 
 const cleanName = (srcName: string, index: number, isScreen: boolean, screenLabel: string) => {
@@ -31,12 +31,16 @@ const PairSettings = ({
   show,
   includeAudio,
   onToggleAudio,
+  allowRemoteControl,
+  onToggleRemoteControl,
   quality,
   onSetQuality
 }: {
   show: boolean
   includeAudio: boolean
   onToggleAudio: (checked: boolean) => void
+  allowRemoteControl: boolean
+  onToggleRemoteControl: (checked: boolean) => void
   quality: 'low' | 'high'
   onSetQuality: (next: 'low' | 'high') => void
 }) => {
@@ -72,6 +76,21 @@ const PairSettings = ({
               type="checkbox"
               checked={includeAudio}
               onChange={(e) => onToggleAudio(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-8 h-5 bg-white/[0.06] border border-[#303035]/70 rounded-full relative transition-colors peer-checked:bg-primaryHover peer-checked:border-primaryHover after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#303035] after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:after:translate-x-3 peer-checked:after:bg-white" />
+          </label>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-textMuted tracking-[0.14em]">
+            {t('stream.allowRemoteControl', 'разрешить удаленное управление')}
+          </span>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={allowRemoteControl}
+              onChange={(e) => onToggleRemoteControl(e.target.checked)}
               className="sr-only peer"
             />
             <div className="w-8 h-5 bg-white/[0.06] border border-[#303035]/70 rounded-full relative transition-colors peer-checked:bg-primaryHover peer-checked:border-primaryHover after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#303035] after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:after:translate-x-3 peer-checked:after:bg-white" />
@@ -118,6 +137,7 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
   const [quality, setQuality] = useState<'low' | 'high'>('low')
   const [includeAudio, setIncludeAudio] = useState(true)
+  const [allowRemoteControl, setAllowRemoteControl] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -346,6 +366,8 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
                     show={isSelectedInPair && !selectedSourceId?.startsWith('camera:')}
                     includeAudio={includeAudio}
                     onToggleAudio={setIncludeAudio}
+                    allowRemoteControl={allowRemoteControl}
+                    onToggleRemoteControl={setAllowRemoteControl}
                     quality={quality}
                     onSetQuality={setQuality}
                   />
@@ -368,7 +390,12 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
           onClick={() => {
             if (selectedSourceId) {
               const isCam = selectedSourceId.startsWith('camera:')
-              onSelect(selectedSourceId, isCam ? 'camera' : quality, isCam ? false : includeAudio)
+              onSelect(
+                selectedSourceId,
+                isCam ? 'camera' : quality,
+                isCam ? false : includeAudio,
+                isCam ? false : allowRemoteControl
+              )
             }
           }}
           className={`w-full py-3 rounded-2xl font-bold text-sm transition-all duration-200 hover:scale-[1.01] active:scale-[0.98] ${selectedSourceId

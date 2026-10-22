@@ -419,11 +419,21 @@ body * {
 
 input,
 textarea,
-[contenteditable="true"],
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .select-text,
 .select-text * {
   -webkit-user-select: text !important;
   user-select: text !important;
+  cursor: default;
+}
+
+.select-text a,
+.select-text button {
+  cursor: pointer;
 }
 
 ::selection {

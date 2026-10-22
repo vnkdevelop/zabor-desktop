@@ -20,6 +20,14 @@ try {
   const cmd = `"${cscPath}" /target:winexe /optimize+ /platform:anycpu /out:"${outFile}" /lib:"${wpfDir}" /r:PresentationCore.dll /r:PresentationFramework.dll /r:WindowsBase.dll /r:System.dll /r:System.Xaml.dll "${srcFile}"`;
   execSync(cmd, { stdio: 'inherit' });
   console.log('[build-splash] Successfully compiled ZaborUpdater.exe');
+
+  const simSrc = join(__dirname, '..', 'build', 'ZaborInputSimulator.cs');
+  const simOut = join(__dirname, '..', 'build', 'ZaborInputSimulator.exe');
+  if (existsSync(simSrc)) {
+    const simCmd = `"${cscPath}" /target:exe /optimize+ /platform:x64 /out:"${simOut}" "${simSrc}"`;
+    execSync(simCmd, { stdio: 'inherit' });
+    console.log('[build-splash] Successfully compiled ZaborInputSimulator.exe');
+  }
 } catch (err) {
   console.error('[build-splash] Failed to compile ZaborUpdater.exe:', err);
   process.exit(1);

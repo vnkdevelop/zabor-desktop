@@ -1,0 +1,261 @@
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+namespace ZaborInputSimulator {
+    public class Program {
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetCursorPos(int X, int Y);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint SendInput(uint nInputs, [In] INPUT[] pInputs, int cbSize);
+
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int vKey);
+
+        private const uint INPUT_MOUSE = 0;
+        private const uint INPUT_KEYBOARD = 1;
+
+        private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+        private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+        private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+        private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+        private const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
+        private const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
+        private const uint MOUSEEVENTF_WHEEL = 0x0800;
+
+        private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+        private const uint KEYEVENTF_KEYUP = 0x0002;
+
+        private const ushort VK_SHIFT = 0x10;
+        private const ushort VK_CONTROL = 0x11;
+        private const ushort VK_MENU = 0x12; // Alt
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct INPUT {
+            public uint type;
+            public InputUnion u;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct InputUnion {
+            [FieldOffset(0)]
+            public MOUSEINPUT mi;
+            [FieldOffset(0)]
+            public KEYBDINPUT ki;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MOUSEINPUT {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KEYBDINPUT {
+            public ushort wVk;
+            public ushort wScan;
+            public uint dwFlags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        private static bool isLeftDown = false;
+        private static bool isRightDown = false;
+        private static bool isMiddleDown = false;
+        private static readonly bool[] pressedKeys = new bool[256];
+
+        public static void Main(string[] args) {
+            int parentPid = 0;
+            if (args != null && args.Length > 0) {
+                int.TryParse(args[0], out parentPid);
+            }
+
+            // Watchdog thread to terminate if parent process exits
+            if (parentPid > 0) {
+                var watchdog = new Thread(() => {
+                    try {
+                        var parent = Process.GetProcessById(parentPid);
+                        parent.WaitForExit();
+                    } catch {}
+                    ResetAll();
+                    Environment.Exit(0);
+                }) { IsBackground = true };
+                watchdog.Start();
+            }
+
+            // Ensure clean start
+            ResetAll();
+
+            string line;
+            while ((line = Console.ReadLine()) != null) {
+                try {
+                    line = line.Trim();
+                    if (string.IsNullOrEmpty(line)) continue;
+                    if (line == "exit" || line == "quit") break;
+
+                    if (line == "reset") {
+                        ResetAll();
+                        continue;
+                    }
+
+                    if (line == "check_click") {
+                        // Check if host physically pressed left/right/middle button
+                        bool click = (GetAsyncKeyState(0x01) & 0x8000) != 0 ||
+                                     (GetAsyncKeyState(0x02) & 0x8000) != 0 ||
+                                     (GetAsyncKeyState(0x04) & 0x8000) != 0;
+                        Console.WriteLine(click ? "1" : "0");
+                        continue;
+                    }
+
+                    string[] parts = line.Split(' ');
+                    string cmd = parts[0];
+
+                    if (cmd == "m" && parts.Length >= 3) {
+                        int x, y;
+                        if (int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y)) {
+                            SetCursorPos(x, y);
+                        }
+                    } else if (cmd == "d" && parts.Length >= 2) {
+                        int btn;
+                        if (int.TryParse(parts[1], out btn)) {
+                            SendMouseButton(btn, true);
+                        }
+                    } else if (cmd == "u" && parts.Length >= 2) {
+                        int btn;
+                        if (int.TryParse(parts[1], out btn)) {
+                            SendMouseButton(btn, false);
+                        }
+                    } else if (cmd == "w" && parts.Length >= 2) {
+                        int delta;
+                        if (int.TryParse(parts[1], out delta)) {
+                            SendMouseWheel(delta);
+                        }
+                    } else if (cmd == "kd" && parts.Length >= 2) {
+                        ushort vk;
+                        if (ushort.TryParse(parts[1], out vk)) {
+                            SendKeyboardKey(vk, true);
+                        }
+                    } else if (cmd == "ku" && parts.Length >= 2) {
+                        ushort vk;
+                        if (ushort.TryParse(parts[1], out vk)) {
+                            SendKeyboardKey(vk, false);
+                        }
+                    }
+                } catch {
+                    // Ignore single malformed line, keep loop running
+                }
+            }
+
+            ResetAll();
+        }
+
+        private static void SendMouseButton(int button, bool down) {
+            uint flag = 0;
+            if (button == 0) {
+                flag = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+                isLeftDown = down;
+            } else if (button == 1) {
+                flag = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+                isMiddleDown = down;
+            } else if (button == 2) {
+                flag = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
+                isRightDown = down;
+            }
+
+            if (flag == 0) return;
+
+            var input = new INPUT {
+                type = INPUT_MOUSE,
+                u = new InputUnion {
+                    mi = new MOUSEINPUT {
+                        dwFlags = flag,
+                        mouseData = 0,
+                        time = 0,
+                        dwExtraInfo = IntPtr.Zero
+                    }
+                }
+            };
+
+            SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
+        }
+
+        private static void SendMouseWheel(int delta) {
+            var input = new INPUT {
+                type = INPUT_MOUSE,
+                u = new InputUnion {
+                    mi = new MOUSEINPUT {
+                        dwFlags = MOUSEEVENTF_WHEEL,
+                        mouseData = (uint)(delta * 120),
+                        time = 0,
+                        dwExtraInfo = IntPtr.Zero
+                    }
+                }
+            };
+
+            SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
+        }
+
+        private static void SendKeyboardKey(ushort vk, bool down) {
+            if (vk == 0 || vk >= 256) return;
+
+            uint flags = 0;
+            if (!down) flags |= KEYEVENTF_KEYUP;
+
+            // Extended keys (arrows, nav keys)
+            if (vk >= 0x21 && vk <= 0x2E) {
+                flags |= KEYEVENTF_EXTENDEDKEY;
+            }
+
+            var input = new INPUT {
+                type = INPUT_KEYBOARD,
+                u = new InputUnion {
+                    ki = new KEYBDINPUT {
+                        wVk = vk,
+                        wScan = 0,
+                        dwFlags = flags,
+                        time = 0,
+                        dwExtraInfo = IntPtr.Zero
+                    }
+                }
+            };
+
+            SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
+            pressedKeys[vk] = down;
+        }
+
+        private static void ResetAll() {
+            // Release mouse buttons
+            if (isLeftDown) {
+                SendMouseButton(0, false);
+                isLeftDown = false;
+            }
+            if (isRightDown) {
+                SendMouseButton(2, false);
+                isRightDown = false;
+            }
+            if (isMiddleDown) {
+                SendMouseButton(1, false);
+                isMiddleDown = false;
+            }
+
+            // Release all pressed keyboard keys
+            for (ushort i = 0; i < 256; i++) {
+                if (pressedKeys[i]) {
+                    SendKeyboardKey(i, false);
+                    pressedKeys[i] = false;
+                }
+            }
+
+            // Safety explicit release of modifier keys
+            SendKeyboardKey(VK_SHIFT, false);
+            SendKeyboardKey(VK_CONTROL, false);
+            SendKeyboardKey(VK_MENU, false);
+        }
+    }
+}

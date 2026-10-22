@@ -117,6 +117,16 @@ declare global {
       onUpdateDownloaded: (callback: (data: { filePath: string }) => void) => () => void;
       onUpdateError: (callback: (error: string) => void) => () => void;
       onUpdateInstalling: (callback: () => void) => () => void;
+      remoteControlStart: () => Promise<boolean>;
+      remoteControlStop: () => Promise<boolean>;
+      remoteControlReset: () => Promise<boolean>;
+      remoteControlGetScreen: () => Promise<{ width: number; height: number; x: number; y: number }>;
+      remoteControlMove: (absX: number, absY: number) => void;
+      remoteControlMouseButton: (button: number, down: boolean) => void;
+      remoteControlMouseWheel: (delta: number) => void;
+      remoteControlKey: (vk: number, down: boolean) => void;
+      onRemoteControlHostActivity: (callback: (data: { type: 'move' | 'click'; dist?: number }) => void) => () => void;
+      onRemoteControlPanicRevoke: (callback: () => void) => () => void;
     };
   }
 }
