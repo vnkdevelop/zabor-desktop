@@ -45,3 +45,24 @@ The Remote Control feature provides lightweight, high-performance P2P remote con
   - Blocks `Alt+F4` and `Alt+Tab`.
   - Blocks system Sleep / Wake keys.
   - Permits standard keys, typing, arrows, and safe editor shortcuts (`Ctrl+C`, `Ctrl+V`, `Ctrl+Z`).
+
+## 6. Zero-Lag Responsiveness & Screen Resolution Caching
+- **Synchronous Host Movement**:
+  - The Host caches screen resolution (`cachedScreenResolution`) upon session initiation (`startHostRemoteControl()`) and refreshes it opportunistically on background `RC_OP_PING` packets.
+  - Incoming `RC_OP_MOVE` packets calculate absolute screen coordinates synchronously and invoke `remoteControlMove` immediately without creating asynchronous IPC Promises or microtask queue backlog, guaranteeing strict FIFO order and eliminating snappy backward snaps.
+- **Leading-Edge Viewer Motion & Click Flush**:
+  - `StreamCard.tsx` dispatches the leading-edge mouse movement immediately on initial motion (`rafId.current === null`), throttling subsequent rapid moves via `requestAnimationFrame`.
+  - Mouse down and mouse up handlers flush `pendingMove.current` prior to dispatching button events, ensuring clicks register at exact cursor coordinates.
+
+## 7. Local Cursor Toggle (Esc Key)
+- **Viewer Cursor Visibility Toggle**:
+  - When Remote Control is active in Mode 3, pressing `Escape` intercepts the key, stops event propagation, and toggles `isCursorHidden` (`cursor-none` vs `cursor-default`) on the video stream container.
+  - `Escape` is not forwarded to the remote host and does not trigger session disconnection or exit fullscreen mode.
+  - Disconnection is triggered via `Ctrl+Alt+K` or overlay controls.
+
+## 8. Mode 3 Keyboard Capture & Layout Handling
+- **Capture-Phase Interception**:
+  - `StreamCard.tsx` registers window listeners with `{ capture: true }` to capture keys before bubbling or default handlers.
+  - `App.tsx` global keyboard listener contains an early return guard (`if (store.isRemoteControlling) return;`), ensuring physical keys such as `KeyF` (Russian 'а') and `Escape` do not exit or toggle fullscreen during active control.
+- **Physical Key Mapping Fallback (`getWinVkCode`)**:
+  - Adds physical code fallbacks for `KeyA`–`KeyZ` (0x41–0x5A) and `Digit0`–`Digit9` (0x30–0x39) to seamlessly handle non-Latin (e.g. Cyrillic) layouts without dropping or misrouting keystrokes.

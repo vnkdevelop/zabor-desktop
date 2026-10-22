@@ -459,6 +459,7 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (store.isRemoteControlling) return;
       if (!document.hasFocus() || event.repeat) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
@@ -473,7 +474,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [store.activeStreamId, store.isStreamFullscreen, store.setStreamFullscreen]);
+  }, [store.activeStreamId, store.isStreamFullscreen, store.setStreamFullscreen, store.isRemoteControlling]);
 
   const [serverConnected, setServerConnected] = useState(false);
   const [showErrorText, setShowErrorText] = useState(false);

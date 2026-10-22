@@ -83,7 +83,21 @@ export function getWinVkCode(e: KeyboardEvent): number {
     case 'End': return 0x23;
     case 'PageUp': return 0x21;
     case 'PageDown': return 0x22;
-    default: return e.keyCode || 0;
+    default: {
+      if (e.code && e.code.startsWith('Key') && e.code.length === 4) {
+        const charCode = e.code.toUpperCase().charCodeAt(3);
+        if (charCode >= 0x41 && charCode <= 0x5a) {
+          return charCode;
+        }
+      }
+      if (e.code && e.code.startsWith('Digit') && e.code.length === 6) {
+        const charCode = e.code.charCodeAt(5);
+        if (charCode >= 0x30 && charCode <= 0x39) {
+          return charCode;
+        }
+      }
+      return e.keyCode || 0;
+    }
   }
 }
 

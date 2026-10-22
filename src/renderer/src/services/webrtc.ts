@@ -803,6 +803,7 @@ export class WebRTCManager {
   private hostIdleTimer: NodeJS.Timeout | null = null
   private isHostActive = false
   private cleanupHostListeners: (() => void) | null = null
+  private cachedScreenResolution: { width: number; height: number; x: number; y: number } | null = null
   private ultraSendTargets: Set<string> = new Set()
   private ultraSendEncoder: WebCodecsAudioEncoder | null = null
   private ultraSendReader: ReadableStreamDefaultReader<WebCodecsAudioData> | null = null
@@ -4458,6 +4459,12 @@ export class WebRTCManager {
       window.windowControls.remoteControlStart()
     } catch { }
 
+    try {
+      window.windowControls.remoteControlGetScreen().then((sc) => {
+        this.cachedScreenResolution = sc
+      }).catch(() => { })
+    } catch { }
+
     if (!this.cleanupHostListeners) {
       const unsubActivity = window.windowControls.onRemoteControlHostActivity(() => {
         this.triggerHostActivity()
@@ -4475,6 +4482,7 @@ export class WebRTCManager {
 
   public stopHostRemoteControl(): void {
     this.resetControlState(true)
+    this.cachedScreenResolution = null
     try {
       window.windowControls.remoteControlStop()
     } catch { }
@@ -4544,6 +4552,13 @@ export class WebRTCManager {
       }
 
       if (op === RC_OP_PING) {
+        if (!this.cachedScreenResolution) {
+          try {
+            window.windowControls.remoteControlGetScreen().then((sc) => {
+              this.cachedScreenResolution = sc
+            }).catch(() => { })
+          } catch { }
+        }
         if (this.activeRemoteViewerId === userId) {
           this.refreshHostFailSafe(userId)
         }
@@ -4572,13 +4587,23 @@ export class WebRTCManager {
           const xNorm = dv.getFloat32(1, true)
           const yNorm = dv.getFloat32(5, true)
           if (xNorm >= 0 && xNorm <= 1 && yNorm >= 0 && yNorm <= 1) {
-            try {
-              window.windowControls.remoteControlGetScreen().then((sc) => {
-                const absX = sc.x + Math.round(xNorm * sc.width)
-                const absY = sc.y + Math.round(yNorm * sc.height)
+            if (this.cachedScreenResolution) {
+              const sc = this.cachedScreenResolution
+              const absX = sc.x + Math.round(xNorm * sc.width)
+              const absY = sc.y + Math.round(yNorm * sc.height)
+              try {
                 window.windowControls.remoteControlMove(absX, absY)
-              }).catch(() => { })
-            } catch { }
+              } catch { }
+            } else {
+              try {
+                window.windowControls.remoteControlGetScreen().then((sc) => {
+                  this.cachedScreenResolution = sc
+                  const absX = sc.x + Math.round(xNorm * sc.width)
+                  const absY = sc.y + Math.round(yNorm * sc.height)
+                  window.windowControls.remoteControlMove(absX, absY)
+                }).catch(() => { })
+              } catch { }
+            }
           }
           break
         }

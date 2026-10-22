@@ -114,6 +114,13 @@ export const StreamCard = ({
 
   const pendingMove = useRef<{ x: number; y: number } | null>(null)
   const rafId = useRef<number | null>(null)
+  const [isCursorHidden, setIsCursorHidden] = useState(false)
+
+  useEffect(() => {
+    if (!isRemoteControlling) {
+      setIsCursorHidden(false)
+    }
+  }, [isRemoteControlling])
 
   useEffect(() => {
     if (!isFullscreen || isLocal) {
@@ -128,6 +135,7 @@ export const StreamCard = ({
       if (e.ctrlKey && e.altKey && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) {
         e.preventDefault()
         e.stopPropagation()
+        e.stopImmediatePropagation?.()
         if (isRemoteControlRevoked) return
         const next = !isRemoteControlling
         if (next) {
@@ -143,8 +151,8 @@ export const StreamCard = ({
       if (isRemoteControlling && e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
-        setRemoteControlState({ isControlling: false })
+        e.stopImmediatePropagation?.()
+        setIsCursorHidden((prev) => !prev)
         return
       }
 
@@ -159,6 +167,7 @@ export const StreamCard = ({
         if (isShortcutSafe(vk, modifiers)) {
           e.preventDefault()
           e.stopPropagation()
+          e.stopImmediatePropagation?.()
           let modBits = 0
           if (e.shiftKey) modBits |= 1
           if (e.ctrlKey) modBits |= 2
@@ -170,6 +179,13 @@ export const StreamCard = ({
     }
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (isRemoteControlling && e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
+        return
+      }
+
       if (isRemoteControlling && !isHostActive) {
         if (e.ctrlKey && e.altKey && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) {
           return
@@ -184,6 +200,7 @@ export const StreamCard = ({
         if (isShortcutSafe(vk, modifiers)) {
           e.preventDefault()
           e.stopPropagation()
+          e.stopImmediatePropagation?.()
           let modBits = 0
           if (e.shiftKey) modBits |= 1
           if (e.ctrlKey) modBits |= 2
@@ -194,11 +211,11 @@ export const StreamCard = ({
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    window.addEventListener('keyup', handleKeyUp, { capture: true })
     return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
+      window.removeEventListener('keydown', handleKeyDown, { capture: true })
+      window.removeEventListener('keyup', handleKeyUp, { capture: true })
     }
   }, [isFullscreen, isLocal, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState])
 
@@ -229,8 +246,9 @@ export const StreamCard = ({
     const xNorm = clientX / renderRect.width
     const yNorm = clientY / renderRect.height
     if (xNorm >= 0 && xNorm <= 1 && yNorm >= 0 && yNorm <= 1) {
-      pendingMove.current = { x: xNorm, y: yNorm }
       if (rafId.current === null) {
+        webrtcService.sendViewerMove(user.id, xNorm, yNorm)
+        pendingMove.current = null
         rafId.current = requestAnimationFrame(() => {
           rafId.current = null
           if (pendingMove.current) {
@@ -238,6 +256,8 @@ export const StreamCard = ({
             pendingMove.current = null
           }
         })
+      } else {
+        pendingMove.current = { x: xNorm, y: yNorm }
       }
     }
   }
@@ -246,6 +266,10 @@ export const StreamCard = ({
     if (!isRemoteControlling || isHostActive) return
     e.preventDefault()
     e.stopPropagation()
+    if (pendingMove.current) {
+      webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
+      pendingMove.current = null
+    }
     webrtcService.sendViewerMouseButton(user.id, e.button, true)
   }
 
@@ -253,6 +277,10 @@ export const StreamCard = ({
     if (!isRemoteControlling || isHostActive) return
     e.preventDefault()
     e.stopPropagation()
+    if (pendingMove.current) {
+      webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
+      pendingMove.current = null
+    }
     webrtcService.sendViewerMouseButton(user.id, e.button, false)
   }
 
@@ -510,7 +538,7 @@ export const StreamCard = ({
         transform: 'translate3d(0, 0, 0)'
       }}
       className={`relative overflow-hidden group ${isFullscreen ? 'w-full h-full bg-[#0B0B0F] rounded-none' : 'w-full h-full bg-transparent rounded-xl'
-        }`}
+        } ${isRemoteControlling && !isHostActive ? (isCursorHidden ? 'cursor-none select-none' : 'cursor-default select-none') : ''}`}
     >
       <div className={isFullscreen ? "w-full h-full bg-black" : "absolute inset-[1.5px] overflow-hidden rounded-[10.5px] bg-[#0B0B0F]"}>
         <video
@@ -530,7 +558,9 @@ export const StreamCard = ({
           onWheel={isFullscreen && isRemoteControlling ? handleWheel : undefined}
           onContextMenu={isFullscreen && isRemoteControlling ? handleVideoContextMenu : undefined}
           className={`w-full h-full object-contain ${
-            isRemoteControlling && !isHostActive ? 'cursor-default select-none' : ''
+            isRemoteControlling && !isHostActive
+              ? (isCursorHidden ? 'cursor-none select-none' : 'cursor-default select-none')
+              : ''
           }`}
         />
       </div>

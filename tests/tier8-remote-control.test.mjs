@@ -173,6 +173,25 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
       assert.equal(getWinVkCode({ code: 'Delete' }), 0x2e);
       assert.equal(getWinVkCode({ code: 'Home' }), 0x24);
     });
+
+    test('S4-03: Maps physical letter keys (KeyF, KeyA) under Cyrillic/non-Latin layouts', () => {
+      assert.equal(getWinVkCode({ code: 'KeyF', keyCode: 0 }), 0x46, 'KeyF must map to VK_F (0x46)');
+      assert.equal(getWinVkCode({ code: 'KeyF' }), 0x46, 'KeyF without keyCode must map to VK_F (0x46)');
+      assert.equal(getWinVkCode({ code: 'KeyA', keyCode: 0 }), 0x41, 'KeyA must map to VK_A (0x41)');
+      assert.equal(getWinVkCode({ code: 'KeyA' }), 0x41, 'KeyA without keyCode must map to VK_A (0x41)');
+    });
+
+    test('S4-04: Maps physical digit keys (Digit1, Digit0) under non-Latin layouts', () => {
+      assert.equal(getWinVkCode({ code: 'Digit1', keyCode: 0 }), 0x31, 'Digit1 must map to VK_1 (0x31)');
+      assert.equal(getWinVkCode({ code: 'Digit1' }), 0x31, 'Digit1 without keyCode must map to VK_1 (0x31)');
+      assert.equal(getWinVkCode({ code: 'Digit0', keyCode: 0 }), 0x30, 'Digit0 must map to VK_0 (0x30)');
+    });
+
+    test('S4-05: Maps Escape key accurately with or without keyCode', () => {
+      assert.equal(getWinVkCode({ code: 'Escape', keyCode: 27 }), 0x1b, 'Escape with keyCode 27 must map to 0x1b');
+      assert.equal(getWinVkCode({ code: 'Escape', keyCode: 0 }), 0x1b, 'Escape with keyCode 0 must map to 0x1b');
+      assert.equal(getWinVkCode({ code: 'Escape' }), 0x1b, 'Escape without keyCode must map to 0x1b');
+    });
   });
 
   describe('Suite 5: Coordinate Letterbox Math & Aspect Ratio Preservation', () => {
