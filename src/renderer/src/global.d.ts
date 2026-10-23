@@ -121,6 +121,8 @@ declare global {
       remoteControlStop: () => Promise<boolean>;
       remoteControlReset: () => Promise<boolean>;
       remoteControlGetScreen: () => Promise<{ width: number; height: number; x: number; y: number }>;
+      remoteControlClipCursor: (rect: { left: number; top: number; right: number; bottom: number }) => Promise<boolean>;
+      remoteControlUnclipCursor: () => Promise<boolean>;
       remoteControlMove: (absX: number, absY: number) => void;
       remoteControlMouseButton: (button: number, down: boolean) => void;
       remoteControlMouseWheel: (delta: number) => void;

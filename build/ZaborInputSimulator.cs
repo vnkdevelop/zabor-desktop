@@ -11,6 +11,17 @@ namespace ZaborInputSimulator {
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint nInputs, [In] INPUT[] pInputs, int cbSize);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ClipCursor(ref RECT lpRect);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ClipCursor(IntPtr lpRect);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
 
@@ -74,6 +85,14 @@ namespace ZaborInputSimulator {
         private static readonly IntPtr SIMULATED_EXTRA_INFO = new IntPtr(0x5A41424F); // 'ZABO'
 
         private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct POINT {
@@ -178,6 +197,15 @@ namespace ZaborInputSimulator {
         }
 
         public static void Main(string[] args) {
+            try {
+                SetProcessDPIAware();
+            } catch {}
+
+            if (args != null && args.Length > 0 && args[0] == "unclip") {
+                ClipCursor(IntPtr.Zero);
+                return;
+            }
+
             int parentPid = 0;
             if (args != null && args.Length > 0) {
                 int.TryParse(args[0], out parentPid);
@@ -281,6 +309,15 @@ namespace ZaborInputSimulator {
                         if (ushort.TryParse(parts[1], out vk)) {
                             SendKeyboardKey(vk, false);
                         }
+                    } else if (cmd == "clip" && parts.Length >= 5) {
+                        int l, t, r, b;
+                        if (int.TryParse(parts[1], out l) && int.TryParse(parts[2], out t) &&
+                            int.TryParse(parts[3], out r) && int.TryParse(parts[4], out b)) {
+                            RECT rect = new RECT { Left = l, Top = t, Right = r, Bottom = b };
+                            ClipCursor(ref rect);
+                        }
+                    } else if (cmd == "unclip") {
+                        ClipCursor(IntPtr.Zero);
                     }
                 } catch {
                     // Ignore single malformed line, keep loop running
@@ -292,6 +329,9 @@ namespace ZaborInputSimulator {
         }
 
         private static void CleanupHook() {
+            try {
+                ClipCursor(IntPtr.Zero);
+            } catch {}
             if (hookId != IntPtr.Zero) {
                 UnhookWindowsHookEx(hookId);
                 hookId = IntPtr.Zero;
@@ -376,6 +416,9 @@ namespace ZaborInputSimulator {
         }
 
         private static void ResetAll() {
+            try {
+                ClipCursor(IntPtr.Zero);
+            } catch {}
             // Release mouse buttons
             if (isLeftDown) {
                 SendMouseButton(0, false);

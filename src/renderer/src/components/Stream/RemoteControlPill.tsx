@@ -8,7 +8,11 @@ export const RemoteControlPill = () => {
   const currentUser = useAppStore((state) => state.currentUser)
   const isStreamRemoteControlAllowed = useAppStore((state) => state.isStreamRemoteControlAllowed)
   const activeRemoteControllerId = useAppStore((state) => state.activeRemoteControllerId)
-  const channelUsers = useAppStore((state) => state.channelUsers)
+  const voiceUsers = useAppStore((state) => state.voiceUsers)
+  const friends = useAppStore((state) => state.friends)
+  const currentCallUser = useAppStore((state) => state.currentCallUser)
+  const channelUsersMap = useAppStore((state) => state.channelUsersMap)
+  const currentChannelId = useAppStore((state) => state.currentChannelId)
 
   const isHostAllowed = Boolean(currentUser?.isStreaming && isStreamRemoteControlAllowed)
   const isViewerControlling = Boolean(
@@ -19,13 +23,25 @@ export const RemoteControlPill = () => {
     return null
   }
 
+  const channelMembers = currentChannelId ? channelUsersMap[currentChannelId] || [] : []
+  const allUsers = [
+    ...(voiceUsers || []),
+    ...(friends || []),
+    ...channelMembers,
+    ...(currentCallUser ? [currentCallUser] : [])
+  ]
+
   const controllerUser = isViewerControlling
-    ? channelUsers.find((u) => u.id === activeRemoteControllerId) || {
+    ? allUsers.find((u) => u?.id === activeRemoteControllerId) || {
         displayName: 'viewer',
         avatarBase64: '',
         avatarColor: '#FF007F'
       }
-    : currentUser
+    : currentUser || {
+        displayName: 'host',
+        avatarBase64: '',
+        avatarColor: '#FF007F'
+      }
 
   const handlePanicRevoke = () => {
     webrtcService.revokeRemoteControl()

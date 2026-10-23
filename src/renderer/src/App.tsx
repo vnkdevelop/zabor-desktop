@@ -435,17 +435,20 @@ export default function App() {
     if (store.isStreamFullscreen) {
       setShowOverlays(true);
       if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current);
-      overlayTimeoutRef.current = setTimeout(() => {
-        setShowOverlays(false);
-      }, 3000);
-
-      const onMove = () => {
-        if (store.isRemoteControlling || useAppStore.getState().isRemoteControlling) return;
-        setShowOverlays(true);
-        if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current);
+      if (!store.isRemoteControlling) {
         overlayTimeoutRef.current = setTimeout(() => {
           setShowOverlays(false);
         }, 3000);
+      }
+
+      const onMove = () => {
+        setShowOverlays(true);
+        if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current);
+        if (!store.isRemoteControlling) {
+          overlayTimeoutRef.current = setTimeout(() => {
+            setShowOverlays(false);
+          }, 3000);
+        }
       };
       window.addEventListener('mousemove', onMove);
       return () => {
@@ -3210,7 +3213,8 @@ export default function App() {
                     const expLeft = (windowSize.width - expW) / 2;
 
                     const isControlling = Boolean(store.isRemoteControlling);
-                    const overlaysActive = showOverlays && !isControlling;
+                    const isLockedToRemote = isControlling && store.isRemoteControlCursorHidden;
+                    const overlaysActive = showOverlays;
 
                     const currentW = overlaysActive ? normalW : expW;
                     const currentH = overlaysActive ? normalH : expH;
@@ -3218,7 +3222,7 @@ export default function App() {
                     const currentLeft = overlaysActive ? normalLeft : expLeft;
 
                     return (
-                      <div className={`fixed inset-0 bg-black z-[9999] ${overlaysActive ? '' : 'cursor-none'}`}>
+                      <div className={`fixed inset-0 bg-black z-[9999] ${isLockedToRemote ? 'cursor-none' : ''}`}>
                         <div
                           style={{
                             position: 'absolute',
@@ -3243,13 +3247,13 @@ export default function App() {
                           />
                         </div>
 
-                        <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${overlaysActive ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
+                        <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${overlaysActive ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'} ${isLockedToRemote ? 'pointer-events-none' : ''}`}>
                           {callUsersList.map(user => (
                             <SpeakingAvatar key={user.id} user={user} handleContextMenu={handleContextMenu} />
                           ))}
                         </div>
 
-                        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${overlaysActive ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}>
+                        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${overlaysActive ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'} ${isLockedToRemote ? 'pointer-events-none' : ''}`}>
                           <button
                             onClick={() => store.setStreamFullscreen(false)}
                             className="group/mode-button relative w-14 h-14 rounded-full flex items-center justify-center bg-surface/70 hover:bg-surfaceHover/80 text-white transition-colors"
@@ -3503,7 +3507,8 @@ export default function App() {
                     const expLeft = (windowSize.width - expW) / 2;
 
                     const isControlling = Boolean(store.isRemoteControlling);
-                    const overlaysActive = showOverlays && !isControlling;
+                    const isLockedToRemote = isControlling && store.isRemoteControlCursorHidden;
+                    const overlaysActive = showOverlays;
 
                     const currentW = overlaysActive ? normalW : expW;
                     const currentH = overlaysActive ? normalH : expH;
@@ -3511,7 +3516,7 @@ export default function App() {
                     const currentLeft = overlaysActive ? normalLeft : expLeft;
 
                     return (
-                      <div className={`fixed inset-0 bg-black z-[9999] ${overlaysActive ? '' : 'cursor-none'}`}>
+                      <div className={`fixed inset-0 bg-black z-[9999] ${isLockedToRemote ? 'cursor-none' : ''}`}>
                         <div
                           style={{
                             position: 'absolute',
@@ -3536,13 +3541,13 @@ export default function App() {
                           />
                         </div>
 
-                        <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${overlaysActive ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
+                        <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${overlaysActive ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'} ${isLockedToRemote ? 'pointer-events-none' : ''}`}>
                           {sorted.map(user => (
                             <SpeakingAvatar key={user.id} user={user} handleContextMenu={handleContextMenu} />
                           ))}
                         </div>
 
-                        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${overlaysActive ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}>
+                        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${overlaysActive ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'} ${isLockedToRemote ? 'pointer-events-none' : ''}`}>
                           <button
                             onClick={() => store.setStreamFullscreen(false)}
                             className="group/mode-button relative w-14 h-14 rounded-full flex items-center justify-center bg-surface/70 hover:bg-surfaceHover/80 text-white transition-colors"

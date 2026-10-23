@@ -118,6 +118,10 @@ const windowControls = {
   remoteControlReset: (): Promise<boolean> => ipcRenderer.invoke('remote-control:reset'),
   remoteControlGetScreen: (): Promise<{ width: number; height: number; x: number; y: number }> =>
     ipcRenderer.invoke('remote-control:get-screen'),
+  remoteControlClipCursor: (rect: { left: number; top: number; right: number; bottom: number }): Promise<boolean> =>
+    ipcRenderer.invoke('remote-control:clip-cursor', rect),
+  remoteControlUnclipCursor: (): Promise<boolean> =>
+    ipcRenderer.invoke('remote-control:unclip-cursor'),
   remoteControlMove: (absX: number, absY: number) => ipcRenderer.send('remote-control:move', absX, absY),
   remoteControlMouseButton: (button: number, down: boolean) =>
     ipcRenderer.send('remote-control:mouse-button', button, down),

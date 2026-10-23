@@ -116,17 +116,22 @@ export const StreamCard = ({
 
   const pendingMove = useRef<{ x: number; y: number } | null>(null)
   const virtualPos = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.5 })
-  const rafId = useRef<number | null>(null)
+  const lastMoveTime = useRef(0)
+  const moveThrottleTimer = useRef<NodeJS.Timeout | null>(null)
   const [isCursorHidden, setIsCursorHidden] = useState(false)
 
   useEffect(() => {
     if (!isRemoteControlling) {
       setIsCursorHidden(false)
+      setRemoteControlState({ isCursorHidden: false })
+      try {
+        window.windowControls.remoteControlUnclipCursor()
+      } catch { }
       if (document.pointerLockElement) {
         try { document.exitPointerLock() } catch { }
       }
     }
-  }, [isRemoteControlling])
+  }, [isRemoteControlling, setRemoteControlState])
 
   useEffect(() => {
     const handleLockChange = () => {
@@ -173,7 +178,11 @@ export const StreamCard = ({
         } else {
           webrtcService.sendViewerSignal(user.id, RC_OP_STOP)
           webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
-          setRemoteControlState({ isControlling: false })
+          setRemoteControlState({ isControlling: false, isCursorHidden: false })
+          setIsCursorHidden(false)
+          try {
+            window.windowControls.remoteControlUnclipCursor()
+          } catch { }
           if (document.pointerLockElement) {
             try { document.exitPointerLock() } catch { }
           }
@@ -188,14 +197,30 @@ export const StreamCard = ({
           e.stopImmediatePropagation?.()
           const nextHidden = !isCursorHidden
           setIsCursorHidden(nextHidden)
+          setRemoteControlState({ isCursorHidden: nextHidden })
           if (nextHidden) {
-            try {
-              videoRef.current?.requestPointerLock()
-            } catch { }
-          } else {
-            if (document.pointerLockElement) {
-              try { document.exitPointerLock() } catch { }
+            if (videoRef.current) {
+              const video = videoRef.current
+              const vRect = video.getBoundingClientRect()
+              const rRect = getVideoRenderRect(video)
+              const scale = window.devicePixelRatio || 1
+              const screenLeft = Math.round((window.screenX + vRect.left + rRect.left) * scale)
+              const screenTop = Math.round((window.screenY + vRect.top + rRect.top) * scale)
+              const screenRight = Math.round((window.screenX + vRect.left + rRect.left + rRect.width) * scale)
+              const screenBottom = Math.round((window.screenY + vRect.top + rRect.top + rRect.height) * scale)
+              try {
+                window.windowControls.remoteControlClipCursor({
+                  left: screenLeft,
+                  top: screenTop,
+                  right: screenRight,
+                  bottom: screenBottom
+                })
+              } catch { }
             }
+          } else {
+            try {
+              window.windowControls.remoteControlUnclipCursor()
+            } catch { }
           }
           const msg = nextHidden ? t('stream.cursorHidden', 'курсор скрыт') : t('stream.cursorShown', 'курсор показан')
           useAppStore.getState().setSystemToast(msg)
@@ -288,12 +313,27 @@ export const StreamCard = ({
 
   useEffect(() => {
     return () => {
-      if (rafId.current !== null) {
-        cancelAnimationFrame(rafId.current)
-        rafId.current = null
+      if (moveThrottleTimer.current) {
+        clearTimeout(moveThrottleTimer.current)
+        moveThrottleTimer.current = null
       }
+      try {
+        window.windowControls.remoteControlUnclipCursor()
+      } catch { }
     }
   }, [isRemoteControlling])
+
+  useEffect(() => {
+    const handleBlur = () => {
+      try {
+        window.windowControls.remoteControlUnclipCursor()
+      } catch { }
+      setIsCursorHidden(false)
+      setRemoteControlState({ isCursorHidden: false })
+    }
+    window.addEventListener('blur', handleBlur)
+    return () => window.removeEventListener('blur', handleBlur)
+  }, [setRemoteControlState])
 
   const handleMouseMove = (e: React.MouseEvent<HTMLVideoElement>) => {
     if (!isRemoteControlling || isHostActive || !videoRef.current) return
@@ -319,18 +359,27 @@ export const StreamCard = ({
       virtualPos.current = { x: xNorm, y: yNorm }
     }
 
-    if (rafId.current === null) {
+    const now = performance.now()
+    if (now - lastMoveTime.current >= 4) {
+      lastMoveTime.current = now
       webrtcService.sendViewerMove(user.id, xNorm, yNorm)
+      if (moveThrottleTimer.current) {
+        clearTimeout(moveThrottleTimer.current)
+        moveThrottleTimer.current = null
+      }
       pendingMove.current = null
-      rafId.current = requestAnimationFrame(() => {
-        rafId.current = null
-        if (pendingMove.current) {
-          webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
-          pendingMove.current = null
-        }
-      })
     } else {
       pendingMove.current = { x: xNorm, y: yNorm }
+      if (!moveThrottleTimer.current) {
+        moveThrottleTimer.current = setTimeout(() => {
+          moveThrottleTimer.current = null
+          if (pendingMove.current) {
+            lastMoveTime.current = performance.now()
+            webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
+            pendingMove.current = null
+          }
+        }, 4)
+      }
     }
   }
 
@@ -338,6 +387,10 @@ export const StreamCard = ({
     if (!isRemoteControlling || isHostActive) return
     e.preventDefault()
     e.stopPropagation()
+    if (moveThrottleTimer.current) {
+      clearTimeout(moveThrottleTimer.current)
+      moveThrottleTimer.current = null
+    }
     if (pendingMove.current) {
       webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
       pendingMove.current = null
@@ -349,6 +402,10 @@ export const StreamCard = ({
     if (!isRemoteControlling || isHostActive) return
     e.preventDefault()
     e.stopPropagation()
+    if (moveThrottleTimer.current) {
+      clearTimeout(moveThrottleTimer.current)
+      moveThrottleTimer.current = null
+    }
     if (pendingMove.current) {
       webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
       pendingMove.current = null

@@ -9,10 +9,11 @@ export class RemoteControlSimulatorManager {
   private monitorTimer: NodeJS.Timeout | null = null;
   private lastSimulatedX = -1;
   private lastSimulatedY = -1;
+  private lastSimulatedTime = 0;
   private getWindow: () => BrowserWindow | null;
 
-  // Intentional displacement threshold: 48 pixels
-  private readonly DISPLACEMENT_THRESHOLD = 48;
+  // Intentional displacement threshold: 120 pixels
+  private readonly DISPLACEMENT_THRESHOLD = 120;
 
   constructor(getWindow: () => BrowserWindow | null) {
     this.getWindow = getWindow;
@@ -89,7 +90,7 @@ export class RemoteControlSimulatorManager {
 
     if (this.child) {
       if (this.isRunning && this.child.stdin && this.child.stdin.writable && !this.child.killed) {
-        this.safeWrite('reset\nexit\n');
+        this.safeWrite('unclip\nreset\nexit\n');
       }
       try {
         this.child.kill();
@@ -99,15 +100,30 @@ export class RemoteControlSimulatorManager {
     this.isRunning = false;
     this.lastSimulatedX = -1;
     this.lastSimulatedY = -1;
+    this.lastSimulatedTime = 0;
   }
 
   public reset(): void {
-    this.safeWrite('reset\n');
+    this.safeWrite('unclip\nreset\n');
+  }
+
+  public clipCursor(rect: { left: number; top: number; right: number; bottom: number }): void {
+    if (!this.isRunning) {
+      this.start();
+    }
+    this.safeWrite(`clip ${Math.round(rect.left)} ${Math.round(rect.top)} ${Math.round(rect.right)} ${Math.round(rect.bottom)}\n`);
+  }
+
+  public unclipCursor(): void {
+    if (this.isRunning) {
+      this.safeWrite('unclip\n');
+    }
   }
 
   public move(absX: number, absY: number): void {
     this.lastSimulatedX = Math.round(absX);
     this.lastSimulatedY = Math.round(absY);
+    this.lastSimulatedTime = Date.now();
     this.safeWrite(`m ${this.lastSimulatedX} ${this.lastSimulatedY}\n`);
   }
 
@@ -176,6 +192,11 @@ export class RemoteControlSimulatorManager {
       if (!this.isRunning) return;
 
       try {
+        const now = Date.now();
+        if (now - this.lastSimulatedTime < 300) {
+          return;
+        }
+
         const cur = screen.getCursorScreenPoint();
         if (this.lastSimulatedX >= 0 && this.lastSimulatedY >= 0) {
           const dist = Math.hypot(cur.x - this.lastSimulatedX, cur.y - this.lastSimulatedY);

@@ -879,6 +879,7 @@ export class WebRTCManager {
   private rcDataChannels: Map<string, RTCDataChannel> = new Map()
   private activeRemoteViewerId: string | null = null
   private hostFailSafeTimer: NodeJS.Timeout | null = null
+  private lastHostFailSafeRefresh = 0
   private hostIdleTimer: NodeJS.Timeout | null = null
   private isHostActive = false
   private cleanupHostListeners: (() => void) | null = null
@@ -4630,6 +4631,20 @@ export class WebRTCManager {
     }, 2000)
   }
 
+  private resolveRemoteUserName(userId: string): string {
+    const st = useAppStore.getState()
+    const currentChannelId = st.currentChannelId
+    const channelMembers = currentChannelId ? st.channelUsersMap[currentChannelId] || [] : []
+    const allUsers = [
+      ...(st.voiceUsers || []),
+      ...(st.friends || []),
+      ...channelMembers,
+      ...(st.currentCallUser ? [st.currentCallUser] : [])
+    ]
+    const u = allUsers.find((x) => x?.id === userId)
+    return u?.displayName || 'viewer'
+  }
+
   private onRemoteControlMessage(userId: string, data: unknown): void {
     let buffer: ArrayBuffer | null = null
     if (data instanceof ArrayBuffer) {
@@ -4689,8 +4704,7 @@ export class WebRTCManager {
 
       if (op === RC_OP_START) {
         this.activeRemoteViewerId = userId
-        const ctrlUser = useAppStore.getState().channelUsers.find((u) => u.id === userId)
-        const ctrlName = ctrlUser?.displayName || 'viewer'
+        const ctrlName = this.resolveRemoteUserName(userId)
         useAppStore.getState().setRemoteControlState({
           activeControllerId: userId,
           isHostActive: false
@@ -4709,21 +4723,24 @@ export class WebRTCManager {
 
       if (!this.activeRemoteViewerId) {
         this.activeRemoteViewerId = userId
-        const ctrlUser = useAppStore.getState().channelUsers.find((u) => u.id === userId)
-        const ctrlName = ctrlUser?.displayName || 'viewer'
+        const ctrlName = this.resolveRemoteUserName(userId)
         try {
           window.windowControls.remoteControlShowPill?.({
             controllerName: ctrlName,
             isControlling: true
           })
         } catch { }
+        useAppStore.getState().setRemoteControlState({
+          activeControllerId: userId,
+          isHostActive: false
+        })
       }
 
-      useAppStore.getState().setRemoteControlState({
-        activeControllerId: userId,
-        isHostActive: false
-      })
-      this.refreshHostFailSafe(userId)
+      const now = Date.now()
+      if (now - this.lastHostFailSafeRefresh > 1000) {
+        this.lastHostFailSafeRefresh = now
+        this.refreshHostFailSafe(userId)
+      }
 
       switch (op) {
         case RC_OP_MOVE: {

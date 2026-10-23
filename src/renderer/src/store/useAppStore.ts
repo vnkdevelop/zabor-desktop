@@ -102,6 +102,7 @@ interface AppState {
   isHostActive: boolean;
   isRemoteControlRevoked: boolean;
   activeRemoteControllerId: string | null;
+  isRemoteControlCursorHidden: boolean;
   isStreamRemoteControlAllowed: boolean;
   remoteStreamsAllowControl: Record<string, boolean>;
   setRemoteControlState: (state: Partial<{
@@ -109,6 +110,7 @@ interface AppState {
     isHostActive: boolean;
     isRevoked: boolean;
     activeControllerId: string | null;
+    isCursorHidden: boolean;
   }>) => void;
   setStreamRemoteControlAllowed: (userIdOrAllowed: string | boolean, allowed?: boolean) => void;
   noiseSuppression: boolean;
@@ -275,13 +277,15 @@ export const useAppStore = create<AppState>((set) => ({
   isHostActive: false,
   isRemoteControlRevoked: false,
   activeRemoteControllerId: null,
+  isRemoteControlCursorHidden: false,
   isStreamRemoteControlAllowed: false,
   remoteStreamsAllowControl: {},
   setRemoteControlState: (next) => set((state) => ({
     isRemoteControlling: next.isControlling !== undefined ? next.isControlling : state.isRemoteControlling,
     isHostActive: next.isHostActive !== undefined ? next.isHostActive : state.isHostActive,
     isRemoteControlRevoked: next.isRevoked !== undefined ? next.isRevoked : state.isRemoteControlRevoked,
-    activeRemoteControllerId: next.activeControllerId !== undefined ? next.activeControllerId : state.activeRemoteControllerId
+    activeRemoteControllerId: next.activeControllerId !== undefined ? next.activeControllerId : state.activeRemoteControllerId,
+    isRemoteControlCursorHidden: next.isControlling === false ? false : (next.isCursorHidden !== undefined ? next.isCursorHidden : state.isRemoteControlCursorHidden)
   })),
   setStreamRemoteControlAllowed: (userIdOrAllowed, allowed) => set((state) => {
     if (typeof userIdOrAllowed === 'boolean') {

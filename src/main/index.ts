@@ -221,6 +221,7 @@ async function readBundledAsset(relativePath: string): Promise<Uint8Array | null
 let mainWindow: BrowserWindow | null = null;
 let updaterWindow: BrowserWindow | null = null;
 let overlayPillWindow: BrowserWindow | null = null;
+let remoteControlSimulator: RemoteControlSimulatorManager | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let quitRequested = false;
@@ -261,6 +262,7 @@ function showPillOverlay(controllerName: string): void {
         event.preventDefault();
         if (url.startsWith('zabor-revoke:')) {
           hidePillOverlay();
+  remoteControlSimulator?.unclipCursor();
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('remote-control:panic-revoke');
           }
@@ -620,6 +622,14 @@ function createWindow(): void {
   mainWindow.on('unmaximize', () => {
     scheduleWindowStateSave();
     mainWindow?.webContents.send('window-unmaximized');
+  });
+
+  mainWindow.on('blur', () => {
+    remoteControlSimulator?.unclipCursor();
+  });
+
+  mainWindow.on('minimize', () => {
+    remoteControlSimulator?.unclipCursor();
   });
 
   mainWindow.on('close', (event) => {
@@ -1023,7 +1033,7 @@ app.whenReady().then(() => {
 
   createWindow();
   createTray();
-  const remoteControlSimulator = new RemoteControlSimulatorManager(() => mainWindow);
+  remoteControlSimulator = new RemoteControlSimulatorManager(() => mainWindow);
 
   ipcMain.handle('remote-control:start', () => {
     return remoteControlSimulator.start();
@@ -1031,18 +1041,30 @@ app.whenReady().then(() => {
 
   ipcMain.handle('remote-control:stop', () => {
     hidePillOverlay();
+  remoteControlSimulator?.unclipCursor();
     remoteControlSimulator.stop();
     return true;
   });
 
   ipcMain.handle('remote-control:reset', () => {
     hidePillOverlay();
+  remoteControlSimulator?.unclipCursor();
     remoteControlSimulator.reset();
     return true;
   });
 
   ipcMain.handle('remote-control:get-screen', () => {
-    return remoteControlSimulator.getScreenResolution();
+    return remoteControlSimulator?.getScreenResolution() || { width: 1920, height: 1080, x: 0, y: 0 };
+  });
+
+  ipcMain.handle('remote-control:clip-cursor', (_event, rect: { left: number; top: number; right: number; bottom: number }) => {
+    remoteControlSimulator?.clipCursor(rect);
+    return true;
+  });
+
+  ipcMain.handle('remote-control:unclip-cursor', () => {
+    remoteControlSimulator?.unclipCursor();
+    return true;
   });
 
   ipcMain.on('remote-control:show-pill', (_event, data: { controllerName: string; isControlling: boolean }) => {
@@ -1051,6 +1073,7 @@ app.whenReady().then(() => {
 
   ipcMain.on('remote-control:hide-pill', () => {
     hidePillOverlay();
+  remoteControlSimulator?.unclipCursor();
   });
 
   ipcMain.on('remote-control:move', (_event, absX: number, absY: number) => {
@@ -1087,6 +1110,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   hidePillOverlay();
+  remoteControlSimulator?.unclipCursor();
   stopStreamAudioCapture();
   disposeChatFileWriters();
   if (!isQuitting) {
