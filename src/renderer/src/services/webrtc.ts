@@ -4544,8 +4544,12 @@ export class WebRTCManager {
       this.hostIdleTimer = null
     }
 
+    const previousControllerId = this.activeRemoteViewerId
     this.isHostActive = false
     this.activeRemoteViewerId = null
+    if (previousControllerId && this.sfuPubActive) {
+      void this.setP2PScreenSenderActiveForPeer(previousControllerId, false)
+    }
     try {
       window.windowControls.remoteControlHidePill?.()
     } catch { }
@@ -4717,6 +4721,9 @@ export class WebRTCManager {
 
       if (op === RC_OP_START) {
         this.activeRemoteViewerId = userId
+        if (this.sfuPubActive) {
+          void this.setP2PScreenSenderActiveForPeer(userId, true)
+        }
         const ctrlName = this.resolveRemoteUserName(userId)
         useAppStore.getState().setRemoteControlState({
           activeControllerId: userId,
@@ -4736,6 +4743,9 @@ export class WebRTCManager {
 
       if (!this.activeRemoteViewerId) {
         this.activeRemoteViewerId = userId
+        if (this.sfuPubActive) {
+          void this.setP2PScreenSenderActiveForPeer(userId, true)
+        }
         const ctrlName = this.resolveRemoteUserName(userId)
         try {
           window.windowControls.remoteControlShowPill?.({
@@ -5351,14 +5361,14 @@ export class WebRTCManager {
   private attachRemoteVideo(userId: string, track: MediaStreamTrack, stream?: MediaStream, isSfu = false) {
     if (track.readyState === 'ended') return
     const videoStream = stream || new MediaStream([track])
-    const hasRemoteControl = this.rcDataChannels.has(userId) || this.allowRemoteControl
+    const isControlling = useAppStore.getState().isRemoteControlling
     if (!isSfu) {
       this.p2pStreamsBackup.set(userId, videoStream)
-      if (!hasRemoteControl && this.sfuSubConnections.has(userId) && useAppStore.getState().remoteVideoStreams[userId]) {
+      if (!isControlling && this.sfuSubConnections.has(userId) && useAppStore.getState().remoteVideoStreams[userId]) {
         return
       }
-    } else if (hasRemoteControl && this.p2pStreamsBackup.has(userId)) {
-      // Keep direct ultra-low latency P2P video stream when remote control is present
+    } else if (isControlling && this.p2pStreamsBackup.has(userId)) {
+      // Keep direct ultra-low latency P2P video stream when actively controlling
       return
     }
     const currentStream = useAppStore.getState().remoteVideoStreams[userId]
@@ -5895,7 +5905,8 @@ export class WebRTCManager {
         if (this.allowRemoteControl) {
           this.ensureRemoteControlChannel(pc, userId)
         }
-        const keepP2PActive = !this.sfuPubActive || this.sfuFallbackPeers.has(userId) || this.allowRemoteControl || this.rcDataChannels.has(userId)
+        const isController = this.allowRemoteControl && this.activeRemoteViewerId === userId
+        const keepP2PActive = !this.sfuPubActive || this.sfuFallbackPeers.has(userId) || isController
         if (videoTrack) {
           const videoTransceiver = pc.getTransceivers().find(t => t.receiver.track.kind === 'video' && !t.stopped)
           let sender: RTCRtpSender
@@ -6584,7 +6595,8 @@ export class WebRTCManager {
                 params.encodings[0].maxFramerate = (isHigh || isMedium) ? 60 : 30
                 params.encodings[0].networkPriority = 'high'
               }
-              if (this.sfuPubActive && !this.allowRemoteControl && !this.rcDataChannels.has(userId)) {
+              const isController = this.allowRemoteControl && this.activeRemoteViewerId === userId
+              if (this.sfuPubActive && !this.sfuFallbackPeers.has(userId) && !isController) {
                 params.encodings[0].active = false
               }
               sender.setParameters(params).catch(() => { })
@@ -6693,7 +6705,8 @@ export class WebRTCManager {
                   params.encodings[0].maxFramerate = (isHigh || isMedium) ? 60 : 30
                   params.encodings[0].networkPriority = 'high'
                 }
-                if (this.sfuPubActive && !this.allowRemoteControl && !this.rcDataChannels.has(senderId)) {
+                const isController = this.allowRemoteControl && this.activeRemoteViewerId === senderId
+                if (this.sfuPubActive && !this.sfuFallbackPeers.has(senderId) && !isController) {
                   params.encodings[0].active = false
                 }
                 sender.setParameters(params).catch(() => { })
@@ -7102,7 +7115,8 @@ export class WebRTCManager {
 
     for (const [peerId, pc] of this.peerConnections.entries()) {
       if (pc.connectionState === 'closed') continue
-      const targetActive = active || this.sfuFallbackPeers.has(peerId)
+      const isController = this.allowRemoteControl && this.activeRemoteViewerId === peerId
+      const targetActive = active || this.sfuFallbackPeers.has(peerId) || isController
       try {
         const transceivers = pc.getTransceivers()
         const videoTransceiver = transceivers.find(t => t.receiver.track.kind === 'video' && !t.stopped)
@@ -7137,6 +7151,36 @@ export class WebRTCManager {
         }
       } catch { }
     }
+  }
+
+  public async setP2PScreenSenderActiveForPeer(peerId: string, active: boolean) {
+    const pc = this.peerConnections.get(peerId)
+    if (!pc || pc.connectionState === 'closed') return
+    const localVideo = this.localVideoStream
+    if (!localVideo) return
+    const videoTrack = localVideo.getVideoTracks()[0] ?? null
+    try {
+      const transceivers = pc.getTransceivers()
+      const videoTransceiver = transceivers.find(t => t.receiver.track.kind === 'video' && !t.stopped)
+      if (videoTransceiver) {
+        const sender = videoTransceiver.sender
+        if (active && videoTrack && sender.track !== videoTrack) {
+          await sender.replaceTrack(videoTrack).catch(() => { })
+        }
+        const params = sender.getParameters()
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+        params.encodings[0].active = active
+        await sender.setParameters(params).catch(() => { })
+        if (active && this.currentStreamQuality !== 'camera') {
+          this.appliedVideoProfiles.delete(peerId)
+          await this.applyVideoProfile(peerId, pc)
+        }
+      }
+    } catch { }
+  }
+
+  public getP2PVideoStream(userId: string): MediaStream | null {
+    return this.p2pStreamsBackup.get(userId) || null
   }
 
   public async handleViewerSfuFallback(viewerId: string, epoch: number) {

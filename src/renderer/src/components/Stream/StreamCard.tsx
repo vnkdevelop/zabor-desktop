@@ -174,6 +174,10 @@ export const StreamCard = ({
         if (next) {
           webrtcService.ensureRemoteControlChannelForStreamer(user.id)
           setRemoteControlState({ isControlling: true, isHostActive: false })
+          const p2pStream = webrtcService.getP2PVideoStream(user.id)
+          if (p2pStream) {
+            useAppStore.getState().setRemoteVideoStream(user.id, p2pStream)
+          }
           webrtcService.sendViewerSignal(user.id, RC_OP_START)
         } else {
           webrtcService.sendViewerSignal(user.id, RC_OP_STOP)
