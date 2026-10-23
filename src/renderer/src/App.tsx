@@ -2347,6 +2347,7 @@ export default function App() {
     if (next) {
       webrtc.ensureRemoteControlChannelForStreamer(streamerId);
       store.setRemoteControlState({ isControlling: true, isHostActive: false });
+      void webrtc.switchViewerToP2PForRemoteControl(streamerId);
       webrtc.sendViewerSignal(streamerId, RC_OP_START);
     } else {
       webrtc.sendViewerSignal(streamerId, RC_OP_STOP);

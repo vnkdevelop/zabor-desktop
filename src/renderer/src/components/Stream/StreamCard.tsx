@@ -174,11 +174,7 @@ export const StreamCard = ({
         if (next) {
           webrtcService.ensureRemoteControlChannelForStreamer(user.id)
           setRemoteControlState({ isControlling: true, isHostActive: false })
-          const p2pStream = webrtcService.getP2PVideoStream(user.id)
-          const current = useAppStore.getState().remoteVideoStreams[user.id]
-          if (p2pStream && p2pStream !== current && (!current || current.getVideoTracks()[0]?.id !== p2pStream.getVideoTracks()[0]?.id)) {
-            useAppStore.getState().setRemoteVideoStream(user.id, p2pStream)
-          }
+          void webrtcService.switchViewerToP2PForRemoteControl(user.id)
           webrtcService.sendViewerSignal(user.id, RC_OP_START)
         } else {
           webrtcService.sendViewerSignal(user.id, RC_OP_STOP)
@@ -579,6 +575,9 @@ export const StreamCard = ({
     if ('playoutDelayHint' in video) {
       try { (video as any).playoutDelayHint = 0 } catch { }
     }
+    if ('latencyHint' in video) {
+      try { (video as any).latencyHint = 0 } catch { }
+    }
     if (!isLocal) {
       webrtcService.enforceVideoZeroPlayoutDelay(user.id)
     }
@@ -704,10 +703,14 @@ export const StreamCard = ({
           autoPlay
           playsInline
           muted
+          style={{ transform: 'translateZ(0)', willChange: 'transform' }}
           onLoadedMetadata={(e) => {
             const video = e.currentTarget
             if ('playoutDelayHint' in video) {
               try { (video as any).playoutDelayHint = 0 } catch { }
+            }
+            if ('latencyHint' in video) {
+              try { (video as any).latencyHint = 0 } catch { }
             }
             if (!isLocal) {
               webrtcService.enforceVideoZeroPlayoutDelay(user.id)

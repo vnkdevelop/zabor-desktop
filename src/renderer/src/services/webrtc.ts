@@ -370,7 +370,7 @@ type UltraJitterStatsMessage = {
   underruns?: number
 }
 
-function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false, ultraPtimeMs = 10): string {
+function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false, ultraPtimeMs = 10, isRemoteControl = false): string {
   let lines = sdp.split('\r\n')
 
   if (isRelayOnly) {
@@ -569,6 +569,9 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           if (!hasPlayoutDelayExt && playoutDelayExtId !== -1) {
             filteredLines.push(`a=extmap:${playoutDelayExtId} http://www.webrtc.org/experiments/rtp-hdrext/playout-delay`)
           }
+          if (isRemoteControl && !hasPlayoutDelayAttr) {
+            filteredLines.push('a=playout-delay:0,0')
+          }
           skipVideoTracks = true
           continue
         }
@@ -576,6 +579,14 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           skipVideoTracks = false
         }
         if (skipVideoTracks) {
+          if (lines[i].startsWith('a=playout-delay:')) {
+            if (isRemoteControl) {
+              filteredLines.push('a=playout-delay:0,0')
+            } else {
+              filteredLines.push(lines[i])
+            }
+            continue
+          }
           if (lines[i].startsWith('a=rtpmap:') || lines[i].startsWith('a=fmtp:') || lines[i].startsWith('a=rtcp-fb:')) {
             const ptMatch = lines[i].match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)/i)
             if (ptMatch && keptPayloads.has(ptMatch[1])) {
@@ -598,11 +609,22 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           if (!hasPlayoutDelayExt && playoutDelayExtId !== -1) {
             filteredLines.push(`a=extmap:${playoutDelayExtId} http://www.webrtc.org/experiments/rtp-hdrext/playout-delay`)
           }
+          if (isRemoteControl && !hasPlayoutDelayAttr) {
+            filteredLines.push('a=playout-delay:0,0')
+          }
           inVideoSection = true
           continue
         }
         if (inVideoSection && lines[i].startsWith('m=')) {
           inVideoSection = false
+        }
+        if (inVideoSection && lines[i].startsWith('a=playout-delay:')) {
+          if (isRemoteControl) {
+            filteredLines.push('a=playout-delay:0,0')
+          } else {
+            filteredLines.push(lines[i])
+          }
+          continue
         }
         filteredLines.push(lines[i])
       }
@@ -4707,9 +4729,7 @@ export class WebRTCManager {
 
       if (op === RC_OP_START) {
         this.activeRemoteViewerId = userId
-        if (this.sfuPubActive) {
-          void this.setP2PScreenSenderActiveForPeer(userId, true)
-        }
+        void this.setP2PScreenSenderActiveForPeer(userId, true)
         const ctrlName = this.resolveRemoteUserName(userId)
         useAppStore.getState().setRemoteControlState({
           activeControllerId: userId,
@@ -4722,6 +4742,7 @@ export class WebRTCManager {
           })
         } catch { }
         this.refreshHostFailSafe(userId)
+        this.sendRemoteControlSignal(userId, RC_OP_START)
         return
       }
 
@@ -4803,6 +4824,11 @@ export class WebRTCManager {
       }
     } else {
       switch (op) {
+        case RC_OP_START: {
+          void this.switchViewerToP2PForRemoteControl(userId)
+          this.enforceVideoZeroPlayoutDelay(userId)
+          break
+        }
         case RC_OP_BUSY: {
           useAppStore.getState().setRemoteControlState({
             isControlling: false,
@@ -6065,7 +6091,13 @@ export class WebRTCManager {
           if (needsIceRestart) this.pendingIceRestart.add(userId)
           return
         }
-        const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId))
+        const isRemoteControl = Boolean(
+          this.allowRemoteControl ||
+          this.rcDataChannels.has(userId) ||
+          useAppStore.getState().isRemoteControlling ||
+          this.activeRemoteViewerId === userId
+        )
+        const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId), isRemoteControl)
         await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
         const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
         this.offerEpoch.set(userId, offerEpoch)
@@ -6385,11 +6417,12 @@ export class WebRTCManager {
       const params = sender.getParameters()
       if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
       params.degradationPreference = 'maintain-framerate'
-      params.encodings[0].priority = 'medium'
+      const isController = Boolean(this.allowRemoteControl || this.activeRemoteViewerId === userId)
+      params.encodings[0].priority = isController ? 'high' : 'medium'
       params.encodings[0].networkPriority = 'high'
-      params.encodings[0].scaleResolutionDownBy = profile.scale
+      params.encodings[0].scaleResolutionDownBy = isController ? 1.0 : profile.scale
       params.encodings[0].maxBitrate = profile.bitrate
-      params.encodings[0].maxFramerate = profile.framerate
+      params.encodings[0].maxFramerate = isController ? 60 : profile.framerate
       await sender.setParameters(params)
       this.appliedVideoProfiles.set(userId, signature)
     } catch { }
@@ -6625,7 +6658,13 @@ export class WebRTCManager {
       this.isMakingOffer.set(userId, true)
       try {
         const offer = await pc.createOffer(SILENCE_SUPPRESSION_OFF)
-        const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId))
+        const isRemoteControl = Boolean(
+          this.allowRemoteControl ||
+          this.rcDataChannels.has(userId) ||
+          useAppStore.getState().isRemoteControlling ||
+          this.activeRemoteViewerId === userId
+        )
+        const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId), isRemoteControl)
         await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
         if (this.peerConnections.get(userId) !== pc || !this.isPeerRelevant(userId)) {
           this.disconnectFromPeer(userId)
@@ -6756,7 +6795,13 @@ export class WebRTCManager {
         const isOfferUltraLow = Boolean(offeredMinPtime && Number(offeredMinPtime[1]) <= 10)
         const effectiveUltraLow = this.ultraLowLatency || isOfferUltraLow
         const answerPtime = offeredMinPtime ? Math.max(ULTRA_FRAME_MS_FAST, Math.min(ULTRA_FRAME_MS_SAFE, Number(offeredMinPtime[1]))) : this.ultraPtimeFor(senderId)
-        const optimizedAnswerSDP = optimizeSDP(answer.sdp!, this.relayOnlyIce, effectiveUltraLow, answerPtime)
+        const isRemoteControl = Boolean(
+          this.allowRemoteControl ||
+          this.rcDataChannels.has(senderId) ||
+          useAppStore.getState().isRemoteControlling ||
+          this.activeRemoteViewerId === senderId
+        )
+        const optimizedAnswerSDP = optimizeSDP(answer.sdp!, this.relayOnlyIce, effectiveUltraLow, answerPtime, isRemoteControl)
         await pc.setLocalDescription({ type: 'answer', sdp: optimizedAnswerSDP })
         await this.drainPendingCandidates(senderId)
         if (this.peerConnections.get(senderId) !== pc || !this.isPeerRelevant(senderId)) {
@@ -7168,6 +7213,13 @@ export class WebRTCManager {
         const params = sender.getParameters()
         if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
         params.encodings[0].active = active
+        if (active) {
+          params.encodings[0].priority = 'high'
+          params.encodings[0].networkPriority = 'high'
+          params.encodings[0].maxFramerate = 60
+          params.encodings[0].scaleResolutionDownBy = 1.0
+          params.degradationPreference = 'maintain-framerate'
+        }
         await sender.setParameters(params).catch(() => { })
         if (active && this.currentStreamQuality !== 'camera') {
           this.appliedVideoProfiles.delete(peerId)
@@ -7545,7 +7597,8 @@ export class WebRTCManager {
     }
   }
 
-  private async switchViewerFromSfuToP2P(streamerId: string) {
+  public async switchViewerFromSfuToP2P(streamerId: string, immediate = false) {
+    const isControlling = immediate || useAppStore.getState().isRemoteControlling
     const p2pPc = this.peerConnections.get(streamerId)
     let p2pVideoStream = this.p2pStreamsBackup.get(streamerId)
     if ((!p2pVideoStream || p2pVideoStream.getVideoTracks().every(t => t.readyState === 'ended')) && p2pPc && p2pPc.connectionState !== 'closed') {
@@ -7553,10 +7606,11 @@ export class WebRTCManager {
       if (vRec?.track) {
         p2pVideoStream = new MediaStream([vRec.track])
         this.p2pStreamsBackup.set(streamerId, p2pVideoStream)
+        this.applyVideoZeroPlayoutDelay(vRec)
       }
     }
 
-    if (p2pVideoStream) {
+    if (p2pVideoStream && !isControlling) {
       await this.waitForFirstVideoFrame(p2pVideoStream, 450)
     }
 
@@ -7571,6 +7625,13 @@ export class WebRTCManager {
     } else {
       this.syncRemoteVideoStream(streamerId)
     }
+    if (isControlling) {
+      this.enforceVideoZeroPlayoutDelay(streamerId)
+    }
+  }
+
+  public async switchViewerToP2PForRemoteControl(streamerId: string): Promise<void> {
+    await this.switchViewerFromSfuToP2P(streamerId, true)
   }
 
   private closeSfuSubscriber(streamerId: string, notifyServer = false) {

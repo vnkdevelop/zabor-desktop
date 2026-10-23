@@ -147,6 +147,13 @@ if (app) {
   if (gpuFallbackTier === 0) {
     app.commandLine.appendSwitch('enable-gpu-rasterization');
     app.commandLine.appendSwitch('enable-zero-copy');
+    app.commandLine.appendSwitch('enable-accelerated-video-encode');
+    app.commandLine.appendSwitch('enable-accelerated-video-decode');
+    app.commandLine.appendSwitch('video-capture-use-gpu-memory-buffer');
+    app.commandLine.appendSwitch(
+      'enable-features',
+      'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer,AcceleratedVideoEncoder,DirectCompositionVideoOverlays'
+    );
   }
 
   if (gpuFallbackTier >= 1) {
