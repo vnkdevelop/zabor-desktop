@@ -405,9 +405,20 @@ export const StreamCard = ({
       clearTimeout(moveThrottleTimer.current)
       moveThrottleTimer.current = null
     }
-    if (pendingMove.current) {
-      webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
-      pendingMove.current = null
+    pendingMove.current = null
+    if (videoRef.current) {
+      const video = videoRef.current
+      const renderRect = getVideoRenderRect(video)
+      if (renderRect.width > 0 && renderRect.height > 0) {
+        const rect = video.getBoundingClientRect()
+        const clientX = e.clientX - rect.left - renderRect.left
+        const clientY = e.clientY - rect.top - renderRect.top
+        const xNorm = Math.max(0, Math.min(1, clientX / renderRect.width))
+        const yNorm = Math.max(0, Math.min(1, clientY / renderRect.height))
+        virtualPos.current = { x: xNorm, y: yNorm }
+        lastMoveTime.current = performance.now()
+        webrtcService.sendViewerMove(user.id, xNorm, yNorm)
+      }
     }
     webrtcService.sendViewerMouseButton(user.id, e.button, true)
   }
@@ -420,9 +431,20 @@ export const StreamCard = ({
       clearTimeout(moveThrottleTimer.current)
       moveThrottleTimer.current = null
     }
-    if (pendingMove.current) {
-      webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
-      pendingMove.current = null
+    pendingMove.current = null
+    if (videoRef.current && !isHostActive) {
+      const video = videoRef.current
+      const renderRect = getVideoRenderRect(video)
+      if (renderRect.width > 0 && renderRect.height > 0) {
+        const rect = video.getBoundingClientRect()
+        const clientX = e.clientX - rect.left - renderRect.left
+        const clientY = e.clientY - rect.top - renderRect.top
+        const xNorm = Math.max(0, Math.min(1, clientX / renderRect.width))
+        const yNorm = Math.max(0, Math.min(1, clientY / renderRect.height))
+        virtualPos.current = { x: xNorm, y: yNorm }
+        lastMoveTime.current = performance.now()
+        webrtcService.sendViewerMove(user.id, xNorm, yNorm)
+      }
     }
     webrtcService.sendViewerMouseButton(user.id, e.button, false)
   }

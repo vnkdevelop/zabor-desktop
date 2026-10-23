@@ -4512,6 +4512,14 @@ export class WebRTCManager {
     }
     this.rcDataChannels.set(userId, channel)
 
+    channel.onopen = () => {
+      if (useAppStore.getState().isRemoteControlling) {
+        try {
+          channel.send(RemoteControlProtocol.encodeSignal(RC_OP_START))
+        } catch { }
+      }
+    }
+
     channel.onclose = () => {
       if (this.rcDataChannels.get(userId) === channel) {
         this.rcDataChannels.delete(userId)
@@ -4658,7 +4666,7 @@ export class WebRTCManager {
       useAppStore.getState().setRemoteControlState({
         isHostActive: false
       })
-    }, 800)
+    }, 2000)
   }
 
   private resolveRemoteUserName(userId: string): string {
@@ -4734,6 +4742,9 @@ export class WebRTCManager {
 
       if (op === RC_OP_START) {
         this.activeRemoteViewerId = userId
+        if (this.allowRemoteControl) {
+          this.startHostRemoteControl()
+        }
         void this.setP2PScreenSenderActiveForPeer(userId, true)
         const ctrlName = this.resolveRemoteUserName(userId)
         useAppStore.getState().setRemoteControlState({
@@ -4926,10 +4937,20 @@ export class WebRTCManager {
 
   public sendViewerSignal(streamerId: string, opcode: number): void {
     const ch = this.rcDataChannels.get(streamerId)
-    if (ch && ch.readyState === 'open') {
-      try {
-        ch.send(RemoteControlProtocol.encodeSignal(opcode))
-      } catch { }
+    if (ch) {
+      if (ch.readyState === 'open') {
+        try {
+          ch.send(RemoteControlProtocol.encodeSignal(opcode))
+        } catch { }
+      } else if (ch.readyState === 'connecting') {
+        const sendOnOpen = () => {
+          ch.removeEventListener('open', sendOnOpen)
+          try {
+            ch.send(RemoteControlProtocol.encodeSignal(opcode))
+          } catch { }
+        }
+        ch.addEventListener('open', sendOnOpen)
+      }
     }
   }
 
@@ -5597,6 +5618,7 @@ export class WebRTCManager {
         this.attachRemoteControlChannel(userId, event.channel)
       }
     }
+    this.ensureRemoteControlChannel(pc, userId)
 
     pc.onicecandidate = (e) => {
       if (!e.candidate) return
@@ -5834,6 +5856,9 @@ export class WebRTCManager {
     includeAudio: boolean,
     allowRemoteControl = false
   ) {
+    if (this.localVideoStream) {
+      this.stopScreenShare()
+    }
     this.allowRemoteControl = allowRemoteControl
     if (allowRemoteControl) {
       this.startHostRemoteControl()
@@ -5843,9 +5868,6 @@ export class WebRTCManager {
     const savedPendingSfu = this.pendingSfuPublish ?? (this.sfuPubEpoch > 0 ? { epoch: this.sfuPubEpoch, nodeId: '' } : null)
     const wasSfuActive = this.sfuPubActive
     this.isStartingScreenShare = true
-    if (this.localVideoStream) {
-      this.stopScreenShare()
-    }
     this.viewerStates = savedViewerStates
     if (!this.pendingSfuPublish && savedPendingSfu) {
       this.pendingSfuPublish = savedPendingSfu
@@ -7624,9 +7646,9 @@ export class WebRTCManager {
       await this.waitForFirstVideoFrame(p2pVideoStream, 450)
     }
 
-    this.closeSfuSubscriber(streamerId, false)
-
-    if (p2pVideoStream && p2pVideoStream.getVideoTracks()[0]) {
+    const hasP2PVideo = Boolean(p2pVideoStream && p2pVideoStream.getVideoTracks().some(t => t.readyState !== 'ended'))
+    if (hasP2PVideo && p2pVideoStream) {
+      this.closeSfuSubscriber(streamerId, false)
       this.attachRemoteVideo(streamerId, p2pVideoStream.getVideoTracks()[0], p2pVideoStream, false)
     }
     const audioBackup = this.p2pAudioBackup.get(streamerId)

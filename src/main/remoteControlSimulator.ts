@@ -131,6 +131,9 @@ export class RemoteControlSimulatorManager {
   }
 
   public move(absX: number, absY: number): void {
+    if (!this.isRunning || !this.child) {
+      this.start();
+    }
     this.lastSimulatedX = Math.round(absX);
     this.lastSimulatedY = Math.round(absY);
     this.lastSimulatedTime = Date.now();
@@ -138,21 +141,33 @@ export class RemoteControlSimulatorManager {
   }
 
   public moveNormalized(xNorm: number, yNorm: number): void {
+    if (!this.isRunning || !this.child) {
+      this.start();
+    }
     const clampedX = Math.max(0, Math.min(1, xNorm));
     const clampedY = Math.max(0, Math.min(1, yNorm));
     this.safeWrite(`mn ${clampedX.toFixed(5)} ${clampedY.toFixed(5)}\n`);
   }
 
   public mouseButton(button: number, down: boolean): void {
+    if (!this.isRunning || !this.child) {
+      this.start();
+    }
     const cmd = down ? 'd' : 'u';
     this.safeWrite(`${cmd} ${button}\n`);
   }
 
   public mouseWheel(delta: number): void {
+    if (!this.isRunning || !this.child) {
+      this.start();
+    }
     this.safeWrite(`w ${Math.round(delta)}\n`);
   }
 
   public key(vk: number, down: boolean): void {
+    if (!this.isRunning || !this.child) {
+      this.start();
+    }
     const cmd = down ? 'kd' : 'ku';
     this.safeWrite(`${cmd} ${vk}\n`);
   }
@@ -205,11 +220,11 @@ export class RemoteControlSimulatorManager {
     if (this.child?.stdout) {
       this.child.stdout.on('data', (data: Buffer) => {
         const str = data.toString().trim();
-        if (str.includes('click')) {
+        if (str.includes('activity') || str.includes('click') || str.includes('move')) {
           const win = this.getWindow();
           if (win && !win.isDestroyed()) {
             win.webContents.send('remote-control:host-activity', {
-              type: 'click'
+              type: 'activity'
             });
           }
         }

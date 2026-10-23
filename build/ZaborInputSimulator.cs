@@ -180,8 +180,11 @@ namespace ZaborInputSimulator {
         private static IntPtr hookId = IntPtr.Zero;
         private static uint hookThreadId = 0;
         private static volatile bool hasRecentPhysicalClick = false;
-        private static long lastPhysicalClickTicks = 0;
+        private static long lastPhysicalActivityTicks = 0;
         private static long lastSimulatedClickTicks = 0;
+        private static int lastSimulatedX = -1;
+        private static int lastSimulatedY = -1;
+        private static long lastSimulatedMoveTicks = 0;
         private static readonly AutoResetEvent physicalClickSignal = new AutoResetEvent(false);
         private static int cachedScreenWidth = 0;
         private static int cachedScreenHeight = 0;
@@ -226,7 +229,35 @@ namespace ZaborInputSimulator {
             if (nCode >= 0) {
                 try {
                     int msg = wParam.ToInt32();
-                    if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN) {
+                    if (msg == WM_MOUSEMOVE) {
+                        MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+                        long now = Environment.TickCount;
+
+                        bool isInjected = ((hookStruct.flags & LLMHF_INJECTED) != 0) ||
+                                          ((hookStruct.flags & LLMHF_LOWER_IL_INJECTED) != 0) ||
+                                          (hookStruct.dwExtraInfo == SIMULATED_EXTRA_INFO);
+
+                        if (!isInjected) {
+                            int dx = hookStruct.pt.x - lastSimulatedX;
+                            int dy = hookStruct.pt.y - lastSimulatedY;
+                            double dist = Math.Sqrt(dx * dx + dy * dy);
+                            long timeSinceSim = Math.Abs(now - lastSimulatedMoveTicks);
+
+                            bool isOurPlacement = (dist <= 4 && timeSinceSim < 250);
+                            if (!isOurPlacement) {
+                                // Deliberate physical host mouse movement (threshold > 48px or idle > 350ms with movement)
+                                if (dist > 48 || (timeSinceSim >= 350 && dist > 10)) {
+                                    if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
+                                        lastPhysicalActivityTicks = now;
+                                        hasRecentPhysicalClick = true;
+                                        try {
+                                            physicalClickSignal.Set();
+                                        } catch {}
+                                    }
+                                }
+                            }
+                        }
+                    } else if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN) {
                         MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
 
                         long now = Environment.TickCount;
@@ -239,10 +270,9 @@ namespace ZaborInputSimulator {
                                           (hookStruct.dwExtraInfo == SIMULATED_EXTRA_INFO);
 
                         if (!isInjected) {
-                            if (now - lastPhysicalClickTicks > 100) {
-                                lastPhysicalClickTicks = now;
+                            if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
+                                lastPhysicalActivityTicks = now;
                                 hasRecentPhysicalClick = true;
-                                RestoreSystemCursors(true);
                                 try {
                                     physicalClickSignal.Set();
                                 } catch {}
@@ -325,12 +355,12 @@ namespace ZaborInputSimulator {
             }) { IsBackground = true };
             hookThread.Start();
 
-            // Background reporter for physical clicks to keep hook callback non-blocking
+            // Background reporter for physical activity to keep hook callback non-blocking
             var clickReporter = new Thread(() => {
                 while (true) {
                     try {
                         if (physicalClickSignal.WaitOne()) {
-                            Console.WriteLine("click");
+                            Console.WriteLine("activity");
                         }
                     } catch {
                         break;
@@ -383,11 +413,17 @@ namespace ZaborInputSimulator {
                             int h = cachedScreenHeight;
                             int x = (int)Math.Round(xn * (w - 1));
                             int y = (int)Math.Round(yn * (h - 1));
+                            lastSimulatedX = x;
+                            lastSimulatedY = y;
+                            lastSimulatedMoveTicks = Environment.TickCount;
                             SetCursorPos(x, y);
                         }
                     } else if (cmd == "m" && parts.Length >= 3) {
                         int x, y;
                         if (int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y)) {
+                            lastSimulatedX = x;
+                            lastSimulatedY = y;
+                            lastSimulatedMoveTicks = Environment.TickCount;
                             SetCursorPos(x, y);
                         }
                     } else if (cmd == "d" && parts.Length >= 2) {
