@@ -230,10 +230,10 @@ let streamAudioOwnerId: number | null = null;
 function showPillOverlay(controllerName: string): void {
   try {
     const primary = screen.getPrimaryDisplay();
-    const width = 280;
-    const height = 44;
+    const width = 160;
+    const height = 32;
     const x = Math.round(primary.bounds.x + (primary.bounds.width - width) / 2);
-    const y = primary.bounds.y + 12;
+    const y = primary.bounds.y + 10;
 
     if (!overlayPillWindow || overlayPillWindow.isDestroyed()) {
       overlayPillWindow = new BrowserWindow({
@@ -256,40 +256,24 @@ function showPillOverlay(controllerName: string): void {
       });
       overlayPillWindow.setAlwaysOnTop(true, 'screen-saver');
       overlayPillWindow.setVisibleOnAllWorkspaces(true);
+      overlayPillWindow.setIgnoreMouseEvents(true);
 
       overlayPillWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-      overlayPillWindow.webContents.on('will-navigate', (event, url) => {
-        event.preventDefault();
-        if (url.startsWith('zabor-revoke:')) {
-          hidePillOverlay();
-  remoteControlSimulator?.unclipCursor();
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('remote-control:panic-revoke');
-          }
-        }
-      });
     }
 
     const safeName = (controllerName || 'viewer').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:transparent;user-select:none;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
-.pill{display:flex;align-items:center;gap:8px;padding:6px 14px;background:rgba(22,22,24,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,0,127,0.8);border-top:1px solid rgba(255,0,127,1);box-shadow:0 0 16px rgba(255,0,127,0.35);border-radius:9999px;color:white;font-size:11px;font-weight:700;letter-spacing:0.02em;cursor:pointer;transition:transform 0.15s ease,background 0.15s ease;}
-.pill:hover{transform:scale(1.04);background:rgba(30,20,26,0.96);}
-.pill:active{transform:scale(0.96);}
-.dot{width:8px;height:8px;border-radius:50%;background:#FF007F;animation:pulse 1.5s infinite;}
-@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.4;transform:scale(0.85);}}
-.name{max-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:lowercase;}
-.revoke{color:#FF007F;font-size:10px;font-weight:800;margin-left:2px;text-transform:lowercase;}
+.pill{display:flex;align-items:center;gap:7px;padding:4px 12px;background:rgba(18,18,20,0.88);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.08);border-top:1px solid rgba(255,255,255,0.14);border-radius:9999px;color:rgba(255,255,255,0.9);font-size:11px;font-weight:600;letter-spacing:0.02em;pointer-events:none;}
+.dot{width:6px;height:6px;border-radius:50%;background:#ffffff;flex-shrink:0;}
+.name{max-width:115px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:lowercase;}
 </style></head><body>
-<div class="pill" id="pillBtn" title="кликните для отзыва управления">
+<div class="pill">
 <div class="dot"></div>
 <span class="name">${safeName}</span>
-<span class="revoke">✕ отозвать</span>
 </div>
-<script>
-document.getElementById('pillBtn').addEventListener('click',function(){window.location.href='zabor-revoke://action';});
-</script></body></html>`;
+</body></html>`;
 
     overlayPillWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
     overlayPillWindow.showInactive();
@@ -1077,7 +1061,11 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('remote-control:move', (_event, absX: number, absY: number) => {
-    remoteControlSimulator.move(absX, absY);
+    remoteControlSimulator?.move(absX, absY);
+  });
+
+  ipcMain.on('remote-control:move-normalized', (_event, xNorm: number, yNorm: number) => {
+    remoteControlSimulator?.moveNormalized(xNorm, yNorm);
   });
 
   ipcMain.on('remote-control:mouse-button', (_event, button: number, down: boolean) => {

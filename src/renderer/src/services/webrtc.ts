@@ -4748,23 +4748,9 @@ export class WebRTCManager {
           const xNorm = dv.getFloat32(1, true)
           const yNorm = dv.getFloat32(5, true)
           if (xNorm >= 0 && xNorm <= 1 && yNorm >= 0 && yNorm <= 1) {
-            if (this.cachedScreenResolution) {
-              const sc = this.cachedScreenResolution
-              const absX = sc.x + Math.round(xNorm * sc.width)
-              const absY = sc.y + Math.round(yNorm * sc.height)
-              try {
-                window.windowControls.remoteControlMove(absX, absY)
-              } catch { }
-            } else {
-              try {
-                window.windowControls.remoteControlGetScreen().then((sc) => {
-                  this.cachedScreenResolution = sc
-                  const absX = sc.x + Math.round(xNorm * sc.width)
-                  const absY = sc.y + Math.round(yNorm * sc.height)
-                  window.windowControls.remoteControlMove(absX, absY)
-                }).catch(() => { })
-              } catch { }
-            }
+            try {
+              window.windowControls.remoteControlMoveNormalized?.(xNorm, yNorm)
+            } catch { }
           }
           break
         }

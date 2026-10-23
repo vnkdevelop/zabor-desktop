@@ -353,9 +353,8 @@ export const StreamCard = ({
       const rect = video.getBoundingClientRect()
       const clientX = e.clientX - rect.left - renderRect.left
       const clientY = e.clientY - rect.top - renderRect.top
-      xNorm = clientX / renderRect.width
-      yNorm = clientY / renderRect.height
-      if (xNorm < 0 || xNorm > 1 || yNorm < 0 || yNorm > 1) return
+      xNorm = Math.max(0, Math.min(1, clientX / renderRect.width))
+      yNorm = Math.max(0, Math.min(1, clientY / renderRect.height))
       virtualPos.current = { x: xNorm, y: yNorm }
     }
 

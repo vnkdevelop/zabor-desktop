@@ -22,6 +22,9 @@ namespace ZaborInputSimulator {
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
 
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int nIndex);
+
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
 
@@ -71,6 +74,10 @@ namespace ZaborInputSimulator {
         // Win32 Hook Constants
         private const int WH_MOUSE_LL = 14;
 
+        private const int SM_CXSCREEN = 0;
+        private const int SM_CYSCREEN = 1;
+
+        private const int WM_MOUSEMOVE = 0x0200;
         private const int WM_LBUTTONDOWN = 0x0201;
         private const int WM_RBUTTONDOWN = 0x0204;
         private const int WM_MBUTTONDOWN = 0x0207;
@@ -163,6 +170,9 @@ namespace ZaborInputSimulator {
         private static uint hookThreadId = 0;
         private static volatile bool hasRecentPhysicalClick = false;
         private static long lastPhysicalClickTicks = 0;
+        private static int lastPhysicalX = -1;
+        private static int lastPhysicalY = -1;
+        private static long lastPhysicalMoveTicks = 0;
 
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
             if (nCode >= 0) {
@@ -187,6 +197,21 @@ namespace ZaborInputSimulator {
                                     // Stdout may be closed by host
                                 }
                             }
+                        } else if (msg == WM_MOUSEMOVE) {
+                            int dx = hookStruct.pt.x - lastPhysicalX;
+                            int dy = hookStruct.pt.y - lastPhysicalY;
+                            if (lastPhysicalX >= 0 && (dx * dx + dy * dy >= 14400)) {
+                                long now = Environment.TickCount;
+                                if (now - lastPhysicalMoveTicks > 400) {
+                                    lastPhysicalMoveTicks = now;
+                                    try {
+                                        Console.WriteLine("move");
+                                    } catch {
+                                    }
+                                }
+                            }
+                            lastPhysicalX = hookStruct.pt.x;
+                            lastPhysicalY = hookStruct.pt.y;
                         }
                     }
                 } catch {
@@ -279,10 +304,24 @@ namespace ZaborInputSimulator {
                     string[] parts = line.Split(' ');
                     string cmd = parts[0];
 
-                    if (cmd == "m" && parts.Length >= 3) {
+                    if (cmd == "mn" && parts.Length >= 3) {
+                        float xn, yn;
+                        if (float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out xn) &&
+                            float.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out yn)) {
+                            int w = GetSystemMetrics(SM_CXSCREEN);
+                            int h = GetSystemMetrics(SM_CYSCREEN);
+                            int x = (int)Math.Round(xn * (w - 1));
+                            int y = (int)Math.Round(yn * (h - 1));
+                            SetCursorPos(x, y);
+                            lastPhysicalX = x;
+                            lastPhysicalY = y;
+                        }
+                    } else if (cmd == "m" && parts.Length >= 3) {
                         int x, y;
                         if (int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y)) {
                             SetCursorPos(x, y);
+                            lastPhysicalX = x;
+                            lastPhysicalY = y;
                         }
                     } else if (cmd == "d" && parts.Length >= 2) {
                         int btn;

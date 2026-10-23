@@ -127,6 +127,12 @@ export class RemoteControlSimulatorManager {
     this.safeWrite(`m ${this.lastSimulatedX} ${this.lastSimulatedY}\n`);
   }
 
+  public moveNormalized(xNorm: number, yNorm: number): void {
+    const clampedX = Math.max(0, Math.min(1, xNorm));
+    const clampedY = Math.max(0, Math.min(1, yNorm));
+    this.safeWrite(`mn ${clampedX.toFixed(5)} ${clampedY.toFixed(5)}\n`);
+  }
+
   public mouseButton(button: number, down: boolean): void {
     const cmd = down ? 'd' : 'u';
     this.safeWrite(`${cmd} ${button}\n`);
@@ -186,41 +192,15 @@ export class RemoteControlSimulatorManager {
   }
 
   private startMonitoring(): void {
-    if (this.monitorTimer) clearInterval(this.monitorTimer);
-
-    this.monitorTimer = setInterval(() => {
-      if (!this.isRunning) return;
-
-      try {
-        const now = Date.now();
-        if (now - this.lastSimulatedTime < 300) {
-          return;
-        }
-
-        const cur = screen.getCursorScreenPoint();
-        if (this.lastSimulatedX >= 0 && this.lastSimulatedY >= 0) {
-          const dist = Math.hypot(cur.x - this.lastSimulatedX, cur.y - this.lastSimulatedY);
-          if (dist >= this.DISPLACEMENT_THRESHOLD) {
-            // Intentional physical movement by host detected!
-            this.lastSimulatedX = cur.x;
-            this.lastSimulatedY = cur.y;
-            const win = this.getWindow();
-            if (win && !win.isDestroyed()) {
-              win.webContents.send('remote-control:host-activity', { type: 'move', dist });
-            }
-          }
-        }
-      } catch {}
-    }, 40);
-
-    // Listen to simulator stdout for physical click notification
     if (this.child?.stdout) {
       this.child.stdout.on('data', (data: Buffer) => {
         const str = data.toString().trim();
-        if (str.includes('click') || str.includes('1')) {
+        if (str.includes('click') || str.includes('move')) {
           const win = this.getWindow();
           if (win && !win.isDestroyed()) {
-            win.webContents.send('remote-control:host-activity', { type: 'click' });
+            win.webContents.send('remote-control:host-activity', {
+              type: str.includes('click') ? 'click' : 'move'
+            });
           }
         }
       });

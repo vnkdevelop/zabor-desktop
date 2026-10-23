@@ -123,6 +123,8 @@ const windowControls = {
   remoteControlUnclipCursor: (): Promise<boolean> =>
     ipcRenderer.invoke('remote-control:unclip-cursor'),
   remoteControlMove: (absX: number, absY: number) => ipcRenderer.send('remote-control:move', absX, absY),
+  remoteControlMoveNormalized: (xNorm: number, yNorm: number) =>
+    ipcRenderer.send('remote-control:move-normalized', xNorm, yNorm),
   remoteControlMouseButton: (button: number, down: boolean) =>
     ipcRenderer.send('remote-control:mouse-button', button, down),
   remoteControlMouseWheel: (delta: number) => ipcRenderer.send('remote-control:mouse-wheel', delta),
