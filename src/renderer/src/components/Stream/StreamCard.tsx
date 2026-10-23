@@ -304,12 +304,13 @@ export const StreamCard = ({
   }, [isFullscreen, isLocal, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState, isCursorHidden, t])
 
   useEffect(() => {
-    if (!isFullscreen || isLocal || !isRemoteControlling) return
+    if (isLocal || !isRemoteControlling) return
     const timer = setInterval(() => {
       webrtcService.sendViewerSignal(user.id, RC_OP_PING)
-    }, 1500)
+      webrtcService.enforceVideoZeroPlayoutDelay(user.id)
+    }, 1000)
     return () => clearInterval(timer)
-  }, [isFullscreen, isLocal, isRemoteControlling, user.id])
+  }, [isLocal, isRemoteControlling, user.id])
 
   useEffect(() => {
     return () => {

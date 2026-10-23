@@ -170,6 +170,7 @@ namespace ZaborInputSimulator {
         private static uint hookThreadId = 0;
         private static volatile bool hasRecentPhysicalClick = false;
         private static long lastPhysicalClickTicks = 0;
+        private static long lastSimulatedClickTicks = 0;
         private static readonly AutoResetEvent physicalClickSignal = new AutoResetEvent(false);
         private static int cachedScreenWidth = 0;
         private static int cachedScreenHeight = 0;
@@ -191,13 +192,16 @@ namespace ZaborInputSimulator {
                     if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN) {
                         MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
 
+                        long now = Environment.TickCount;
+                        bool isRecentSimulated = Math.Abs(now - lastSimulatedClickTicks) < 150;
+
                         // Filter out ALL injected/simulated inputs
-                        bool isInjected = ((hookStruct.flags & LLMHF_INJECTED) != 0) ||
+                        bool isInjected = isRecentSimulated ||
+                                          ((hookStruct.flags & LLMHF_INJECTED) != 0) ||
                                           ((hookStruct.flags & LLMHF_LOWER_IL_INJECTED) != 0) ||
                                           (hookStruct.dwExtraInfo == SIMULATED_EXTRA_INFO);
 
                         if (!isInjected) {
-                            long now = Environment.TickCount;
                             if (now - lastPhysicalClickTicks > 100) {
                                 lastPhysicalClickTicks = now;
                                 hasRecentPhysicalClick = true;
@@ -398,6 +402,8 @@ namespace ZaborInputSimulator {
             }
 
             if (flag == 0) return;
+
+            lastSimulatedClickTicks = Environment.TickCount;
 
             var input = new INPUT {
                 type = INPUT_MOUSE,

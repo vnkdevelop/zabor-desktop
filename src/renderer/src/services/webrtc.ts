@@ -572,6 +572,7 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           if (!hasPlayoutDelayAttr) {
             filteredLines.push('a=playout-delay:0,0')
           }
+          filteredLines.push('b=AS:6000')
           skipVideoTracks = true
           continue
         }
@@ -584,7 +585,15 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           } else if (lines[i].startsWith('a=rtpmap:') || lines[i].startsWith('a=fmtp:') || lines[i].startsWith('a=rtcp-fb:')) {
             const ptMatch = lines[i].match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)/i)
             if (ptMatch && keptPayloads.has(ptMatch[1])) {
-              filteredLines.push(lines[i])
+              if (lines[i].startsWith('a=fmtp:')) {
+                let fmtpLine = lines[i]
+                if (!fmtpLine.includes('x-google-min-bitrate')) {
+                  fmtpLine += ';x-google-min-bitrate=2500;x-google-start-bitrate=3500;x-google-max-bitrate=6000'
+                }
+                filteredLines.push(fmtpLine)
+              } else {
+                filteredLines.push(lines[i])
+              }
             }
           } else {
             filteredLines.push(lines[i])
@@ -606,6 +615,7 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           if (!hasPlayoutDelayAttr) {
             filteredLines.push('a=playout-delay:0,0')
           }
+          filteredLines.push('b=AS:6000')
           inVideoSection = true
           continue
         }
@@ -4501,8 +4511,11 @@ export class WebRTCManager {
       this.handleRemoteControlDisconnect(userId)
     }
 
-    channel.onerror = () => {
-      this.handleRemoteControlDisconnect(userId)
+    channel.onerror = (e) => {
+      console.warn('[WebRTC] Remote control channel error for', userId, e)
+      if (channel.readyState === 'closed') {
+        this.handleRemoteControlDisconnect(userId)
+      }
     }
 
     channel.onmessage = (event: MessageEvent) => {
@@ -4628,7 +4641,7 @@ export class WebRTCManager {
       useAppStore.getState().setRemoteControlState({
         isHostActive: false
       })
-    }, 1000)
+    }, 800)
   }
 
   private resolveRemoteUserName(userId: string): string {
@@ -4737,7 +4750,7 @@ export class WebRTCManager {
       }
 
       const now = Date.now()
-      if (now - this.lastHostFailSafeRefresh > 1000) {
+      if (now - this.lastHostFailSafeRefresh > 500) {
         this.lastHostFailSafeRefresh = now
         this.refreshHostFailSafe(userId)
       }
@@ -4837,7 +4850,7 @@ export class WebRTCManager {
       if (this.activeRemoteViewerId === userId) {
         this.resetControlState()
       }
-    }, 3500)
+    }, 15000)
   }
 
   public sendViewerMove(streamerId: string, xNorm: number, yNorm: number): void {
@@ -5338,11 +5351,15 @@ export class WebRTCManager {
   private attachRemoteVideo(userId: string, track: MediaStreamTrack, stream?: MediaStream, isSfu = false) {
     if (track.readyState === 'ended') return
     const videoStream = stream || new MediaStream([track])
+    const hasRemoteControl = this.rcDataChannels.has(userId) || this.allowRemoteControl
     if (!isSfu) {
       this.p2pStreamsBackup.set(userId, videoStream)
-      if (this.sfuSubConnections.has(userId) && useAppStore.getState().remoteVideoStreams[userId]) {
+      if (!hasRemoteControl && this.sfuSubConnections.has(userId) && useAppStore.getState().remoteVideoStreams[userId]) {
         return
       }
+    } else if (hasRemoteControl && this.p2pStreamsBackup.has(userId)) {
+      // Keep direct ultra-low latency P2P video stream when remote control is present
+      return
     }
     const currentStream = useAppStore.getState().remoteVideoStreams[userId]
     if (currentStream && currentStream.getVideoTracks().includes(track)) return
@@ -5878,7 +5895,7 @@ export class WebRTCManager {
         if (this.allowRemoteControl) {
           this.ensureRemoteControlChannel(pc, userId)
         }
-        const keepP2PActive = !this.sfuPubActive || this.sfuFallbackPeers.has(userId)
+        const keepP2PActive = !this.sfuPubActive || this.sfuFallbackPeers.has(userId) || this.allowRemoteControl || this.rcDataChannels.has(userId)
         if (videoTrack) {
           const videoTransceiver = pc.getTransceivers().find(t => t.receiver.track.kind === 'video' && !t.stopped)
           let sender: RTCRtpSender
@@ -6567,7 +6584,7 @@ export class WebRTCManager {
                 params.encodings[0].maxFramerate = (isHigh || isMedium) ? 60 : 30
                 params.encodings[0].networkPriority = 'high'
               }
-              if (this.sfuPubActive) {
+              if (this.sfuPubActive && !this.allowRemoteControl && !this.rcDataChannels.has(userId)) {
                 params.encodings[0].active = false
               }
               sender.setParameters(params).catch(() => { })
@@ -6676,7 +6693,7 @@ export class WebRTCManager {
                   params.encodings[0].maxFramerate = (isHigh || isMedium) ? 60 : 30
                   params.encodings[0].networkPriority = 'high'
                 }
-                if (this.sfuPubActive) {
+                if (this.sfuPubActive && !this.allowRemoteControl && !this.rcDataChannels.has(senderId)) {
                   params.encodings[0].active = false
                 }
                 sender.setParameters(params).catch(() => { })
