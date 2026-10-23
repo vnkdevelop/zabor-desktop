@@ -4753,7 +4753,12 @@ export class WebRTCManager {
           window.windowControls.remoteControlHideHostCursor?.()
         } catch { }
         this.refreshHostFailSafe(userId)
-        this.sendRemoteControlSignal(userId, RC_OP_START)
+        const ch = this.rcDataChannels.get(userId)
+        if (ch && ch.readyState === 'open') {
+          try {
+            ch.send(RemoteControlProtocol.encodeSignal(RC_OP_START))
+          } catch { }
+        }
         return
       }
 
