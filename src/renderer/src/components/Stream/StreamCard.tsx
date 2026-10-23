@@ -215,7 +215,7 @@ export const StreamCard = ({
           e.stopImmediatePropagation?.()
           const nextClipped = !isCursorClipped
           setIsCursorClipped(nextClipped)
-          setRemoteControlState({ isCursorHidden: !nextClipped })
+          setRemoteControlState({ isCursorHidden: false })
           if (nextClipped) {
             clipCursorToVideo()
           } else {
@@ -401,10 +401,6 @@ export const StreamCard = ({
     if (!isRemoteControlling || isHostActive) return
     e.preventDefault()
     e.stopPropagation()
-    if (isFullscreen && !isCursorClipped) {
-      setIsCursorClipped(true)
-      clipCursorToVideo()
-    }
     if (moveThrottleTimer.current) {
       clearTimeout(moveThrottleTimer.current)
       moveThrottleTimer.current = null
@@ -737,6 +733,13 @@ export const StreamCard = ({
           onMouseUp={isFullscreen && isRemoteControlling ? handleMouseUp : undefined}
           onWheel={isFullscreen && isRemoteControlling ? handleWheel : undefined}
           onContextMenu={isFullscreen && isRemoteControlling ? handleVideoContextMenu : undefined}
+          onMouseLeave={isFullscreen && isRemoteControlling ? () => {
+            if (moveThrottleTimer.current) {
+              clearTimeout(moveThrottleTimer.current)
+              moveThrottleTimer.current = null
+            }
+            pendingMove.current = null
+          } : undefined}
           className={`w-full h-full object-contain ${
             isRemoteControlling && !isHostActive ? 'cursor-default select-none' : ''
           }`}

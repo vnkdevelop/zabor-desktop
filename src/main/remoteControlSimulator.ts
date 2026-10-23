@@ -108,10 +108,7 @@ export class RemoteControlSimulatorManager {
   }
 
   public hideHostCursor(): void {
-    if (!this.isRunning) {
-      this.start();
-    }
-    this.safeWrite('hide_cursor\n');
+    // Keep host cursor fully visible on physical host machine
   }
 
   public showHostCursor(): void {

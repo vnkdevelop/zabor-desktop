@@ -203,41 +203,13 @@ namespace ZaborInputSimulator {
         private const uint OCR_HAND = 32649;
         private const uint OCR_APPSTARTING = 32650;
 
-        private static readonly uint[] SYSTEM_CURSOR_IDS = new uint[] {
-            OCR_NORMAL, OCR_IBEAM, OCR_WAIT, OCR_CROSS, OCR_UP,
-            OCR_SIZENWSE, OCR_SIZENESW, OCR_SIZEWE, OCR_SIZENS, OCR_SIZEALL,
-            OCR_NO, OCR_HAND, OCR_APPSTARTING
-        };
-
-        private static bool isCursorHidden = false;
-
-        private static IntPtr CreateBlankCursor() {
-            byte[] andPlane = new byte[128];
-            for (int i = 0; i < andPlane.Length; i++) {
-                andPlane[i] = 0xFF;
-            }
-            byte[] xorPlane = new byte[128];
-            return CreateCursor(IntPtr.Zero, 0, 0, 32, 32, andPlane, xorPlane);
-        }
-
         private static void HideSystemCursor() {
-            if (isCursorHidden) return;
-            try {
-                foreach (uint id in SYSTEM_CURSOR_IDS) {
-                    IntPtr hBlank = CreateBlankCursor();
-                    if (hBlank != IntPtr.Zero) {
-                        SetSystemCursor(hBlank, id);
-                    }
-                }
-                isCursorHidden = true;
-            } catch {}
+            // Keep host cursor fully visible on the physical host machine at all times
         }
 
         private static void RestoreSystemCursors(bool force = false) {
-            if (!isCursorHidden && !force) return;
             try {
                 SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
-                isCursorHidden = false;
             } catch {}
         }
 
@@ -290,6 +262,10 @@ namespace ZaborInputSimulator {
             } catch {}
 
             try {
+                RestoreSystemCursors(true);
+            } catch {}
+
+            try {
                 AppDomain.CurrentDomain.ProcessExit += (s, e) => {
                     RestoreSystemCursors(true);
                 };
@@ -297,6 +273,7 @@ namespace ZaborInputSimulator {
 
             if (args != null && args.Length > 0 && args[0] == "unclip") {
                 ClipCursor(IntPtr.Zero);
+                RestoreSystemCursors(true);
                 return;
             }
 

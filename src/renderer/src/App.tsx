@@ -3213,8 +3213,6 @@ export default function App() {
                     const expTop = expMarginTop + (expMaxH - expH) / 2;
                     const expLeft = (windowSize.width - expW) / 2;
 
-                    const isControlling = Boolean(store.isRemoteControlling);
-                    const isLockedToRemote = isControlling && store.isRemoteControlCursorHidden;
                     const overlaysActive = showOverlays;
 
                     const currentW = overlaysActive ? normalW : expW;
@@ -3223,7 +3221,7 @@ export default function App() {
                     const currentLeft = overlaysActive ? normalLeft : expLeft;
 
                     return (
-                      <div className={`fixed inset-0 bg-black z-[9999] ${isLockedToRemote ? 'cursor-none' : ''}`}>
+                      <div className="fixed inset-0 bg-black z-[9999] cursor-default">
                         <div
                           style={{
                             position: 'absolute',
@@ -3507,8 +3505,6 @@ export default function App() {
                     const expTop = expMarginTop + (expMaxH - expH) / 2;
                     const expLeft = (windowSize.width - expW) / 2;
 
-                    const isControlling = Boolean(store.isRemoteControlling);
-                    const isLockedToRemote = isControlling && store.isRemoteControlCursorHidden;
                     const overlaysActive = showOverlays;
 
                     const currentW = overlaysActive ? normalW : expW;
@@ -3517,7 +3513,7 @@ export default function App() {
                     const currentLeft = overlaysActive ? normalLeft : expLeft;
 
                     return (
-                      <div className={`fixed inset-0 bg-black z-[9999] ${isLockedToRemote ? 'cursor-none' : ''}`}>
+                      <div className="fixed inset-0 bg-black z-[9999] cursor-default">
                         <div
                           style={{
                             position: 'absolute',

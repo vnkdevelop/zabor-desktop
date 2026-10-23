@@ -4648,11 +4648,6 @@ export class WebRTCManager {
     if (this.hostIdleTimer) clearTimeout(this.hostIdleTimer)
     this.hostIdleTimer = setTimeout(() => {
       this.isHostActive = false
-      if (this.activeRemoteViewerId) {
-        try {
-          window.windowControls.remoteControlHideHostCursor?.()
-        } catch { }
-      }
       for (const ch of this.rcDataChannels.values()) {
         if (ch.readyState === 'open') {
           try {
@@ -4750,7 +4745,6 @@ export class WebRTCManager {
             controllerName: ctrlName,
             isControlling: true
           })
-          window.windowControls.remoteControlHideHostCursor?.()
         } catch { }
         this.refreshHostFailSafe(userId)
         const ch = this.rcDataChannels.get(userId)
@@ -4775,7 +4769,6 @@ export class WebRTCManager {
             controllerName: ctrlName,
             isControlling: true
           })
-          window.windowControls.remoteControlHideHostCursor?.()
         } catch { }
         useAppStore.getState().setRemoteControlState({
           activeControllerId: userId,
