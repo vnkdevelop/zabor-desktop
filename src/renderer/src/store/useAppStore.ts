@@ -28,9 +28,11 @@ export interface User {
   friendRequestsReceived?: string[];
   FriendRequestsReceived?: string[];
   isStreaming?: boolean;
-  streamQuality?: string;
+  streamQuality?: StreamQuality | string;
   allowRemoteControl?: boolean;
 }
+
+export type StreamQuality = 'low' | 'medium' | 'high' | 'camera';
 
 export interface VoiceChannel {
   id: string;

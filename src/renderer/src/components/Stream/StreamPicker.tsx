@@ -13,7 +13,7 @@ interface Source {
 
 interface StreamPickerProps {
   onClose: () => void
-  onSelect: (sourceId: string, quality: 'low' | 'high' | 'camera', includeAudio: boolean, allowRemoteControl: boolean) => void
+  onSelect: (sourceId: string, quality: 'low' | 'medium' | 'high' | 'camera', includeAudio: boolean, allowRemoteControl: boolean) => void
 }
 
 const cleanName = (srcName: string, index: number, isScreen: boolean, screenLabel: string) => {
@@ -45,22 +45,10 @@ const PairSettings = ({
   onSetQuality: (next: 'low' | 'high') => void
 }) => {
   const { t } = useTranslation()
-  const indicatorRef = useRef<HTMLDivElement>(null)
   const { mounted, ref } = usePresence(show, {
     onEnter: (el) => play(el, { opacity: [0, 1], translateY: [6, 0], duration: DUR.base, ease: EASE }),
     onExit: (el) => play(el, { opacity: [1, 0], translateY: [0, 6], duration: 160, ease: EASE })
   })
-
-  useLayoutEffect(() => {
-    const el = indicatorRef.current
-    if (!el) return
-    const to = quality === 'low' ? '0%' : '100%'
-    if (prefersReducedMotion()) {
-      utils.set(el, { translateX: to })
-      return
-    }
-    animate(el, { translateX: to, ease: spring({ stiffness: 300, damping: 22 }) })
-  }, [quality, mounted])
 
   if (!mounted) return null
 
@@ -101,28 +89,52 @@ const PairSettings = ({
           <span className="text-xs font-bold text-textMuted tracking-[0.14em]">
             {t('stream.quality', 'качество')}
           </span>
-          <div className="flex items-center bg-white/[0.06] border border-[#303035]/70 rounded-full p-1 relative shrink-0 w-28 h-8">
-            <button
-              type="button"
-              onClick={() => onSetQuality('low')}
-              className={`flex-1 flex items-center justify-center h-full rounded-full text-xs font-bold z-10 transition-all duration-200 ${quality === 'low' ? 'text-white' : 'text-textMuted hover:text-white'
-                }`}
-            >
-              {t('stream.qualityLow', 'low')}
-            </button>
-            <button
-              type="button"
-              onClick={() => onSetQuality('high')}
-              className={`flex-1 flex items-center justify-center h-full rounded-full text-xs font-bold z-10 transition-all duration-200 ${quality === 'high' ? 'text-white' : 'text-textMuted hover:text-white'
-                }`}
-            >
-              {t('stream.qualityHigh', 'high')}
-            </button>
+          <div className="flex items-center bg-white/[0.06] border border-[#303035]/70 rounded-full p-1 relative shrink-0 w-28 h-8 overflow-hidden select-none">
             <div
-              ref={indicatorRef}
-              style={{ willChange: 'transform' }}
-              className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] bg-primaryHover rounded-full"
+              style={{ willChange: 'left, width' }}
+              className={`absolute top-1 bottom-1 bg-primaryHover rounded-full transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none ${
+                allowRemoteControl
+                  ? 'left-1 w-[calc(100%-8px)]'
+                  : quality === 'low'
+                  ? 'left-1 w-[calc(50%-4px)]'
+                  : 'left-[calc(50%+2px)] w-[calc(50%-4px)]'
+              }`}
             />
+            <div
+              className={`absolute inset-1 flex items-center z-10 transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+                allowRemoteControl ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => onSetQuality('low')}
+                tabIndex={allowRemoteControl ? -1 : 0}
+                className={`flex-1 flex items-center justify-center h-full rounded-full text-xs font-bold transition-colors duration-200 ${
+                  quality === 'low' ? 'text-white' : 'text-textMuted hover:text-white'
+                }`}
+              >
+                {t('stream.qualityLow', 'low')}
+              </button>
+              <button
+                type="button"
+                onClick={() => onSetQuality('high')}
+                tabIndex={allowRemoteControl ? -1 : 0}
+                className={`flex-1 flex items-center justify-center h-full rounded-full text-xs font-bold transition-colors duration-200 ${
+                  quality === 'high' ? 'text-white' : 'text-textMuted hover:text-white'
+                }`}
+              >
+                {t('stream.qualityHigh', 'high')}
+              </button>
+            </div>
+            <div
+              className={`absolute inset-1 flex items-center justify-center z-10 transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] pointer-events-none ${
+                allowRemoteControl ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+              }`}
+            >
+              <span className="text-white text-xs font-bold tracking-wide select-none">
+                {t('stream.qualityMedium', 'medium')}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -135,10 +147,12 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
   const [sources, setSources] = useState<Source[]>([])
   const [activeTab, setActiveTab] = useState<'screen' | 'window' | 'camera'>('screen')
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
-  const [quality, setQuality] = useState<'low' | 'high'>('low')
+  const [manualQuality, setManualQuality] = useState<'low' | 'high'>('low')
   const [includeAudio, setIncludeAudio] = useState(true)
   const [allowRemoteControl, setAllowRemoteControl] = useState(false)
   const [loading, setLoading] = useState(true)
+
+  const effectiveQuality: 'low' | 'medium' | 'high' = allowRemoteControl ? 'medium' : manualQuality
 
   useEffect(() => {
     setSelectedSourceId(null)
@@ -232,7 +246,10 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
   }, [sources])
 
   const getQualityDetailsText = () => {
-    if (quality === 'high') {
+    if (allowRemoteControl || effectiveQuality === 'medium') {
+      return t('stream.detailsMedium', '1280x720 60fps (~3.0 Мбит/с)')
+    }
+    if (effectiveQuality === 'high') {
       return t('stream.detailsHigh', '1920x1080 60fps (~6 Мбит/с)')
     }
     return t('stream.detailsLow', '1280x720 30fps (~2.5 Мбит/с)')
@@ -368,8 +385,8 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
                     onToggleAudio={setIncludeAudio}
                     allowRemoteControl={allowRemoteControl}
                     onToggleRemoteControl={setAllowRemoteControl}
-                    quality={quality}
-                    onSetQuality={setQuality}
+                    quality={manualQuality}
+                    onSetQuality={setManualQuality}
                   />
                 </div>
               )
@@ -392,7 +409,7 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
               const isCam = selectedSourceId.startsWith('camera:')
               onSelect(
                 selectedSourceId,
-                isCam ? 'camera' : quality,
+                isCam ? 'camera' : effectiveQuality,
                 isCam ? false : includeAudio,
                 isCam ? false : allowRemoteControl
               )

@@ -11,8 +11,33 @@ namespace ZaborInputSimulator {
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint nInputs, [In] INPUT[] pInputs, int cbSize);
 
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern IntPtr GetModuleHandle(string lpModuleName);
+
         [DllImport("user32.dll")]
-        private static extern short GetAsyncKeyState(int vKey);
+        private static extern sbyte GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+        [DllImport("user32.dll")]
+        private static extern bool TranslateMessage([In] ref MSG lpMsg);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr DispatchMessage([In] ref MSG lpMsg);
+
+        [DllImport("user32.dll")]
+        private static extern bool PostThreadMessage(uint idThread, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
 
         private const uint INPUT_MOUSE = 0;
         private const uint INPUT_KEYBOARD = 1;
@@ -31,6 +56,49 @@ namespace ZaborInputSimulator {
         private const ushort VK_SHIFT = 0x10;
         private const ushort VK_CONTROL = 0x11;
         private const ushort VK_MENU = 0x12; // Alt
+
+        // Win32 Hook Constants
+        private const int WH_MOUSE_LL = 14;
+
+        private const int WM_LBUTTONDOWN = 0x0201;
+        private const int WM_RBUTTONDOWN = 0x0204;
+        private const int WM_MBUTTONDOWN = 0x0207;
+        private const int WM_XBUTTONDOWN = 0x020B;
+
+        private const uint LLMHF_INJECTED = 0x00000001;
+        private const uint LLMHF_LOWER_IL_INJECTED = 0x00000002;
+
+        private const uint WM_QUIT = 0x0012;
+
+        // Custom signature tag for all inputs injected by Zabor
+        private static readonly IntPtr SIMULATED_EXTRA_INFO = new IntPtr(0x5A41424F); // 'ZABO'
+
+        private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT {
+            public int x;
+            public int y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MSLLHOOKSTRUCT {
+            public POINT pt;
+            public uint mouseData;
+            public uint flags;
+            public uint time;
+            public IntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MSG {
+            public IntPtr hwnd;
+            public uint message;
+            public IntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public POINT pt;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct INPUT {
@@ -70,6 +138,45 @@ namespace ZaborInputSimulator {
         private static bool isMiddleDown = false;
         private static readonly bool[] pressedKeys = new bool[256];
 
+        // Static references to prevent GC collection of unmanaged callback
+        private static LowLevelMouseProc mouseHookDelegate;
+        private static IntPtr hookId = IntPtr.Zero;
+        private static uint hookThreadId = 0;
+        private static volatile bool hasRecentPhysicalClick = false;
+        private static long lastPhysicalClickTicks = 0;
+
+        private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
+            if (nCode >= 0) {
+                try {
+                    MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+
+                    // Filter out ALL injected/simulated inputs
+                    bool isInjected = ((hookStruct.flags & LLMHF_INJECTED) != 0) ||
+                                      ((hookStruct.flags & LLMHF_LOWER_IL_INJECTED) != 0) ||
+                                      (hookStruct.dwExtraInfo == SIMULATED_EXTRA_INFO);
+
+                    if (!isInjected) {
+                        int msg = wParam.ToInt32();
+                        if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN) {
+                            long now = Environment.TickCount;
+                            if (now - lastPhysicalClickTicks > 50) {
+                                lastPhysicalClickTicks = now;
+                                hasRecentPhysicalClick = true;
+                                try {
+                                    Console.WriteLine("click");
+                                } catch {
+                                    // Stdout may be closed by host
+                                }
+                            }
+                        }
+                    }
+                } catch {
+                    // Suppress any callback exceptions to maintain hook stability
+                }
+            }
+            return CallNextHookEx(hookId, nCode, wParam, lParam);
+        }
+
         public static void Main(string[] args) {
             int parentPid = 0;
             if (args != null && args.Length > 0) {
@@ -82,6 +189,7 @@ namespace ZaborInputSimulator {
                     try {
                         var parent = Process.GetProcessById(parentPid);
                         parent.WaitForExit();
+                        CleanupHook();
                         ResetAll();
                         Environment.Exit(0);
                     } catch {
@@ -91,25 +199,32 @@ namespace ZaborInputSimulator {
                 watchdog.Start();
             }
 
-            // Autonomous physical click watcher to detect host physical clicks without stdin polling
-            var clickWatcher = new Thread(() => {
-                bool wasPressed = false;
-                while (true) {
-                    Thread.Sleep(30);
-                    bool isPressed = (GetAsyncKeyState(0x01) & 0x8000) != 0 ||
-                                     (GetAsyncKeyState(0x02) & 0x8000) != 0 ||
-                                     (GetAsyncKeyState(0x04) & 0x8000) != 0;
-                    if (isPressed && !wasPressed && !isLeftDown && !isRightDown && !isMiddleDown) {
-                        try {
-                            Console.WriteLine("click");
-                        } catch {
-                            break;
+            // Autonomous physical click watcher using WH_MOUSE_LL hook with LLMHF_INJECTED filtering
+            var hookThread = new Thread(() => {
+                try {
+                    hookThreadId = GetCurrentThreadId();
+                    mouseHookDelegate = MouseHookCallback;
+
+                    using (Process curProcess = Process.GetCurrentProcess())
+                    using (ProcessModule curModule = curProcess.MainModule) {
+                        IntPtr hMod = GetModuleHandle(curModule.ModuleName);
+                        hookId = SetWindowsHookEx(WH_MOUSE_LL, mouseHookDelegate, hMod, 0);
+                    }
+
+                    if (hookId != IntPtr.Zero) {
+                        MSG msg;
+                        while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {
+                            TranslateMessage(ref msg);
+                            DispatchMessage(ref msg);
                         }
                     }
-                    wasPressed = isPressed;
+                } catch {
+                    // Thread safety
+                } finally {
+                    CleanupHook();
                 }
             }) { IsBackground = true };
-            clickWatcher.Start();
+            hookThread.Start();
 
             // Ensure clean start
             ResetAll();
@@ -127,10 +242,8 @@ namespace ZaborInputSimulator {
                     }
 
                     if (line == "check_click") {
-                        // Check if host physically pressed left/right/middle button
-                        bool click = (GetAsyncKeyState(0x01) & 0x8000) != 0 ||
-                                     (GetAsyncKeyState(0x02) & 0x8000) != 0 ||
-                                     (GetAsyncKeyState(0x04) & 0x8000) != 0;
+                        bool click = hasRecentPhysicalClick;
+                        hasRecentPhysicalClick = false;
                         Console.WriteLine(click ? "1" : "0");
                         continue;
                     }
@@ -174,7 +287,18 @@ namespace ZaborInputSimulator {
                 }
             }
 
+            CleanupHook();
             ResetAll();
+        }
+
+        private static void CleanupHook() {
+            if (hookId != IntPtr.Zero) {
+                UnhookWindowsHookEx(hookId);
+                hookId = IntPtr.Zero;
+            }
+            if (hookThreadId != 0) {
+                PostThreadMessage(hookThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+            }
         }
 
         private static void SendMouseButton(int button, bool down) {
@@ -199,7 +323,7 @@ namespace ZaborInputSimulator {
                         dwFlags = flag,
                         mouseData = 0,
                         time = 0,
-                        dwExtraInfo = IntPtr.Zero
+                        dwExtraInfo = SIMULATED_EXTRA_INFO
                     }
                 }
             };
@@ -215,7 +339,7 @@ namespace ZaborInputSimulator {
                         dwFlags = MOUSEEVENTF_WHEEL,
                         mouseData = (uint)(delta * 120),
                         time = 0,
-                        dwExtraInfo = IntPtr.Zero
+                        dwExtraInfo = SIMULATED_EXTRA_INFO
                     }
                 }
             };
@@ -242,7 +366,7 @@ namespace ZaborInputSimulator {
                         wScan = 0,
                         dwFlags = flags,
                         time = 0,
-                        dwExtraInfo = IntPtr.Zero
+                        dwExtraInfo = SIMULATED_EXTRA_INFO
                     }
                 }
             };

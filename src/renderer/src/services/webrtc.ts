@@ -485,9 +485,23 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
     const fecPayloads: string[] = []
     const rtxCandidates: string[] = []
     const aptByPayload: Record<string, string> = {}
+    const fmtpByPayload: Record<string, string> = {}
+    const usedExtmapIds = new Set<number>()
+    let hasPlayoutDelayExt = false
+    let hasPlayoutDelayAttr = false
 
     for (let i = videoSectionIdx + 1; i < lines.length; i++) {
       if (lines[i].startsWith('m=')) break
+      const extmapMatch = lines[i].match(/^a=extmap:(\d+)(?:\/[a-z]+)?\s+(\S+)/i)
+      if (extmapMatch) {
+        usedExtmapIds.add(parseInt(extmapMatch[1], 10))
+        if (extmapMatch[2] === 'http://www.webrtc.org/experiments/rtp-hdrext/playout-delay') {
+          hasPlayoutDelayExt = true
+        }
+      }
+      if (lines[i].startsWith('a=playout-delay:')) {
+        hasPlayoutDelayAttr = true
+      }
       const rtpmapMatch = lines[i].match(/^a=rtpmap:(\d+)\s+([A-Za-z0-9-]+)\/90000/i)
       if (rtpmapMatch) {
         const pt = rtpmapMatch[1]
@@ -496,8 +510,37 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
         else if (codec === 'rtx') rtxCandidates.push(pt)
         else if (codec === 'red' || codec === 'ulpfec') fecPayloads.push(pt)
       }
-      const aptMatch = lines[i].match(/^a=fmtp:(\d+)\s+apt=(\d+)/i)
-      if (aptMatch) aptByPayload[aptMatch[1]] = aptMatch[2]
+      const fmtpMatch = lines[i].match(/^a=fmtp:(\d+)\s+(.+)/i)
+      if (fmtpMatch) {
+        fmtpByPayload[fmtpMatch[1]] = fmtpMatch[2]
+        const aptMatch = fmtpMatch[2].match(/apt=(\d+)/i)
+        if (aptMatch) aptByPayload[fmtpMatch[1]] = aptMatch[1]
+      }
+    }
+
+    // Prioritize H.264 Constrained Baseline (profile-level-id=42e01f / 42001f with packetization-mode=1)
+    const getH264Score = (pt: string): number => {
+      const fmtp = (fmtpByPayload[pt] || '').toLowerCase()
+      const isPacketizationMode1 = fmtp.includes('packetization-mode=1')
+      const isConstrainedBaseline1f = fmtp.includes('profile-level-id=42e01f') || fmtp.includes('profile-level-id=42001f')
+      const isConstrainedBaseline = fmtp.includes('profile-level-id=42e0') || fmtp.includes('profile-level-id=4200')
+      if (isConstrainedBaseline1f && isPacketizationMode1) return 100
+      if (isConstrainedBaseline1f) return 80
+      if (isConstrainedBaseline && isPacketizationMode1) return 60
+      if (isConstrainedBaseline) return 40
+      if (isPacketizationMode1) return 20
+      return 10
+    }
+    h264Payloads.sort((a, b) => getH264Score(b) - getH264Score(a))
+
+    let playoutDelayExtId = -1
+    if (!hasPlayoutDelayExt) {
+      for (let id = 1; id <= 14; id++) {
+        if (!usedExtmapIds.has(id)) {
+          playoutDelayExtId = id
+          break
+        }
+      }
     }
 
     if (h264Payloads.length > 0) {
@@ -520,6 +563,12 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           const parts = lines[i].split(' ')
           const newVideoLine = `${parts[0]} ${parts[1]} ${parts[2]} ${orderedPayloads.join(' ')}`
           filteredLines.push(newVideoLine)
+          if (!hasPlayoutDelayExt && playoutDelayExtId !== -1) {
+            filteredLines.push(`a=extmap:${playoutDelayExtId} http://www.webrtc.org/experiments/rtp-hdrext/playout-delay`)
+          }
+          if (!hasPlayoutDelayAttr) {
+            filteredLines.push('a=playout-delay:0,0')
+          }
           skipVideoTracks = true
           continue
         }
@@ -527,7 +576,9 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           skipVideoTracks = false
         }
         if (skipVideoTracks) {
-          if (lines[i].startsWith('a=rtpmap:') || lines[i].startsWith('a=fmtp:') || lines[i].startsWith('a=rtcp-fb:')) {
+          if (lines[i].startsWith('a=playout-delay:')) {
+            filteredLines.push('a=playout-delay:0,0')
+          } else if (lines[i].startsWith('a=rtpmap:') || lines[i].startsWith('a=fmtp:') || lines[i].startsWith('a=rtcp-fb:')) {
             const ptMatch = lines[i].match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)/i)
             if (ptMatch && keptPayloads.has(ptMatch[1])) {
               filteredLines.push(lines[i])
@@ -535,6 +586,31 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           } else {
             filteredLines.push(lines[i])
           }
+        } else {
+          filteredLines.push(lines[i])
+        }
+      }
+      lines = filteredLines
+    } else {
+      const filteredLines: string[] = []
+      let inVideoSection = false
+      for (let i = 0; i < lines.length; i++) {
+        if (i === videoSectionIdx) {
+          filteredLines.push(lines[i])
+          if (!hasPlayoutDelayExt && playoutDelayExtId !== -1) {
+            filteredLines.push(`a=extmap:${playoutDelayExtId} http://www.webrtc.org/experiments/rtp-hdrext/playout-delay`)
+          }
+          if (!hasPlayoutDelayAttr) {
+            filteredLines.push('a=playout-delay:0,0')
+          }
+          inVideoSection = true
+          continue
+        }
+        if (inVideoSection && lines[i].startsWith('m=')) {
+          inVideoSection = false
+        }
+        if (inVideoSection && lines[i].startsWith('a=playout-delay:')) {
+          filteredLines.push('a=playout-delay:0,0')
         } else {
           filteredLines.push(lines[i])
         }
@@ -678,7 +754,7 @@ export class WebRTCManager {
   private static readonly SOFT_REFRESH_COOLDOWN_MS = 1000
 
   private currentDeviceId = 'default'
-  private currentStreamQuality: 'high' | 'low' | 'camera' = 'low'
+  private currentStreamQuality: 'high' | 'medium' | 'low' | 'camera' = 'low'
   private currentOutputDeviceId = 'default'
   private noiseSuppression = localStorage.getItem(ULTRA_LOW_LATENCY_STORAGE_KEY) !== 'true'
   private activeGraphSignature: string | null = null
@@ -1094,6 +1170,28 @@ export class WebRTCManager {
     }
     if ('playoutDelayHint' in receiver) {
       try { (receiver as any).playoutDelayHint = hasTarget ? 0 : ms / 1000 } catch { }
+    }
+  }
+
+  public applyVideoZeroPlayoutDelay(receiver: RTCRtpReceiver): void {
+    if (!receiver.track || receiver.track.kind !== 'video') return
+    if ('playoutDelayHint' in receiver) {
+      try { (receiver as any).playoutDelayHint = 0 } catch { }
+    }
+    if ('jitterBufferTarget' in receiver) {
+      try { (receiver as any).jitterBufferTarget = 0 } catch { }
+    }
+  }
+
+  public enforceVideoZeroPlayoutDelay(userId: string): void {
+    const pcs = [this.peerConnections.get(userId), this.sfuSubConnections.get(userId)]
+    for (const pc of pcs) {
+      if (!pc || pc.connectionState === 'closed') continue
+      for (const receiver of pc.getReceivers()) {
+        if (receiver.track?.kind === 'video') {
+          this.applyVideoZeroPlayoutDelay(receiver)
+        }
+      }
     }
   }
 
@@ -5265,6 +5363,7 @@ export class WebRTCManager {
     for (const receiver of pc.getReceivers()) {
       const track = receiver.track
       if (track && track.kind === 'video' && track.readyState !== 'ended') {
+        this.applyVideoZeroPlayoutDelay(receiver)
         if (!track.onunmute) {
           track.onunmute = () => {
             this.syncRemoteVideoStream(userId)
@@ -5272,6 +5371,15 @@ export class WebRTCManager {
         }
         if (isUserStreaming || !track.muted) {
           this.attachRemoteVideo(userId, track)
+        }
+      }
+    }
+
+    const sfuPc = this.sfuSubConnections.get(userId)
+    if (sfuPc && sfuPc.connectionState !== 'closed') {
+      for (const receiver of sfuPc.getReceivers()) {
+        if (receiver.track && receiver.track.kind === 'video' && receiver.track.readyState !== 'ended') {
+          this.applyVideoZeroPlayoutDelay(receiver)
         }
       }
     }
@@ -5299,6 +5407,7 @@ export class WebRTCManager {
       pc.getTransceivers().forEach(transceiver => {
         const track = transceiver.receiver.track
         if (track && track.kind === 'video') {
+          this.applyVideoZeroPlayoutDelay(transceiver.receiver)
           track.onunmute = () => {
             this.syncRemoteVideoStream(userId)
           }
@@ -5316,6 +5425,9 @@ export class WebRTCManager {
       this.initOutputMixer()
 
       if (event.track.kind === 'video') {
+        if (event.receiver) {
+          this.applyVideoZeroPlayoutDelay(event.receiver)
+        }
         this.attachRemoteVideo(userId, event.track, stream)
         return
       }
@@ -5603,7 +5715,7 @@ export class WebRTCManager {
 
   public async startScreenShare(
     sourceId: string,
-    quality: 'high' | 'low' | 'camera',
+    quality: 'high' | 'medium' | 'low' | 'camera',
     includeAudio: boolean,
     allowRemoteControl = false
   ) {
@@ -5628,7 +5740,7 @@ export class WebRTCManager {
     }
     const width = quality === 'high' ? 1920 : 1280
     const height = quality === 'high' ? 1080 : 720
-    const frameRate = quality === 'high' ? 60 : 30
+    const frameRate = (quality === 'high' || quality === 'medium') ? 60 : 30
 
     try {
       let constraints: MediaStreamConstraints
@@ -6140,10 +6252,10 @@ export class WebRTCManager {
   }
 
   private static readonly VIDEO_LADDER = [
-    { scale: 1.0, bitrateHigh: 6000000, bitrateLow: 2500000, fpsHigh: 60, fpsLow: 30 },
-    { scale: 1.0, bitrateHigh: 3500000, bitrateLow: 1500000, fpsHigh: 60, fpsLow: 30 },
-    { scale: 1.5, bitrateHigh: 2000000, bitrateLow: 1000000, fpsHigh: 60, fpsLow: 30 },
-    { scale: 2.0, bitrateHigh: 1200000, bitrateLow: 600000, fpsHigh: 30, fpsLow: 24 }
+    { scale: 1.0, bitrateHigh: 6000000, bitrateMedium: 3000000, bitrateLow: 2500000, fpsHigh: 60, fpsMedium: 60, fpsLow: 30 },
+    { scale: 1.0, bitrateHigh: 3500000, bitrateMedium: 2200000, bitrateLow: 1500000, fpsHigh: 60, fpsMedium: 60, fpsLow: 30 },
+    { scale: 1.5, bitrateHigh: 2000000, bitrateMedium: 1400000, bitrateLow: 1000000, fpsHigh: 60, fpsMedium: 60, fpsLow: 30 },
+    { scale: 2.0, bitrateHigh: 1200000, bitrateMedium: 800000,  bitrateLow: 600000,  fpsHigh: 30, fpsMedium: 30, fpsLow: 24 }
   ]
 
   private static readonly PREVIEW_VIDEO_PROFILE = { scale: 4.0, bitrate: 150000, framerate: 2 }
@@ -6153,13 +6265,14 @@ export class WebRTCManager {
   private videoProfileFor(userId: string) {
     if (userId !== '__sfu__' && this.viewerStates.get(userId) === 'preview') return WebRTCManager.PREVIEW_VIDEO_PROFILE
     const isHigh = this.currentStreamQuality === 'high'
+    const isMedium = this.currentStreamQuality === 'medium'
     const maxStep = WebRTCManager.VIDEO_LADDER.length - 1
     const step = Math.max(0, Math.min(maxStep, this.lossLadderStep.get(userId) ?? 0))
     const rung = WebRTCManager.VIDEO_LADDER[step]
     return {
       scale: rung.scale,
-      bitrate: isHigh ? rung.bitrateHigh : rung.bitrateLow,
-      framerate: isHigh ? rung.fpsHigh : rung.fpsLow
+      bitrate: isHigh ? rung.bitrateHigh : isMedium ? rung.bitrateMedium : rung.bitrateLow,
+      framerate: isHigh ? rung.fpsHigh : isMedium ? rung.fpsMedium : rung.fpsLow
     }
   }
 
@@ -6379,8 +6492,10 @@ export class WebRTCManager {
               if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
               if (!isCamera) {
                 params.degradationPreference = 'maintain-framerate'
-                params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
-                params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
+                const isHigh = this.currentStreamQuality === 'high'
+                const isMedium = this.currentStreamQuality === 'medium'
+                params.encodings[0].maxBitrate = isHigh ? 6000000 : isMedium ? 3000000 : 2500000
+                params.encodings[0].maxFramerate = (isHigh || isMedium) ? 60 : 30
                 params.encodings[0].networkPriority = 'high'
               }
               if (this.sfuPubActive) {
@@ -6486,8 +6601,10 @@ export class WebRTCManager {
                 if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
                 if (!isCamera) {
                   params.degradationPreference = 'maintain-framerate'
-                  params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
-                  params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
+                  const isHigh = this.currentStreamQuality === 'high'
+                  const isMedium = this.currentStreamQuality === 'medium'
+                  params.encodings[0].maxBitrate = isHigh ? 6000000 : isMedium ? 3000000 : 2500000
+                  params.encodings[0].maxFramerate = (isHigh || isMedium) ? 60 : 30
                   params.encodings[0].networkPriority = 'high'
                 }
                 if (this.sfuPubActive) {
@@ -7019,8 +7136,10 @@ export class WebRTCManager {
           const params = vSender.getParameters()
           if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
           params.degradationPreference = 'maintain-framerate'
-          params.encodings[0].maxBitrate = this.currentStreamQuality === 'high' ? 6000000 : 2500000
-          params.encodings[0].maxFramerate = this.currentStreamQuality === 'high' ? 60 : 30
+          const isHigh = this.currentStreamQuality === 'high'
+          const isMedium = this.currentStreamQuality === 'medium'
+          params.encodings[0].maxBitrate = isHigh ? 6000000 : isMedium ? 3000000 : 2500000
+          params.encodings[0].maxFramerate = (isHigh || isMedium) ? 60 : 30
           params.encodings[0].networkPriority = 'high'
           params.encodings[0].active = true
           vSender.setParameters(params).catch(() => { })
@@ -7212,6 +7331,9 @@ export class WebRTCManager {
       sfuCombinedStream.addTrack(event.track)
 
       if (event.track.kind === 'video') {
+        if (event.receiver) {
+          this.applyVideoZeroPlayoutDelay(event.receiver)
+        }
         void (async () => {
           await this.waitForFirstVideoFrame(sfuCombinedStream, 550)
           if (this.sfuSubConnections.get(streamerId) !== pc) return

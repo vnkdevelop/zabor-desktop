@@ -459,7 +459,7 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (store.isRemoteControlling) return;
+      if (store.isRemoteControlling || useAppStore.getState().isRemoteControlling) return;
       if (!document.hasFocus() || event.repeat) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
@@ -2316,7 +2316,7 @@ export default function App() {
     }
   }, [store]);
 
-  const handleStartStream = useCallback(async (sourceId: string, quality: 'low' | 'high' | 'camera', includeAudio: boolean, allowRemoteControl = false) => {
+  const handleStartStream = useCallback(async (sourceId: string, quality: 'low' | 'medium' | 'high' | 'camera', includeAudio: boolean, allowRemoteControl = false) => {
     try {
       setShowStreamPicker(false);
       const ok = await signalRService.startStream(quality);

@@ -148,66 +148,75 @@ export const StreamCard = ({
         return
       }
 
-      if (isRemoteControlling && e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        e.stopImmediatePropagation?.()
-        setIsCursorHidden((prev) => !prev)
-        return
-      }
-
-      if (isRemoteControlling && !isHostActive) {
-        const vk = getWinVkCode(e)
-        const modifiers = {
-          alt: e.altKey,
-          ctrl: e.ctrlKey,
-          shift: e.shiftKey,
-          win: e.metaKey
-        }
-        if (isShortcutSafe(vk, modifiers)) {
+      if (isRemoteControlling) {
+        if (e.key === 'Escape' || e.code === 'Escape') {
           e.preventDefault()
           e.stopPropagation()
           e.stopImmediatePropagation?.()
-          let modBits = 0
-          if (e.shiftKey) modBits |= 1
-          if (e.ctrlKey) modBits |= 2
-          if (e.altKey) modBits |= 4
-          if (e.metaKey) modBits |= 8
-          webrtcService.sendViewerKey(user.id, vk, true, modBits)
+          setIsCursorHidden((prev) => !prev)
+          return
         }
+
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
+
+        if (!isHostActive) {
+          const vk = getWinVkCode(e)
+          const modifiers = {
+            alt: e.altKey,
+            ctrl: e.ctrlKey,
+            shift: e.shiftKey,
+            win: e.metaKey
+          }
+          if (isShortcutSafe(vk, modifiers)) {
+            let modBits = 0
+            if (e.shiftKey) modBits |= 1
+            if (e.ctrlKey) modBits |= 2
+            if (e.altKey) modBits |= 4
+            if (e.metaKey) modBits |= 8
+            webrtcService.sendViewerKey(user.id, vk, true, modBits)
+          }
+        }
+        return
       }
     }
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (isRemoteControlling && e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        e.stopImmediatePropagation?.()
-        return
-      }
-
-      if (isRemoteControlling && !isHostActive) {
-        if (e.ctrlKey && e.altKey && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) {
-          return
-        }
-        const vk = getWinVkCode(e)
-        const modifiers = {
-          alt: e.altKey,
-          ctrl: e.ctrlKey,
-          shift: e.shiftKey,
-          win: e.metaKey
-        }
-        if (isShortcutSafe(vk, modifiers)) {
+      if (isRemoteControlling) {
+        if (e.key === 'Escape' || e.code === 'Escape') {
           e.preventDefault()
           e.stopPropagation()
           e.stopImmediatePropagation?.()
-          let modBits = 0
-          if (e.shiftKey) modBits |= 1
-          if (e.ctrlKey) modBits |= 2
-          if (e.altKey) modBits |= 4
-          if (e.metaKey) modBits |= 8
-          webrtcService.sendViewerKey(user.id, vk, false, modBits)
+          return
         }
+
+        if (e.ctrlKey && e.altKey && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) {
+          return
+        }
+
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation?.()
+
+        if (!isHostActive) {
+          const vk = getWinVkCode(e)
+          const modifiers = {
+            alt: e.altKey,
+            ctrl: e.ctrlKey,
+            shift: e.shiftKey,
+            win: e.metaKey
+          }
+          if (isShortcutSafe(vk, modifiers)) {
+            let modBits = 0
+            if (e.shiftKey) modBits |= 1
+            if (e.ctrlKey) modBits |= 2
+            if (e.altKey) modBits |= 4
+            if (e.metaKey) modBits |= 8
+            webrtcService.sendViewerKey(user.id, vk, false, modBits)
+          }
+        }
+        return
       }
     }
 
@@ -429,6 +438,12 @@ export const StreamCard = ({
       return
     }
     if (video.srcObject !== videoOnlyStream) video.srcObject = videoOnlyStream
+    if ('playoutDelayHint' in video) {
+      try { (video as any).playoutDelayHint = 0 } catch { }
+    }
+    if (!isLocal) {
+      webrtcService.enforceVideoZeroPlayoutDelay(user.id)
+    }
 
     let cancelled = false
     let frameHandle = 0
@@ -540,7 +555,7 @@ export const StreamCard = ({
       className={`relative overflow-hidden group ${isFullscreen ? 'w-full h-full bg-[#0B0B0F] rounded-none' : 'w-full h-full bg-transparent rounded-xl'
         } ${isRemoteControlling && !isHostActive ? (isCursorHidden ? 'cursor-none select-none' : 'cursor-default select-none') : ''}`}
     >
-      <div className={isFullscreen ? "w-full h-full bg-black" : "absolute inset-[1.5px] overflow-hidden rounded-[10.5px] bg-[#0B0B0F]"}>
+      <div className={`${isFullscreen ? "w-full h-full bg-black" : "absolute inset-[1.5px] overflow-hidden rounded-[10.5px] bg-[#0B0B0F]"} ${isRemoteControlling && !isHostActive ? (isCursorHidden ? 'cursor-none select-none' : 'cursor-default select-none') : ''}`}>
         <video
           ref={videoRef}
           autoPlay
@@ -548,8 +563,23 @@ export const StreamCard = ({
           muted
           onLoadedMetadata={(e) => {
             const video = e.currentTarget
+            if ('playoutDelayHint' in video) {
+              try { (video as any).playoutDelayHint = 0 } catch { }
+            }
+            if (!isLocal) {
+              webrtcService.enforceVideoZeroPlayoutDelay(user.id)
+            }
             if (video.videoWidth && video.videoHeight && onRatioChange) {
               onRatioChange(video.videoWidth / video.videoHeight)
+            }
+          }}
+          onPlaying={(e) => {
+            const video = e.currentTarget
+            if ('playoutDelayHint' in video) {
+              try { (video as any).playoutDelayHint = 0 } catch { }
+            }
+            if (!isLocal) {
+              webrtcService.enforceVideoZeroPlayoutDelay(user.id)
             }
           }}
           onMouseMove={isFullscreen && isRemoteControlling ? handleMouseMove : undefined}
@@ -595,7 +625,7 @@ export const StreamCard = ({
 
         <div className="flex items-center gap-2">
           <span className="bg-[#09090B]/85 border border-[#303035]/50 text-textMuted text-[10px] font-black px-2 py-0.5 rounded-md">
-            {user.streamQuality ? (user.streamQuality === 'high' ? 'High' : (user.streamQuality === 'low' ? 'Low' : user.streamQuality)) : 'Low'}
+            {user.streamQuality ? user.streamQuality.toLowerCase() : 'low'}
           </span>
         </div>
       </div>
