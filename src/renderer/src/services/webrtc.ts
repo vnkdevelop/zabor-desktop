@@ -4843,6 +4843,9 @@ export class WebRTCManager {
   public sendViewerMove(streamerId: string, xNorm: number, yNorm: number): void {
     const ch = this.rcDataChannels.get(streamerId)
     if (ch && ch.readyState === 'open') {
+      if (ch.bufferedAmount > 2048) {
+        return
+      }
       try {
         ch.send(RemoteControlProtocol.encodeMove(xNorm, yNorm))
       } catch { }
@@ -5825,7 +5828,8 @@ export class WebRTCManager {
               chromeMediaSourceId: sourceId,
               maxWidth: width,
               maxHeight: height,
-              maxFrameRate: frameRate
+              maxFrameRate: frameRate,
+              minFrameRate: frameRate
             }
           } as any
         }
@@ -5893,8 +5897,10 @@ export class WebRTCManager {
             if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
             if (!isCamera) {
               params.degradationPreference = 'maintain-framerate'
-              params.encodings[0].maxBitrate = quality === 'high' ? 6000000 : 2500000
-              params.encodings[0].maxFramerate = quality === 'high' ? 60 : 30
+              const isHigh = quality === 'high'
+              const isMedium = quality === 'medium'
+              params.encodings[0].maxBitrate = isHigh ? 6000000 : (isMedium ? 3500000 : 2500000)
+              params.encodings[0].maxFramerate = (isHigh || isMedium) ? 60 : 30
               params.encodings[0].networkPriority = 'high'
             }
             params.encodings[0].active = keepP2PActive

@@ -135,6 +135,7 @@ if (app) {
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-background-timer-throttling');
+  app.commandLine.appendSwitch('enable-webrtc-srtp-aes-gcm');
   app.commandLine.appendSwitch(
     'force-webrtc-ip-handling-policy',
     readWebRtcRelayOnly() ? 'disable_non_proxied_udp' : 'default'

@@ -171,6 +171,18 @@ namespace ZaborInputSimulator {
         private static volatile bool hasRecentPhysicalClick = false;
         private static long lastPhysicalClickTicks = 0;
         private static readonly AutoResetEvent physicalClickSignal = new AutoResetEvent(false);
+        private static int cachedScreenWidth = 0;
+        private static int cachedScreenHeight = 0;
+        private static long lastScreenMetricsTicks = 0;
+
+        private static void UpdateScreenMetrics() {
+            long now = Environment.TickCount;
+            if (cachedScreenWidth == 0 || now - lastScreenMetricsTicks > 2000) {
+                cachedScreenWidth = GetSystemMetrics(SM_CXSCREEN);
+                cachedScreenHeight = GetSystemMetrics(SM_CYSCREEN);
+                lastScreenMetricsTicks = now;
+            }
+        }
 
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
             if (nCode >= 0) {
@@ -303,8 +315,9 @@ namespace ZaborInputSimulator {
                         float xn, yn;
                         if (float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out xn) &&
                             float.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out yn)) {
-                            int w = GetSystemMetrics(SM_CXSCREEN);
-                            int h = GetSystemMetrics(SM_CYSCREEN);
+                            UpdateScreenMetrics();
+                            int w = cachedScreenWidth;
+                            int h = cachedScreenHeight;
                             int x = (int)Math.Round(xn * (w - 1));
                             int y = (int)Math.Round(yn * (h - 1));
                             SetCursorPos(x, y);

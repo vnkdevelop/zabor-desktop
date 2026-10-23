@@ -373,7 +373,7 @@ export const StreamCard = ({
     }
 
     const now = performance.now()
-    if (now - lastMoveTime.current >= 4) {
+    if (now - lastMoveTime.current >= 8) {
       lastMoveTime.current = now
       webrtcService.sendViewerMove(user.id, xNorm, yNorm)
       if (moveThrottleTimer.current) {
@@ -391,7 +391,7 @@ export const StreamCard = ({
             webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
             pendingMove.current = null
           }
-        }, 4)
+        }, 8)
       }
     }
   }
@@ -619,6 +619,15 @@ export const StreamCard = ({
       }
     }
   }, [mode, videoOnlyStream])
+
+  useEffect(() => {
+    if (mode === 'normal' || isLocal) return
+    webrtcService.enforceVideoZeroPlayoutDelay(user.id)
+    const timer = setInterval(() => {
+      webrtcService.enforceVideoZeroPlayoutDelay(user.id)
+    }, 500)
+    return () => clearInterval(timer)
+  }, [mode, isLocal, user.id])
 
   useLayoutEffect(() => {
     const el = rootRef.current
