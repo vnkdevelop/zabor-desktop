@@ -30,6 +30,9 @@ import {
   RC_OP_HOST_IDLE,
   RC_OP_RESET,
   RC_OP_HOST_REVOKED,
+  RC_OP_BUSY,
+  RC_OP_START,
+  RC_OP_STOP,
   RemoteControlProtocol,
   isShortcutSafe
 } from './remoteControl'
@@ -4529,6 +4532,9 @@ export class WebRTCManager {
 
     this.isHostActive = false
     this.activeRemoteViewerId = null
+    try {
+      window.windowControls.remoteControlHidePill?.()
+    } catch { }
 
     const st = useAppStore.getState()
     st.setRemoteControlState({
@@ -4649,6 +4655,17 @@ export class WebRTCManager {
         return
       }
 
+      // Concurrency lock: If another viewer is already controlling, reject this viewer with BUSY
+      if (this.activeRemoteViewerId && this.activeRemoteViewerId !== userId) {
+        const ch = this.rcDataChannels.get(userId)
+        if (ch && ch.readyState === 'open') {
+          try {
+            ch.send(RemoteControlProtocol.encodeSignal(RC_OP_BUSY))
+          } catch { }
+        }
+        return
+      }
+
       if (op === RC_OP_PING) {
         if (!this.cachedScreenResolution) {
           try {
@@ -4663,16 +4680,45 @@ export class WebRTCManager {
         return
       }
 
-      if (op === RC_OP_RESET) {
+      if (op === RC_OP_RESET || op === RC_OP_STOP) {
         if (this.activeRemoteViewerId === userId) {
           this.resetControlState()
         }
         return
       }
 
+      if (op === RC_OP_START) {
+        this.activeRemoteViewerId = userId
+        const ctrlUser = useAppStore.getState().channelUsers.find((u) => u.id === userId)
+        const ctrlName = ctrlUser?.displayName || 'viewer'
+        useAppStore.getState().setRemoteControlState({
+          activeControllerId: userId,
+          isHostActive: false
+        })
+        try {
+          window.windowControls.remoteControlShowPill?.({
+            controllerName: ctrlName,
+            isControlling: true
+          })
+        } catch { }
+        this.refreshHostFailSafe(userId)
+        return
+      }
+
       if (this.isHostActive) return
 
-      this.activeRemoteViewerId = userId
+      if (!this.activeRemoteViewerId) {
+        this.activeRemoteViewerId = userId
+        const ctrlUser = useAppStore.getState().channelUsers.find((u) => u.id === userId)
+        const ctrlName = ctrlUser?.displayName || 'viewer'
+        try {
+          window.windowControls.remoteControlShowPill?.({
+            controllerName: ctrlName,
+            isControlling: true
+          })
+        } catch { }
+      }
+
       useAppStore.getState().setRemoteControlState({
         activeControllerId: userId,
         isHostActive: false
@@ -4745,6 +4791,20 @@ export class WebRTCManager {
       }
     } else {
       switch (op) {
+        case RC_OP_BUSY: {
+          useAppStore.getState().setRemoteControlState({
+            isControlling: false,
+            isHostActive: false
+          })
+          const busyMsg = i18n.t('stream.controlBusy', 'управление сейчас занято')
+          useAppStore.getState().setSystemToast?.(busyMsg)
+          setTimeout(() => {
+            if (useAppStore.getState().systemToast === busyMsg) {
+              useAppStore.getState().setSystemToast?.(null)
+            }
+          }, 3000)
+          break
+        }
         case RC_OP_HOST_ACTIVE:
           useAppStore.getState().setRemoteControlState({ isHostActive: true })
           break

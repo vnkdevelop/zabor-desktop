@@ -10,13 +10,14 @@ export const RemoteControlPill = () => {
   const activeRemoteControllerId = useAppStore((state) => state.activeRemoteControllerId)
   const channelUsers = useAppStore((state) => state.channelUsers)
 
-  if (!currentUser?.isStreaming || !isStreamRemoteControlAllowed) {
+  const isHostAllowed = Boolean(currentUser?.isStreaming && isStreamRemoteControlAllowed)
+  const isViewerControlling = Boolean(
+    activeRemoteControllerId && activeRemoteControllerId !== currentUser?.id
+  )
+
+  if (!isHostAllowed && !isViewerControlling) {
     return null
   }
-
-  const isViewerControlling = Boolean(
-    activeRemoteControllerId && activeRemoteControllerId !== currentUser.id
-  )
 
   const controllerUser = isViewerControlling
     ? channelUsers.find((u) => u.id === activeRemoteControllerId) || {
@@ -34,23 +35,38 @@ export const RemoteControlPill = () => {
     <div
       onClick={handlePanicRevoke}
       title={t('stream.revokeRemoteControlHint')}
-      className={`fixed top-3 left-1/2 -translate-x-1/2 z-[99999] pointer-events-auto select-none flex items-center gap-2 px-3 py-1.5 rounded-full cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 ${
+      style={{ WebkitAppRegion: 'no-drag' as any }}
+      className={`title-no-drag fixed top-2 left-1/2 -translate-x-1/2 z-[999999] pointer-events-auto select-none flex items-center gap-2 px-3 py-1.5 rounded-full cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95 ${
         isViewerControlling
-          ? 'bg-primary/20 backdrop-blur-xl border border-primary border-t-primary/80 ring-1 ring-primary'
+          ? 'bg-[#161618]/95 backdrop-blur-xl border border-primary border-t-primary/90 shadow-[0_0_16px_rgba(255,0,127,0.35)]'
           : 'bg-[#161618]/90 backdrop-blur-xl border border-white/[0.08] border-t-white/[0.16]'
       }`}
     >
-      <div className="shrink-0 w-5 h-5 flex items-center justify-center">
-        <AvatarImg
-          src={controllerUser.avatarBase64}
-          size={20}
-          bgColor={controllerUser.avatarColor}
-          animate={false}
-        />
-      </div>
-      <span className="text-white font-bold text-xs truncate max-w-[120px] lowercase tracking-wide">
-        {controllerUser.displayName}
-      </span>
+      {isViewerControlling ? (
+        <>
+          <div className="shrink-0 w-5 h-5 flex items-center justify-center">
+            <AvatarImg
+              src={controllerUser.avatarBase64}
+              size={20}
+              bgColor={controllerUser.avatarColor}
+              animate={false}
+            />
+          </div>
+          <span className="text-white font-bold text-xs truncate max-w-[120px] lowercase tracking-wide">
+            {controllerUser.displayName}
+          </span>
+          <span className="text-primaryText font-extrabold text-[10px] tracking-wide ml-0.5 lowercase">
+            ✕ {t('stream.stopHint', 'отозвать')}
+          </span>
+        </>
+      ) : (
+        <>
+          <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+          <span className="text-white/80 font-bold text-[11px] truncate lowercase tracking-wide">
+            {t('stream.remoteControlAllowedHint', 'удаленное управление разрешено')}
+          </span>
+        </>
+      )}
     </div>
   )
 }

@@ -491,10 +491,15 @@
     "exitFullscreenHint": "вернуться в режим фокуса (F)",
     "broadcastOf": "трансляция {{name}}",
     "loading": "загрузка трансляции",
-    "revokeRemoteControlHint": "отозвать удаленное управление (клик или pause)",
+    "revokeRemoteControlHint": "отозвать удаленное управление (клик или ctrl+alt+backspace)",
     "remoteControlActiveHint": "удаленное управление активно (ctrl+alt+k для отключения)",
     "remoteControlCapture": "перехватить управление (ctrl+alt+k)",
-    "remoteControlRelease": "отпустить управление (ctrl+alt+k)"
+    "remoteControlRelease": "отпустить управление (ctrl+alt+k)",
+    "cursorHidden": "курсор скрыт",
+    "cursorShown": "курсор показан",
+    "controlBusy": "управление сейчас занято",
+    "hostControlling": "управляет вашим пк",
+    "remoteControlAllowedHint": "удаленное управление разрешено"
   },
   "joke": {
     "title": "шутейка:",

@@ -14,6 +14,9 @@ import {
   RC_OP_HOST_IDLE,
   RC_OP_RESET,
   RC_OP_HOST_REVOKED,
+  RC_OP_BUSY,
+  RC_OP_START,
+  RC_OP_STOP,
   RemoteControlProtocol,
   isShortcutSafe,
   getWinVkCode
@@ -42,7 +45,10 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
         RC_OP_HOST_ACTIVE,
         RC_OP_HOST_IDLE,
         RC_OP_RESET,
-        RC_OP_HOST_REVOKED
+        RC_OP_HOST_REVOKED,
+        RC_OP_BUSY,
+        RC_OP_START,
+        RC_OP_STOP
       ];
       const unique = new Set(opcodes);
       assert.equal(unique.size, opcodes.length, 'Every protocol opcode must be unique');
@@ -97,7 +103,7 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
     });
 
     test('S2-05: encodeSignal returns fast pre-allocated single-byte buffers', () => {
-      for (const op of [RC_OP_PING, RC_OP_HOST_ACTIVE, RC_OP_HOST_IDLE, RC_OP_RESET, RC_OP_HOST_REVOKED]) {
+      for (const op of [RC_OP_PING, RC_OP_HOST_ACTIVE, RC_OP_HOST_IDLE, RC_OP_RESET, RC_OP_HOST_REVOKED, RC_OP_BUSY, RC_OP_START, RC_OP_STOP]) {
         const buf = RemoteControlProtocol.encodeSignal(op);
         assert.equal(buf.byteLength, 1);
         assert.equal(buf[0], op);

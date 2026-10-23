@@ -140,25 +140,25 @@ export class RemoteControlSimulatorManager {
   }
 
   private registerPanicHotkeys(): void {
-    try {
-      // Primary: Pause key
-      globalShortcut.register('Pause', () => {
-        this.triggerPanicRevoke();
-      });
-      // Fallback: Ctrl+Alt+Backspace
-      globalShortcut.register('CommandOrControl+Alt+Backspace', () => {
-        this.triggerPanicRevoke();
-      });
-    } catch (err) {
-      console.warn('[RemoteControl] Could not register panic shortcuts:', err);
+    const shortcuts = ['CommandOrControl+Alt+Backspace', 'CommandOrControl+Alt+Escape'];
+    for (const sc of shortcuts) {
+      try {
+        globalShortcut.register(sc, () => {
+          this.triggerPanicRevoke();
+        });
+      } catch (err) {
+        console.warn(`[RemoteControl] Could not register shortcut ${sc}:`, err);
+      }
     }
   }
 
   private unregisterPanicHotkeys(): void {
-    try {
-      globalShortcut.unregister('Pause');
-      globalShortcut.unregister('CommandOrControl+Alt+Backspace');
-    } catch {}
+    const shortcuts = ['CommandOrControl+Alt+Backspace', 'CommandOrControl+Alt+Escape'];
+    for (const sc of shortcuts) {
+      try {
+        globalShortcut.unregister(sc);
+      } catch {}
+    }
   }
 
   private triggerPanicRevoke(): void {

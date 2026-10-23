@@ -489,10 +489,15 @@
     "streamLabel": "{{name}}'s stream",
     "broadcastOf": "{{name}}'s stream",
     "loading": "loading stream",
-    "revokeRemoteControlHint": "revoke remote control (click or pause)",
+    "revokeRemoteControlHint": "revoke remote control (click or ctrl+alt+backspace)",
     "remoteControlActiveHint": "remote control active (ctrl+alt+k to exit)",
     "remoteControlCapture": "take remote control (ctrl+alt+k)",
-    "remoteControlRelease": "release remote control (ctrl+alt+k)"
+    "remoteControlRelease": "release remote control (ctrl+alt+k)",
+    "cursorHidden": "cursor hidden",
+    "cursorShown": "cursor shown",
+    "controlBusy": "remote control is busy",
+    "hostControlling": "is controlling your pc",
+    "remoteControlAllowedHint": "remote control is allowed"
   },
   "joke": {
     "title": "joke:",

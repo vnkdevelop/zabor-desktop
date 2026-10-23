@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, safeStorage, session } from 'electron';
+import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, safeStorage, session, screen } from 'electron';
 
 if (!app || typeof app.whenReady !== 'function') {
   console.error('\n[ZABOR] Ошибка запуска: проект ZABOR является Electron-приложением и не может быть запущен через обычный Node.js ("node out/main/index.js")!');
@@ -220,10 +220,89 @@ async function readBundledAsset(relativePath: string): Promise<Uint8Array | null
 
 let mainWindow: BrowserWindow | null = null;
 let updaterWindow: BrowserWindow | null = null;
+let overlayPillWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let quitRequested = false;
 let streamAudioOwnerId: number | null = null;
+
+function showPillOverlay(controllerName: string): void {
+  try {
+    const primary = screen.getPrimaryDisplay();
+    const width = 280;
+    const height = 44;
+    const x = Math.round(primary.bounds.x + (primary.bounds.width - width) / 2);
+    const y = primary.bounds.y + 12;
+
+    if (!overlayPillWindow || overlayPillWindow.isDestroyed()) {
+      overlayPillWindow = new BrowserWindow({
+        width,
+        height,
+        x,
+        y,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        resizable: false,
+        focusable: false,
+        hasShadow: false,
+        show: false,
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false
+        }
+      });
+      overlayPillWindow.setAlwaysOnTop(true, 'screen-saver');
+      overlayPillWindow.setVisibleOnAllWorkspaces(true);
+
+      overlayPillWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      overlayPillWindow.webContents.on('will-navigate', (event, url) => {
+        event.preventDefault();
+        if (url.startsWith('zabor-revoke:')) {
+          hidePillOverlay();
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('remote-control:panic-revoke');
+          }
+        }
+      });
+    }
+
+    const safeName = (controllerName || 'viewer').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:transparent;user-select:none;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+.pill{display:flex;align-items:center;gap:8px;padding:6px 14px;background:rgba(22,22,24,0.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,0,127,0.8);border-top:1px solid rgba(255,0,127,1);box-shadow:0 0 16px rgba(255,0,127,0.35);border-radius:9999px;color:white;font-size:11px;font-weight:700;letter-spacing:0.02em;cursor:pointer;transition:transform 0.15s ease,background 0.15s ease;}
+.pill:hover{transform:scale(1.04);background:rgba(30,20,26,0.96);}
+.pill:active{transform:scale(0.96);}
+.dot{width:8px;height:8px;border-radius:50%;background:#FF007F;animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.4;transform:scale(0.85);}}
+.name{max-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:lowercase;}
+.revoke{color:#FF007F;font-size:10px;font-weight:800;margin-left:2px;text-transform:lowercase;}
+</style></head><body>
+<div class="pill" id="pillBtn" title="кликните для отзыва управления">
+<div class="dot"></div>
+<span class="name">${safeName}</span>
+<span class="revoke">✕ отозвать</span>
+</div>
+<script>
+document.getElementById('pillBtn').addEventListener('click',function(){window.location.href='zabor-revoke://action';});
+</script></body></html>`;
+
+    overlayPillWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+    overlayPillWindow.showInactive();
+  } catch (err) {
+    console.warn('[OverlayPill] Failed to show pill overlay:', err);
+  }
+}
+
+function hidePillOverlay(): void {
+  try {
+    if (overlayPillWindow && !overlayPillWindow.isDestroyed()) {
+      overlayPillWindow.hide();
+    }
+  } catch {}
+}
 
 function stopStreamAudioCapture(): void {
   if (streamAudioOwnerId === null) return;
@@ -951,17 +1030,27 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('remote-control:stop', () => {
+    hidePillOverlay();
     remoteControlSimulator.stop();
     return true;
   });
 
   ipcMain.handle('remote-control:reset', () => {
+    hidePillOverlay();
     remoteControlSimulator.reset();
     return true;
   });
 
   ipcMain.handle('remote-control:get-screen', () => {
     return remoteControlSimulator.getScreenResolution();
+  });
+
+  ipcMain.on('remote-control:show-pill', (_event, data: { controllerName: string; isControlling: boolean }) => {
+    showPillOverlay(data?.controllerName || 'viewer');
+  });
+
+  ipcMain.on('remote-control:hide-pill', () => {
+    hidePillOverlay();
   });
 
   ipcMain.on('remote-control:move', (_event, absX: number, absY: number) => {
@@ -997,6 +1086,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
+  hidePillOverlay();
   stopStreamAudioCapture();
   disposeChatFileWriters();
   if (!isQuitting) {

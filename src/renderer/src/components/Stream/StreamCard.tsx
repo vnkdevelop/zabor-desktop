@@ -8,6 +8,8 @@ import { webrtcService } from '../../services/webrtc'
 import {
   RC_OP_PING,
   RC_OP_RESET,
+  RC_OP_START,
+  RC_OP_STOP,
   getWinVkCode,
   isShortcutSafe
 } from '../../services/remoteControl'
@@ -113,20 +115,46 @@ export const StreamCard = ({
   const setRemoteControlState = useAppStore((state) => state.setRemoteControlState)
 
   const pendingMove = useRef<{ x: number; y: number } | null>(null)
+  const virtualPos = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.5 })
   const rafId = useRef<number | null>(null)
   const [isCursorHidden, setIsCursorHidden] = useState(false)
 
   useEffect(() => {
     if (!isRemoteControlling) {
       setIsCursorHidden(false)
+      if (document.pointerLockElement) {
+        try { document.exitPointerLock() } catch { }
+      }
     }
   }, [isRemoteControlling])
 
   useEffect(() => {
+    const handleLockChange = () => {
+      const isLocked = Boolean(document.pointerLockElement && document.pointerLockElement === videoRef.current)
+      if (!isLocked && isCursorHidden) {
+        setIsCursorHidden(false)
+        const msg = t('stream.cursorShown', 'курсор показан')
+        useAppStore.getState().setSystemToast(msg)
+        setTimeout(() => {
+          if (useAppStore.getState().systemToast === msg) {
+            useAppStore.getState().setSystemToast(null)
+          }
+        }, 2000)
+      }
+    }
+    document.addEventListener('pointerlockchange', handleLockChange)
+    return () => document.removeEventListener('pointerlockchange', handleLockChange)
+  }, [isCursorHidden, t])
+
+  useEffect(() => {
     if (!isFullscreen || isLocal) {
       if (isRemoteControlling) {
+        webrtcService.sendViewerSignal(user.id, RC_OP_STOP)
         webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
         setRemoteControlState({ isControlling: false })
+        if (document.pointerLockElement) {
+          try { document.exitPointerLock() } catch { }
+        }
       }
       return
     }
@@ -141,9 +169,14 @@ export const StreamCard = ({
         if (next) {
           webrtcService.ensureRemoteControlChannelForStreamer(user.id)
           setRemoteControlState({ isControlling: true, isHostActive: false })
+          webrtcService.sendViewerSignal(user.id, RC_OP_START)
         } else {
+          webrtcService.sendViewerSignal(user.id, RC_OP_STOP)
           webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
           setRemoteControlState({ isControlling: false })
+          if (document.pointerLockElement) {
+            try { document.exitPointerLock() } catch { }
+          }
         }
         return
       }
@@ -153,7 +186,24 @@ export const StreamCard = ({
           e.preventDefault()
           e.stopPropagation()
           e.stopImmediatePropagation?.()
-          setIsCursorHidden((prev) => !prev)
+          const nextHidden = !isCursorHidden
+          setIsCursorHidden(nextHidden)
+          if (nextHidden) {
+            try {
+              videoRef.current?.requestPointerLock()
+            } catch { }
+          } else {
+            if (document.pointerLockElement) {
+              try { document.exitPointerLock() } catch { }
+            }
+          }
+          const msg = nextHidden ? t('stream.cursorHidden', 'курсор скрыт') : t('stream.cursorShown', 'курсор показан')
+          useAppStore.getState().setSystemToast(msg)
+          setTimeout(() => {
+            if (useAppStore.getState().systemToast === msg) {
+              useAppStore.getState().setSystemToast(null)
+            }
+          }, 2000)
           return
         }
 
@@ -226,7 +276,7 @@ export const StreamCard = ({
       window.removeEventListener('keydown', handleKeyDown, { capture: true })
       window.removeEventListener('keyup', handleKeyUp, { capture: true })
     }
-  }, [isFullscreen, isLocal, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState])
+  }, [isFullscreen, isLocal, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState, isCursorHidden, t])
 
   useEffect(() => {
     if (!isFullscreen || isLocal || !isRemoteControlling) return
@@ -248,26 +298,39 @@ export const StreamCard = ({
   const handleMouseMove = (e: React.MouseEvent<HTMLVideoElement>) => {
     if (!isRemoteControlling || isHostActive || !videoRef.current) return
     const video = videoRef.current
-    const rect = video.getBoundingClientRect()
     const renderRect = getVideoRenderRect(video)
-    const clientX = e.clientX - rect.left - renderRect.left
-    const clientY = e.clientY - rect.top - renderRect.top
-    const xNorm = clientX / renderRect.width
-    const yNorm = clientY / renderRect.height
-    if (xNorm >= 0 && xNorm <= 1 && yNorm >= 0 && yNorm <= 1) {
-      if (rafId.current === null) {
-        webrtcService.sendViewerMove(user.id, xNorm, yNorm)
-        pendingMove.current = null
-        rafId.current = requestAnimationFrame(() => {
-          rafId.current = null
-          if (pendingMove.current) {
-            webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
-            pendingMove.current = null
-          }
-        })
-      } else {
-        pendingMove.current = { x: xNorm, y: yNorm }
-      }
+    if (renderRect.width <= 0 || renderRect.height <= 0) return
+
+    let xNorm = 0
+    let yNorm = 0
+
+    if (document.pointerLockElement === video) {
+      virtualPos.current.x = Math.max(0, Math.min(1, virtualPos.current.x + e.movementX / renderRect.width))
+      virtualPos.current.y = Math.max(0, Math.min(1, virtualPos.current.y + e.movementY / renderRect.height))
+      xNorm = virtualPos.current.x
+      yNorm = virtualPos.current.y
+    } else {
+      const rect = video.getBoundingClientRect()
+      const clientX = e.clientX - rect.left - renderRect.left
+      const clientY = e.clientY - rect.top - renderRect.top
+      xNorm = clientX / renderRect.width
+      yNorm = clientY / renderRect.height
+      if (xNorm < 0 || xNorm > 1 || yNorm < 0 || yNorm > 1) return
+      virtualPos.current = { x: xNorm, y: yNorm }
+    }
+
+    if (rafId.current === null) {
+      webrtcService.sendViewerMove(user.id, xNorm, yNorm)
+      pendingMove.current = null
+      rafId.current = requestAnimationFrame(() => {
+        rafId.current = null
+        if (pendingMove.current) {
+          webrtcService.sendViewerMove(user.id, pendingMove.current.x, pendingMove.current.y)
+          pendingMove.current = null
+        }
+      })
+    } else {
+      pendingMove.current = { x: xNorm, y: yNorm }
     }
   }
 

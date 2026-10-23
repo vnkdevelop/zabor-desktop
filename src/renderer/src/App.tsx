@@ -21,7 +21,7 @@ import { GlassSelect } from './components/Shared/GlassSelect';
 import { AvatarImg } from './components/Shared/AvatarImg';
 import { StreamPicker } from './components/Stream/StreamPicker';
 import { RemoteControlPill } from './components/Stream/RemoteControlPill';
-import { RC_OP_PING, RC_OP_RESET } from './services/remoteControl';
+import { RC_OP_PING, RC_OP_RESET, RC_OP_START, RC_OP_STOP } from './services/remoteControl';
 import { StreamCard } from './components/Stream/StreamCard';
 import { NoiseSuppressionSettings, type CalibrationPhase, type SmartNoiseModel } from './components/Settings/NoiseSuppressionSettings';
 import { MIC_TEST_PANEL_GAP_PX, MicTestPanel } from './components/Settings/MicTestPanel';
@@ -440,6 +440,7 @@ export default function App() {
       }, 3000);
 
       const onMove = () => {
+        if (store.isRemoteControlling || useAppStore.getState().isRemoteControlling) return;
         setShowOverlays(true);
         if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current);
         overlayTimeoutRef.current = setTimeout(() => {
@@ -455,7 +456,7 @@ export default function App() {
       setShowOverlays(true);
     }
     return undefined;
-  }, [store.isStreamFullscreen]);
+  }, [store.isStreamFullscreen, store.isRemoteControlling]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2343,8 +2344,9 @@ export default function App() {
     if (next) {
       webrtc.ensureRemoteControlChannelForStreamer(streamerId);
       store.setRemoteControlState({ isControlling: true, isHostActive: false });
-      webrtc.sendViewerSignal(streamerId, RC_OP_PING);
+      webrtc.sendViewerSignal(streamerId, RC_OP_START);
     } else {
+      webrtc.sendViewerSignal(streamerId, RC_OP_STOP);
       webrtc.sendViewerSignal(streamerId, RC_OP_RESET);
       store.setRemoteControlState({ isControlling: false });
     }
@@ -3207,13 +3209,16 @@ export default function App() {
                     const expTop = expMarginTop + (expMaxH - expH) / 2;
                     const expLeft = (windowSize.width - expW) / 2;
 
-                    const currentW = showOverlays ? normalW : expW;
-                    const currentH = showOverlays ? normalH : expH;
-                    const currentTop = showOverlays ? normalTop : expTop;
-                    const currentLeft = showOverlays ? normalLeft : expLeft;
+                    const isControlling = Boolean(store.isRemoteControlling);
+                    const overlaysActive = showOverlays && !isControlling;
+
+                    const currentW = overlaysActive ? normalW : expW;
+                    const currentH = overlaysActive ? normalH : expH;
+                    const currentTop = overlaysActive ? normalTop : expTop;
+                    const currentLeft = overlaysActive ? normalLeft : expLeft;
 
                     return (
-                      <div className={`fixed inset-0 bg-black z-[9999] ${showOverlays ? '' : 'cursor-none'}`}>
+                      <div className={`fixed inset-0 bg-black z-[9999] ${overlaysActive ? '' : 'cursor-none'}`}>
                         <div
                           style={{
                             position: 'absolute',
@@ -3231,20 +3236,20 @@ export default function App() {
                             cardSize={{ w: currentW, h: currentH }}
                             isFocused={true}
                             isFullscreen={true}
-                            showOverlays={showOverlays}
+                            showOverlays={overlaysActive}
                             onClick={() => { }}
                             onContextMenu={e => handleContextMenu(e, 'stream', activeStream.user)}
                             onRatioChange={setStreamRatio}
                           />
                         </div>
 
-                        <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${showOverlays ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
+                        <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${overlaysActive ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
                           {callUsersList.map(user => (
                             <SpeakingAvatar key={user.id} user={user} handleContextMenu={handleContextMenu} />
                           ))}
                         </div>
 
-                        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${showOverlays ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}>
+                        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${overlaysActive ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}>
                           <button
                             onClick={() => store.setStreamFullscreen(false)}
                             className="group/mode-button relative w-14 h-14 rounded-full flex items-center justify-center bg-surface/70 hover:bg-surfaceHover/80 text-white transition-colors"
@@ -3497,13 +3502,16 @@ export default function App() {
                     const expTop = expMarginTop + (expMaxH - expH) / 2;
                     const expLeft = (windowSize.width - expW) / 2;
 
-                    const currentW = showOverlays ? normalW : expW;
-                    const currentH = showOverlays ? normalH : expH;
-                    const currentTop = showOverlays ? normalTop : expTop;
-                    const currentLeft = showOverlays ? normalLeft : expLeft;
+                    const isControlling = Boolean(store.isRemoteControlling);
+                    const overlaysActive = showOverlays && !isControlling;
+
+                    const currentW = overlaysActive ? normalW : expW;
+                    const currentH = overlaysActive ? normalH : expH;
+                    const currentTop = overlaysActive ? normalTop : expTop;
+                    const currentLeft = overlaysActive ? normalLeft : expLeft;
 
                     return (
-                      <div className={`fixed inset-0 bg-black z-[9999] ${showOverlays ? '' : 'cursor-none'}`}>
+                      <div className={`fixed inset-0 bg-black z-[9999] ${overlaysActive ? '' : 'cursor-none'}`}>
                         <div
                           style={{
                             position: 'absolute',
@@ -3521,20 +3529,20 @@ export default function App() {
                             cardSize={{ w: currentW, h: currentH }}
                             isFocused={true}
                             isFullscreen={true}
-                            showOverlays={showOverlays}
+                            showOverlays={overlaysActive}
                             onClick={() => { }}
                             onContextMenu={e => handleContextMenu(e, 'stream', activeStream.user)}
                             onRatioChange={setStreamRatio}
                           />
                         </div>
 
-                        <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${showOverlays ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
+                        <div className={`absolute left-6 top-1/2 -translate-y-1/2 flex flex-col gap-3 justify-center items-center transition-all duration-300 z-50 ${overlaysActive ? 'translate-x-0 opacity-100' : '-translate-x-20 opacity-0 pointer-events-none'}`}>
                           {sorted.map(user => (
                             <SpeakingAvatar key={user.id} user={user} handleContextMenu={handleContextMenu} />
                           ))}
                         </div>
 
-                        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${showOverlays ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}>
+                        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 bg-panelBg/80 backdrop-blur-2xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] transition-all duration-300 z-50 ${overlaysActive ? 'translate-y-0 opacity-100' : 'translate-y-28 opacity-0 pointer-events-none'}`}>
                           <button
                             onClick={() => store.setStreamFullscreen(false)}
                             className="group/mode-button relative w-14 h-14 rounded-full flex items-center justify-center bg-surface/70 hover:bg-surfaceHover/80 text-white transition-colors"

@@ -125,6 +125,8 @@ declare global {
       remoteControlMouseButton: (button: number, down: boolean) => void;
       remoteControlMouseWheel: (delta: number) => void;
       remoteControlKey: (vk: number, down: boolean) => void;
+      remoteControlShowPill?: (data: { controllerName: string; isControlling: boolean }) => void;
+      remoteControlHidePill?: () => void;
       onRemoteControlHostActivity: (callback: (data: { type: 'move' | 'click'; dist?: number }) => void) => () => void;
       onRemoteControlPanicRevoke: (callback: () => void) => () => void;
     };

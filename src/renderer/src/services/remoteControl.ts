@@ -13,6 +13,9 @@ export const RC_OP_HOST_ACTIVE = 0x11;
 export const RC_OP_HOST_IDLE = 0x12;
 export const RC_OP_RESET = 0x13;
 export const RC_OP_HOST_REVOKED = 0x14;
+export const RC_OP_BUSY = 0x15;
+export const RC_OP_START = 0x16;
+export const RC_OP_STOP = 0x17;
 
 // Safe Virtual Key Codes Whitelist & Blacklist for Security Filtering
 const SAFE_VK_CODES = new Set<number>([
@@ -118,7 +121,10 @@ export class RemoteControlProtocol {
     [RC_OP_HOST_ACTIVE, new Uint8Array([RC_OP_HOST_ACTIVE])],
     [RC_OP_HOST_IDLE, new Uint8Array([RC_OP_HOST_IDLE])],
     [RC_OP_RESET, new Uint8Array([RC_OP_RESET])],
-    [RC_OP_HOST_REVOKED, new Uint8Array([RC_OP_HOST_REVOKED])]
+    [RC_OP_HOST_REVOKED, new Uint8Array([RC_OP_HOST_REVOKED])],
+    [RC_OP_BUSY, new Uint8Array([RC_OP_BUSY])],
+    [RC_OP_START, new Uint8Array([RC_OP_START])],
+    [RC_OP_STOP, new Uint8Array([RC_OP_STOP])]
   ]);
 
   public static encodeMove(xNorm: number, yNorm: number): ArrayBuffer {

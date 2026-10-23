@@ -123,6 +123,9 @@ const windowControls = {
     ipcRenderer.send('remote-control:mouse-button', button, down),
   remoteControlMouseWheel: (delta: number) => ipcRenderer.send('remote-control:mouse-wheel', delta),
   remoteControlKey: (vk: number, down: boolean) => ipcRenderer.send('remote-control:key', vk, down),
+  remoteControlShowPill: (data: { controllerName: string; isControlling: boolean }) =>
+    ipcRenderer.send('remote-control:show-pill', data),
+  remoteControlHidePill: () => ipcRenderer.send('remote-control:hide-pill'),
   onRemoteControlHostActivity: (callback: (data: { type: 'move' | 'click'; dist?: number }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('remote-control:host-activity', listener)

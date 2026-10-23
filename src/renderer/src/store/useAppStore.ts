@@ -102,6 +102,7 @@ interface AppState {
   isHostActive: boolean;
   isRemoteControlRevoked: boolean;
   activeRemoteControllerId: string | null;
+  isStreamRemoteControlAllowed: boolean;
   remoteStreamsAllowControl: Record<string, boolean>;
   setRemoteControlState: (state: Partial<{
     isControlling: boolean;
@@ -109,7 +110,7 @@ interface AppState {
     isRevoked: boolean;
     activeControllerId: string | null;
   }>) => void;
-  setStreamRemoteControlAllowed: (userId: string, allowed: boolean) => void;
+  setStreamRemoteControlAllowed: (userIdOrAllowed: string | boolean, allowed?: boolean) => void;
   noiseSuppression: boolean;
   setNoiseSuppression: (enabled: boolean) => void;
   webrtcConnections: Record<string, boolean>;
@@ -274,6 +275,7 @@ export const useAppStore = create<AppState>((set) => ({
   isHostActive: false,
   isRemoteControlRevoked: false,
   activeRemoteControllerId: null,
+  isStreamRemoteControlAllowed: false,
   remoteStreamsAllowControl: {},
   setRemoteControlState: (next) => set((state) => ({
     isRemoteControlling: next.isControlling !== undefined ? next.isControlling : state.isRemoteControlling,
@@ -281,9 +283,16 @@ export const useAppStore = create<AppState>((set) => ({
     isRemoteControlRevoked: next.isRevoked !== undefined ? next.isRevoked : state.isRemoteControlRevoked,
     activeRemoteControllerId: next.activeControllerId !== undefined ? next.activeControllerId : state.activeRemoteControllerId
   })),
-  setStreamRemoteControlAllowed: (userId, allowed) => set((state) => ({
-    remoteStreamsAllowControl: { ...state.remoteStreamsAllowControl, [userId]: allowed }
-  })),
+  setStreamRemoteControlAllowed: (userIdOrAllowed, allowed) => set((state) => {
+    if (typeof userIdOrAllowed === 'boolean') {
+      return { isStreamRemoteControlAllowed: userIdOrAllowed };
+    }
+    const isAllowed = allowed ?? false;
+    return {
+      isStreamRemoteControlAllowed: state.currentUser?.id === userIdOrAllowed ? isAllowed : state.isStreamRemoteControlAllowed,
+      remoteStreamsAllowControl: { ...state.remoteStreamsAllowControl, [userIdOrAllowed]: isAllowed }
+    };
+  }),
   setStreamVolume: (userId, volume) => set((state) => ({
     streamVolumes: { ...state.streamVolumes, [userId]: volume }
   })),
