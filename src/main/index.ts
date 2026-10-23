@@ -1059,6 +1059,16 @@ app.whenReady().then(() => {
     return true;
   });
 
+  ipcMain.handle('remote-control:hide-host-cursor', () => {
+    remoteControlSimulator?.hideHostCursor();
+    return true;
+  });
+
+  ipcMain.handle('remote-control:show-host-cursor', () => {
+    remoteControlSimulator?.showHostCursor();
+    return true;
+  });
+
   ipcMain.on('remote-control:show-pill', (_event, data: { controllerName: string; isControlling: boolean }) => {
     showPillOverlay(data?.controllerName || 'viewer');
   });

@@ -497,6 +497,10 @@
     "remoteControlRelease": "отпустить управление (ctrl+alt+k)",
     "cursorHidden": "курсор скрыт",
     "cursorShown": "курсор показан",
+    "cursorCaptured": "курсор захвачен",
+    "cursorReleased": "курсор освобождён",
+    "captureCursor": "захватить мышь",
+    "releaseCursor": "освободить мышь",
     "controlBusy": "управление сейчас занято",
     "hostControlling": "управляет вашим пк",
     "remoteControlAllowedHint": "удаленное управление разрешено"

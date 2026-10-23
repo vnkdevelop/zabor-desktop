@@ -90,7 +90,7 @@ export class RemoteControlSimulatorManager {
 
     if (this.child) {
       if (this.isRunning && this.child.stdin && this.child.stdin.writable && !this.child.killed) {
-        this.safeWrite('unclip\nreset\nexit\n');
+        this.safeWrite('unclip\nshow_cursor\nreset\nexit\n');
       }
       try {
         this.child.kill();
@@ -104,7 +104,20 @@ export class RemoteControlSimulatorManager {
   }
 
   public reset(): void {
-    this.safeWrite('unclip\nreset\n');
+    this.safeWrite('unclip\nshow_cursor\nreset\n');
+  }
+
+  public hideHostCursor(): void {
+    if (!this.isRunning) {
+      this.start();
+    }
+    this.safeWrite('hide_cursor\n');
+  }
+
+  public showHostCursor(): void {
+    if (this.isRunning) {
+      this.safeWrite('show_cursor\n');
+    }
   }
 
   public clipCursor(rect: { left: number; top: number; right: number; bottom: number }): void {

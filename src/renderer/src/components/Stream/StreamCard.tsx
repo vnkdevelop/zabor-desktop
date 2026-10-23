@@ -118,11 +118,32 @@ export const StreamCard = ({
   const virtualPos = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.5 })
   const lastMoveTime = useRef(0)
   const moveThrottleTimer = useRef<NodeJS.Timeout | null>(null)
-  const [isCursorHidden, setIsCursorHidden] = useState(false)
+  const [isCursorClipped, setIsCursorClipped] = useState(false)
+
+  const clipCursorToVideo = useCallback(() => {
+    if (videoRef.current) {
+      const video = videoRef.current
+      const vRect = video.getBoundingClientRect()
+      const rRect = getVideoRenderRect(video)
+      const scale = window.devicePixelRatio || 1
+      const screenLeft = Math.round((window.screenX + vRect.left + rRect.left) * scale)
+      const screenTop = Math.round((window.screenY + vRect.top + rRect.top) * scale)
+      const screenRight = Math.round((window.screenX + vRect.left + rRect.left + rRect.width) * scale)
+      const screenBottom = Math.round((window.screenY + vRect.top + rRect.top + rRect.height) * scale)
+      try {
+        window.windowControls.remoteControlClipCursor({
+          left: screenLeft,
+          top: screenTop,
+          right: screenRight,
+          bottom: screenBottom
+        })
+      } catch { }
+    }
+  }, [])
 
   useEffect(() => {
     if (!isRemoteControlling) {
-      setIsCursorHidden(false)
+      setIsCursorClipped(false)
       setRemoteControlState({ isCursorHidden: false })
       try {
         window.windowControls.remoteControlUnclipCursor()
@@ -130,26 +151,22 @@ export const StreamCard = ({
       if (document.pointerLockElement) {
         try { document.exitPointerLock() } catch { }
       }
+    } else if (isFullscreen) {
+      setIsCursorClipped(true)
+      clipCursorToVideo()
     }
-  }, [isRemoteControlling, setRemoteControlState])
+  }, [isRemoteControlling, isFullscreen, clipCursorToVideo, setRemoteControlState])
 
   useEffect(() => {
     const handleLockChange = () => {
       const isLocked = Boolean(document.pointerLockElement && document.pointerLockElement === videoRef.current)
-      if (!isLocked && isCursorHidden) {
-        setIsCursorHidden(false)
-        const msg = t('stream.cursorShown', 'курсор показан')
-        useAppStore.getState().setSystemToast(msg)
-        setTimeout(() => {
-          if (useAppStore.getState().systemToast === msg) {
-            useAppStore.getState().setSystemToast(null)
-          }
-        }, 2000)
+      if (!isLocked && isCursorClipped) {
+        setIsCursorClipped(false)
       }
     }
     document.addEventListener('pointerlockchange', handleLockChange)
     return () => document.removeEventListener('pointerlockchange', handleLockChange)
-  }, [isCursorHidden, t])
+  }, [isCursorClipped])
 
   useEffect(() => {
     if (!isFullscreen || isLocal) {
@@ -180,7 +197,7 @@ export const StreamCard = ({
           webrtcService.sendViewerSignal(user.id, RC_OP_STOP)
           webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
           setRemoteControlState({ isControlling: false, isCursorHidden: false })
-          setIsCursorHidden(false)
+          setIsCursorClipped(false)
           try {
             window.windowControls.remoteControlUnclipCursor()
           } catch { }
@@ -196,34 +213,17 @@ export const StreamCard = ({
           e.preventDefault()
           e.stopPropagation()
           e.stopImmediatePropagation?.()
-          const nextHidden = !isCursorHidden
-          setIsCursorHidden(nextHidden)
-          setRemoteControlState({ isCursorHidden: nextHidden })
-          if (nextHidden) {
-            if (videoRef.current) {
-              const video = videoRef.current
-              const vRect = video.getBoundingClientRect()
-              const rRect = getVideoRenderRect(video)
-              const scale = window.devicePixelRatio || 1
-              const screenLeft = Math.round((window.screenX + vRect.left + rRect.left) * scale)
-              const screenTop = Math.round((window.screenY + vRect.top + rRect.top) * scale)
-              const screenRight = Math.round((window.screenX + vRect.left + rRect.left + rRect.width) * scale)
-              const screenBottom = Math.round((window.screenY + vRect.top + rRect.top + rRect.height) * scale)
-              try {
-                window.windowControls.remoteControlClipCursor({
-                  left: screenLeft,
-                  top: screenTop,
-                  right: screenRight,
-                  bottom: screenBottom
-                })
-              } catch { }
-            }
+          const nextClipped = !isCursorClipped
+          setIsCursorClipped(nextClipped)
+          setRemoteControlState({ isCursorHidden: !nextClipped })
+          if (nextClipped) {
+            clipCursorToVideo()
           } else {
             try {
               window.windowControls.remoteControlUnclipCursor()
             } catch { }
           }
-          const msg = nextHidden ? t('stream.cursorHidden', 'курсор скрыт') : t('stream.cursorShown', 'курсор показан')
+          const msg = nextClipped ? t('stream.cursorCaptured', 'курсор захвачен') : t('stream.cursorReleased', 'курсор освобождён')
           useAppStore.getState().setSystemToast(msg)
           setTimeout(() => {
             if (useAppStore.getState().systemToast === msg) {
@@ -302,7 +302,7 @@ export const StreamCard = ({
       window.removeEventListener('keydown', handleKeyDown, { capture: true })
       window.removeEventListener('keyup', handleKeyUp, { capture: true })
     }
-  }, [isFullscreen, isLocal, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState, isCursorHidden, t])
+  }, [isFullscreen, isLocal, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState, isCursorClipped, clipCursorToVideo, t])
 
   useEffect(() => {
     if (isLocal || !isRemoteControlling) return
@@ -329,7 +329,7 @@ export const StreamCard = ({
       try {
         window.windowControls.remoteControlUnclipCursor()
       } catch { }
-      setIsCursorHidden(false)
+      setIsCursorClipped(false)
       setRemoteControlState({ isCursorHidden: false })
       if (isRemoteControlling) {
         webrtcService.sendViewerMouseButton(user.id, 0, false)
@@ -401,6 +401,10 @@ export const StreamCard = ({
     if (!isRemoteControlling || isHostActive) return
     e.preventDefault()
     e.stopPropagation()
+    if (isFullscreen && !isCursorClipped) {
+      setIsCursorClipped(true)
+      clipCursorToVideo()
+    }
     if (moveThrottleTimer.current) {
       clearTimeout(moveThrottleTimer.current)
       moveThrottleTimer.current = null
@@ -695,9 +699,9 @@ export const StreamCard = ({
         transform: 'translate3d(0, 0, 0)'
       }}
       className={`relative overflow-hidden group ${isFullscreen ? 'w-full h-full bg-[#0B0B0F] rounded-none' : 'w-full h-full bg-transparent rounded-xl'
-        } ${isRemoteControlling && !isHostActive ? (isCursorHidden ? 'cursor-none select-none' : 'cursor-default select-none') : ''}`}
+        } ${isRemoteControlling && !isHostActive ? 'cursor-default select-none' : ''}`}
     >
-      <div className={`${isFullscreen ? "w-full h-full bg-black" : "absolute inset-[1.5px] overflow-hidden rounded-[10.5px] bg-[#0B0B0F]"} ${isRemoteControlling && !isHostActive ? (isCursorHidden ? 'cursor-none select-none' : 'cursor-default select-none') : ''}`}>
+      <div className={`${isFullscreen ? "w-full h-full bg-black" : "absolute inset-[1.5px] overflow-hidden rounded-[10.5px] bg-[#0B0B0F]"} ${isRemoteControlling && !isHostActive ? 'cursor-default select-none' : ''}`}>
         <video
           ref={videoRef}
           autoPlay
@@ -734,9 +738,7 @@ export const StreamCard = ({
           onWheel={isFullscreen && isRemoteControlling ? handleWheel : undefined}
           onContextMenu={isFullscreen && isRemoteControlling ? handleVideoContextMenu : undefined}
           className={`w-full h-full object-contain ${
-            isRemoteControlling && !isHostActive
-              ? (isCursorHidden ? 'cursor-none select-none' : 'cursor-default select-none')
-              : ''
+            isRemoteControlling && !isHostActive ? 'cursor-default select-none' : ''
           }`}
         />
       </div>
@@ -749,6 +751,19 @@ export const StreamCard = ({
               : 'ring-2 ring-inset ring-primary'
           }`}
         />
+      )}
+
+      {isFullscreen && isRemoteControlling && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex items-center gap-2 bg-[#09090B]/85 backdrop-blur-md border border-white/[0.07] px-3.5 py-1.5 rounded-full text-[11px] font-semibold text-white/90">
+          <span className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${isHostActive ? 'bg-amber-400' : 'bg-primary animate-pulse'}`} />
+            {isHostActive ? t('stream.hostActive', 'хост управляет') : t('stream.controlling', 'вы управляете')}
+          </span>
+          <span className="text-white/30">|</span>
+          <span className="text-white/60">
+            esc: {isCursorClipped ? t('stream.releaseCursor', 'освободить мышь') : t('stream.captureCursor', 'захватить мышь')}
+          </span>
+        </div>
       )}
 
       {!hasFirstFrame && (

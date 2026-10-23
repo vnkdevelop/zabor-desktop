@@ -122,6 +122,10 @@ const windowControls = {
     ipcRenderer.invoke('remote-control:clip-cursor', rect),
   remoteControlUnclipCursor: (): Promise<boolean> =>
     ipcRenderer.invoke('remote-control:unclip-cursor'),
+  remoteControlHideHostCursor: (): Promise<boolean> =>
+    ipcRenderer.invoke('remote-control:hide-host-cursor'),
+  remoteControlShowHostCursor: (): Promise<boolean> =>
+    ipcRenderer.invoke('remote-control:show-host-cursor'),
   remoteControlMove: (absX: number, absY: number) => ipcRenderer.send('remote-control:move', absX, absY),
   remoteControlMoveNormalized: (xNorm: number, yNorm: number) =>
     ipcRenderer.send('remote-control:move-normalized', xNorm, yNorm),

@@ -123,6 +123,8 @@ declare global {
       remoteControlGetScreen: () => Promise<{ width: number; height: number; x: number; y: number }>;
       remoteControlClipCursor: (rect: { left: number; top: number; right: number; bottom: number }) => Promise<boolean>;
       remoteControlUnclipCursor: () => Promise<boolean>;
+      remoteControlHideHostCursor?: () => Promise<boolean>;
+      remoteControlShowHostCursor?: () => Promise<boolean>;
       remoteControlMove: (absX: number, absY: number) => void;
       remoteControlMoveNormalized: (xNorm: number, yNorm: number) => void;
       remoteControlMouseButton: (button: number, down: boolean) => void;

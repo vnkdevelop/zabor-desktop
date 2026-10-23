@@ -19,6 +19,17 @@ namespace ZaborInputSimulator {
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool ClipCursor(IntPtr lpRect);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetSystemCursor(IntPtr hcur, uint id);
+
+        [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
 
@@ -176,6 +187,60 @@ namespace ZaborInputSimulator {
         private static int cachedScreenHeight = 0;
         private static long lastScreenMetricsTicks = 0;
 
+        private const uint SPI_SETCURSORS = 0x0057;
+
+        private const uint OCR_NORMAL = 32512;
+        private const uint OCR_IBEAM = 32513;
+        private const uint OCR_WAIT = 32514;
+        private const uint OCR_CROSS = 32515;
+        private const uint OCR_UP = 32516;
+        private const uint OCR_SIZENWSE = 32642;
+        private const uint OCR_SIZENESW = 32643;
+        private const uint OCR_SIZEWE = 32644;
+        private const uint OCR_SIZENS = 32645;
+        private const uint OCR_SIZEALL = 32646;
+        private const uint OCR_NO = 32648;
+        private const uint OCR_HAND = 32649;
+        private const uint OCR_APPSTARTING = 32650;
+
+        private static readonly uint[] SYSTEM_CURSOR_IDS = new uint[] {
+            OCR_NORMAL, OCR_IBEAM, OCR_WAIT, OCR_CROSS, OCR_UP,
+            OCR_SIZENWSE, OCR_SIZENESW, OCR_SIZEWE, OCR_SIZENS, OCR_SIZEALL,
+            OCR_NO, OCR_HAND, OCR_APPSTARTING
+        };
+
+        private static bool isCursorHidden = false;
+
+        private static IntPtr CreateBlankCursor() {
+            byte[] andPlane = new byte[128];
+            for (int i = 0; i < andPlane.Length; i++) {
+                andPlane[i] = 0xFF;
+            }
+            byte[] xorPlane = new byte[128];
+            return CreateCursor(IntPtr.Zero, 0, 0, 32, 32, andPlane, xorPlane);
+        }
+
+        private static void HideSystemCursor() {
+            if (isCursorHidden) return;
+            try {
+                foreach (uint id in SYSTEM_CURSOR_IDS) {
+                    IntPtr hBlank = CreateBlankCursor();
+                    if (hBlank != IntPtr.Zero) {
+                        SetSystemCursor(hBlank, id);
+                    }
+                }
+                isCursorHidden = true;
+            } catch {}
+        }
+
+        private static void RestoreSystemCursors(bool force = false) {
+            if (!isCursorHidden && !force) return;
+            try {
+                SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+                isCursorHidden = false;
+            } catch {}
+        }
+
         private static void UpdateScreenMetrics() {
             long now = Environment.TickCount;
             if (cachedScreenWidth == 0 || now - lastScreenMetricsTicks > 2000) {
@@ -205,6 +270,7 @@ namespace ZaborInputSimulator {
                             if (now - lastPhysicalClickTicks > 100) {
                                 lastPhysicalClickTicks = now;
                                 hasRecentPhysicalClick = true;
+                                RestoreSystemCursors(true);
                                 try {
                                     physicalClickSignal.Set();
                                 } catch {}
@@ -221,6 +287,12 @@ namespace ZaborInputSimulator {
         public static void Main(string[] args) {
             try {
                 SetProcessDPIAware();
+            } catch {}
+
+            try {
+                AppDomain.CurrentDomain.ProcessExit += (s, e) => {
+                    RestoreSystemCursors(true);
+                };
             } catch {}
 
             if (args != null && args.Length > 0 && args[0] == "unclip") {
@@ -305,6 +377,16 @@ namespace ZaborInputSimulator {
                         continue;
                     }
 
+                    if (line == "hide_cursor") {
+                        HideSystemCursor();
+                        continue;
+                    }
+
+                    if (line == "show_cursor") {
+                        RestoreSystemCursors(true);
+                        continue;
+                    }
+
                     if (line == "check_click") {
                         bool click = hasRecentPhysicalClick;
                         hasRecentPhysicalClick = false;
@@ -378,6 +460,9 @@ namespace ZaborInputSimulator {
         private static void CleanupHook() {
             try {
                 ClipCursor(IntPtr.Zero);
+            } catch {}
+            try {
+                RestoreSystemCursors(true);
             } catch {}
             if (hookId != IntPtr.Zero) {
                 UnhookWindowsHookEx(hookId);
@@ -467,6 +552,9 @@ namespace ZaborInputSimulator {
         private static void ResetAll() {
             try {
                 ClipCursor(IntPtr.Zero);
+            } catch {}
+            try {
+                RestoreSystemCursors(true);
             } catch {}
             // Release mouse buttons
             if (isLeftDown) {
