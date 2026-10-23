@@ -569,10 +569,6 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           if (!hasPlayoutDelayExt && playoutDelayExtId !== -1) {
             filteredLines.push(`a=extmap:${playoutDelayExtId} http://www.webrtc.org/experiments/rtp-hdrext/playout-delay`)
           }
-          if (!hasPlayoutDelayAttr) {
-            filteredLines.push('a=playout-delay:0,0')
-          }
-          filteredLines.push('b=AS:6000')
           skipVideoTracks = true
           continue
         }
@@ -580,20 +576,10 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           skipVideoTracks = false
         }
         if (skipVideoTracks) {
-          if (lines[i].startsWith('a=playout-delay:')) {
-            filteredLines.push('a=playout-delay:0,0')
-          } else if (lines[i].startsWith('a=rtpmap:') || lines[i].startsWith('a=fmtp:') || lines[i].startsWith('a=rtcp-fb:')) {
+          if (lines[i].startsWith('a=rtpmap:') || lines[i].startsWith('a=fmtp:') || lines[i].startsWith('a=rtcp-fb:')) {
             const ptMatch = lines[i].match(/^a=(?:rtpmap|fmtp|rtcp-fb):(\d+)/i)
             if (ptMatch && keptPayloads.has(ptMatch[1])) {
-              if (lines[i].startsWith('a=fmtp:')) {
-                let fmtpLine = lines[i]
-                if (!fmtpLine.includes('x-google-min-bitrate')) {
-                  fmtpLine += ';x-google-min-bitrate=2500;x-google-start-bitrate=3500;x-google-max-bitrate=6000'
-                }
-                filteredLines.push(fmtpLine)
-              } else {
-                filteredLines.push(lines[i])
-              }
+              filteredLines.push(lines[i])
             }
           } else {
             filteredLines.push(lines[i])
@@ -612,21 +598,13 @@ function optimizeSDP(sdp: string, isRelayOnly = false, isUltraLowLatency = false
           if (!hasPlayoutDelayExt && playoutDelayExtId !== -1) {
             filteredLines.push(`a=extmap:${playoutDelayExtId} http://www.webrtc.org/experiments/rtp-hdrext/playout-delay`)
           }
-          if (!hasPlayoutDelayAttr) {
-            filteredLines.push('a=playout-delay:0,0')
-          }
-          filteredLines.push('b=AS:6000')
           inVideoSection = true
           continue
         }
         if (inVideoSection && lines[i].startsWith('m=')) {
           inVideoSection = false
         }
-        if (inVideoSection && lines[i].startsWith('a=playout-delay:')) {
-          filteredLines.push('a=playout-delay:0,0')
-        } else {
-          filteredLines.push(lines[i])
-        }
+        filteredLines.push(lines[i])
       }
       lines = filteredLines
     }
@@ -1190,10 +1168,18 @@ export class WebRTCManager {
   public applyVideoZeroPlayoutDelay(receiver: RTCRtpReceiver): void {
     if (!receiver.track || receiver.track.kind !== 'video') return
     if ('playoutDelayHint' in receiver) {
-      try { (receiver as any).playoutDelayHint = 0 } catch { }
+      try {
+        if ((receiver as any).playoutDelayHint !== 0) {
+          (receiver as any).playoutDelayHint = 0
+        }
+      } catch { }
     }
     if ('jitterBufferTarget' in receiver) {
-      try { (receiver as any).jitterBufferTarget = 0 } catch { }
+      try {
+        if ((receiver as any).jitterBufferTarget !== 0) {
+          (receiver as any).jitterBufferTarget = 0
+        }
+      } catch { }
     }
   }
 
@@ -4760,7 +4746,7 @@ export class WebRTCManager {
       }
 
       const now = Date.now()
-      if (now - this.lastHostFailSafeRefresh > 500) {
+      if (now - this.lastHostFailSafeRefresh > 2000) {
         this.lastHostFailSafeRefresh = now
         this.refreshHostFailSafe(userId)
       }
@@ -6251,6 +6237,18 @@ export class WebRTCManager {
 
   private updateVideoJitterBuffer(userId: string, receiver: RTCRtpReceiver, stats: RTCStatsReport) {
     if (!('jitterBufferTarget' in receiver)) return
+
+    if (this.rcDataChannels.has(userId) || useAppStore.getState().isRemoteControlling || this.allowRemoteControl) {
+      try {
+        if ((receiver as any).jitterBufferTarget !== 0) {
+          (receiver as any).jitterBufferTarget = 0
+        }
+        if ('playoutDelayHint' in receiver && (receiver as any).playoutDelayHint !== 0) {
+          (receiver as any).playoutDelayHint = 0
+        }
+      } catch { }
+      return
+    }
 
     let jitterSeconds = 0
     let packetsLost = 0

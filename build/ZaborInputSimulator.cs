@@ -193,7 +193,7 @@ namespace ZaborInputSimulator {
                         MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
 
                         long now = Environment.TickCount;
-                        bool isRecentSimulated = Math.Abs(now - lastSimulatedClickTicks) < 150;
+                        bool isRecentSimulated = Math.Abs(now - lastSimulatedClickTicks) < 250;
 
                         // Filter out ALL injected/simulated inputs
                         bool isInjected = isRecentSimulated ||

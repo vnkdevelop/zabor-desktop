@@ -175,7 +175,8 @@ export const StreamCard = ({
           webrtcService.ensureRemoteControlChannelForStreamer(user.id)
           setRemoteControlState({ isControlling: true, isHostActive: false })
           const p2pStream = webrtcService.getP2PVideoStream(user.id)
-          if (p2pStream) {
+          const current = useAppStore.getState().remoteVideoStreams[user.id]
+          if (p2pStream && p2pStream !== current && (!current || current.getVideoTracks()[0]?.id !== p2pStream.getVideoTracks()[0]?.id)) {
             useAppStore.getState().setRemoteVideoStream(user.id, p2pStream)
           }
           webrtcService.sendViewerSignal(user.id, RC_OP_START)
@@ -311,8 +312,7 @@ export const StreamCard = ({
     if (isLocal || !isRemoteControlling) return
     const timer = setInterval(() => {
       webrtcService.sendViewerSignal(user.id, RC_OP_PING)
-      webrtcService.enforceVideoZeroPlayoutDelay(user.id)
-    }, 1000)
+    }, 4000)
     return () => clearInterval(timer)
   }, [isLocal, isRemoteControlling, user.id])
 
@@ -628,10 +628,6 @@ export const StreamCard = ({
   useEffect(() => {
     if (mode === 'normal' || isLocal) return
     webrtcService.enforceVideoZeroPlayoutDelay(user.id)
-    const timer = setInterval(() => {
-      webrtcService.enforceVideoZeroPlayoutDelay(user.id)
-    }, 500)
-    return () => clearInterval(timer)
   }, [mode, isLocal, user.id])
 
   useLayoutEffect(() => {
