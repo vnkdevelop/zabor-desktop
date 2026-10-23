@@ -195,11 +195,11 @@ export class RemoteControlSimulatorManager {
     if (this.child?.stdout) {
       this.child.stdout.on('data', (data: Buffer) => {
         const str = data.toString().trim();
-        if (str.includes('click') || str.includes('move')) {
+        if (str.includes('click')) {
           const win = this.getWindow();
           if (win && !win.isDestroyed()) {
             win.webContents.send('remote-control:host-activity', {
-              type: str.includes('click') ? 'click' : 'move'
+              type: 'click'
             });
           }
         }

@@ -330,10 +330,24 @@ export const StreamCard = ({
       } catch { }
       setIsCursorHidden(false)
       setRemoteControlState({ isCursorHidden: false })
+      if (isRemoteControlling) {
+        webrtcService.sendViewerMouseButton(user.id, 0, false)
+        webrtcService.sendViewerMouseButton(user.id, 1, false)
+        webrtcService.sendViewerMouseButton(user.id, 2, false)
+      }
     }
     window.addEventListener('blur', handleBlur)
     return () => window.removeEventListener('blur', handleBlur)
-  }, [setRemoteControlState])
+  }, [isRemoteControlling, user.id, setRemoteControlState])
+
+  useEffect(() => {
+    if (!isFullscreen || isLocal || !isRemoteControlling) return
+    const handleGlobalMouseUp = (e: MouseEvent) => {
+      webrtcService.sendViewerMouseButton(user.id, e.button, false)
+    }
+    window.addEventListener('mouseup', handleGlobalMouseUp)
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp)
+  }, [isFullscreen, isLocal, isRemoteControlling, user.id])
 
   const handleMouseMove = (e: React.MouseEvent<HTMLVideoElement>) => {
     if (!isRemoteControlling || isHostActive || !videoRef.current) return
@@ -398,7 +412,7 @@ export const StreamCard = ({
   }
 
   const handleMouseUp = (e: React.MouseEvent<HTMLVideoElement>) => {
-    if (!isRemoteControlling || isHostActive) return
+    if (!isRemoteControlling) return
     e.preventDefault()
     e.stopPropagation()
     if (moveThrottleTimer.current) {

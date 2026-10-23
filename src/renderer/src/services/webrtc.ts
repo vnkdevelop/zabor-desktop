@@ -4628,7 +4628,7 @@ export class WebRTCManager {
       useAppStore.getState().setRemoteControlState({
         isHostActive: false
       })
-    }, 2000)
+    }, 1000)
   }
 
   private resolveRemoteUserName(userId: string): string {
@@ -4719,7 +4719,7 @@ export class WebRTCManager {
         return
       }
 
-      if (this.isHostActive) return
+      if (this.isHostActive && op !== RC_OP_MOUSE_UP) return
 
       if (!this.activeRemoteViewerId) {
         this.activeRemoteViewerId = userId

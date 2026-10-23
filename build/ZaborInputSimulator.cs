@@ -170,48 +170,29 @@ namespace ZaborInputSimulator {
         private static uint hookThreadId = 0;
         private static volatile bool hasRecentPhysicalClick = false;
         private static long lastPhysicalClickTicks = 0;
-        private static int lastPhysicalX = -1;
-        private static int lastPhysicalY = -1;
-        private static long lastPhysicalMoveTicks = 0;
+        private static readonly AutoResetEvent physicalClickSignal = new AutoResetEvent(false);
 
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
             if (nCode >= 0) {
                 try {
-                    MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
+                    int msg = wParam.ToInt32();
+                    if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN) {
+                        MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
 
-                    // Filter out ALL injected/simulated inputs
-                    bool isInjected = ((hookStruct.flags & LLMHF_INJECTED) != 0) ||
-                                      ((hookStruct.flags & LLMHF_LOWER_IL_INJECTED) != 0) ||
-                                      (hookStruct.dwExtraInfo == SIMULATED_EXTRA_INFO);
+                        // Filter out ALL injected/simulated inputs
+                        bool isInjected = ((hookStruct.flags & LLMHF_INJECTED) != 0) ||
+                                          ((hookStruct.flags & LLMHF_LOWER_IL_INJECTED) != 0) ||
+                                          (hookStruct.dwExtraInfo == SIMULATED_EXTRA_INFO);
 
-                    if (!isInjected) {
-                        int msg = wParam.ToInt32();
-                        if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN) {
+                        if (!isInjected) {
                             long now = Environment.TickCount;
-                            if (now - lastPhysicalClickTicks > 50) {
+                            if (now - lastPhysicalClickTicks > 100) {
                                 lastPhysicalClickTicks = now;
                                 hasRecentPhysicalClick = true;
                                 try {
-                                    Console.WriteLine("click");
-                                } catch {
-                                    // Stdout may be closed by host
-                                }
+                                    physicalClickSignal.Set();
+                                } catch {}
                             }
-                        } else if (msg == WM_MOUSEMOVE) {
-                            int dx = hookStruct.pt.x - lastPhysicalX;
-                            int dy = hookStruct.pt.y - lastPhysicalY;
-                            if (lastPhysicalX >= 0 && (dx * dx + dy * dy >= 14400)) {
-                                long now = Environment.TickCount;
-                                if (now - lastPhysicalMoveTicks > 400) {
-                                    lastPhysicalMoveTicks = now;
-                                    try {
-                                        Console.WriteLine("move");
-                                    } catch {
-                                    }
-                                }
-                            }
-                            lastPhysicalX = hookStruct.pt.x;
-                            lastPhysicalY = hookStruct.pt.y;
                         }
                     }
                 } catch {
@@ -279,6 +260,20 @@ namespace ZaborInputSimulator {
             }) { IsBackground = true };
             hookThread.Start();
 
+            // Background reporter for physical clicks to keep hook callback non-blocking
+            var clickReporter = new Thread(() => {
+                while (true) {
+                    try {
+                        if (physicalClickSignal.WaitOne()) {
+                            Console.WriteLine("click");
+                        }
+                    } catch {
+                        break;
+                    }
+                }
+            }) { IsBackground = true };
+            clickReporter.Start();
+
             // Ensure clean start
             ResetAll();
 
@@ -313,15 +308,11 @@ namespace ZaborInputSimulator {
                             int x = (int)Math.Round(xn * (w - 1));
                             int y = (int)Math.Round(yn * (h - 1));
                             SetCursorPos(x, y);
-                            lastPhysicalX = x;
-                            lastPhysicalY = y;
                         }
                     } else if (cmd == "m" && parts.Length >= 3) {
                         int x, y;
                         if (int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y)) {
                             SetCursorPos(x, y);
-                            lastPhysicalX = x;
-                            lastPhysicalY = y;
                         }
                     } else if (cmd == "d" && parts.Length >= 2) {
                         int btn;
