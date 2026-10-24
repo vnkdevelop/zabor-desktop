@@ -206,13 +206,33 @@ namespace ZaborInputSimulator {
         private const uint OCR_HAND = 32649;
         private const uint OCR_APPSTARTING = 32650;
 
+        private static bool isCursorHidden = false;
+
         private static void HideSystemCursor() {
-            // Keep host cursor fully visible on the physical host machine at all times
+            if (isCursorHidden) return;
+            uint[] ids = { OCR_NORMAL, OCR_IBEAM, OCR_WAIT, OCR_CROSS, OCR_UP,
+                           OCR_SIZENWSE, OCR_SIZENESW, OCR_SIZEWE, OCR_SIZENS,
+                           OCR_SIZEALL, OCR_NO, OCR_HAND, OCR_APPSTARTING };
+            int size = 32;
+            byte[] andMask = new byte[size * size / 8];
+            byte[] xorMask = new byte[size * size / 8];
+            for (int i = 0; i < andMask.Length; i++) andMask[i] = 0xFF;
+            foreach (uint id in ids) {
+                try {
+                    IntPtr blank = CreateCursor(IntPtr.Zero, 0, 0, size, size, andMask, xorMask);
+                    if (blank != IntPtr.Zero) {
+                        SetSystemCursor(blank, id);
+                    }
+                } catch {}
+            }
+            isCursorHidden = true;
         }
 
         private static void RestoreSystemCursors(bool force = false) {
+            if (!isCursorHidden && !force) return;
             try {
                 SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+                isCursorHidden = false;
             } catch {}
         }
 
@@ -250,6 +270,7 @@ namespace ZaborInputSimulator {
                                     if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
                                         lastPhysicalActivityTicks = now;
                                         hasRecentPhysicalClick = true;
+                                        RestoreSystemCursors(true);
                                         try {
                                             physicalClickSignal.Set();
                                         } catch {}
@@ -273,6 +294,7 @@ namespace ZaborInputSimulator {
                             if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
                                 lastPhysicalActivityTicks = now;
                                 hasRecentPhysicalClick = true;
+                                RestoreSystemCursors(true);
                                 try {
                                     physicalClickSignal.Set();
                                 } catch {}
@@ -360,6 +382,7 @@ namespace ZaborInputSimulator {
                 while (true) {
                     try {
                         if (physicalClickSignal.WaitOne()) {
+                            RestoreSystemCursors(true);
                             Console.WriteLine("activity");
                         }
                     } catch {

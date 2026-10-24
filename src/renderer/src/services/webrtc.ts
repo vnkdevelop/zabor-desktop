@@ -4656,6 +4656,9 @@ export class WebRTCManager {
     if (this.hostIdleTimer) clearTimeout(this.hostIdleTimer)
     this.hostIdleTimer = setTimeout(() => {
       this.isHostActive = false
+      try {
+        window.windowControls.remoteControlHideHostCursor?.()
+      } catch { }
       for (const ch of this.rcDataChannels.values()) {
         if (ch.readyState === 'open') {
           try {
@@ -4745,6 +4748,9 @@ export class WebRTCManager {
         if (this.allowRemoteControl) {
           this.startHostRemoteControl()
         }
+        try {
+          window.windowControls.remoteControlHideHostCursor?.()
+        } catch { }
         void this.setP2PScreenSenderActiveForPeer(userId, true)
         const ctrlName = this.resolveRemoteUserName(userId)
         useAppStore.getState().setRemoteControlState({
@@ -4774,6 +4780,9 @@ export class WebRTCManager {
         if (this.sfuPubActive) {
           void this.setP2PScreenSenderActiveForPeer(userId, true)
         }
+        try {
+          window.windowControls.remoteControlHideHostCursor?.()
+        } catch { }
         const ctrlName = this.resolveRemoteUserName(userId)
         try {
           window.windowControls.remoteControlShowPill?.({

@@ -1116,6 +1116,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   hidePillOverlay();
+  remoteControlSimulator?.showHostCursor();
   remoteControlSimulator?.unclipCursor();
   stopStreamAudioCapture();
   disposeChatFileWriters();
