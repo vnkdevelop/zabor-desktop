@@ -5903,6 +5903,7 @@ export class WebRTCManager {
       } else {
         constraints = {
           video: {
+            cursor: 'never',
             mandatory: {
               chromeMediaSource: 'desktop',
               chromeMediaSourceId: sourceId,
@@ -5919,7 +5920,19 @@ export class WebRTCManager {
       try {
         stream = await navigator.mediaDevices.getUserMedia(constraints)
       } catch (err) {
-        if (constraints.audio) {
+        if ((constraints.video as any)?.cursor) {
+          delete (constraints.video as any).cursor
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints)
+          } catch (retryErr) {
+            if (constraints.audio) {
+              delete constraints.audio
+              stream = await navigator.mediaDevices.getUserMedia(constraints)
+            } else {
+              throw retryErr
+            }
+          }
+        } else if (constraints.audio) {
           delete constraints.audio
           stream = await navigator.mediaDevices.getUserMedia(constraints)
         } else {

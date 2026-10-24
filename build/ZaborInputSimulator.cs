@@ -27,6 +27,9 @@ namespace ZaborInputSimulator {
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
 
+        [DllImport("user32.dll")]
+        private static extern uint MapVirtualKey(uint uCode, uint uMapType);
+
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
 
@@ -67,6 +70,7 @@ namespace ZaborInputSimulator {
         private const uint INPUT_MOUSE = 0;
         private const uint INPUT_KEYBOARD = 1;
 
+        private const uint MOUSEEVENTF_MOVE = 0x0001;
         private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
         private const uint MOUSEEVENTF_LEFTUP = 0x0004;
         private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
@@ -74,6 +78,8 @@ namespace ZaborInputSimulator {
         private const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
         private const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
         private const uint MOUSEEVENTF_WHEEL = 0x0800;
+        private const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
+        private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
 
         private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         private const uint KEYEVENTF_KEYUP = 0x0002;
@@ -206,34 +212,12 @@ namespace ZaborInputSimulator {
         private const uint OCR_HAND = 32649;
         private const uint OCR_APPSTARTING = 32650;
 
-        private static bool isCursorHidden = false;
-
         private static void HideSystemCursor() {
-            if (isCursorHidden) return;
-            uint[] ids = { OCR_NORMAL, OCR_IBEAM, OCR_WAIT, OCR_CROSS, OCR_UP,
-                           OCR_SIZENWSE, OCR_SIZENESW, OCR_SIZEWE, OCR_SIZENS,
-                           OCR_SIZEALL, OCR_NO, OCR_HAND, OCR_APPSTARTING };
-            int size = 32;
-            byte[] andMask = new byte[size * size / 8];
-            byte[] xorMask = new byte[size * size / 8];
-            for (int i = 0; i < andMask.Length; i++) andMask[i] = 0xFF;
-            foreach (uint id in ids) {
-                try {
-                    IntPtr blank = CreateCursor(IntPtr.Zero, 0, 0, size, size, andMask, xorMask);
-                    if (blank != IntPtr.Zero) {
-                        SetSystemCursor(blank, id);
-                    }
-                } catch {}
-            }
-            isCursorHidden = true;
+            // Preserved clean: Host cursor remains visible on physical display (RustDesk / AnyDesk pattern)
         }
 
         private static void RestoreSystemCursors(bool force = false) {
-            if (!isCursorHidden && !force) return;
-            try {
-                SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
-                isCursorHidden = false;
-            } catch {}
+            // Preserved clean: System cursors remain untouched
         }
 
         private static void UpdateScreenMetrics() {
@@ -243,6 +227,37 @@ namespace ZaborInputSimulator {
                 cachedScreenHeight = GetSystemMetrics(SM_CYSCREEN);
                 lastScreenMetricsTicks = now;
             }
+        }
+
+        private static void SendMouseMove(int x, int y) {
+            UpdateScreenMetrics();
+            int w = cachedScreenWidth;
+            int h = cachedScreenHeight;
+            if (w <= 0 || h <= 0) return;
+
+            int normX = (int)Math.Round((x * 65535.0) / (w - 1));
+            int normY = (int)Math.Round((y * 65535.0) / (h - 1));
+
+            lastSimulatedX = x;
+            lastSimulatedY = y;
+            lastSimulatedMoveTicks = Environment.TickCount;
+
+            var input = new INPUT {
+                type = INPUT_MOUSE,
+                u = new InputUnion {
+                    mi = new MOUSEINPUT {
+                        dx = normX,
+                        dy = normY,
+                        mouseData = 0,
+                        dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                        time = 0,
+                        dwExtraInfo = SIMULATED_EXTRA_INFO
+                    }
+                }
+            };
+
+            SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
+            SetCursorPos(x, y);
         }
 
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
@@ -270,7 +285,6 @@ namespace ZaborInputSimulator {
                                     if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
                                         lastPhysicalActivityTicks = now;
                                         hasRecentPhysicalClick = true;
-                                        RestoreSystemCursors(true);
                                         try {
                                             physicalClickSignal.Set();
                                         } catch {}
@@ -282,7 +296,7 @@ namespace ZaborInputSimulator {
                         MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
 
                         long now = Environment.TickCount;
-                        bool isRecentSimulated = Math.Abs(now - lastSimulatedClickTicks) < 250;
+                        bool isRecentSimulated = Math.Abs(now - lastSimulatedClickTicks) < 350;
 
                         // Filter out ALL injected/simulated inputs
                         bool isInjected = isRecentSimulated ||
@@ -294,7 +308,6 @@ namespace ZaborInputSimulator {
                             if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
                                 lastPhysicalActivityTicks = now;
                                 hasRecentPhysicalClick = true;
-                                RestoreSystemCursors(true);
                                 try {
                                     physicalClickSignal.Set();
                                 } catch {}
@@ -382,7 +395,6 @@ namespace ZaborInputSimulator {
                 while (true) {
                     try {
                         if (physicalClickSignal.WaitOne()) {
-                            RestoreSystemCursors(true);
                             Console.WriteLine("activity");
                         }
                     } catch {
@@ -436,18 +448,12 @@ namespace ZaborInputSimulator {
                             int h = cachedScreenHeight;
                             int x = (int)Math.Round(xn * (w - 1));
                             int y = (int)Math.Round(yn * (h - 1));
-                            lastSimulatedX = x;
-                            lastSimulatedY = y;
-                            lastSimulatedMoveTicks = Environment.TickCount;
-                            SetCursorPos(x, y);
+                            SendMouseMove(x, y);
                         }
                     } else if (cmd == "m" && parts.Length >= 3) {
                         int x, y;
                         if (int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y)) {
-                            lastSimulatedX = x;
-                            lastSimulatedY = y;
-                            lastSimulatedMoveTicks = Environment.TickCount;
-                            SetCursorPos(x, y);
+                            SendMouseMove(x, y);
                         }
                     } else if (cmd == "d" && parts.Length >= 2) {
                         int btn;
@@ -568,12 +574,17 @@ namespace ZaborInputSimulator {
                 flags |= KEYEVENTF_EXTENDEDKEY;
             }
 
+            ushort scan = 0;
+            try {
+                scan = (ushort)MapVirtualKey(vk, 0);
+            } catch {}
+
             var input = new INPUT {
                 type = INPUT_KEYBOARD,
                 u = new InputUnion {
                     ki = new KEYBDINPUT {
                         wVk = vk,
-                        wScan = 0,
+                        wScan = scan,
                         dwFlags = flags,
                         time = 0,
                         dwExtraInfo = SIMULATED_EXTRA_INFO

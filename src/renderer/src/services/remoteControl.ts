@@ -26,8 +26,8 @@ const SAFE_VK_CODES = new Set<number>([
   // A-Z
   0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d,
   0x4e, 0x4f, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a,
-  // Shift, Ctrl, Alt
-  0x10, 0x11, 0x12,
+  // Shift, Ctrl, Alt, CapsLock, NumLock, ScrollLock
+  0x10, 0x11, 0x12, 0x14, 0x90, 0x91,
   // Numpad 0-9, multiply, add, separator, subtract, decimal, divide
   0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
   // F1 - F11 (F12 is omitted as a potential dev/system key)
@@ -35,6 +35,60 @@ const SAFE_VK_CODES = new Set<number>([
   // Punctuation and symbols
   0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xc0, 0xdb, 0xdc, 0xdd, 0xde
 ]);
+
+const CODE_TO_VK: Record<string, number> = {
+  Enter: 0x0d,
+  Escape: 0x1b,
+  Backspace: 0x08,
+  Tab: 0x09,
+  Space: 0x20,
+  ArrowLeft: 0x25,
+  ArrowUp: 0x26,
+  ArrowRight: 0x27,
+  ArrowDown: 0x28,
+  Delete: 0x2e,
+  Insert: 0x2d,
+  Home: 0x24,
+  End: 0x23,
+  PageUp: 0x21,
+  PageDown: 0x22,
+  Minus: 0xbd,
+  Equal: 0xbb,
+  BracketLeft: 0xdb,
+  BracketRight: 0xdd,
+  Semicolon: 0xba,
+  Quote: 0xde,
+  Backquote: 0xc0,
+  Backslash: 0xdc,
+  Comma: 0xbc,
+  Period: 0xbe,
+  Slash: 0xbf,
+  ShiftLeft: 0x10,
+  ShiftRight: 0x10,
+  ControlLeft: 0x11,
+  ControlRight: 0x11,
+  AltLeft: 0x12,
+  AltRight: 0x12,
+  CapsLock: 0x14,
+  NumLock: 0x90,
+  ScrollLock: 0x91,
+  Numpad0: 0x60,
+  Numpad1: 0x61,
+  Numpad2: 0x62,
+  Numpad3: 0x63,
+  Numpad4: 0x64,
+  Numpad5: 0x65,
+  Numpad6: 0x66,
+  Numpad7: 0x67,
+  Numpad8: 0x68,
+  Numpad9: 0x69,
+  NumpadMultiply: 0x6a,
+  NumpadAdd: 0x6b,
+  NumpadSubtract: 0x6d,
+  NumpadDecimal: 0x6e,
+  NumpadDivide: 0x6f,
+  NumpadEnter: 0x0d
+};
 
 export interface KeyModifiers {
   alt?: boolean;
@@ -65,43 +119,32 @@ export function isShortcutSafe(vk: number, modifiers: KeyModifiers): boolean {
 }
 
 // Convert DOM KeyboardEvent to Windows Virtual Key code
-export function getWinVkCode(e: KeyboardEvent): number {
+export function getWinVkCode(e: KeyboardEvent | { code?: string; keyCode?: number }): number {
+  if (e.code && CODE_TO_VK[e.code]) {
+    return CODE_TO_VK[e.code];
+  }
+  if (e.code && e.code.startsWith('Key') && e.code.length === 4) {
+    const charCode = e.code.toUpperCase().charCodeAt(3);
+    if (charCode >= 0x41 && charCode <= 0x5a) {
+      return charCode;
+    }
+  }
+  if (e.code && e.code.startsWith('Digit') && e.code.length === 6) {
+    const charCode = e.code.charCodeAt(5);
+    if (charCode >= 0x30 && charCode <= 0x39) {
+      return charCode;
+    }
+  }
+  if (e.code && /^F\d{1,2}$/.test(e.code)) {
+    const fnNum = parseInt(e.code.slice(1), 10);
+    if (fnNum >= 1 && fnNum <= 12) {
+      return 0x70 + fnNum - 1;
+    }
+  }
   if (e.keyCode && SAFE_VK_CODES.has(e.keyCode)) {
     return e.keyCode;
   }
-  // Standard mappings for common keys if keyCode is missing
-  switch (e.code) {
-    case 'Enter': return 0x0d;
-    case 'Escape': return 0x1b;
-    case 'Backspace': return 0x08;
-    case 'Tab': return 0x09;
-    case 'Space': return 0x20;
-    case 'ArrowLeft': return 0x25;
-    case 'ArrowUp': return 0x26;
-    case 'ArrowRight': return 0x27;
-    case 'ArrowDown': return 0x28;
-    case 'Delete': return 0x2e;
-    case 'Insert': return 0x2d;
-    case 'Home': return 0x24;
-    case 'End': return 0x23;
-    case 'PageUp': return 0x21;
-    case 'PageDown': return 0x22;
-    default: {
-      if (e.code && e.code.startsWith('Key') && e.code.length === 4) {
-        const charCode = e.code.toUpperCase().charCodeAt(3);
-        if (charCode >= 0x41 && charCode <= 0x5a) {
-          return charCode;
-        }
-      }
-      if (e.code && e.code.startsWith('Digit') && e.code.length === 6) {
-        const charCode = e.code.charCodeAt(5);
-        if (charCode >= 0x30 && charCode <= 0x39) {
-          return charCode;
-        }
-      }
-      return e.keyCode || 0;
-    }
-  }
+  return e.keyCode || 0;
 }
 
 // Zero-allocation pre-allocated reusable binary packets
