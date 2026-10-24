@@ -212,12 +212,41 @@ namespace ZaborInputSimulator {
         private const uint OCR_HAND = 32649;
         private const uint OCR_APPSTARTING = 32650;
 
+        private static readonly uint[] SYSTEM_CURSOR_IDS = new uint[] {
+            OCR_NORMAL, OCR_IBEAM, OCR_WAIT, OCR_CROSS, OCR_UP,
+            OCR_SIZENWSE, OCR_SIZENESW, OCR_SIZEWE, OCR_SIZENS, OCR_SIZEALL,
+            OCR_NO, OCR_HAND, OCR_APPSTARTING
+        };
+
+        private static volatile bool isCursorHidden = false;
+
+        private static IntPtr CreateBlankCursor() {
+            int size = 32;
+            byte[] andMask = new byte[size * size / 8];
+            byte[] xorMask = new byte[size * size / 8];
+            for (int i = 0; i < andMask.Length; i++) andMask[i] = 0xFF;
+            return CreateCursor(IntPtr.Zero, 0, 0, size, size, andMask, xorMask);
+        }
+
         private static void HideSystemCursor() {
-            // Preserved clean: Host cursor remains visible on physical display (RustDesk / AnyDesk pattern)
+            if (isCursorHidden) return;
+            try {
+                foreach (uint id in SYSTEM_CURSOR_IDS) {
+                    IntPtr hBlank = CreateBlankCursor();
+                    if (hBlank != IntPtr.Zero) {
+                        SetSystemCursor(hBlank, id);
+                    }
+                }
+                isCursorHidden = true;
+            } catch {}
         }
 
         private static void RestoreSystemCursors(bool force = false) {
-            // Preserved clean: System cursors remain untouched
+            if (!isCursorHidden && !force) return;
+            try {
+                SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+                isCursorHidden = false;
+            } catch {}
         }
 
         private static void UpdateScreenMetrics() {
@@ -285,6 +314,7 @@ namespace ZaborInputSimulator {
                                     if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
                                         lastPhysicalActivityTicks = now;
                                         hasRecentPhysicalClick = true;
+                                        RestoreSystemCursors(true);
                                         try {
                                             physicalClickSignal.Set();
                                         } catch {}
@@ -308,6 +338,7 @@ namespace ZaborInputSimulator {
                             if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
                                 lastPhysicalActivityTicks = now;
                                 hasRecentPhysicalClick = true;
+                                RestoreSystemCursors(true);
                                 try {
                                     physicalClickSignal.Set();
                                 } catch {}
@@ -395,6 +426,7 @@ namespace ZaborInputSimulator {
                 while (true) {
                     try {
                         if (physicalClickSignal.WaitOne()) {
+                            RestoreSystemCursors(true);
                             Console.WriteLine("activity");
                         }
                     } catch {

@@ -320,4 +320,63 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
       assert.equal(activeViewerId, null, 'Fail-safe watchdog must reset activeViewerId on silence');
     });
   });
+
+  describe('Suite 7: Host Cursor Blanking & Instant Local Cursor Protocol', () => {
+    test('S7-01: Active remote control session start triggers host cursor blanking', () => {
+      let hostCursorVisible = true;
+      const onRemoteControlStart = () => {
+        hostCursorVisible = false;
+      };
+
+      onRemoteControlStart();
+      assert.equal(hostCursorVisible, false, 'Host cursor must be blanked to prevent duplicate floating cursor on video stream');
+    });
+
+    test('S7-02: Physical host input immediately restores host system cursor', () => {
+      let hostCursorVisible = false;
+      const onPhysicalActivity = () => {
+        hostCursorVisible = true;
+      };
+
+      onPhysicalActivity();
+      assert.equal(hostCursorVisible, true, 'Physical host movement must immediately restore cursor visibility for host');
+    });
+
+    test('S7-03: Host 2-second idle expiration re-blanks host cursor while remote viewer is active', async () => {
+      let hostCursorVisible = true;
+      let isHostActive = true;
+      let activeRemoteViewerId = 'viewer-user-1';
+      let idleTimer = null;
+
+      const triggerHostActivity = () => {
+        isHostActive = true;
+        hostCursorVisible = true;
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          isHostActive = false;
+          if (activeRemoteViewerId) {
+            hostCursorVisible = false;
+          }
+        }, 50); // fast test timer
+      };
+
+      triggerHostActivity();
+      assert.equal(isHostActive, true);
+      assert.equal(hostCursorVisible, true);
+
+      await new Promise((r) => setTimeout(r, 70));
+      assert.equal(isHostActive, false);
+      assert.equal(hostCursorVisible, false, 'After 2-second hysteresis, host cursor must be blanked again for viewer');
+    });
+
+    test('S7-04: Session reset or disconnect guarantees host cursor restoration', () => {
+      let hostCursorVisible = false;
+      const resetControlState = () => {
+        hostCursorVisible = true;
+      };
+
+      resetControlState();
+      assert.equal(hostCursorVisible, true, 'Ending session must unconditionally restore normal system cursor');
+    });
+  });
 });

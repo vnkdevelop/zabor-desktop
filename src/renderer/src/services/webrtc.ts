@@ -4656,9 +4656,11 @@ export class WebRTCManager {
     if (this.hostIdleTimer) clearTimeout(this.hostIdleTimer)
     this.hostIdleTimer = setTimeout(() => {
       this.isHostActive = false
-      try {
-        window.windowControls.remoteControlHideHostCursor?.()
-      } catch { }
+      if (this.activeRemoteViewerId) {
+        try {
+          window.windowControls.remoteControlHideHostCursor?.()
+        } catch { }
+      }
       for (const ch of this.rcDataChannels.values()) {
         if (ch.readyState === 'open') {
           try {
@@ -5903,7 +5905,6 @@ export class WebRTCManager {
       } else {
         constraints = {
           video: {
-            cursor: 'never',
             mandatory: {
               chromeMediaSource: 'desktop',
               chromeMediaSourceId: sourceId,
@@ -5920,19 +5921,7 @@ export class WebRTCManager {
       try {
         stream = await navigator.mediaDevices.getUserMedia(constraints)
       } catch (err) {
-        if ((constraints.video as any)?.cursor) {
-          delete (constraints.video as any).cursor
-          try {
-            stream = await navigator.mediaDevices.getUserMedia(constraints)
-          } catch (retryErr) {
-            if (constraints.audio) {
-              delete constraints.audio
-              stream = await navigator.mediaDevices.getUserMedia(constraints)
-            } else {
-              throw retryErr
-            }
-          }
-        } else if (constraints.audio) {
+        if (constraints.audio) {
           delete constraints.audio
           stream = await navigator.mediaDevices.getUserMedia(constraints)
         } else {
