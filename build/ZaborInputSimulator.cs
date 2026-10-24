@@ -8,6 +8,9 @@ namespace ZaborInputSimulator {
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetCursorPos(int X, int Y);
 
+        [DllImport("user32.dll")]
+        private static extern bool GetCursorPos(out POINT lpPoint);
+
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint nInputs, [In] INPUT[] pInputs, int cbSize);
 
@@ -211,14 +214,51 @@ namespace ZaborInputSimulator {
         private const uint OCR_NO = 32648;
         private const uint OCR_HAND = 32649;
         private const uint OCR_APPSTARTING = 32650;
+        private const uint OCR_HELP = 32651;
 
         private static readonly uint[] SYSTEM_CURSOR_IDS = new uint[] {
             OCR_NORMAL, OCR_IBEAM, OCR_WAIT, OCR_CROSS, OCR_UP,
             OCR_SIZENWSE, OCR_SIZENESW, OCR_SIZEWE, OCR_SIZENS, OCR_SIZEALL,
-            OCR_NO, OCR_HAND, OCR_APPSTARTING
+            OCR_NO, OCR_HAND, OCR_APPSTARTING, OCR_HELP
         };
 
         private static volatile bool isCursorHidden = false;
+
+        private struct SimPoint {
+            public int x;
+            public int y;
+            public long ticks;
+        }
+
+        private static readonly SimPoint[] recentSimPoints = new SimPoint[128];
+        private static int simPointIndex = 0;
+        private static readonly object simPointsLock = new object();
+
+        private static void RecordSimulatedPoint(int x, int y, long ticks) {
+            lock (simPointsLock) {
+                recentSimPoints[simPointIndex].x = x;
+                recentSimPoints[simPointIndex].y = y;
+                recentSimPoints[simPointIndex].ticks = ticks;
+                simPointIndex = (simPointIndex + 1) % recentSimPoints.Length;
+            }
+        }
+
+        private static bool IsRecentSimulatedPoint(int ptX, int ptY, long now) {
+            lock (simPointsLock) {
+                for (int i = 0; i < recentSimPoints.Length; i++) {
+                    if (recentSimPoints[i].ticks == 0) continue;
+                    long age = Math.Abs(now - recentSimPoints[i].ticks);
+                    if (age <= 750) {
+                        int dx = ptX - recentSimPoints[i].x;
+                        int dy = ptY - recentSimPoints[i].y;
+                        if ((dx * dx + dy * dy) <= 144) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
 
         private static IntPtr CreateBlankCursor() {
             int size = 32;
@@ -228,8 +268,8 @@ namespace ZaborInputSimulator {
             return CreateCursor(IntPtr.Zero, 0, 0, size, size, andMask, xorMask);
         }
 
-        private static void HideSystemCursor() {
-            if (isCursorHidden) return;
+        private static void HideSystemCursor(bool force = false) {
+            if (isCursorHidden && !force) return;
             try {
                 foreach (uint id in SYSTEM_CURSOR_IDS) {
                     IntPtr hBlank = CreateBlankCursor();
@@ -238,6 +278,10 @@ namespace ZaborInputSimulator {
                     }
                 }
                 isCursorHidden = true;
+                POINT pt;
+                if (GetCursorPos(out pt)) {
+                    SetCursorPos(pt.x, pt.y);
+                }
             } catch {}
         }
 
@@ -246,6 +290,10 @@ namespace ZaborInputSimulator {
             try {
                 SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
                 isCursorHidden = false;
+                POINT pt;
+                if (GetCursorPos(out pt)) {
+                    SetCursorPos(pt.x, pt.y);
+                }
             } catch {}
         }
 
@@ -264,12 +312,14 @@ namespace ZaborInputSimulator {
             int h = cachedScreenHeight;
             if (w <= 0 || h <= 0) return;
 
-            int normX = (int)Math.Round((x * 65535.0) / (w - 1));
-            int normY = (int)Math.Round((y * 65535.0) / (h - 1));
-
+            long now = Environment.TickCount;
             lastSimulatedX = x;
             lastSimulatedY = y;
-            lastSimulatedMoveTicks = Environment.TickCount;
+            lastSimulatedMoveTicks = now;
+            RecordSimulatedPoint(x, y, now);
+
+            int normX = (int)Math.Round((x * 65535.0) / (w - 1));
+            int normY = (int)Math.Round((y * 65535.0) / (h - 1));
 
             var input = new INPUT {
                 type = INPUT_MOUSE,
@@ -302,15 +352,16 @@ namespace ZaborInputSimulator {
                                           (hookStruct.dwExtraInfo == SIMULATED_EXTRA_INFO);
 
                         if (!isInjected) {
-                            int dx = hookStruct.pt.x - lastSimulatedX;
-                            int dy = hookStruct.pt.y - lastSimulatedY;
-                            double dist = Math.Sqrt(dx * dx + dy * dy);
-                            long timeSinceSim = Math.Abs(now - lastSimulatedMoveTicks);
+                            if (!IsRecentSimulatedPoint(hookStruct.pt.x, hookStruct.pt.y, now)) {
+                                long timeSinceSim = Math.Abs(now - lastSimulatedMoveTicks);
+                                int dx = hookStruct.pt.x - lastSimulatedX;
+                                int dy = hookStruct.pt.y - lastSimulatedY;
+                                double dist = Math.Sqrt(dx * dx + dy * dy);
 
-                            bool isOurPlacement = (dist <= 4 && timeSinceSim < 250);
-                            if (!isOurPlacement) {
-                                // Deliberate physical host mouse movement (threshold > 48px or idle > 350ms with movement)
-                                if (dist > 48 || (timeSinceSim >= 350 && dist > 10)) {
+                                bool isPhysicalIntervention = (timeSinceSim < 400 && dist > 100) ||
+                                                              (timeSinceSim >= 400 && dist > 15);
+
+                                if (isPhysicalIntervention) {
                                     if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
                                         lastPhysicalActivityTicks = now;
                                         hasRecentPhysicalClick = true;
@@ -452,7 +503,7 @@ namespace ZaborInputSimulator {
                     }
 
                     if (line == "hide_cursor") {
-                        HideSystemCursor();
+                        HideSystemCursor(true);
                         continue;
                     }
 

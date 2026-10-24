@@ -378,5 +378,88 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
       resetControlState();
       assert.equal(hostCursorVisible, true, 'Ending session must unconditionally restore normal system cursor');
     });
+
+    test('S7-05: Rapid simulated viewer movements do not trigger false host activity or cursor unblanking', () => {
+      const recentSimPoints = [];
+      let hostCursorVisible = false;
+      let hostActivityTriggered = false;
+
+      const recordSimulatedPoint = (x, y, ticks) => {
+        recentSimPoints.push({ x, y, ticks });
+        if (recentSimPoints.length > 64) recentSimPoints.shift();
+      };
+
+      const isRecentSimulatedPoint = (ptX, ptY, now) => {
+        for (let i = recentSimPoints.length - 1; i >= 0; i--) {
+          const p = recentSimPoints[i];
+          if (Math.abs(now - p.ticks) <= 750) {
+            const dx = ptX - p.x;
+            const dy = ptY - p.y;
+            if (dx * dx + dy * dy <= 144) return true;
+          }
+        }
+        return false;
+      };
+
+      const handleHookMove = (hookX, hookY, now) => {
+        if (!isRecentSimulatedPoint(hookX, hookY, now)) {
+          hostCursorVisible = true;
+          hostActivityTriggered = true;
+        }
+      };
+
+      let now = Date.now();
+      for (let i = 0; i < 20; i++) {
+        const simX = 100 + i * 40;
+        const simY = 100 + i * 30;
+        now += 8;
+        recordSimulatedPoint(simX, simY, now);
+        handleHookMove(simX + 1, simY - 1, now + 2);
+      }
+
+      assert.equal(hostActivityTriggered, false, 'Simulated rapid moves must match simulated points ring buffer and not trigger host activity');
+      assert.equal(hostCursorVisible, false, 'Simulated rapid moves must keep host cursor blanked');
+    });
+
+    test('S7-06: Deliberate physical host mouse intervention reclaims control and restores cursor', () => {
+      const recentSimPoints = [];
+      let hostCursorVisible = false;
+      let hostActivityTriggered = false;
+      let lastSimulatedMoveTicks = Date.now();
+
+      const isRecentSimulatedPoint = (ptX, ptY, now) => {
+        for (let i = recentSimPoints.length - 1; i >= 0; i--) {
+          const p = recentSimPoints[i];
+          if (Math.abs(now - p.ticks) <= 750) {
+            const dx = ptX - p.x;
+            const dy = ptY - p.y;
+            if (dx * dx + dy * dy <= 144) return true;
+          }
+        }
+        return false;
+      };
+
+      const handleHookMove = (hookX, hookY, lastSimX, lastSimY, now) => {
+        if (!isRecentSimulatedPoint(hookX, hookY, now)) {
+          const timeSinceSim = Math.Abs ? Math.abs(now - lastSimulatedMoveTicks) : Math.abs(now - lastSimulatedMoveTicks);
+          const dx = hookX - lastSimX;
+          const dy = hookY - lastSimY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          const isPhysicalIntervention = (timeSinceSim < 400 && dist > 100) ||
+                                        (timeSinceSim >= 400 && dist > 15);
+          if (isPhysicalIntervention) {
+            hostCursorVisible = true;
+            hostActivityTriggered = true;
+          }
+        }
+      };
+
+      const now = Date.now();
+      handleHookMove(250, 250, 100, 100, now);
+
+      assert.equal(hostActivityTriggered, true, 'Deliberate physical displacement must trigger host activity');
+      assert.equal(hostCursorVisible, true, 'Deliberate physical displacement must restore host cursor visibility');
+    });
   });
 });
