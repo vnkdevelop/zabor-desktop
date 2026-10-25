@@ -321,67 +321,67 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
     });
   });
 
-  describe('Suite 7: Host Cursor Blanking & Instant Local Cursor Protocol', () => {
-    test('S7-01: Active remote control session start triggers host cursor blanking', () => {
-      let hostCursorVisible = true;
-      const onRemoteControlStart = () => {
-        hostCursorVisible = false;
-      };
+  describe('Suite 7: RustDesk Architecture - Capture-Level Cursor Isolation & Arbitrated Control', () => {
+    test('S7-01: Remote control screen share specifies capture-level cursor exclusion (cursor: never)', () => {
+      const getCaptureOptions = (allowRemoteControl) => ({
+        video: {
+          cursor: allowRemoteControl ? 'never' : 'always'
+        }
+      });
 
-      onRemoteControlStart();
-      assert.equal(hostCursorVisible, false, 'Host cursor must be blanked to prevent duplicate floating cursor on video stream');
+      const rcOptions = getCaptureOptions(true);
+      const regularOptions = getCaptureOptions(false);
+      assert.equal(rcOptions.video.cursor, 'never', 'Remote control stream must exclude cursor at capturer level');
+      assert.equal(regularOptions.video.cursor, 'always', 'Standard stream without remote control must show cursor');
     });
 
-    test('S7-02: Physical host input immediately restores host system cursor', () => {
-      let hostCursorVisible = false;
-      const onPhysicalActivity = () => {
-        hostCursorVisible = true;
+    test('S7-02: Host system cursor remains visible on host screen for complete host awareness', () => {
+      let hostOSCursorBlanked = false;
+      const onHostRemoteControlStart = () => {
+        // RustDesk architecture: host OS cursor is NEVER blanked, preserving host visibility and zero mouse lag
+        hostOSCursorBlanked = false;
       };
 
-      onPhysicalActivity();
-      assert.equal(hostCursorVisible, true, 'Physical host movement must immediately restore cursor visibility for host');
+      onHostRemoteControlStart();
+      assert.equal(hostOSCursorBlanked, false, 'Host cursor must remain visible on physical monitor');
     });
 
-    test('S7-03: Host 2-second idle expiration re-blanks host cursor while remote viewer is active', async () => {
-      let hostCursorVisible = true;
+    test('S7-03: Host 2-second idle expiration returns control to viewer without touching OS cursors', async () => {
       let isHostActive = true;
       let activeRemoteViewerId = 'viewer-user-1';
       let idleTimer = null;
 
       const triggerHostActivity = () => {
         isHostActive = true;
-        hostCursorVisible = true;
         if (idleTimer) clearTimeout(idleTimer);
         idleTimer = setTimeout(() => {
           isHostActive = false;
-          if (activeRemoteViewerId) {
-            hostCursorVisible = false;
-          }
         }, 50); // fast test timer
       };
 
       triggerHostActivity();
       assert.equal(isHostActive, true);
-      assert.equal(hostCursorVisible, true);
 
       await new Promise((r) => setTimeout(r, 70));
-      assert.equal(isHostActive, false);
-      assert.equal(hostCursorVisible, false, 'After 2-second hysteresis, host cursor must be blanked again for viewer');
+      assert.equal(isHostActive, false, 'After 2-second hysteresis, control returns to active remote viewer');
+      assert.equal(activeRemoteViewerId, 'viewer-user-1');
     });
 
-    test('S7-04: Session reset or disconnect guarantees host cursor restoration', () => {
-      let hostCursorVisible = false;
+    test('S7-04: Session reset or disconnect guarantees clean state reset without OS cursor corruption', () => {
+      let activeViewerId = 'viewer-user-1';
+      let isHostActive = false;
       const resetControlState = () => {
-        hostCursorVisible = true;
+        activeViewerId = null;
+        isHostActive = false;
       };
 
       resetControlState();
-      assert.equal(hostCursorVisible, true, 'Ending session must unconditionally restore normal system cursor');
+      assert.equal(activeViewerId, null, 'Ending session must clear active viewer');
+      assert.equal(isHostActive, false, 'Ending session must reset host activity');
     });
 
-    test('S7-05: Rapid simulated viewer movements do not trigger false host activity or cursor unblanking', () => {
+    test('S7-05: Rapid simulated viewer movements do not trigger false host activity', () => {
       const recentSimPoints = [];
-      let hostCursorVisible = false;
       let hostActivityTriggered = false;
 
       const recordSimulatedPoint = (x, y, ticks) => {
@@ -403,7 +403,6 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
 
       const handleHookMove = (hookX, hookY, now) => {
         if (!isRecentSimulatedPoint(hookX, hookY, now)) {
-          hostCursorVisible = true;
           hostActivityTriggered = true;
         }
       };
@@ -418,12 +417,10 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
       }
 
       assert.equal(hostActivityTriggered, false, 'Simulated rapid moves must match simulated points ring buffer and not trigger host activity');
-      assert.equal(hostCursorVisible, false, 'Simulated rapid moves must keep host cursor blanked');
     });
 
-    test('S7-06: Deliberate physical host mouse intervention reclaims control and restores cursor', () => {
+    test('S7-06: Deliberate physical host mouse intervention reclaims control', () => {
       const recentSimPoints = [];
-      let hostCursorVisible = false;
       let hostActivityTriggered = false;
       let lastSimulatedMoveTicks = Date.now();
 
@@ -441,15 +438,14 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
 
       const handleHookMove = (hookX, hookY, lastSimX, lastSimY, now) => {
         if (!isRecentSimulatedPoint(hookX, hookY, now)) {
-          const timeSinceSim = Math.Abs ? Math.abs(now - lastSimulatedMoveTicks) : Math.abs(now - lastSimulatedMoveTicks);
+          const timeSinceSim = Math.abs(now - lastSimulatedMoveTicks);
           const dx = hookX - lastSimX;
           const dy = hookY - lastSimY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
+          const distSq = dx * dx + dy * dy;
 
-          const isPhysicalIntervention = (timeSinceSim < 400 && dist > 100) ||
-                                        (timeSinceSim >= 400 && dist > 15);
+          const isPhysicalIntervention = (timeSinceSim < 400 && distSq > 10000) ||
+                                        (timeSinceSim >= 400 && distSq > 225);
           if (isPhysicalIntervention) {
-            hostCursorVisible = true;
             hostActivityTriggered = true;
           }
         }
@@ -459,7 +455,6 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
       handleHookMove(250, 250, 100, 100, now);
 
       assert.equal(hostActivityTriggered, true, 'Deliberate physical displacement must trigger host activity');
-      assert.equal(hostCursorVisible, true, 'Deliberate physical displacement must restore host cursor visibility');
     });
   });
 });

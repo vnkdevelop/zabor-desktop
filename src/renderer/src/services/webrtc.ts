@@ -1198,8 +1198,8 @@ export class WebRTCManager {
     }
     if ('jitterBufferTarget' in receiver) {
       try {
-        if ((receiver as any).jitterBufferTarget !== 0) {
-          (receiver as any).jitterBufferTarget = 0
+        if ((receiver as any).jitterBufferTarget !== WebRTCManager.VIDEO_JITTER_RC_MS) {
+          (receiver as any).jitterBufferTarget = WebRTCManager.VIDEO_JITTER_RC_MS
         }
       } catch { }
     }
@@ -4539,6 +4539,20 @@ export class WebRTCManager {
     }
   }
 
+  public requestSenderKeyFrame(): void {
+    try {
+      for (const pc of this.peerConnections.values()) {
+        for (const sender of pc.getSenders()) {
+          if (sender.track?.kind === 'video') {
+            try {
+              (sender as any).generateKeyFrame?.()
+            } catch { }
+          }
+        }
+      }
+    } catch { }
+  }
+
   public handleRemoteControlDisconnect(userId: string): void {
     if (this.activeRemoteViewerId === userId) {
       this.resetControlState()
@@ -4656,11 +4670,6 @@ export class WebRTCManager {
     if (this.hostIdleTimer) clearTimeout(this.hostIdleTimer)
     this.hostIdleTimer = setTimeout(() => {
       this.isHostActive = false
-      if (this.activeRemoteViewerId) {
-        try {
-          window.windowControls.remoteControlHideHostCursor?.()
-        } catch { }
-      }
       for (const ch of this.rcDataChannels.values()) {
         if (ch.readyState === 'open') {
           try {
@@ -4750,10 +4759,8 @@ export class WebRTCManager {
         if (this.allowRemoteControl) {
           this.startHostRemoteControl()
         }
-        try {
-          window.windowControls.remoteControlHideHostCursor?.()
-        } catch { }
         void this.setP2PScreenSenderActiveForPeer(userId, true)
+        this.requestSenderKeyFrame()
         const ctrlName = this.resolveRemoteUserName(userId)
         useAppStore.getState().setRemoteControlState({
           activeControllerId: userId,
@@ -4782,9 +4789,7 @@ export class WebRTCManager {
         if (this.sfuPubActive) {
           void this.setP2PScreenSenderActiveForPeer(userId, true)
         }
-        try {
-          window.windowControls.remoteControlHideHostCursor?.()
-        } catch { }
+        this.requestSenderKeyFrame()
         const ctrlName = this.resolveRemoteUserName(userId)
         try {
           window.windowControls.remoteControlShowPill?.({
@@ -5917,15 +5922,35 @@ export class WebRTCManager {
         }
       }
 
-      let stream: MediaStream
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints)
-      } catch (err) {
-        if (constraints.audio) {
-          delete constraints.audio
+      let stream: MediaStream | null = null
+
+      if (!isCamera && typeof navigator !== 'undefined' && navigator.mediaDevices?.getDisplayMedia) {
+        try {
+          await window.windowControls?.setDisplayMediaSource?.(sourceId)
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+              cursor: allowRemoteControl ? 'never' : 'always',
+              width: { ideal: width, max: width },
+              height: { ideal: height, max: height },
+              frameRate: { ideal: frameRate, max: frameRate }
+            } as any,
+            audio: false
+          })
+        } catch (e) {
+          console.warn('[ScreenShare] getDisplayMedia unavailable or rejected, falling back to getUserMedia:', e)
+        }
+      }
+
+      if (!stream) {
+        try {
           stream = await navigator.mediaDevices.getUserMedia(constraints)
-        } else {
-          throw err
+        } catch (err) {
+          if (constraints.audio) {
+            delete constraints.audio
+            stream = await navigator.mediaDevices.getUserMedia(constraints)
+          } else {
+            throw err
+          }
         }
       }
 
@@ -6202,6 +6227,7 @@ export class WebRTCManager {
   private static readonly VIDEO_JITTER_FREEZE_MS = 300
   private static readonly VIDEO_JITTER_ATTACK = 0.7
   private static readonly VIDEO_JITTER_RELEASE = 0.04
+  private static readonly VIDEO_JITTER_RC_MS = 25
 
   private startStreamSyncMonitoring() {
     if (this.streamSyncInterval) return
@@ -6315,8 +6341,8 @@ export class WebRTCManager {
 
     if (this.rcDataChannels.has(userId) || useAppStore.getState().isRemoteControlling || this.allowRemoteControl) {
       try {
-        if ((receiver as any).jitterBufferTarget !== 0) {
-          (receiver as any).jitterBufferTarget = 0
+        if ((receiver as any).jitterBufferTarget !== WebRTCManager.VIDEO_JITTER_RC_MS) {
+          (receiver as any).jitterBufferTarget = WebRTCManager.VIDEO_JITTER_RC_MS
         }
         if ('playoutDelayHint' in receiver && (receiver as any).playoutDelayHint !== 0) {
           (receiver as any).playoutDelayHint = 0

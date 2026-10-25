@@ -22,19 +22,8 @@ namespace ZaborInputSimulator {
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool ClipCursor(IntPtr lpRect);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool SetSystemCursor(IntPtr hcur, uint id);
-
-        [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
-
         [DllImport("user32.dll")]
         private static extern uint MapVirtualKey(uint uCode, uint uMapType);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
 
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
@@ -199,102 +188,38 @@ namespace ZaborInputSimulator {
         private static int cachedScreenHeight = 0;
         private static long lastScreenMetricsTicks = 0;
 
-        private const uint SPI_SETCURSORS = 0x0057;
-
-        private const uint OCR_NORMAL = 32512;
-        private const uint OCR_IBEAM = 32513;
-        private const uint OCR_WAIT = 32514;
-        private const uint OCR_CROSS = 32515;
-        private const uint OCR_UP = 32516;
-        private const uint OCR_SIZENWSE = 32642;
-        private const uint OCR_SIZENESW = 32643;
-        private const uint OCR_SIZEWE = 32644;
-        private const uint OCR_SIZENS = 32645;
-        private const uint OCR_SIZEALL = 32646;
-        private const uint OCR_NO = 32648;
-        private const uint OCR_HAND = 32649;
-        private const uint OCR_APPSTARTING = 32650;
-        private const uint OCR_HELP = 32651;
-
-        private static readonly uint[] SYSTEM_CURSOR_IDS = new uint[] {
-            OCR_NORMAL, OCR_IBEAM, OCR_WAIT, OCR_CROSS, OCR_UP,
-            OCR_SIZENWSE, OCR_SIZENESW, OCR_SIZEWE, OCR_SIZENS, OCR_SIZEALL,
-            OCR_NO, OCR_HAND, OCR_APPSTARTING, OCR_HELP
-        };
-
-        private static volatile bool isCursorHidden = false;
-
-        private struct SimPoint {
-            public int x;
-            public int y;
-            public long ticks;
-        }
-
-        private static readonly SimPoint[] recentSimPoints = new SimPoint[128];
+        private static readonly int[] simPointsX = new int[64];
+        private static readonly int[] simPointsY = new int[64];
+        private static readonly long[] simPointsTicks = new long[64];
         private static int simPointIndex = 0;
-        private static readonly object simPointsLock = new object();
 
         private static void RecordSimulatedPoint(int x, int y, long ticks) {
-            lock (simPointsLock) {
-                recentSimPoints[simPointIndex].x = x;
-                recentSimPoints[simPointIndex].y = y;
-                recentSimPoints[simPointIndex].ticks = ticks;
-                simPointIndex = (simPointIndex + 1) % recentSimPoints.Length;
-            }
+            int idx = (Interlocked.Increment(ref simPointIndex) & 0x7FFFFFFF) % 64;
+            simPointsX[idx] = x;
+            simPointsY[idx] = y;
+            simPointsTicks[idx] = ticks;
         }
 
         private static bool IsRecentSimulatedPoint(int ptX, int ptY, long now) {
-            lock (simPointsLock) {
-                for (int i = 0; i < recentSimPoints.Length; i++) {
-                    if (recentSimPoints[i].ticks == 0) continue;
-                    long age = Math.Abs(now - recentSimPoints[i].ticks);
-                    if (age <= 750) {
-                        int dx = ptX - recentSimPoints[i].x;
-                        int dy = ptY - recentSimPoints[i].y;
-                        if ((dx * dx + dy * dy) <= 144) {
-                            return true;
-                        }
+            for (int i = 0; i < 64; i++) {
+                long t = simPointsTicks[i];
+                if (t == 0) continue;
+                long age = Math.Abs(now - t);
+                if (age <= 750) {
+                    int dx = ptX - simPointsX[i];
+                    int dy = ptY - simPointsY[i];
+                    if ((dx * dx + dy * dy) <= 144) {
+                        return true;
                     }
                 }
             }
             return false;
         }
 
-        private static IntPtr CreateBlankCursor() {
-            int size = 32;
-            byte[] andMask = new byte[size * size / 8];
-            byte[] xorMask = new byte[size * size / 8];
-            for (int i = 0; i < andMask.Length; i++) andMask[i] = 0xFF;
-            return CreateCursor(IntPtr.Zero, 0, 0, size, size, andMask, xorMask);
-        }
-
         private static void HideSystemCursor(bool force = false) {
-            if (isCursorHidden && !force) return;
-            try {
-                foreach (uint id in SYSTEM_CURSOR_IDS) {
-                    IntPtr hBlank = CreateBlankCursor();
-                    if (hBlank != IntPtr.Zero) {
-                        SetSystemCursor(hBlank, id);
-                    }
-                }
-                isCursorHidden = true;
-                POINT pt;
-                if (GetCursorPos(out pt)) {
-                    SetCursorPos(pt.x, pt.y);
-                }
-            } catch {}
         }
 
         private static void RestoreSystemCursors(bool force = false) {
-            if (!isCursorHidden && !force) return;
-            try {
-                SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
-                isCursorHidden = false;
-                POINT pt;
-                if (GetCursorPos(out pt)) {
-                    SetCursorPos(pt.x, pt.y);
-                }
-            } catch {}
         }
 
         private static void UpdateScreenMetrics() {
@@ -356,16 +281,15 @@ namespace ZaborInputSimulator {
                                 long timeSinceSim = Math.Abs(now - lastSimulatedMoveTicks);
                                 int dx = hookStruct.pt.x - lastSimulatedX;
                                 int dy = hookStruct.pt.y - lastSimulatedY;
-                                double dist = Math.Sqrt(dx * dx + dy * dy);
+                                int distSq = dx * dx + dy * dy;
 
-                                bool isPhysicalIntervention = (timeSinceSim < 400 && dist > 100) ||
-                                                              (timeSinceSim >= 400 && dist > 15);
+                                bool isPhysicalIntervention = (timeSinceSim < 400 && distSq > 10000) ||
+                                                              (timeSinceSim >= 400 && distSq > 225);
 
                                 if (isPhysicalIntervention) {
                                     if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
                                         lastPhysicalActivityTicks = now;
                                         hasRecentPhysicalClick = true;
-                                        RestoreSystemCursors(true);
                                         try {
                                             physicalClickSignal.Set();
                                         } catch {}
@@ -389,7 +313,6 @@ namespace ZaborInputSimulator {
                             if (Math.Abs(now - lastPhysicalActivityTicks) > 80) {
                                 lastPhysicalActivityTicks = now;
                                 hasRecentPhysicalClick = true;
-                                RestoreSystemCursors(true);
                                 try {
                                     physicalClickSignal.Set();
                                 } catch {}
@@ -408,19 +331,8 @@ namespace ZaborInputSimulator {
                 SetProcessDPIAware();
             } catch {}
 
-            try {
-                RestoreSystemCursors(true);
-            } catch {}
-
-            try {
-                AppDomain.CurrentDomain.ProcessExit += (s, e) => {
-                    RestoreSystemCursors(true);
-                };
-            } catch {}
-
             if (args != null && args.Length > 0 && args[0] == "unclip") {
                 ClipCursor(IntPtr.Zero);
-                RestoreSystemCursors(true);
                 return;
             }
 
@@ -477,7 +389,6 @@ namespace ZaborInputSimulator {
                 while (true) {
                     try {
                         if (physicalClickSignal.WaitOne()) {
-                            RestoreSystemCursors(true);
                             Console.WriteLine("activity");
                         }
                     } catch {

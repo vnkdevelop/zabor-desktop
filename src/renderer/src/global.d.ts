@@ -117,6 +117,7 @@ declare global {
       onUpdateDownloaded: (callback: (data: { filePath: string }) => void) => () => void;
       onUpdateError: (callback: (error: string) => void) => () => void;
       onUpdateInstalling: (callback: () => void) => () => void;
+      setDisplayMediaSource?: (sourceId: string | null) => Promise<boolean>;
       remoteControlStart: () => Promise<boolean>;
       remoteControlStop: () => Promise<boolean>;
       remoteControlReset: () => Promise<boolean>;

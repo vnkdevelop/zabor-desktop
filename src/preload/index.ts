@@ -113,6 +113,8 @@ const windowControls = {
     ipcRenderer.on('update-installing', listener)
     return () => { ipcRenderer.removeListener('update-installing', listener) }
   },
+  setDisplayMediaSource: (sourceId: string | null): Promise<boolean> =>
+    ipcRenderer.invoke('set-display-media-source', sourceId),
   remoteControlStart: (): Promise<boolean> => ipcRenderer.invoke('remote-control:start'),
   remoteControlStop: (): Promise<boolean> => ipcRenderer.invoke('remote-control:stop'),
   remoteControlReset: (): Promise<boolean> => ipcRenderer.invoke('remote-control:reset'),

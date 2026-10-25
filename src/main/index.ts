@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, safeStorage, session, screen } from 'electron';
+import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, safeStorage, session, screen, desktopCapturer } from 'electron';
 
 if (!app || typeof app.whenReady !== 'function') {
   console.error('\n[ZABOR] Ошибка запуска: проект ZABOR является Electron-приложением и не может быть запущен через обычный Node.js ("node out/main/index.js")!');
@@ -152,7 +152,7 @@ if (app) {
     app.commandLine.appendSwitch('video-capture-use-gpu-memory-buffer');
     app.commandLine.appendSwitch(
       'enable-features',
-      'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer,AcceleratedVideoEncoder,DirectCompositionVideoOverlays'
+      'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer,AcceleratedVideoEncoder'
     );
   }
 
@@ -766,10 +766,32 @@ app.whenReady().then(() => {
   } catch {}
   reportGpuStatus();
   session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
-    return permission === 'media';
+    return permission === 'media' || permission === 'display-capture';
   });
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(permission === 'media');
+    callback(permission === 'media' || permission === 'display-capture');
+  });
+
+  let selectedDisplayMediaSourceId: string | null = null;
+  ipcMain.handle('set-display-media-source', (_event, sourceId: string | null) => {
+    selectedDisplayMediaSourceId = sourceId;
+    return true;
+  });
+
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
+      let chosen = selectedDisplayMediaSourceId
+        ? sources.find((s) => s.id === selectedDisplayMediaSourceId)
+        : null;
+      if (!chosen && sources.length > 0) {
+        chosen = sources[0];
+      }
+      if (chosen) {
+        callback({ video: chosen });
+      } else {
+        callback({});
+      }
+    }).catch(() => callback({}));
   });
   const settings = loadAppSettings();
   applyAutoLaunch(settings.openAtLogin);
