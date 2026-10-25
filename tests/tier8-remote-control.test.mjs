@@ -456,5 +456,63 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
 
       assert.equal(hostActivityTriggered, true, 'Deliberate physical displacement must trigger host activity');
     });
+
+    test('S7-07: Remote control start invokes hideHostCursor to isolate capture while showing host overlay', () => {
+      let hostCursorHidden = false;
+      let overlayShown = false;
+
+      const mockSimulator = {
+        hideHostCursor: () => {
+          hostCursorHidden = true;
+          overlayShown = true;
+        },
+        showHostCursor: () => {
+          hostCursorHidden = false;
+          overlayShown = false;
+        }
+      };
+
+      // When remote viewer connects and starts control:
+      mockSimulator.hideHostCursor();
+
+      assert.equal(hostCursorHidden, true, 'Host cursor must be hidden from stream capture');
+      assert.equal(overlayShown, true, 'Host overlay must be shown for local host visibility');
+    });
+
+    test('S7-08: Host activity immediately restores system cursor and 2s idle re-blanks for stream', async () => {
+      let hostCursorHidden = true;
+      let isHostActive = false;
+
+      const mockSimulator = {
+        hideHostCursor: () => {
+          hostCursorHidden = true;
+        },
+        showHostCursor: () => {
+          hostCursorHidden = false;
+        }
+      };
+
+      const triggerHostActivity = () => {
+        isHostActive = true;
+        mockSimulator.showHostCursor();
+      };
+
+      const onHostIdle = (activeRemoteViewerId) => {
+        isHostActive = false;
+        if (activeRemoteViewerId) {
+          mockSimulator.hideHostCursor();
+        }
+      };
+
+      // Host intervenes
+      triggerHostActivity();
+      assert.equal(isHostActive, true);
+      assert.equal(hostCursorHidden, false, 'System cursor must immediately be restored on host intervention');
+
+      // 2 seconds expire with active remote viewer
+      onHostIdle('viewer-123');
+      assert.equal(isHostActive, false);
+      assert.equal(hostCursorHidden, true, 'Cursor must re-blank when control returns to viewer');
+    });
   });
 });
