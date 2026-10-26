@@ -1301,7 +1301,8 @@ export class WebRTCManager {
 
   private getSmartGateParams(gainFactor: number) {
     return {
-      thresholdMode: 'auto',
+      thresholdMode: this.thresholdMode,
+      manualThresholdValue: this.manualThresholdValue,
       vadThreshold: this.calibratedVadThreshold,
       vadTrackerSeed: this.calibratedVadTrackerSeed,
       vadFixedThreshold: VAD_CALIBRATION_ENABLED ? 0 : FIXED_SILERO_THRESHOLD,
@@ -1354,7 +1355,7 @@ export class WebRTCManager {
 
   private usesSmartWorklet(): boolean {
     if (this.noiseSuppression) {
-      return this.thresholdMode === 'auto'
+      return true
     }
     return this.analyzerFeedsWorklet()
   }
@@ -1662,6 +1663,7 @@ export class WebRTCManager {
   private terminateVadWorker() {
     this.vadProbabilityHandler = null
     this.vadWorkerReady = false
+    this.vadWorkerInitPromise = null
     if (this.vadWorker) {
       try { this.vadWorker.terminate() } catch { }
       this.vadWorker = null
@@ -1944,7 +1946,6 @@ export class WebRTCManager {
     rawStream: MediaStream,
     model: SmartNoiseModel
   ): Promise<MediaStream> {
-    await this.cleanupProcessedStream()
     this.micEngineError = null
     this.audioProcessorError = null
 
@@ -1994,7 +1995,7 @@ export class WebRTCManager {
       const graphEpoch = this.vadEpoch
       this.micNode.port.onmessage = (event) => {
         if (event.data.type === 'vad') {
-          if (this.getActiveVadBranch() === 'silero') {
+          if (this.getActiveVadBranch() === 'silero' || this.getActiveVadBranch() === 'manual-gate') {
             this.applyLocalSpeaking(Boolean(event.data.isSpeaking))
           }
         } else if (event.data.type === 'audio16k') {
@@ -2610,7 +2611,13 @@ export class WebRTCManager {
     }
   }
 
-  public setInputDevice(deviceId: string) { this.currentDeviceId = deviceId }
+  public setInputDevice(deviceId: string) {
+    const prevDeviceId = this.currentDeviceId
+    this.currentDeviceId = deviceId
+    if (this.localStream && prevDeviceId !== deviceId) {
+      void this.updateSettings(deviceId, this.noiseSuppression)
+    }
+  }
 
   public subscribeMicLevel(listener: (db: number) => void): () => void {
     this.micLevelListeners.add(listener)
@@ -4719,10 +4726,16 @@ export class WebRTCManager {
     if (isHost) {
       if (!this.allowRemoteControl) {
         const ch = this.rcDataChannels.get(userId)
-        if (ch && ch.readyState === 'open') {
+        if (ch) {
+          if (ch.readyState === 'open') {
+            try {
+              ch.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_REVOKED))
+            } catch { }
+          }
           try {
-            ch.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_REVOKED))
+            ch.close()
           } catch { }
+          this.rcDataChannels.delete(userId)
         }
         return
       }
@@ -6067,6 +6080,118 @@ export class WebRTCManager {
     }
   }
 
+  public async restoreLocalVideoStream(streamQuality?: string): Promise<void> {
+    const stream = this.localVideoStream
+    if (!stream) return
+    const isLive = stream.getTracks().some(t => t.readyState === 'live')
+    if (!isLive) return
+
+    const quality = (streamQuality ?? this.currentStreamQuality ?? 'medium') as any
+    this.currentStreamQuality = quality
+    const videoTrack = stream.getVideoTracks()[0]
+    const micTrack = this.localStream?.getAudioTracks()[0]
+    const audioTrack = stream.getAudioTracks().find(t => t !== micTrack)
+    const isCamera = quality === 'camera'
+
+    for (const [userId, pc] of this.peerConnections.entries()) {
+      if (pc.connectionState === 'closed') continue
+      if (this.allowRemoteControl) {
+        this.ensureRemoteControlChannel(pc, userId)
+      }
+      const isController = this.allowRemoteControl && this.activeRemoteViewerId === userId
+      const keepP2PActive = !this.sfuPubActive || this.sfuFallbackPeers.has(userId) || isController
+
+      if (videoTrack) {
+        const videoTransceiver = pc.getTransceivers().find(t => t.receiver.track.kind === 'video' && !t.stopped)
+        let sender: RTCRtpSender
+        if (videoTransceiver) {
+          videoTransceiver.direction = 'sendrecv'
+          await videoTransceiver.sender.replaceTrack(videoTrack).catch(() => { })
+          try {
+            (videoTransceiver.sender as any).setStreams(stream)
+          } catch { }
+          sender = videoTransceiver.sender
+        } else {
+          sender = pc.addTrack(videoTrack, stream)
+        }
+        try {
+          const params = sender.getParameters()
+          if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+          if (!isCamera) {
+            params.degradationPreference = 'maintain-framerate'
+            const isHigh = quality === 'high'
+            const isMedium = quality === 'medium'
+            params.encodings[0].maxBitrate = isHigh ? 6000000 : (isMedium ? 3500000 : 2500000)
+            params.encodings[0].maxFramerate = (isHigh || isMedium) ? 60 : 30
+            params.encodings[0].networkPriority = 'high'
+          }
+          params.encodings[0].active = keepP2PActive
+          sender.setParameters(params).catch(() => { })
+        } catch { }
+      }
+
+      if (audioTrack) {
+        const audioTransceivers = pc.getTransceivers().filter(t => t.receiver.track.kind === 'audio' && !t.stopped)
+        const screenAudioTransceiver = audioTransceivers.length > 1 ? audioTransceivers[1] : null
+        let aSender: RTCRtpSender
+        if (screenAudioTransceiver) {
+          screenAudioTransceiver.direction = 'sendrecv'
+          await screenAudioTransceiver.sender.replaceTrack(audioTrack).catch(() => { })
+          try {
+            (screenAudioTransceiver.sender as any).setStreams(stream)
+          } catch { }
+          aSender = screenAudioTransceiver.sender
+        } else {
+          aSender = pc.addTrack(audioTrack, stream)
+        }
+        this.configureAudioSender(aSender)
+        if (!keepP2PActive) {
+          try {
+            const params = aSender.getParameters()
+            if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+            params.encodings[0].active = false
+            aSender.setParameters(params).catch(() => { })
+          } catch { }
+        }
+      }
+
+      await this.renegotiatePeer(pc, userId)
+    }
+
+    if (this.pendingSfuPublish) {
+      const pending = this.pendingSfuPublish
+      void this.handleSfuPublishRequired(pending.epoch, pending.nodeId)
+    }
+  }
+
+  public async recoverMesh(peerIds: string[]): Promise<void> {
+    const me = useAppStore.getState().currentUser?.id
+    if (!me) return
+
+    for (const peerId of peerIds) {
+      if (peerId === me) continue
+      const pc = this.peerConnections.get(peerId)
+      if (
+        !pc ||
+        pc.connectionState === 'closed' ||
+        pc.connectionState === 'failed' ||
+        pc.connectionState === 'disconnected' ||
+        pc.iceConnectionState === 'closed' ||
+        pc.iceConnectionState === 'failed'
+      ) {
+        this.disconnectFromPeer(peerId, { preserveRemoteVideo: true, preserveRetryState: true })
+        void this.connectToPeer(peerId, true)
+      } else {
+        if (pc.signalingState === 'have-local-offer') {
+          try {
+            await pc.setLocalDescription({ type: 'rollback' })
+          } catch { }
+        }
+        void this.renegotiatePeer(pc, peerId, true)
+      }
+    }
+  }
+
   public stopScreenShare() {
     if (this.statsInterval) {
       clearInterval(this.statsInterval)
@@ -6152,6 +6277,11 @@ export class WebRTCManager {
         if (iceRestart) this.pendingIceRestart.add(userId)
         return
       }
+      if (!signalRService.isConnected() || !signalRService.isSessionReady()) {
+        this.pendingRenegotiation.add(userId)
+        if (iceRestart) this.pendingIceRestart.add(userId)
+        return
+      }
       this.pendingRenegotiation.delete(userId)
       const needsIceRestart = iceRestart || this.pendingIceRestart.has(userId)
       this.isMakingOffer.set(userId, true)
@@ -6177,10 +6307,15 @@ export class WebRTCManager {
           this.activeRemoteViewerId === userId
         )
         const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId), isRemoteControl)
+        if (!signalRService.isConnected() || !signalRService.isSessionReady()) {
+          this.pendingRenegotiation.add(userId)
+          if (needsIceRestart) this.pendingIceRestart.add(userId)
+          return
+        }
         await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
         const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
         this.offerEpoch.set(userId, offerEpoch)
-        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch }))
+        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch, allowRemoteControl: this.allowRemoteControl }))
         this.pendingIceRestart.delete(userId)
       } catch (e) {
         console.error('[WebRTC] renegotiation failed', e)
@@ -6662,7 +6797,22 @@ export class WebRTCManager {
   public async connectToPeer(userId: string, preserveRemoteVideoOnFailure = false) {
     if (userId === useAppStore.getState().currentUser?.id) return
     if (!this.isPeerRelevant(userId)) return
-    if (this.peerConnections.has(userId)) return
+    const existingPc = this.peerConnections.get(userId)
+    if (existingPc) {
+      const isDead =
+        existingPc.connectionState === 'failed' ||
+        existingPc.connectionState === 'closed' ||
+        existingPc.connectionState === 'disconnected' ||
+        existingPc.iceConnectionState === 'failed' ||
+        existingPc.iceConnectionState === 'closed'
+      if (isDead) {
+        this.disconnectFromPeer(userId, { preserveRemoteVideo: preserveRemoteVideoOnFailure, preserveRetryState: true })
+        this.peerConnections.delete(userId)
+      } else {
+        this.flushPendingRenegotiation(userId)
+        return
+      }
+    }
 
     const startedAt = performance.now()
     this.peerConnectStartedAt.set(userId, startedAt)
@@ -6677,7 +6827,22 @@ export class WebRTCManager {
 
     return this.enqueueSignalingTask(userId, async () => {
       if (!this.isPeerRelevant(userId)) return
-      if (this.peerConnections.has(userId)) return
+      const queuedExistingPc = this.peerConnections.get(userId)
+      if (queuedExistingPc) {
+        const isDead =
+          queuedExistingPc.connectionState === 'failed' ||
+          queuedExistingPc.connectionState === 'closed' ||
+          queuedExistingPc.connectionState === 'disconnected' ||
+          queuedExistingPc.iceConnectionState === 'failed' ||
+          queuedExistingPc.iceConnectionState === 'closed'
+        if (isDead) {
+          this.disconnectFromPeer(userId, { preserveRemoteVideo: preserveRemoteVideoOnFailure, preserveRetryState: true })
+          this.peerConnections.delete(userId)
+        } else {
+          this.flushPendingRenegotiation(userId)
+          return
+        }
+      }
 
       const pc = new (RTCPeerConnection as any)(this.rtcConfig(), WebRTCManager.PC_CONSTRAINTS) as RTCPeerConnection
       this.peerConnections.set(userId, pc)
@@ -6745,6 +6910,10 @@ export class WebRTCManager {
           this.activeRemoteViewerId === userId
         )
         const optimizedSDP = optimizeSDP(offer.sdp!, this.relayOnlyIce, this.ultraLowLatency, this.ultraPtimeFor(userId), isRemoteControl)
+        if (!signalRService.isConnected() || !signalRService.isSessionReady()) {
+          this.pendingRenegotiation.add(userId)
+          return
+        }
         await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
         if (this.peerConnections.get(userId) !== pc || !this.isPeerRelevant(userId)) {
           this.disconnectFromPeer(userId)
@@ -6752,7 +6921,7 @@ export class WebRTCManager {
         }
         const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
         this.offerEpoch.set(userId, offerEpoch)
-        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch }))
+        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch, allowRemoteControl: this.allowRemoteControl }))
         console.log(`[WebRTC] offer to ${userId} sent in ${Math.round(performance.now() - startedAt)}ms (ice servers ${iceMs}ms)`)
       } catch (e) {
         console.error('[WebRTC] connectToPeer failed', e)
@@ -6848,6 +7017,11 @@ export class WebRTCManager {
 
       try {
         const offer = JSON.parse(offerStr)
+        if (typeof (offer as { allowRemoteControl?: boolean }).allowRemoteControl === 'boolean') {
+          const rcAllowed = Boolean((offer as { allowRemoteControl: boolean }).allowRemoteControl)
+          store.setStreamRemoteControlAllowed(senderId, rcAllowed)
+          store.updateUserStatus(senderId, { allowRemoteControl: rcAllowed })
+        }
 
         const isMakingOffer = this.isMakingOffer.get(senderId) ?? false
         const readyForOffer = !isMakingOffer && (pc.signalingState === 'stable' || (this.isSettingRemoteAnswerPending.get(senderId) ?? false))

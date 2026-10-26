@@ -1602,10 +1602,12 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
           outboundSpeaking = !this.dfVetoLatched &&
             this.gateGain > 0.05 &&
             (delayedIsSpeech || this.gateHoldFrames > 0)
+        } else {
+          outboundSpeaking = this.gateGain > 0.05 && (delayedIsSpeech || this.gateHoldFrames > 0)
         }
       }
 
-      if (this.sileroVadEnabled && this.lastVadSent !== outboundSpeaking) {
+      if (this.lastVadSent !== outboundSpeaking) {
         this.port.postMessage({ type: 'vad', isSpeaking: outboundSpeaking })
         this.lastVadSent = outboundSpeaking
       }

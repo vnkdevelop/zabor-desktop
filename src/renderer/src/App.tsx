@@ -1175,7 +1175,6 @@ export default function App() {
     if (!creds.login || !creds.password) return;
     autoLoginInFlightRef.current = true;
     autoLoginPendingRef.current = false;
-    setServerConnected(false);
     try {
       const result = await signalRService.login(creds.login, creds.password);
       if (result === 'ok') {
@@ -1188,6 +1187,8 @@ export default function App() {
         if (serverSettings) applySettings(serverSettings);
         setJoke(jokeText || '__NO_JOKE__');
         setServerConnected(true);
+        setShowReconnectingOverlay(false);
+        setShowErrorText(false);
         setIsAuth(true);
         saveLocalCache();
         setTimeout(() => { settingsLoadedRef.current = true; }, 1000);
@@ -1338,7 +1339,6 @@ export default function App() {
       }
 
       setShowInitConnectionError(false);
-      const errorTimer = setTimeout(() => setShowInitConnectionError(true), 10000);
 
       let connected = await signalRService.connect();
       let retries = 0;
@@ -1347,11 +1347,8 @@ export default function App() {
         connected = await signalRService.connect();
         retries++;
       }
-      clearTimeout(errorTimer);
 
       setShowErrorText(false);
-      setShowInitConnectionError(false);
-
       if (!connected) {
         autoLoginPendingRef.current = true;
         await safeAwaitMic();
@@ -1359,6 +1356,8 @@ export default function App() {
         setShowInitConnectionError(true);
         return;
       }
+
+      setShowInitConnectionError(false);
 
       const loginResult = await signalRService.login(
         cachedCredentials.login,
@@ -2345,6 +2344,17 @@ export default function App() {
 
     const next = !store.isRemoteControlling;
     if (next) {
+      const streamerUser = store.voiceUsers.find(u => u.id === streamerId)
+        || (store.currentCallUser?.id === streamerId ? store.currentCallUser : null)
+        || store.friends.find(u => u.id === streamerId);
+      const isRcPermitted = (streamerUser ? (
+        streamerUser.streamQuality !== 'camera' && (
+          streamerUser.allowRemoteControl === true ||
+          (streamerUser.allowRemoteControl !== false && streamerUser.streamQuality === 'medium')
+        )
+      ) : false) || store.remoteStreamsAllowControl?.[streamerId] === true;
+      if (!isRcPermitted) return;
+
       webrtc.ensureRemoteControlChannelForStreamer(streamerId);
       store.setRemoteControlState({ isControlling: true, isHostActive: false });
       void webrtc.switchViewerToP2PForRemoteControl(streamerId);
@@ -2858,7 +2868,7 @@ export default function App() {
         </div>
       )}
 
-      {!appLoading && !serverConnected && isAuth && (
+      {!appLoading && showReconnectingOverlay && isAuth && (
         <div className="fixed inset-0 z-[100000] flex flex-col bg-appBg select-none">
           <TitleBar />
           <div className="flex-1 flex items-center justify-center">
@@ -3186,6 +3196,12 @@ export default function App() {
                   const activeStream = items.find(item => item.type === 'stream' && store.activeStreamId === item.user.id);
 
                   if (activeStream && store.isStreamFullscreen) {
+                    const streamerUser = activeStream.user;
+                    const isRcPermitted = streamerUser && streamerUser.streamQuality !== 'camera' && (
+                      streamerUser.allowRemoteControl === true ||
+                      (streamerUser.allowRemoteControl !== false && streamerUser.streamQuality === 'medium') ||
+                      store.remoteStreamsAllowControl?.[store.activeStreamId] === true
+                    );
                     const normalMaxW = windowSize.width - 40;
                     const normalMaxH = windowSize.height - 140;
                     let normalW = normalMaxW;
@@ -3268,7 +3284,7 @@ export default function App() {
                               <CornersIn weight="bold" size={24} />
                             </div>
                           </button>
-                          {store.activeStreamId && store.activeStreamId !== store.currentUser?.id && (
+                          {store.activeStreamId && store.activeStreamId !== store.currentUser?.id && isRcPermitted && (
                             <button
                               onClick={handleToggleRemoteControl}
                               className={`group/rc-btn relative w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ${store.isRemoteControlling ? (store.isHostActive ? "bg-white/20 text-white ring-2 ring-white/30" : "bg-primaryHover text-white ring-2 ring-primary active:scale-95") : "bg-surface/70 hover:bg-surfaceHover/80 text-white hover:scale-105 active:scale-95"}`}
@@ -3478,6 +3494,12 @@ export default function App() {
                   const activeStream = items.find(item => item.type === 'stream' && store.activeStreamId === item.user.id);
 
                   if (activeStream && store.isStreamFullscreen) {
+                    const streamerUser = activeStream.user;
+                    const isRcPermitted = streamerUser && streamerUser.streamQuality !== 'camera' && (
+                      streamerUser.allowRemoteControl === true ||
+                      (streamerUser.allowRemoteControl !== false && streamerUser.streamQuality === 'medium') ||
+                      store.remoteStreamsAllowControl?.[store.activeStreamId] === true
+                    );
                     const normalMaxW = windowSize.width - 40;
                     const normalMaxH = windowSize.height - 140;
                     let normalW = normalMaxW;
@@ -3560,7 +3582,7 @@ export default function App() {
                               <CornersIn weight="bold" size={24} />
                             </div>
                           </button>
-                          {store.activeStreamId && store.activeStreamId !== store.currentUser?.id && (
+                          {store.activeStreamId && store.activeStreamId !== store.currentUser?.id && isRcPermitted && (
                             <button
                               onClick={handleToggleRemoteControl}
                               className={`group/rc-btn relative w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 ${store.isRemoteControlling ? (store.isHostActive ? "bg-white/20 text-white ring-2 ring-white/30" : "bg-primaryHover text-white ring-2 ring-primary active:scale-95") : "bg-surface/70 hover:bg-surfaceHover/80 text-white hover:scale-105 active:scale-95"}`}

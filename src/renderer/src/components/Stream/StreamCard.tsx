@@ -113,6 +113,7 @@ export const StreamCard = ({
   const isHostActive = useAppStore((state) => state.isHostActive)
   const isRemoteControlRevoked = useAppStore((state) => state.isRemoteControlRevoked)
   const setRemoteControlState = useAppStore((state) => state.setRemoteControlState)
+  const remoteStreamsAllowControl = useAppStore((state) => state.remoteStreamsAllowControl)
 
   const pendingMove = useRef<{ x: number; y: number } | null>(null)
   const virtualPos = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.5 })
@@ -187,6 +188,12 @@ export const StreamCard = ({
         e.stopPropagation()
         e.stopImmediatePropagation?.()
         if (isRemoteControlRevoked) return
+        const isRcPermitted = !isLocal && user.streamQuality !== 'camera' && (
+          user.allowRemoteControl === true ||
+          (user.allowRemoteControl !== false && user.streamQuality === 'medium') ||
+          remoteStreamsAllowControl?.[user.id] === true
+        )
+        if (!isRcPermitted) return
         const next = !isRemoteControlling
         if (next) {
           webrtcService.ensureRemoteControlChannelForStreamer(user.id)

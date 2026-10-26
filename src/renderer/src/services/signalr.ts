@@ -698,7 +698,9 @@ class SignalRService {
 
     on("UserStartedStreaming", (userId: string, streamQuality: string) => {
       this.clearStreamDropTimer(userId);
-      store().updateUserStatus(userId, { isStreaming: true, streamQuality });
+      const isRcAllowed = streamQuality === 'medium';
+      store().updateUserStatus(userId, { isStreaming: true, streamQuality, allowRemoteControl: isRcAllowed });
+      store().setStreamRemoteControlAllowed(userId, isRcAllowed);
       webrtc.syncRemoteVideoStream(userId);
     });
 
@@ -708,7 +710,8 @@ class SignalRService {
       if (appStore.activeStreamId === userId) {
         appStore.setActiveStreamId(null);
       }
-      appStore.updateUserStatus(userId, { isStreaming: false, streamQuality: undefined });
+      appStore.updateUserStatus(userId, { isStreaming: false, streamQuality: undefined, allowRemoteControl: false });
+      appStore.setStreamRemoteControlAllowed(userId, false);
       webrtc.cleanupRemoteStream(userId);
     });
 
@@ -720,7 +723,8 @@ class SignalRService {
         if (appStore.activeStreamId === userId) {
           appStore.setActiveStreamId(null);
         }
-        appStore.updateUserStatus(userId, { isStreaming: false, streamQuality: undefined });
+        appStore.updateUserStatus(userId, { isStreaming: false, streamQuality: undefined, allowRemoteControl: false });
+        appStore.setStreamRemoteControlAllowed(userId, false);
         webrtc.cleanupRemoteStream(userId);
       }, SignalRService.STREAM_DROP_GRACE_MS);
       this.streamDropTimers.set(userId, timer);
@@ -1155,6 +1159,7 @@ class SignalRService {
               const isStreamActive = webrtc.localVideoStream.getTracks().some(t => t.readyState === 'live');
               if (isStreamActive) {
                 await this.startStream(streamQuality);
+                await webrtc.restoreLocalVideoStream(streamQuality);
               }
             } else if (res === 'network' || res === 'mic_failed') {
               this.wasInChannel = channelToRejoin;
@@ -1566,10 +1571,21 @@ class SignalRService {
         store.commitVoiceChannel(channelId, update.users);
         store.setCallStatus('idle');
         store.setCurrentCallUser(null);
+        for (const u of update.users) {
+          if (u.id !== currentUser.id && u.isStreaming) {
+            this.clearStreamDropTimer(u.id);
+            webrtc.syncRemoteVideoStream(u.id);
+          }
+        }
         report(`${isResumeJoin ? 'resume' : 'ok'}, ${peerIds.length} peers`);
         setTimeout(() => {
           if (operationId !== this.voiceOperationId || useAppStore.getState().currentChannelId !== channelId) return;
           this.connectToPeersStaggered(peerIds, operationId, channelId);
+          for (const u of update.users) {
+            if (u.id !== currentUser.id && u.isStreaming) {
+              webrtc.syncRemoteVideoStream(u.id);
+            }
+          }
         }, SignalRService.PEER_CONNECT_DELAY_MS);
         return 'ok';
       }
