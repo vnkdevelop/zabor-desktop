@@ -2322,11 +2322,14 @@ export default function App() {
   const handleStartStream = useCallback(async (sourceId: string, quality: 'low' | 'medium' | 'high' | 'camera', includeAudio: boolean, allowRemoteControl = false) => {
     try {
       setShowStreamPicker(false);
+      store.setStreamRemoteControlAllowed(allowRemoteControl);
+      await webrtc.startScreenShare(sourceId, quality, includeAudio, allowRemoteControl);
       const ok = await signalRService.startStream(quality);
       if (ok) {
-        store.setStreamRemoteControlAllowed(allowRemoteControl);
-        await webrtc.startScreenShare(sourceId, quality, includeAudio, allowRemoteControl);
         store.updateUserStatus(store.currentUser?.id || '', { isStreaming: true, streamQuality: quality, allowRemoteControl });
+      } else {
+        webrtc.stopScreenShare();
+        store.setStreamRemoteControlAllowed(false);
       }
     } catch (e) {
       console.error(e);
@@ -2340,7 +2343,6 @@ export default function App() {
   const handleToggleRemoteControl = useCallback(() => {
     const streamerId = store.activeStreamId;
     if (!streamerId || streamerId === store.currentUser?.id) return;
-    if (store.isRemoteControlRevoked) return;
 
     const next = !store.isRemoteControlling;
     if (next) {
@@ -2350,10 +2352,15 @@ export default function App() {
       const isRcPermitted = (streamerUser ? (
         streamerUser.streamQuality !== 'camera' && (
           streamerUser.allowRemoteControl === true ||
-          (streamerUser.allowRemoteControl !== false && streamerUser.streamQuality === 'medium')
+          (streamerUser.allowRemoteControl !== false && streamerUser.streamQuality === 'medium') ||
+          store.remoteStreamsAllowControl?.[streamerId] === true
         )
       ) : false) || store.remoteStreamsAllowControl?.[streamerId] === true;
       if (!isRcPermitted) return;
+
+      if (store.isRemoteControlRevoked) {
+        store.setRemoteControlState({ isRevoked: false });
+      }
 
       webrtc.ensureRemoteControlChannelForStreamer(streamerId);
       store.setRemoteControlState({ isControlling: true, isHostActive: false });

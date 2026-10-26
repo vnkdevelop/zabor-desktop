@@ -187,13 +187,15 @@ export const StreamCard = ({
         e.preventDefault()
         e.stopPropagation()
         e.stopImmediatePropagation?.()
-        if (isRemoteControlRevoked) return
         const isRcPermitted = !isLocal && user.streamQuality !== 'camera' && (
           user.allowRemoteControl === true ||
           (user.allowRemoteControl !== false && user.streamQuality === 'medium') ||
           remoteStreamsAllowControl?.[user.id] === true
         )
         if (!isRcPermitted) return
+        if (isRemoteControlRevoked) {
+          setRemoteControlState({ isRevoked: false })
+        }
         const next = !isRemoteControlling
         if (next) {
           webrtcService.ensureRemoteControlChannelForStreamer(user.id)

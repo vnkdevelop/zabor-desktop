@@ -3,6 +3,7 @@ import { X, Desktop, AppWindow, Camera, Check } from '@phosphor-icons/react'
 import { useTranslation } from 'react-i18next'
 import { animate, play, utils, spring, EASE, DUR, prefersReducedMotion } from '../../lib/anime'
 import { usePresence } from '../../hooks/usePresence'
+import { useAppStore } from '../../store/useAppStore'
 
 interface Source {
   id: string
@@ -149,7 +150,7 @@ export const StreamPicker = ({ onClose, onSelect }: StreamPickerProps) => {
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
   const [manualQuality, setManualQuality] = useState<'low' | 'high'>('low')
   const [includeAudio, setIncludeAudio] = useState(true)
-  const [allowRemoteControl, setAllowRemoteControl] = useState(false)
+  const [allowRemoteControl, setAllowRemoteControl] = useState(() => useAppStore.getState().isStreamRemoteControlAllowed)
   const [loading, setLoading] = useState(true)
 
   const effectiveQuality: 'low' | 'medium' | 'high' = allowRemoteControl ? 'medium' : manualQuality

@@ -262,7 +262,11 @@ export const useAppStore = create<AppState>((set) => ({
   systemToast: null,
   setSystemToast: (msg) => set({ systemToast: msg }),
 
-  setActiveStreamId: (id) => set((state) => ({ activeStreamId: id, isStreamFullscreen: id === null ? false : state.isStreamFullscreen })),
+  setActiveStreamId: (id) => set((state) => ({
+    activeStreamId: id,
+    isStreamFullscreen: id === null ? false : state.isStreamFullscreen,
+    isRemoteControlRevoked: false
+  })),
   setStreamFullscreen: (val) => set({ isStreamFullscreen: val }),
   setRemoteVideoStream: (userId, stream) => set((state) => {
     const next = { ...state.remoteVideoStreams };
@@ -289,12 +293,16 @@ export const useAppStore = create<AppState>((set) => ({
   })),
   setStreamRemoteControlAllowed: (userIdOrAllowed, allowed) => set((state) => {
     if (typeof userIdOrAllowed === 'boolean') {
-      return { isStreamRemoteControlAllowed: userIdOrAllowed };
+      return {
+        isStreamRemoteControlAllowed: userIdOrAllowed,
+        isRemoteControlRevoked: userIdOrAllowed ? false : state.isRemoteControlRevoked
+      };
     }
     const isAllowed = allowed ?? false;
     return {
       isStreamRemoteControlAllowed: state.currentUser?.id === userIdOrAllowed ? isAllowed : state.isStreamRemoteControlAllowed,
-      remoteStreamsAllowControl: { ...state.remoteStreamsAllowControl, [userIdOrAllowed]: isAllowed }
+      remoteStreamsAllowControl: { ...state.remoteStreamsAllowControl, [userIdOrAllowed]: isAllowed },
+      isRemoteControlRevoked: isAllowed ? false : state.isRemoteControlRevoked
     };
   }),
   setStreamVolume: (userId, volume) => set((state) => ({

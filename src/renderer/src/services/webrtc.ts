@@ -4641,7 +4641,7 @@ export class WebRTCManager {
   }
 
   public stopHostRemoteControl(): void {
-    this.resetControlState(true)
+    this.resetControlState(false)
     this.cachedScreenResolution = null
     try {
       window.windowControls.remoteControlStop()
@@ -4729,7 +4729,7 @@ export class WebRTCManager {
         if (ch) {
           if (ch.readyState === 'open') {
             try {
-              ch.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_REVOKED))
+              ch.send(RemoteControlProtocol.encodeSignal(RC_OP_RESET))
             } catch { }
           }
           try {
@@ -5900,6 +5900,7 @@ export class WebRTCManager {
       this.stopScreenShare()
     }
     this.allowRemoteControl = allowRemoteControl
+    useAppStore.getState().setRemoteControlState({ isRevoked: false })
     if (allowRemoteControl) {
       this.startHostRemoteControl()
     }
@@ -7062,7 +7063,7 @@ export class WebRTCManager {
           this.disconnectFromPeer(senderId)
           return
         }
-        signalRService.sendWebRTCAnswer(senderId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: (offer as { epoch?: number }).epoch }))
+        signalRService.sendWebRTCAnswer(senderId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: (offer as { epoch?: number }).epoch, allowRemoteControl: this.allowRemoteControl }))
         this.flushPendingRenegotiation(senderId)
         this.syncRemoteVideoStream(senderId)
 
@@ -7098,6 +7099,12 @@ export class WebRTCManager {
         this.isSettingRemoteAnswerPending.set(senderId, true)
         try {
           const answer = JSON.parse(answerStr)
+          if (typeof (answer as { allowRemoteControl?: boolean }).allowRemoteControl === 'boolean') {
+            const rcAllowed = Boolean((answer as { allowRemoteControl: boolean }).allowRemoteControl)
+            const store = useAppStore.getState()
+            store.setStreamRemoteControlAllowed(senderId, rcAllowed)
+            store.updateUserStatus(senderId, { allowRemoteControl: rcAllowed })
+          }
           const currentEpoch = this.offerEpoch.get(senderId)
           const answerEpoch = (answer as { epoch?: number }).epoch
           if (answerEpoch != null && currentEpoch != null && answerEpoch !== currentEpoch) return
@@ -7306,7 +7313,11 @@ export class WebRTCManager {
     this.p2pStreamsBackup.delete(userId)
     this.p2pAudioBackup.delete(userId)
     this.cleanupRemoteStreamAudio(userId)
-    useAppStore.getState().setRemoteVideoStream(userId, null)
+    const st = useAppStore.getState()
+    st.setRemoteVideoStream(userId, null)
+    if (st.activeStreamId === userId) {
+      st.setRemoteControlState({ isControlling: false, isRevoked: false })
+    }
   }
 
   private waitForIceGatheringComplete(pc: RTCPeerConnection, timeoutMs = 1200): Promise<void> {

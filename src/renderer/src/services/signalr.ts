@@ -552,10 +552,17 @@ class SignalRService {
       void chatPeer.handleOnline(user.id);
     });
 
-    on("UserLeft", (userId: string) => {
+    on("UserLeft", (userId: string, lastOnline?: string) => {
       chatPeer.handleOffline(userId);
       this.clearStreamDropTimer(userId);
-      store().updateUserStatus(userId, { isOnline: false, currentChannelId: null, currentCallUserId: null, isSpeaking: false });
+      const offlineTime = lastOnline || new Date().toISOString();
+      store().updateUserStatus(userId, {
+        isOnline: false,
+        lastOnline: offlineTime,
+        currentChannelId: null,
+        currentCallUserId: null,
+        isSpeaking: false
+      });
       store().removeUserFromChannelMap('', userId);
       webrtc.disconnectFromPeer(userId);
     });
@@ -698,7 +705,7 @@ class SignalRService {
 
     on("UserStartedStreaming", (userId: string, streamQuality: string) => {
       this.clearStreamDropTimer(userId);
-      const isRcAllowed = streamQuality === 'medium';
+      const isRcAllowed = streamQuality === 'medium' || Boolean(store().remoteStreamsAllowControl[userId]);
       store().updateUserStatus(userId, { isStreaming: true, streamQuality, allowRemoteControl: isRcAllowed });
       store().setStreamRemoteControlAllowed(userId, isRcAllowed);
       webrtc.syncRemoteVideoStream(userId);
