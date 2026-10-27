@@ -888,6 +888,7 @@ export class WebRTCManager {
   public allowRemoteControl = false
   private rcDataChannels: Map<string, RTCDataChannel> = new Map()
   private activeRemoteViewerId: string | null = null
+  public controllingStreamerId: string | null = null
   private hostFailSafeTimer: NodeJS.Timeout | null = null
   private lastHostFailSafeRefresh = 0
   private hostIdleTimer: NodeJS.Timeout | null = null
@@ -1846,6 +1847,10 @@ export class WebRTCManager {
     } catch (error) {
       console.warn('[WebRTC] Could not attach raw analyser:', error)
     }
+
+    const tap = ctx.createGain()
+    source.connect(tap)
+    this.micOutputTap = tap
 
     this.localSpeakingState = false
 
@@ -4485,6 +4490,7 @@ export class WebRTCManager {
   }
 
   public ensureRemoteControlChannel(pc: RTCPeerConnection, userId: string): RTCDataChannel | null {
+    if (pc.connectionState === 'closed') return null
     const existing = this.rcDataChannels.get(userId)
     if (existing && (existing.readyState === 'open' || existing.readyState === 'connecting')) return existing
     try {
@@ -4520,7 +4526,10 @@ export class WebRTCManager {
     this.rcDataChannels.set(userId, channel)
 
     channel.onopen = () => {
-      if (useAppStore.getState().isRemoteControlling) {
+      const isControlling =
+        this.controllingStreamerId === userId ||
+        (useAppStore.getState().isRemoteControlling && useAppStore.getState().activeStreamId === userId)
+      if (isControlling) {
         try {
           channel.send(RemoteControlProtocol.encodeSignal(RC_OP_START))
         } catch { }
@@ -4532,10 +4541,19 @@ export class WebRTCManager {
         this.rcDataChannels.delete(userId)
       }
       this.handleRemoteControlDisconnect(userId)
+      const pc = this.peerConnections.get(userId)
+      if (pc && pc.connectionState !== 'closed' && pc.connectionState !== 'failed') {
+        try {
+          this.ensureRemoteControlChannel(pc, userId)
+        } catch { }
+      }
     }
 
     channel.onerror = (e) => {
-      console.warn('[WebRTC] Remote control channel error for', userId, e)
+      const err = (e as any)?.error
+      if (err?.name !== 'OperationError' && !String(err?.message || '').includes('Close called')) {
+        console.warn('[WebRTC] Remote control channel error for', userId, e)
+      }
       if (channel.readyState === 'closed') {
         this.handleRemoteControlDisconnect(userId)
       }
@@ -4564,6 +4582,16 @@ export class WebRTCManager {
     if (this.activeRemoteViewerId === userId) {
       this.resetControlState()
       this.activeRemoteViewerId = null
+    }
+    if (this.controllingStreamerId === userId) {
+      this.controllingStreamerId = null
+      const st = useAppStore.getState()
+      if (st.isRemoteControlling && st.activeStreamId === userId) {
+        st.setRemoteControlState({
+          isControlling: false,
+          isHostActive: false
+        })
+      }
     }
   }
 
@@ -4594,15 +4622,15 @@ export class WebRTCManager {
 
     const st = useAppStore.getState()
     st.setRemoteControlState({
-      isControlling: false,
       isHostActive: false,
       isRevoked: permanent,
       activeControllerId: null
     })
 
     const signal = permanent ? RC_OP_HOST_REVOKED : RC_OP_RESET
-    for (const ch of this.rcDataChannels.values()) {
-      if (ch.readyState === 'open') {
+    if (previousControllerId) {
+      const ch = this.rcDataChannels.get(previousControllerId)
+      if (ch && ch.readyState === 'open') {
         try {
           ch.send(RemoteControlProtocol.encodeSignal(signal))
         } catch { }
@@ -4655,17 +4683,21 @@ export class WebRTCManager {
   }
 
   public triggerHostActivity(): void {
+    if (!this.localVideoStream || !this.allowRemoteControl || !this.activeRemoteViewerId) {
+      return
+    }
+
     this.isHostActive = true
     try {
       window.windowControls.remoteControlShowHostCursor?.()
     } catch { }
 
-    for (const ch of this.rcDataChannels.values()) {
-      if (ch.readyState === 'open') {
-        try {
-          ch.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_ACTIVE))
-        } catch { }
-      }
+    const targetViewerId = this.activeRemoteViewerId
+    const ch = this.rcDataChannels.get(targetViewerId)
+    if (ch && ch.readyState === 'open') {
+      try {
+        ch.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_ACTIVE))
+      } catch { }
     }
 
     const st = useAppStore.getState()
@@ -4681,11 +4713,10 @@ export class WebRTCManager {
         try {
           window.windowControls.remoteControlHideHostCursor?.()
         } catch { }
-      }
-      for (const ch of this.rcDataChannels.values()) {
-        if (ch.readyState === 'open') {
+        const activeCh = this.rcDataChannels.get(this.activeRemoteViewerId)
+        if (activeCh && activeCh.readyState === 'open') {
           try {
-            ch.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_IDLE))
+            activeCh.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_IDLE))
           } catch { }
         }
       }
@@ -4721,21 +4752,76 @@ export class WebRTCManager {
     const dv = new DataView(buffer)
     const op = dv.getUint8(0)
 
-    const isHost = this.localVideoStream !== null
+    // 1. Host status signals directed to viewers - ALWAYS handle as viewer updates
+    if (op === RC_OP_HOST_ACTIVE) {
+      useAppStore.getState().setRemoteControlState({ isHostActive: true })
+      return
+    }
+    if (op === RC_OP_HOST_IDLE) {
+      useAppStore.getState().setRemoteControlState({ isHostActive: false })
+      return
+    }
+    if (op === RC_OP_HOST_REVOKED) {
+      useAppStore.getState().setRemoteControlState({
+        isControlling: false,
+        isHostActive: false,
+        isRevoked: true
+      })
+      if (this.controllingStreamerId === userId) {
+        this.controllingStreamerId = null
+      }
+      return
+    }
+    if (op === RC_OP_BUSY) {
+      useAppStore.getState().setRemoteControlState({
+        isControlling: false,
+        isHostActive: false
+      })
+      if (this.controllingStreamerId === userId) {
+        this.controllingStreamerId = null
+      }
+      const busyMsg = i18n.t('stream.controlBusy', 'управление сейчас занято')
+      useAppStore.getState().setSystemToast?.(busyMsg)
+      setTimeout(() => {
+        if (useAppStore.getState().systemToast === busyMsg) {
+          useAppStore.getState().setSystemToast?.(null)
+        }
+      }, 3000)
+      return
+    }
 
-    if (isHost) {
-      if (!this.allowRemoteControl) {
+    // 2. Check if we are actively attempting to control or controlling this streamer
+    const isControllingThisUser =
+      this.controllingStreamerId === userId ||
+      (useAppStore.getState().isRemoteControlling && useAppStore.getState().activeStreamId === userId)
+
+    if (isControllingThisUser && op === RC_OP_START) {
+      // Host has accepted our control request and sent an ACK
+      void this.switchViewerToP2PForRemoteControl(userId)
+      this.enforceVideoZeroPlayoutDelay(userId)
+      return
+    }
+
+    if (isControllingThisUser && (op === RC_OP_RESET || op === RC_OP_STOP)) {
+      useAppStore.getState().setRemoteControlState({
+        isControlling: false,
+        isHostActive: false
+      })
+      if (this.controllingStreamerId === userId) {
+        this.controllingStreamerId = null
+      }
+      return
+    }
+
+    // 3. Host branch: someone wants to control our stream or send input to us
+    if (op === RC_OP_START) {
+      if (!this.localVideoStream || !this.allowRemoteControl) {
+        // We do not permit remote control on our stream; reject politely without closing the SCTP data channel!
         const ch = this.rcDataChannels.get(userId)
-        if (ch) {
-          if (ch.readyState === 'open') {
-            try {
-              ch.send(RemoteControlProtocol.encodeSignal(RC_OP_RESET))
-            } catch { }
-          }
+        if (ch && ch.readyState === 'open') {
           try {
-            ch.close()
+            ch.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_REVOKED))
           } catch { }
-          this.rcDataChannels.delete(userId)
         }
         return
       }
@@ -4751,178 +4837,154 @@ export class WebRTCManager {
         return
       }
 
-      if (op === RC_OP_PING) {
-        if (!this.cachedScreenResolution) {
-          try {
-            window.windowControls.remoteControlGetScreen().then((sc) => {
-              this.cachedScreenResolution = sc
-            }).catch(() => { })
-          } catch { }
-        }
-        if (this.activeRemoteViewerId === userId) {
-          this.refreshHostFailSafe(userId)
-        }
-        return
+      this.activeRemoteViewerId = userId
+      this.isHostActive = false
+      if (this.hostIdleTimer) {
+        clearTimeout(this.hostIdleTimer)
+        this.hostIdleTimer = null
       }
-
-      if (op === RC_OP_RESET || op === RC_OP_STOP) {
-        if (this.activeRemoteViewerId === userId) {
-          this.resetControlState()
-        }
-        return
+      this.startHostRemoteControl()
+      void this.setP2PScreenSenderActiveForPeer(userId, true)
+      this.requestSenderKeyFrame()
+      try {
+        window.windowControls.remoteControlHideHostCursor?.()
+      } catch { }
+      const ctrlName = this.resolveRemoteUserName(userId)
+      useAppStore.getState().setRemoteControlState({
+        activeControllerId: userId,
+        isHostActive: false
+      })
+      try {
+        window.windowControls.remoteControlShowPill?.({
+          controllerName: ctrlName,
+          isControlling: true
+        })
+      } catch { }
+      this.refreshHostFailSafe(userId)
+      const ch = this.rcDataChannels.get(userId)
+      if (ch && ch.readyState === 'open') {
+        try {
+          ch.send(RemoteControlProtocol.encodeSignal(RC_OP_START))
+        } catch { }
       }
+      return
+    }
 
-      if (op === RC_OP_START) {
-        this.activeRemoteViewerId = userId
-        if (this.allowRemoteControl) {
-          this.startHostRemoteControl()
-        }
+    // For any subsequent input or host controls: verify we are host and allow remote control
+    if (!this.localVideoStream || !this.allowRemoteControl) {
+      return
+    }
+
+    if (op === RC_OP_PING) {
+      if (!this.cachedScreenResolution) {
+        try {
+          window.windowControls.remoteControlGetScreen().then((sc) => {
+            this.cachedScreenResolution = sc
+          }).catch(() => { })
+        } catch { }
+      }
+      if (this.activeRemoteViewerId === userId) {
+        this.refreshHostFailSafe(userId)
+      }
+      return
+    }
+
+    if (op === RC_OP_RESET || op === RC_OP_STOP) {
+      if (this.activeRemoteViewerId === userId) {
+        this.resetControlState()
+      }
+      return
+    }
+
+    // Concurrency lock for input events
+    if (this.activeRemoteViewerId && this.activeRemoteViewerId !== userId) {
+      return
+    }
+
+    // Physical mouse movement by host takes precedence over remote viewer
+    if (this.isHostActive && op !== RC_OP_MOUSE_UP) return
+
+    if (!this.activeRemoteViewerId) {
+      this.activeRemoteViewerId = userId
+      this.isHostActive = false
+      if (this.hostIdleTimer) {
+        clearTimeout(this.hostIdleTimer)
+        this.hostIdleTimer = null
+      }
+      if (this.sfuPubActive) {
         void this.setP2PScreenSenderActiveForPeer(userId, true)
-        this.requestSenderKeyFrame()
-        try {
-          window.windowControls.remoteControlHideHostCursor?.()
-        } catch { }
-        const ctrlName = this.resolveRemoteUserName(userId)
-        useAppStore.getState().setRemoteControlState({
-          activeControllerId: userId,
-          isHostActive: false
+      }
+      this.requestSenderKeyFrame()
+      try {
+        window.windowControls.remoteControlHideHostCursor?.()
+      } catch { }
+      const ctrlName = this.resolveRemoteUserName(userId)
+      try {
+        window.windowControls.remoteControlShowPill?.({
+          controllerName: ctrlName,
+          isControlling: true
         })
-        try {
-          window.windowControls.remoteControlShowPill?.({
-            controllerName: ctrlName,
-            isControlling: true
-          })
-        } catch { }
-        this.refreshHostFailSafe(userId)
-        const ch = this.rcDataChannels.get(userId)
-        if (ch && ch.readyState === 'open') {
+      } catch { }
+      useAppStore.getState().setRemoteControlState({
+        activeControllerId: userId,
+        isHostActive: false
+      })
+    }
+
+    const now = Date.now()
+    if (now - this.lastHostFailSafeRefresh > 2000) {
+      this.lastHostFailSafeRefresh = now
+      this.refreshHostFailSafe(userId)
+    }
+
+    switch (op) {
+      case RC_OP_MOVE: {
+        if (buffer.byteLength < 9) break
+        const xNorm = dv.getFloat32(1, true)
+        const yNorm = dv.getFloat32(5, true)
+        if (xNorm >= 0 && xNorm <= 1 && yNorm >= 0 && yNorm <= 1) {
           try {
-            ch.send(RemoteControlProtocol.encodeSignal(RC_OP_START))
+            window.windowControls.remoteControlMoveNormalized?.(xNorm, yNorm)
           } catch { }
         }
-        return
+        break
       }
-
-      if (this.isHostActive && op !== RC_OP_MOUSE_UP) return
-
-      if (!this.activeRemoteViewerId) {
-        this.activeRemoteViewerId = userId
-        if (this.sfuPubActive) {
-          void this.setP2PScreenSenderActiveForPeer(userId, true)
-        }
-        this.requestSenderKeyFrame()
+      case RC_OP_MOUSE_DOWN:
+      case RC_OP_MOUSE_UP: {
+        if (buffer.byteLength < 2) break
+        const btn = dv.getUint8(1)
+        const isDown = op === RC_OP_MOUSE_DOWN
         try {
-          window.windowControls.remoteControlHideHostCursor?.()
+          window.windowControls.remoteControlMouseButton(btn, isDown)
         } catch { }
-        const ctrlName = this.resolveRemoteUserName(userId)
+        break
+      }
+      case RC_OP_WHEEL: {
+        if (buffer.byteLength < 5) break
+        const deltaY = dv.getInt16(1, true)
         try {
-          window.windowControls.remoteControlShowPill?.({
-            controllerName: ctrlName,
-            isControlling: true
-          })
+          window.windowControls.remoteControlMouseWheel(deltaY)
         } catch { }
-        useAppStore.getState().setRemoteControlState({
-          activeControllerId: userId,
-          isHostActive: false
-        })
+        break
       }
-
-      const now = Date.now()
-      if (now - this.lastHostFailSafeRefresh > 2000) {
-        this.lastHostFailSafeRefresh = now
-        this.refreshHostFailSafe(userId)
-      }
-
-      switch (op) {
-        case RC_OP_MOVE: {
-          if (buffer.byteLength < 9) break
-          const xNorm = dv.getFloat32(1, true)
-          const yNorm = dv.getFloat32(5, true)
-          if (xNorm >= 0 && xNorm <= 1 && yNorm >= 0 && yNorm <= 1) {
-            try {
-              window.windowControls.remoteControlMoveNormalized?.(xNorm, yNorm)
-            } catch { }
-          }
-          break
+      case RC_OP_KEY_DOWN:
+      case RC_OP_KEY_UP: {
+        if (buffer.byteLength < 3) break
+        const vk = dv.getUint16(1, true)
+        const modifiers = buffer.byteLength >= 4 ? dv.getUint8(3) : 0
+        const isDown = op === RC_OP_KEY_DOWN
+        const modObj = {
+          shift: (modifiers & 1) !== 0,
+          ctrl: (modifiers & 2) !== 0,
+          alt: (modifiers & 4) !== 0,
+          win: (modifiers & 8) !== 0
         }
-        case RC_OP_MOUSE_DOWN:
-        case RC_OP_MOUSE_UP: {
-          if (buffer.byteLength < 2) break
-          const btn = dv.getUint8(1)
-          const isDown = op === RC_OP_MOUSE_DOWN
+        if (isShortcutSafe(vk, modObj)) {
           try {
-            window.windowControls.remoteControlMouseButton(btn, isDown)
+            window.windowControls.remoteControlKey(vk, isDown)
           } catch { }
-          break
         }
-        case RC_OP_WHEEL: {
-          if (buffer.byteLength < 5) break
-          const deltaY = dv.getInt16(1, true)
-          try {
-            window.windowControls.remoteControlMouseWheel(deltaY)
-          } catch { }
-          break
-        }
-        case RC_OP_KEY_DOWN:
-        case RC_OP_KEY_UP: {
-          if (buffer.byteLength < 3) break
-          const vk = dv.getUint16(1, true)
-          const modifiers = buffer.byteLength >= 4 ? dv.getUint8(3) : 0
-          const isDown = op === RC_OP_KEY_DOWN
-          const modObj = {
-            shift: (modifiers & 1) !== 0,
-            ctrl: (modifiers & 2) !== 0,
-            alt: (modifiers & 4) !== 0,
-            win: (modifiers & 8) !== 0
-          }
-          if (isShortcutSafe(vk, modObj)) {
-            try {
-              window.windowControls.remoteControlKey(vk, isDown)
-            } catch { }
-          }
-          break
-        }
-      }
-    } else {
-      switch (op) {
-        case RC_OP_START: {
-          void this.switchViewerToP2PForRemoteControl(userId)
-          this.enforceVideoZeroPlayoutDelay(userId)
-          break
-        }
-        case RC_OP_BUSY: {
-          useAppStore.getState().setRemoteControlState({
-            isControlling: false,
-            isHostActive: false
-          })
-          const busyMsg = i18n.t('stream.controlBusy', 'управление сейчас занято')
-          useAppStore.getState().setSystemToast?.(busyMsg)
-          setTimeout(() => {
-            if (useAppStore.getState().systemToast === busyMsg) {
-              useAppStore.getState().setSystemToast?.(null)
-            }
-          }, 3000)
-          break
-        }
-        case RC_OP_HOST_ACTIVE:
-          useAppStore.getState().setRemoteControlState({ isHostActive: true })
-          break
-        case RC_OP_HOST_IDLE:
-          useAppStore.getState().setRemoteControlState({ isHostActive: false })
-          break
-        case RC_OP_HOST_REVOKED:
-          useAppStore.getState().setRemoteControlState({
-            isControlling: false,
-            isHostActive: false,
-            isRevoked: true
-          })
-          break
-        case RC_OP_RESET:
-          useAppStore.getState().setRemoteControlState({
-            isControlling: false,
-            isHostActive: false
-          })
-          break
+        break
       }
     }
   }
@@ -4937,7 +4999,10 @@ export class WebRTCManager {
   }
 
   public sendViewerMove(streamerId: string, xNorm: number, yNorm: number): void {
-    const ch = this.rcDataChannels.get(streamerId)
+    let ch = this.rcDataChannels.get(streamerId)
+    if (!ch || ch.readyState === 'closed') {
+      ch = this.ensureRemoteControlChannelForStreamer(streamerId) || undefined
+    }
     if (ch && ch.readyState === 'open') {
       if (ch.bufferedAmount > 2048) {
         return
@@ -4949,7 +5014,10 @@ export class WebRTCManager {
   }
 
   public sendViewerMouseButton(streamerId: string, button: number, down: boolean): void {
-    const ch = this.rcDataChannels.get(streamerId)
+    let ch = this.rcDataChannels.get(streamerId)
+    if (!ch || ch.readyState === 'closed') {
+      ch = this.ensureRemoteControlChannelForStreamer(streamerId) || undefined
+    }
     if (ch && ch.readyState === 'open') {
       try {
         ch.send(RemoteControlProtocol.encodeMouseButton(button, down))
@@ -4958,7 +5026,10 @@ export class WebRTCManager {
   }
 
   public sendViewerMouseWheel(streamerId: string, deltaY: number, deltaX = 0): void {
-    const ch = this.rcDataChannels.get(streamerId)
+    let ch = this.rcDataChannels.get(streamerId)
+    if (!ch || ch.readyState === 'closed') {
+      ch = this.ensureRemoteControlChannelForStreamer(streamerId) || undefined
+    }
     if (ch && ch.readyState === 'open') {
       try {
         ch.send(RemoteControlProtocol.encodeMouseWheel(deltaY, deltaX))
@@ -4967,7 +5038,10 @@ export class WebRTCManager {
   }
 
   public sendViewerKey(streamerId: string, vk: number, down: boolean, modifiers = 0): void {
-    const ch = this.rcDataChannels.get(streamerId)
+    let ch = this.rcDataChannels.get(streamerId)
+    if (!ch || ch.readyState === 'closed') {
+      ch = this.ensureRemoteControlChannelForStreamer(streamerId) || undefined
+    }
     if (ch && ch.readyState === 'open') {
       try {
         ch.send(RemoteControlProtocol.encodeKey(vk, down, modifiers))
@@ -4976,7 +5050,17 @@ export class WebRTCManager {
   }
 
   public sendViewerSignal(streamerId: string, opcode: number): void {
-    const ch = this.rcDataChannels.get(streamerId)
+    if (opcode === RC_OP_START) {
+      this.controllingStreamerId = streamerId
+    } else if (opcode === RC_OP_STOP || opcode === RC_OP_RESET) {
+      if (this.controllingStreamerId === streamerId) {
+        this.controllingStreamerId = null
+      }
+    }
+    let ch = this.rcDataChannels.get(streamerId)
+    if (!ch || ch.readyState === 'closed') {
+      ch = this.ensureRemoteControlChannelForStreamer(streamerId) || undefined
+    }
     if (ch) {
       if (ch.readyState === 'open') {
         try {
@@ -4984,9 +5068,9 @@ export class WebRTCManager {
         } catch { }
       } else if (ch.readyState === 'connecting') {
         const sendOnOpen = () => {
-          ch.removeEventListener('open', sendOnOpen)
+          ch?.removeEventListener('open', sendOnOpen)
           try {
-            ch.send(RemoteControlProtocol.encodeSignal(opcode))
+            ch?.send(RemoteControlProtocol.encodeSignal(opcode))
           } catch { }
         }
         ch.addEventListener('open', sendOnOpen)
@@ -6256,13 +6340,6 @@ export class WebRTCManager {
       this.stopHostRemoteControl()
       this.allowRemoteControl = false
     }
-    for (const ch of this.rcDataChannels.values()) {
-      try {
-        ch.onopen = ch.onclose = ch.onerror = ch.onmessage = null
-        ch.close()
-      } catch { }
-    }
-    this.rcDataChannels.clear()
     useAppStore.getState().setStreamRemoteControlAllowed(false)
   }
 
@@ -7469,7 +7546,14 @@ export class WebRTCManager {
     const videoTrack = localVideo.getVideoTracks()[0] ?? null
     try {
       const transceivers = pc.getTransceivers()
-      const videoTransceiver = transceivers.find(t => t.receiver.track.kind === 'video' && !t.stopped)
+      const videoTransceiver = transceivers.find(t =>
+        !t.stopped && (
+          t.sender.track === videoTrack ||
+          (t.sender.track && t.sender.track.kind === 'video') ||
+          t.direction === 'sendrecv' ||
+          t.direction === 'sendonly'
+        )
+      ) ?? transceivers.find(t => t.receiver.track.kind === 'video' && !t.stopped)
       if (videoTransceiver) {
         const sender = videoTransceiver.sender
         if (active && videoTrack && sender.track !== videoTrack) {

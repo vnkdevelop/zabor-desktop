@@ -445,7 +445,7 @@ namespace ZaborInputSimulator {
                         dx = normX,
                         dy = normY,
                         mouseData = 0,
-                        dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                        dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
                         time = 0,
                         dwExtraInfo = SIMULATED_EXTRA_INFO
                     }

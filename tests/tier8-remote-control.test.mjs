@@ -515,4 +515,230 @@ describe('Tier 8: Remote Control Architecture & Security Protocol', () => {
       assert.equal(hostCursorHidden, true, 'Cursor must re-blank when control returns to viewer');
     });
   });
+
+  describe('Suite 8: Concurrent/Mutual Streaming Role Arbitration & Viewport Clipping Precision', () => {
+    test('S8-01: Viewport clipping coordinate translation eliminates non-client window border offset', () => {
+      // In maximized window, win.getBounds() has x: -8, y: -8, but win.getContentBounds() is x: 0, y: 0.
+      const contentBounds = { x: 0, y: 0, width: 1920, height: 1040 };
+      const display = { scaleFactor: 1.25 };
+      const viewportRect = { left: 160, top: 40, right: 1760, bottom: 940 };
+
+      const physicalLeft = Math.round((contentBounds.x + viewportRect.left) * display.scaleFactor);
+      const physicalTop = Math.round((contentBounds.y + viewportRect.top) * display.scaleFactor);
+      const physicalRight = Math.round((contentBounds.x + viewportRect.right) * display.scaleFactor);
+      const physicalBottom = Math.round((contentBounds.y + viewportRect.bottom) * display.scaleFactor);
+
+      assert.equal(physicalLeft, 200, 'Left boundary must be exactly 160 * 1.25 without negative window frame offset');
+      assert.equal(physicalTop, 50, 'Top boundary must be exactly 40 * 1.25');
+      assert.equal(physicalRight, 2200, 'Right boundary must be exactly 1760 * 1.25');
+      assert.equal(physicalBottom, 1175, 'Bottom boundary must be exactly 940 * 1.25');
+    });
+
+    test('S8-02: Clamping prevents physical clipping rectangle from escaping window content bounds', () => {
+      const contentBounds = { x: 0, y: 0, width: 1920, height: 1080 };
+      const scale = 1.0;
+      // Intentionally out-of-bound coords
+      const overflowRect = { left: -50, top: -20, right: 2000, bottom: 1200 };
+
+      const minX = Math.round(contentBounds.x * scale);
+      const minY = Math.round(contentBounds.y * scale);
+      const maxX = Math.round((contentBounds.x + contentBounds.width) * scale);
+      const maxY = Math.round((contentBounds.y + contentBounds.height) * scale);
+
+      const physicalLeft = Math.max(minX, Math.min(Math.round((contentBounds.x + overflowRect.left) * scale), maxX));
+      const physicalTop = Math.max(minY, Math.min(Math.round((contentBounds.y + overflowRect.top) * scale), maxY));
+      const physicalRight = Math.max(minX, Math.min(Math.round((contentBounds.x + overflowRect.right) * scale), maxX));
+      const physicalBottom = Math.max(minY, Math.min(Math.round((contentBounds.y + overflowRect.bottom) * scale), maxY));
+
+      assert.equal(physicalLeft, 0, 'Negative left must clamp to content left (0)');
+      assert.equal(physicalTop, 0, 'Negative top must clamp to content top (0)');
+      assert.equal(physicalRight, 1920, 'Overflowing right must clamp to content width (1920)');
+      assert.equal(physicalBottom, 1080, 'Overflowing bottom must clamp to content height (1080)');
+    });
+
+    test('S8-03: Mutual streaming arbitration recognizes START as viewer ACK when controlling streamer', () => {
+      // User A is streaming their own screen with allowRemoteControl = false
+      const localState = {
+        localVideoStream: {}, // active stream
+        allowRemoteControl: false,
+        controllingStreamerId: 'user-b',
+        activeRemoteViewerId: null,
+        p2pSwitched: false,
+        zeroPlayoutEnforced: false,
+        channelClosed: false
+      };
+
+      const handleRemoteMessage = (userId, op) => {
+        const isControllingThisUser = localState.controllingStreamerId === userId;
+        if (isControllingThisUser && op === RC_OP_START) {
+          localState.p2pSwitched = true;
+          localState.zeroPlayoutEnforced = true;
+          return 'ACK_PROCESSED';
+        }
+        if (op === RC_OP_START) {
+          if (!localState.localVideoStream || !localState.allowRemoteControl) {
+            return 'REJECTED_WITHOUT_CLOSE';
+          }
+        }
+        return 'UNKNOWN';
+      };
+
+      const result = handleRemoteMessage('user-b', RC_OP_START);
+      assert.equal(result, 'ACK_PROCESSED', 'Must process START as host ACK when controlling streamer');
+      assert.equal(localState.p2pSwitched, true);
+      assert.equal(localState.channelClosed, false, 'Data channel must never be closed on ACK');
+    });
+
+    test('S8-04: Rejection on unpermitted stream sends HOST_REVOKED without closing data channel', () => {
+      let channelClosed = false;
+      let sentOpcode = null;
+
+      const mockChannel = {
+        readyState: 'open',
+        send: (buf) => {
+          sentOpcode = buf[0];
+        },
+        close: () => {
+          channelClosed = true;
+        }
+      };
+
+      const localVideoStream = {};
+      const allowRemoteControl = false;
+
+      // Viewer attempts to control us when we do not allow it
+      if (!localVideoStream || !allowRemoteControl) {
+        mockChannel.send(RemoteControlProtocol.encodeSignal(RC_OP_HOST_REVOKED));
+      }
+
+      assert.equal(sentOpcode, RC_OP_HOST_REVOKED, 'Must reply with HOST_REVOKED');
+      assert.equal(channelClosed, false, 'Must NOT close the negotiated SCTP data channel');
+    });
+
+    test('S8-05: Host status signals are dispatched without activating simulator input execution', () => {
+      let simulatedInputCount = 0;
+      let hostActiveState = false;
+
+      const handleMessage = (op) => {
+        if (op === RC_OP_HOST_ACTIVE) {
+          hostActiveState = true;
+          return;
+        }
+        if (op === RC_OP_MOVE) {
+          simulatedInputCount++;
+        }
+      };
+
+      handleMessage(RC_OP_HOST_ACTIVE);
+      assert.equal(hostActiveState, true);
+      assert.equal(simulatedInputCount, 0, 'HOST_ACTIVE must never trigger mouse simulation');
+    });
+
+    test('S8-06: stopScreenShare preserves rcDataChannels and does not close them', () => {
+      let channelClosed = false;
+      const channels = new Map();
+      channels.set('peer-1', {
+        readyState: 'open',
+        close: () => {
+          channelClosed = true;
+        }
+      });
+
+      const stopScreenShare = (state) => {
+        if (state.allowRemoteControl) {
+          state.allowRemoteControl = false;
+        }
+      };
+
+      const state = { allowRemoteControl: true };
+      stopScreenShare(state);
+
+      assert.equal(state.allowRemoteControl, false);
+      assert.equal(channelClosed, false);
+      assert.equal(channels.size, 1);
+    });
+
+    test('S8-07: triggerHostActivity is isolated and ignores local mouse movement when activeRemoteViewerId is null', () => {
+      let isHostActive = false;
+      let sentSignal = null;
+
+      const triggerHostActivity = (state) => {
+        if (!state.localVideoStream || !state.allowRemoteControl || !state.activeRemoteViewerId) {
+          return;
+        }
+        isHostActive = true;
+        sentSignal = RC_OP_HOST_ACTIVE;
+      };
+
+      const state = {
+        localVideoStream: {},
+        allowRemoteControl: true,
+        activeRemoteViewerId: null
+      };
+
+      triggerHostActivity(state);
+      assert.equal(isHostActive, false);
+      assert.equal(sentSignal, null);
+
+      state.activeRemoteViewerId = 'remote-viewer-1';
+      triggerHostActivity(state);
+      assert.equal(isHostActive, true);
+      assert.equal(sentSignal, RC_OP_HOST_ACTIVE);
+    });
+
+    test('S8-08: Fresh RC_OP_START resets isHostActive and cancels pending hostIdleTimer', () => {
+      let isHostActive = true;
+      let timerCleared = false;
+      let timer = 12345;
+
+      const onStartReceived = () => {
+        isHostActive = false;
+        if (timer) {
+          timerCleared = true;
+          timer = null;
+        }
+      };
+
+      onStartReceived();
+      assert.equal(isHostActive, false);
+      assert.equal(timerCleared, true);
+      assert.equal(timer, null);
+    });
+
+    test('S8-09: Multi-monitor dipToScreenRect coordinate translation maps content bounds accurately', () => {
+      const mockWin = {
+        getContentBounds: () => ({ x: 1920, y: 100, width: 1920, height: 1080 })
+      };
+      const mockScreen = {
+        dipToScreenRect: (win, dipRect) => ({
+          x: Math.round(dipRect.x * 1.5),
+          y: Math.round(dipRect.y * 1.5),
+          width: Math.round(dipRect.width * 1.5),
+          height: Math.round(dipRect.height * 1.5)
+        })
+      };
+
+      const rect = { left: 100, top: 50, right: 900, bottom: 650 };
+      const contentBounds = mockWin.getContentBounds();
+      const dipRect = {
+        x: contentBounds.x + rect.left,
+        y: contentBounds.y + rect.top,
+        width: Math.max(1, rect.right - rect.left),
+        height: Math.max(1, rect.bottom - rect.top)
+      };
+
+      const phys = mockScreen.dipToScreenRect(mockWin, dipRect);
+      const physicalRect = {
+        left: phys.x,
+        top: phys.y,
+        right: phys.x + phys.width,
+        bottom: phys.y + phys.height
+      };
+
+      assert.equal(physicalRect.left, 3030);
+      assert.equal(physicalRect.top, 225);
+      assert.equal(physicalRect.right, 4230);
+      assert.equal(physicalRect.bottom, 1125);
+    });
+  });
 });

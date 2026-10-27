@@ -1071,8 +1071,41 @@ app.whenReady().then(() => {
     return remoteControlSimulator?.getScreenResolution() || { width: 1920, height: 1080, x: 0, y: 0 };
   });
 
-  ipcMain.handle('remote-control:clip-cursor', (_event, rect: { left: number; top: number; right: number; bottom: number }) => {
-    remoteControlSimulator?.clipCursor(rect);
+  ipcMain.handle('remote-control:clip-cursor', (event, rect: { left: number; top: number; right: number; bottom: number }) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    if (!win || win.isDestroyed()) {
+      remoteControlSimulator?.clipCursor(rect);
+      return true;
+    }
+    const contentBounds = win.getContentBounds();
+    const dipRect = {
+      x: contentBounds.x + rect.left,
+      y: contentBounds.y + rect.top,
+      width: Math.max(1, rect.right - rect.left),
+      height: Math.max(1, rect.bottom - rect.top)
+    };
+
+    let physicalRect: { left: number; top: number; right: number; bottom: number };
+    if (typeof screen.dipToScreenRect === 'function') {
+      const phys = screen.dipToScreenRect(win, dipRect);
+      physicalRect = {
+        left: phys.x,
+        top: phys.y,
+        right: phys.x + phys.width,
+        bottom: phys.y + phys.height
+      };
+    } else {
+      const display = screen.getDisplayMatching(contentBounds);
+      const scale = display?.scaleFactor || 1;
+      physicalRect = {
+        left: Math.round((contentBounds.x + rect.left) * scale),
+        top: Math.round((contentBounds.y + rect.top) * scale),
+        right: Math.round((contentBounds.x + rect.right) * scale),
+        bottom: Math.round((contentBounds.y + rect.bottom) * scale)
+      };
+    }
+
+    remoteControlSimulator?.clipCursor(physicalRect);
     return true;
   });
 

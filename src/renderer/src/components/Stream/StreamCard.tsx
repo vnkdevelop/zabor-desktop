@@ -15,8 +15,9 @@ import {
 } from '../../services/remoteControl'
 
 function getVideoRenderRect(video: HTMLVideoElement) {
-  const cw = video.clientWidth
-  const ch = video.clientHeight
+  const vRect = video.getBoundingClientRect()
+  const cw = vRect.width || video.clientWidth
+  const ch = vRect.height || video.clientHeight
   const vw = video.videoWidth
   const vh = video.videoHeight
   if (!vw || !vh || !cw || !ch) {
@@ -126,17 +127,17 @@ export const StreamCard = ({
       const video = videoRef.current
       const vRect = video.getBoundingClientRect()
       const rRect = getVideoRenderRect(video)
-      const scale = window.devicePixelRatio || 1
-      const screenLeft = Math.round((window.screenX + vRect.left + rRect.left) * scale)
-      const screenTop = Math.round((window.screenY + vRect.top + rRect.top) * scale)
-      const screenRight = Math.round((window.screenX + vRect.left + rRect.left + rRect.width) * scale)
-      const screenBottom = Math.round((window.screenY + vRect.top + rRect.top + rRect.height) * scale)
+      if (rRect.width <= 0 || rRect.height <= 0) return
+      const clientLeft = vRect.left + rRect.left
+      const clientTop = vRect.top + rRect.top
+      const clientRight = clientLeft + rRect.width
+      const clientBottom = clientTop + rRect.height
       try {
         window.windowControls.remoteControlClipCursor({
-          left: screenLeft,
-          top: screenTop,
-          right: screenRight,
-          bottom: screenBottom
+          left: clientLeft,
+          top: clientTop,
+          right: clientRight,
+          bottom: clientBottom
         })
       } catch { }
     }
@@ -157,6 +158,41 @@ export const StreamCard = ({
       clipCursorToVideo()
     }
   }, [isRemoteControlling, isFullscreen, clipCursorToVideo, setRemoteControlState])
+
+  useEffect(() => {
+    if (!isRemoteControlling || !isFullscreen || !isCursorClipped) return
+
+    clipCursorToVideo()
+
+    const animTimer = setTimeout(clipCursorToVideo, 320)
+
+    const handleWindowResize = () => {
+      clipCursorToVideo()
+    }
+    window.addEventListener('resize', handleWindowResize)
+
+    const handleTransitionEnd = () => {
+      clipCursorToVideo()
+    }
+    const rootEl = rootRef.current
+    rootEl?.addEventListener('transitionend', handleTransitionEnd)
+
+    let observer: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        clipCursorToVideo()
+      })
+      if (videoRef.current) observer.observe(videoRef.current)
+      if (rootRef.current) observer.observe(rootRef.current)
+    }
+
+    return () => {
+      clearTimeout(animTimer)
+      window.removeEventListener('resize', handleWindowResize)
+      rootEl?.removeEventListener('transitionend', handleTransitionEnd)
+      observer?.disconnect()
+    }
+  }, [isRemoteControlling, isFullscreen, isCursorClipped, cardSize.w, cardSize.h, showOverlays, clipCursorToVideo])
 
   useEffect(() => {
     const handleLockChange = () => {
@@ -749,6 +785,9 @@ export const StreamCard = ({
             if (video.videoWidth && video.videoHeight && onRatioChange) {
               onRatioChange(video.videoWidth / video.videoHeight)
             }
+            if (isFullscreen && isRemoteControlling && isCursorClipped) {
+              clipCursorToVideo()
+            }
           }}
           onPlaying={(e) => {
             const video = e.currentTarget
@@ -757,6 +796,9 @@ export const StreamCard = ({
             }
             if (!isLocal) {
               webrtcService.enforceVideoZeroPlayoutDelay(user.id)
+            }
+            if (isFullscreen && isRemoteControlling && isCursorClipped) {
+              clipCursorToVideo()
             }
           }}
           onMouseMove={isFullscreen && isRemoteControlling ? handleMouseMove : undefined}
