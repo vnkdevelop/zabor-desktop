@@ -5,7 +5,7 @@ import { useTranslation, Trans } from 'react-i18next';
 
 import { useAppStore, User, VoiceChannel } from './store/useAppStore';
 import { useSpeakingStore } from './store/useSpeakingStore';
-import { signalRService } from './services/signalr';
+import { signalRService, type AudioSettingsPayload } from './services/signalr';
 import { webrtc, CalibrationError } from './services/webrtc';
 import { isPackedGif, packGif, unpackGif, getDisplaySrc, getStaticFrameSync, preloadStaticFrame } from './utils/avatar';
 import i18n from './i18n';
@@ -780,21 +780,52 @@ export default function App() {
       animate(el, { translateX: ['-50%', '-50%'], translateY: ['-110%', '0%'], opacity: [0, 1], ease: DROP_SPRING });
     }
   }, [adminBlockToast]);
-  const settingsRef = useRef({
-    inputVolume: 100, outputVolume: 100,
-    selectedInput: 'default', selectedOutput: 'default',
-    noiseSuppression: true, language: i18n.language || 'ru',
-    openAtLogin: false, minimizeToTray: true,
-    micThresholdMode: 'auto' as 'auto' | 'manual',
-    manualThresholdValue: -42
+  const settingsRef = useRef<{
+    inputVolume: number;
+    outputVolume: number;
+    selectedInput: string;
+    selectedOutput: string;
+    noiseSuppression: boolean;
+    language: string;
+    openAtLogin: boolean;
+    minimizeToTray: boolean;
+    micThresholdMode: 'auto' | 'manual';
+    manualThresholdValue: number;
+    smartNoiseModel: SmartNoiseModel;
+    speechAnalyzer: boolean;
+    echoCancellation: boolean;
+    suppressionStrength: number;
+    ultraLowLatency: boolean;
+  }>({
+    inputVolume: 100,
+    outputVolume: 100,
+    selectedInput: 'default',
+    selectedOutput: 'default',
+    noiseSuppression: webrtc.isNoiseSuppressionEnabled(),
+    language: i18n.language || 'ru',
+    openAtLogin: false,
+    minimizeToTray: true,
+    micThresholdMode: 'auto',
+    manualThresholdValue: -42,
+    smartNoiseModel: webrtc.getSmartNoiseModel(),
+    speechAnalyzer: webrtc.isSpeechAnalyzerEnabled(),
+    echoCancellation: webrtc.isEchoCancellationEnabled(),
+    suppressionStrength: webrtc.getSuppressionStrength(),
+    ultraLowLatency: webrtc.isUltraLowLatency()
   });
 
   useEffect(() => {
     settingsRef.current = {
       inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language,
-      openAtLogin: autoLaunch, minimizeToTray, micThresholdMode, manualThresholdValue
+      openAtLogin: autoLaunch, minimizeToTray, micThresholdMode, manualThresholdValue,
+      smartNoiseModel, speechAnalyzer: speechAnalyzerEnabled, echoCancellation: echoCancellationEnabled,
+      suppressionStrength, ultraLowLatency
     };
-  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language, autoLaunch, minimizeToTray, micThresholdMode, manualThresholdValue]);
+  }, [
+    inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, language,
+    autoLaunch, minimizeToTray, micThresholdMode, manualThresholdValue,
+    smartNoiseModel, speechAnalyzerEnabled, echoCancellationEnabled, suppressionStrength, ultraLowLatency
+  ]);
 
   useEffect(() => {
     let glowElement: HTMLElement | null = null;
@@ -859,7 +890,12 @@ export default function App() {
           openAtLogin: settingsRef.current.openAtLogin,
           minimizeToTray: settingsRef.current.minimizeToTray,
           micThresholdMode: settingsRef.current.micThresholdMode,
-          manualThresholdValue: settingsRef.current.manualThresholdValue
+          manualThresholdValue: settingsRef.current.manualThresholdValue,
+          smartNoiseModel: settingsRef.current.smartNoiseModel,
+          speechAnalyzer: settingsRef.current.speechAnalyzer,
+          echoCancellation: settingsRef.current.echoCancellation,
+          suppressionStrength: settingsRef.current.suppressionStrength,
+          ultraLowLatency: settingsRef.current.ultraLowLatency
         }
       });
       window.windowControls.saveSession(data).catch(() => { });
@@ -889,6 +925,10 @@ export default function App() {
     webrtc.setNoiseSuppression(true);
     webrtc.setEchoCancellationEnabled(true);
     webrtc.setSpeechAnalyzerEnabled(false);
+    setSmartNoiseModel('rnnoise');
+    webrtc.setSmartNoiseModel('rnnoise');
+    setSuppressionStrength(15);
+    webrtc.setSuppressionStrength(15);
     setMicThresholdMode('auto');
     setManualThresholdValue(-42);
     setUltraLowLatency(false);
@@ -905,6 +945,16 @@ export default function App() {
     setIsLoginCopied(false);
     webrtc.setInputDevice('default');
     webrtc.setOutputDevice('default');
+    settingsRef.current = {
+      inputVolume: 100, outputVolume: 100,
+      selectedInput: 'default', selectedOutput: 'default',
+      noiseSuppression: true, language: i18n.language || 'ru',
+      openAtLogin: false, minimizeToTray: true,
+      micThresholdMode: 'auto', manualThresholdValue: -42,
+      smartNoiseModel: 'rnnoise', speechAnalyzer: false,
+      echoCancellation: true, suppressionStrength: 15,
+      ultraLowLatency: false
+    };
     localStorage.removeItem('zabor_mic_calibrated');
     localStorage.removeItem('zabor_base_noise_floor');
     localStorage.removeItem('zabor_threshold_on');
@@ -912,18 +962,17 @@ export default function App() {
     localStorage.removeItem('zabor_attenuation_limit');
     localStorage.removeItem('zabor_threshold_mode');
     localStorage.removeItem('zabor_manual_threshold_value');
+    localStorage.removeItem('zabor_noise_suppression');
+    localStorage.removeItem('zabor_smart_noise_model');
+    localStorage.removeItem('zabor_speech_analyzer_enabled');
+    localStorage.removeItem('zabor_echo_cancellation_enabled');
+    localStorage.removeItem('zabor_suppression_strength_db');
+    localStorage.removeItem('zabor_ultra_low_latency');
   }, []);
 
-  const applySettings = useCallback((s: {
-    inputVolume?: number; outputVolume?: number;
-    selectedInput?: string; selectedOutput?: string;
-    noiseSuppression?: boolean;
-    userVolumes?: Record<string, number>;
-    language?: string;
+  const applySettings = useCallback((s: Partial<AudioSettingsPayload> & {
     openAtLogin?: boolean;
     minimizeToTray?: boolean;
-    micThresholdMode?: 'auto' | 'manual';
-    manualThresholdValue?: number;
   }) => {
     const iv = s.inputVolume ?? 100;
     const ov = s.outputVolume ?? 100;
@@ -934,6 +983,12 @@ export default function App() {
     const normalizedInput = rawInput === 'communications' ? 'default' : rawInput;
     const normalizedOutput = rawOutput === 'communications' ? 'default' : rawOutput;
     setSelectedInput(normalizedInput);
+
+    if (s.ultraLowLatency !== undefined) {
+      setUltraLowLatency(s.ultraLowLatency);
+      webrtc.setUltraLowLatency(s.ultraLowLatency);
+    }
+
     if (webrtc.isUltraLowLatency()) {
       setNoiseSuppression(false);
       webrtc.setNoiseSuppression(false);
@@ -941,21 +996,42 @@ export default function App() {
         const raw = localStorage.getItem('zabor_pre_ultra_low_settings');
         const prev = raw ? JSON.parse(raw) : {};
         if (s.noiseSuppression !== undefined) prev.noiseSuppression = s.noiseSuppression;
+        if (s.echoCancellation !== undefined) prev.echoCancellation = s.echoCancellation;
+        if (s.speechAnalyzer !== undefined) prev.speechAnalyzer = s.speechAnalyzer;
         localStorage.setItem('zabor_pre_ultra_low_settings', JSON.stringify(prev));
       } catch { }
     } else {
-      const ns = s.noiseSuppression ?? true;
-      setNoiseSuppression(ns);
-      webrtc.setNoiseSuppression(ns);
+      if (s.noiseSuppression !== undefined) {
+        setNoiseSuppression(s.noiseSuppression);
+        webrtc.setNoiseSuppression(s.noiseSuppression);
+      }
+      if (s.echoCancellation !== undefined) {
+        setEchoCancellationEnabled(s.echoCancellation);
+        webrtc.setEchoCancellationEnabled(s.echoCancellation);
+      }
+      if (s.speechAnalyzer !== undefined) {
+        setSpeechAnalyzerEnabled(s.speechAnalyzer);
+        webrtc.setSpeechAnalyzerEnabled(s.speechAnalyzer);
+      }
     }
 
-    const mode = s.micThresholdMode ?? 'auto';
-    const savedThreshold = s.manualThresholdValue ?? -42;
+    if (s.smartNoiseModel && (s.smartNoiseModel === 'deepfilter' || s.smartNoiseModel === 'rnnoise')) {
+      setSmartNoiseModel(s.smartNoiseModel);
+      webrtc.setSmartNoiseModel(s.smartNoiseModel);
+    }
+
+    if (typeof s.suppressionStrength === 'number') {
+      setSuppressionStrength(s.suppressionStrength);
+      webrtc.setSuppressionStrength(s.suppressionStrength);
+    }
+
+    const mode = s.micThresholdMode ?? settingsRef.current.micThresholdMode ?? 'auto';
+    const savedThreshold = s.manualThresholdValue ?? settingsRef.current.manualThresholdValue ?? -42;
     const val = savedThreshold < 0 ? Math.max(-60, Math.min(-12, savedThreshold)) : -42;
     setMicThresholdMode(mode);
     setManualThresholdValue(val);
     webrtc.setMicThresholdParams(mode, val);
-    webrtc.warmUpSmartNoiseSuppression(s.noiseSuppression ?? true);
+    webrtc.warmUpSmartNoiseSuppression(s.noiseSuppression ?? settingsRef.current.noiseSuppression ?? true);
 
     webrtc.setInputDevice(normalizedInput);
     webrtc.setOutputDevice(normalizedOutput);
@@ -989,12 +1065,17 @@ export default function App() {
       outputVolume: ov,
       selectedInput: normalizedInput,
       selectedOutput: normalizedOutput,
-      noiseSuppression: s.noiseSuppression ?? true,
+      noiseSuppression: s.noiseSuppression !== undefined ? s.noiseSuppression : settingsRef.current.noiseSuppression,
       language: s.language ?? settingsRef.current.language,
       openAtLogin: s.openAtLogin ?? settingsRef.current.openAtLogin,
       minimizeToTray: s.minimizeToTray ?? settingsRef.current.minimizeToTray,
       micThresholdMode: mode,
-      manualThresholdValue: val
+      manualThresholdValue: val,
+      smartNoiseModel: (s.smartNoiseModel && (s.smartNoiseModel === 'deepfilter' || s.smartNoiseModel === 'rnnoise')) ? s.smartNoiseModel : settingsRef.current.smartNoiseModel,
+      speechAnalyzer: s.speechAnalyzer !== undefined ? s.speechAnalyzer : settingsRef.current.speechAnalyzer,
+      echoCancellation: s.echoCancellation !== undefined ? s.echoCancellation : settingsRef.current.echoCancellation,
+      suppressionStrength: typeof s.suppressionStrength === 'number' ? s.suppressionStrength : settingsRef.current.suppressionStrength,
+      ultraLowLatency: s.ultraLowLatency !== undefined ? s.ultraLowLatency : settingsRef.current.ultraLowLatency
     };
   }, []);
 
@@ -1384,7 +1465,7 @@ export default function App() {
           const nextInput = serverSettings.selectedInput === 'communications'
             ? 'default'
             : (serverSettings.selectedInput ?? 'default');
-          const nextNoiseSuppression = serverSettings.noiseSuppression ?? true;
+          const nextNoiseSuppression = serverSettings.noiseSuppression ?? settingsRef.current.noiseSuppression;
           if (nextInput !== previousInput || nextNoiseSuppression !== previousNoiseSuppression) {
             await webrtc.updateSettings(nextInput, nextNoiseSuppression).catch(() => {});
           }
@@ -1534,10 +1615,11 @@ export default function App() {
   useEffect(() => {
     if (!settingsLoadedRef.current || !isAuth) return;
 
+    saveLocalCache();
     if (settingsSaveTimerRef.current) clearTimeout(settingsSaveTimerRef.current);
     settingsSaveTimerRef.current = setTimeout(() => {
       const s = settingsRef.current;
-      signalRService.saveAudioSettings({
+      void signalRService.saveAudioSettings({
         inputVolume: s.inputVolume,
         outputVolume: s.outputVolume,
         selectedInput: s.selectedInput,
@@ -1546,11 +1628,19 @@ export default function App() {
         userVolumes: useAppStore.getState().userVolumes,
         language: s.language,
         micThresholdMode: s.micThresholdMode,
-        manualThresholdValue: s.manualThresholdValue
+        manualThresholdValue: s.manualThresholdValue,
+        smartNoiseModel: s.smartNoiseModel,
+        speechAnalyzer: s.speechAnalyzer,
+        echoCancellation: s.echoCancellation,
+        suppressionStrength: s.suppressionStrength,
+        ultraLowLatency: s.ultraLowLatency
       });
-      saveLocalCache();
     }, 500);
-  }, [inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, isAuth, language, micThresholdMode, manualThresholdValue]);
+  }, [
+    inputVolume, outputVolume, selectedInput, selectedOutput, noiseSuppression, isAuth, language,
+    micThresholdMode, manualThresholdValue, smartNoiseModel, speechAnalyzerEnabled,
+    echoCancellationEnabled, suppressionStrength, ultraLowLatency, saveLocalCache
+  ]);
 
   useEffect(() => {
     if (!settingsLoadedRef.current || !isAuth) return;
@@ -1563,18 +1653,57 @@ export default function App() {
     if (userVolumesSaveTimerRef.current) clearTimeout(userVolumesSaveTimerRef.current);
     userVolumesSaveTimerRef.current = setTimeout(() => {
       const s = settingsRef.current;
-      signalRService.saveAudioSettings({
+      void signalRService.saveAudioSettings({
         inputVolume: s.inputVolume,
         outputVolume: s.outputVolume,
         selectedInput: s.selectedInput,
         selectedOutput: s.selectedOutput,
         noiseSuppression: s.noiseSuppression,
         userVolumes: useAppStore.getState().userVolumes,
+        language: s.language,
         micThresholdMode: s.micThresholdMode,
-        manualThresholdValue: s.manualThresholdValue
+        manualThresholdValue: s.manualThresholdValue,
+        smartNoiseModel: s.smartNoiseModel,
+        speechAnalyzer: s.speechAnalyzer,
+        echoCancellation: s.echoCancellation,
+        suppressionStrength: s.suppressionStrength,
+        ultraLowLatency: s.ultraLowLatency
       });
     }, 800);
   }, [store.userVolumes, isAuth]);
+
+  useEffect(() => {
+    const flushSettings = () => {
+      if (settingsSaveTimerRef.current) {
+        clearTimeout(settingsSaveTimerRef.current);
+        settingsSaveTimerRef.current = null;
+        const s = settingsRef.current;
+        void signalRService.saveAudioSettings({
+          inputVolume: s.inputVolume,
+          outputVolume: s.outputVolume,
+          selectedInput: s.selectedInput,
+          selectedOutput: s.selectedOutput,
+          noiseSuppression: s.noiseSuppression,
+          userVolumes: useAppStore.getState().userVolumes,
+          language: s.language,
+          micThresholdMode: s.micThresholdMode,
+          manualThresholdValue: s.manualThresholdValue,
+          smartNoiseModel: s.smartNoiseModel,
+          speechAnalyzer: s.speechAnalyzer,
+          echoCancellation: s.echoCancellation,
+          suppressionStrength: s.suppressionStrength,
+          ultraLowLatency: s.ultraLowLatency
+        });
+        saveLocalCache();
+      }
+    };
+    const unsub = window.windowControls?.onBeforeQuit?.(flushSettings);
+    window.addEventListener('beforeunload', flushSettings);
+    return () => {
+      unsub?.();
+      window.removeEventListener('beforeunload', flushSettings);
+    };
+  }, [saveLocalCache]);
 
   useEffect(() => {
     if (!isAuth || !serverConnected || joke) return;
@@ -1942,6 +2071,13 @@ export default function App() {
       try {
         localStorage.setItem('zabor_pre_ultra_low_settings', JSON.stringify(prevSettings));
       } catch { }
+      settingsRef.current = {
+        ...settingsRef.current,
+        ultraLowLatency: true,
+        noiseSuppression: false,
+        echoCancellation: false,
+        speechAnalyzer: false
+      };
       setNoiseSuppression(false);
       webrtc.setNoiseSuppression(false);
       setEchoCancellationEnabled(false);
@@ -1957,6 +2093,13 @@ export default function App() {
       try {
         localStorage.removeItem('zabor_pre_ultra_low_settings');
       } catch { }
+      settingsRef.current = {
+        ...settingsRef.current,
+        ultraLowLatency: false,
+        noiseSuppression: restored.noiseSuppression,
+        echoCancellation: restored.echoCancellation,
+        speechAnalyzer: restored.speechAnalyzer
+      };
       setNoiseSuppression(restored.noiseSuppression);
       webrtc.setNoiseSuppression(restored.noiseSuppression);
       setEchoCancellationEnabled(restored.echoCancellation);
@@ -2329,6 +2472,7 @@ export default function App() {
         store.updateUserStatus(store.currentUser?.id || '', { isStreaming: true, streamQuality: quality, allowRemoteControl });
       } else {
         webrtc.stopScreenShare();
+        store.setSystemToast(t('toasts.streamLimitReached', 'в канале уже запущено максимальное количество стримов (3)'));
         store.setStreamRemoteControlAllowed(false);
       }
     } catch (e) {
@@ -2337,6 +2481,10 @@ export default function App() {
       await signalRService.stopStream();
       store.setStreamRemoteControlAllowed(false);
       store.updateUserStatus(store.currentUser?.id || '', { isStreaming: false, streamQuality: undefined, allowRemoteControl: false });
+      const isCancellation = (e as any)?.name === 'NotAllowedError' || (e as any)?.message?.includes('Permission denied') || (e as any)?.name === 'AbortError';
+      if (!isCancellation) {
+        store.setSystemToast(t('toasts.streamStartFailed', 'не удалось запустить трансляцию экрана'));
+      }
     }
   }, [store]);
 
@@ -4093,6 +4241,7 @@ export default function App() {
                   onEnabledChange={v => {
                     setNoiseSuppression(v);
                     webrtc.setNoiseSuppression(v);
+                    settingsRef.current = { ...settingsRef.current, noiseSuppression: v };
                   }}
                   ultraLowLatency={ultraLowLatency}
                   onUltraLowLatencyChange={handleUltraLowLatencyToggle}
@@ -4113,21 +4262,25 @@ export default function App() {
                   onSmartModelChange={m => {
                     setSmartNoiseModel(m);
                     webrtc.setSmartNoiseModel(m);
+                    settingsRef.current = { ...settingsRef.current, smartNoiseModel: m };
                   }}
                   speechAnalyzer={speechAnalyzerEnabled}
                   onSpeechAnalyzerChange={v => {
                     setSpeechAnalyzerEnabled(v);
                     webrtc.setSpeechAnalyzerEnabled(v);
+                    settingsRef.current = { ...settingsRef.current, speechAnalyzer: v };
                   }}
                   echoCancellation={echoCancellationEnabled}
                   onEchoCancellationChange={v => {
                     setEchoCancellationEnabled(v);
                     webrtc.setEchoCancellationEnabled(v);
+                    settingsRef.current = { ...settingsRef.current, echoCancellation: v };
                   }}
                   suppressionStrength={suppressionStrength}
                   onSuppressionStrengthChange={v => {
                     setSuppressionStrength(v);
                     webrtc.setSuppressionStrength(v);
+                    settingsRef.current = { ...settingsRef.current, suppressionStrength: v };
                   }}
                   onStartCalibration={handleManualCalibration}
                   isCalibrating={isCalibrating}

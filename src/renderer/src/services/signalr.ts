@@ -46,6 +46,23 @@ export interface IceConfig {
   ttlSeconds: number;
 }
 
+export interface AudioSettingsPayload {
+  inputVolume: number;
+  outputVolume: number;
+  selectedInput: string;
+  selectedOutput: string;
+  noiseSuppression: boolean;
+  userVolumes?: Record<string, number>;
+  language?: string;
+  micThresholdMode?: 'auto' | 'manual';
+  manualThresholdValue?: number;
+  smartNoiseModel?: 'deepfilter' | 'rnnoise';
+  speechAnalyzer?: boolean;
+  echoCancellation?: boolean;
+  suppressionStrength?: number;
+  ultraLowLatency?: boolean;
+}
+
 class SignalRService {
   private connection: signalR.HubConnection | null = null;
   private listenersAttached = false;
@@ -1275,17 +1292,8 @@ class SignalRService {
     return await this.safeInvoke<boolean>("DeleteMyAccount") ?? false;
   }
 
-  public async saveAudioSettings(settings: {
-    inputVolume: number;
-    outputVolume: number;
-    selectedInput: string;
-    selectedOutput: string;
-    noiseSuppression: boolean;
-    userVolumes?: Record<string, number>;
-    language?: string;
-    micThresholdMode?: 'auto' | 'manual';
-    manualThresholdValue?: number;
-  }): Promise<void> {
+
+  public async saveAudioSettings(settings: AudioSettingsPayload): Promise<void> {
     await this.safeInvoke("SaveAudioSettings", JSON.stringify(settings));
   }
 
@@ -1293,17 +1301,7 @@ class SignalRService {
     await this.safeInvoke("SetShowLastOnline", value);
   }
 
-  public async loadAudioSettings(): Promise<{
-    inputVolume: number;
-    outputVolume: number;
-    selectedInput: string;
-    selectedOutput: string;
-    noiseSuppression: boolean;
-    userVolumes?: Record<string, number>;
-    language?: string;
-    micThresholdMode?: 'auto' | 'manual';
-    manualThresholdValue?: number;
-  } | null> {
+  public async loadAudioSettings(): Promise<AudioSettingsPayload | null> {
     const json = await this.safeInvoke<string>("GetAudioSettings");
     if (!json) return null;
     try { return JSON.parse(json); } catch { return null; }

@@ -68,64 +68,6 @@ namespace ZaborInputSimulator {
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
 
-        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-        private static extern ushort RegisterClassEx([In] ref WNDCLASSEX lpwcx);
-
-        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-        private static extern IntPtr CreateWindowEx(
-            uint dwExStyle,
-            string lpClassName,
-            string lpWindowName,
-            uint dwStyle,
-            int x,
-            int y,
-            int nWidth,
-            int nHeight,
-            IntPtr hWndParent,
-            IntPtr hMenu,
-            IntPtr hInstance,
-            IntPtr lpParam
-        );
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool DestroyWindow(IntPtr hWnd);
-
-        [DllImport("user32.dll")]
-        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
-
-        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-        private static extern IntPtr LoadCursor(IntPtr hInstance, IntPtr lpCursorName);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool DrawIcon(IntPtr hDC, int X, int Y, IntPtr hIcon);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr BeginPaint(IntPtr hWnd, out PAINTSTRUCT lpPaint);
-
-        [DllImport("user32.dll")]
-        private static extern bool EndPaint(IntPtr hWnd, [In] ref PAINTSTRUCT lpPaint);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
-        private static extern IntPtr DefWindowProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("gdi32.dll")]
-        private static extern IntPtr CreateSolidBrush(uint crColor);
-
-        [DllImport("gdi32.dll")]
-        private static extern bool DeleteObject(IntPtr hObject);
-
-        [DllImport("user32.dll")]
-        private static extern int FillRect(IntPtr hDC, [In] ref RECT lprc, IntPtr hbr);
-
         private const uint INPUT_MOUSE = 0;
         private const uint INPUT_KEYBOARD = 1;
 
@@ -166,60 +108,10 @@ namespace ZaborInputSimulator {
 
         private const uint SPI_SETCURSORS = 0x0057;
 
-        private const int SW_HIDE = 0;
-        private const int SW_SHOWNOACTIVATE = 4;
-
-        private const uint SWP_NOSIZE = 0x0001;
-        private const uint SWP_NOMOVE = 0x0002;
-        private const uint SWP_NOZORDER = 0x0004;
-        private const uint SWP_NOACTIVATE = 0x0010;
-        private const uint SWP_SHOWWINDOW = 0x0040;
-
-        private const uint LWA_COLORKEY = 0x00000001;
-        private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
-
-        private const uint WS_POPUP = 0x80000000;
-        private const uint WS_EX_TOPMOST = 0x00000008;
-        private const uint WS_EX_TRANSPARENT = 0x00000020;
-        private const uint WS_EX_TOOLWINDOW = 0x00000080;
-        private const uint WS_EX_LAYERED = 0x00080000;
-        private const uint WS_EX_NOACTIVATE = 0x08000000;
-
-        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-        private static readonly IntPtr IDC_ARROW = (IntPtr)32512;
-
         // Custom signature tag for all inputs injected by Zabor
         private static readonly IntPtr SIMULATED_EXTRA_INFO = new IntPtr(0x5A41424F); // 'ZABO'
 
         private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
-        private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-        private struct WNDCLASSEX {
-            public uint cbSize;
-            public uint style;
-            public IntPtr lpfnWndProc;
-            public int cbClsExtra;
-            public int cbWndExtra;
-            public IntPtr hInstance;
-            public IntPtr hIcon;
-            public IntPtr hCursor;
-            public IntPtr hbrBackground;
-            public string lpszMenuName;
-            public string lpszClassName;
-            public IntPtr hIconSm;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct PAINTSTRUCT {
-            public IntPtr hdc;
-            public bool fErase;
-            public RECT rcPaint;
-            public bool fRestore;
-            public bool fIncUpdate;
-            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
-            public byte[] rgbReserved;
-        }
 
         [StructLayout(LayoutKind.Sequential)]
         public struct RECT {
@@ -335,8 +227,6 @@ namespace ZaborInputSimulator {
             return false;
         }
 
-        private static IntPtr overlayWindowHwnd = IntPtr.Zero;
-        private static WndProcDelegate overlayWndProcDelegate;
         private static volatile bool isCursorHidden = false;
 
         private static readonly uint[] OCR_IDS = new uint[] {
@@ -352,31 +242,6 @@ namespace ZaborInputSimulator {
             return CreateCursor(IntPtr.Zero, 0, 0, 32, 32, andMask, xorMask);
         }
 
-        private static IntPtr OverlayWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam) {
-            const uint WM_PAINT = 0x000F;
-            const uint WM_ERASEBKGND = 0x0014;
-            if (msg == WM_PAINT) {
-                PAINTSTRUCT ps;
-                IntPtr hdc = BeginPaint(hWnd, out ps);
-                if (hdc != IntPtr.Zero) {
-                    IntPtr hBrush = CreateSolidBrush(0x00FF00FF);
-                    RECT rc = new RECT { Left = 0, Top = 0, Right = 32, Bottom = 32 };
-                    FillRect(hdc, ref rc, hBrush);
-                    DeleteObject(hBrush);
-
-                    IntPtr hArrow = LoadCursor(IntPtr.Zero, IDC_ARROW);
-                    if (hArrow != IntPtr.Zero) {
-                        DrawIcon(hdc, 0, 0, hArrow);
-                    }
-                    EndPaint(hWnd, ref ps);
-                }
-                return IntPtr.Zero;
-            } else if (msg == WM_ERASEBKGND) {
-                return (IntPtr)1;
-            }
-            return DefWindowProc(hWnd, msg, wParam, lParam);
-        }
-
         private static void HideSystemCursor(bool force = false) {
             if (isCursorHidden && !force) return;
             try {
@@ -389,25 +254,10 @@ namespace ZaborInputSimulator {
                 isCursorHidden = true;
             } catch {}
 
-            if (overlayWindowHwnd != IntPtr.Zero) {
-                try {
-                    POINT pt;
-                    if (GetCursorPos(out pt)) {
-                        SetWindowPos(overlayWindowHwnd, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-                    } else {
-                        ShowWindow(overlayWindowHwnd, SW_SHOWNOACTIVATE);
-                    }
-                } catch {}
-            }
         }
 
         private static void RestoreSystemCursors(bool force = false) {
             if (!isCursorHidden && !force) return;
-            try {
-                if (overlayWindowHwnd != IntPtr.Zero) {
-                    ShowWindow(overlayWindowHwnd, SW_HIDE);
-                }
-            } catch {}
             try {
                 SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
             } catch {}
@@ -455,9 +305,6 @@ namespace ZaborInputSimulator {
             SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
             SetCursorPos(x, y);
 
-            if (isCursorHidden && overlayWindowHwnd != IntPtr.Zero) {
-                SetWindowPos(overlayWindowHwnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-            }
         }
 
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
@@ -570,53 +417,9 @@ namespace ZaborInputSimulator {
                     using (ProcessModule curModule = curProcess.MainModule) {
                         IntPtr hMod = GetModuleHandle(curModule.ModuleName);
                         hookId = SetWindowsHookEx(WH_MOUSE_LL, mouseHookDelegate, hMod, 0);
-
-                        try {
-                            overlayWndProcDelegate = OverlayWndProc;
-                            WNDCLASSEX wc = new WNDCLASSEX();
-                            wc.cbSize = (uint)Marshal.SizeOf(typeof(WNDCLASSEX));
-                            wc.style = 0;
-                            wc.lpfnWndProc = Marshal.GetFunctionPointerForDelegate(overlayWndProcDelegate);
-                            wc.cbClsExtra = 0;
-                            wc.cbWndExtra = 0;
-                            wc.hInstance = hMod;
-                            wc.hIcon = IntPtr.Zero;
-                            wc.hCursor = IntPtr.Zero;
-                            wc.hbrBackground = IntPtr.Zero;
-                            wc.lpszMenuName = null;
-                            wc.lpszClassName = "ZaborHostCursorOverlay";
-                            wc.hIconSm = IntPtr.Zero;
-
-                            RegisterClassEx(ref wc);
-
-                            uint exStyle = WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE;
-
-                            overlayWindowHwnd = CreateWindowEx(
-                                exStyle,
-                                "ZaborHostCursorOverlay",
-                                "ZaborHostCursorOverlay",
-                                WS_POPUP,
-                                -100, -100, 32, 32,
-                                IntPtr.Zero, IntPtr.Zero, hMod, IntPtr.Zero
-                            );
-
-                            if (overlayWindowHwnd != IntPtr.Zero) {
-                                SetLayeredWindowAttributes(overlayWindowHwnd, 0x00FF00FF, 0, LWA_COLORKEY);
-                                try {
-                                    SetWindowDisplayAffinity(overlayWindowHwnd, WDA_EXCLUDEFROMCAPTURE);
-                                } catch {}
-
-                                if (isCursorHidden) {
-                                    POINT pt;
-                                    if (GetCursorPos(out pt)) {
-                                        SetWindowPos(overlayWindowHwnd, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-                                    }
-                                }
-                            }
-                        } catch {}
                     }
 
-                    if (hookId != IntPtr.Zero || overlayWindowHwnd != IntPtr.Zero) {
+                    if (hookId != IntPtr.Zero) {
                         MSG msg;
                         while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {
                             TranslateMessage(ref msg);
@@ -750,11 +553,6 @@ namespace ZaborInputSimulator {
             try {
                 RestoreSystemCursors(true);
             } catch {}
-            if (overlayWindowHwnd != IntPtr.Zero) {
-                try {
-                    ShowWindow(overlayWindowHwnd, SW_HIDE);
-                } catch {}
-            }
             if (hookId != IntPtr.Zero) {
                 UnhookWindowsHookEx(hookId);
                 hookId = IntPtr.Zero;

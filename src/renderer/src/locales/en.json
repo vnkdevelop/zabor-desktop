@@ -460,7 +460,9 @@
     "channelJoinFailed": "could not join the channel: the server did not respond. please try again.",
     "relayUnavailable": "IP hiding is on, but the relay server is unreachable — the connection will not be established.",
     "ipPolicyRestart": "the ip setting fully applies after you restart zabor.",
-    "passwordChanged": "password successfully changed"
+    "passwordChanged": "password successfully changed",
+    "streamLimitReached": "channel has reached the maximum number of streams (3)",
+    "streamStartFailed": "failed to start screen share"
   },
   "stream": {
     "pickerTitle": "select source",

@@ -60,6 +60,7 @@ const SMART_MODEL_STORAGE_KEY = 'zabor_smart_noise_model'
 const SUPPRESSION_STRENGTH_STORAGE_KEY = 'zabor_suppression_strength_db'
 const SPEECH_ANALYZER_STORAGE_KEY = 'zabor_speech_analyzer_enabled'
 const ECHO_CANCELLATION_STORAGE_KEY = 'zabor_echo_cancellation_enabled'
+const NOISE_SUPPRESSION_STORAGE_KEY = 'zabor_noise_suppression'
 const RELAY_ONLY_STORAGE_KEY = 'zabor_relay_only_ice'
 const ULTRA_LOW_LATENCY_STORAGE_KEY = 'zabor_ultra_low_latency'
 
@@ -769,7 +770,9 @@ export class WebRTCManager {
   private currentDeviceId = 'default'
   private currentStreamQuality: 'high' | 'medium' | 'low' | 'camera' = 'low'
   private currentOutputDeviceId = 'default'
-  private noiseSuppression = localStorage.getItem(ULTRA_LOW_LATENCY_STORAGE_KEY) !== 'true'
+  private noiseSuppression = localStorage.getItem(ULTRA_LOW_LATENCY_STORAGE_KEY) === 'true'
+    ? false
+    : localStorage.getItem(NOISE_SUPPRESSION_STORAGE_KEY) !== 'false'
   private activeGraphSignature: string | null = null
 
   private inputVolume = 100
@@ -2381,6 +2384,9 @@ export class WebRTCManager {
   }
 
   public setNoiseSuppression(enabled: boolean) {
+    if (!this.ultraLowLatency) {
+      localStorage.setItem(NOISE_SUPPRESSION_STORAGE_KEY, enabled ? 'true' : 'false')
+    }
     if (this.noiseSuppression === enabled) return
     this.noiseSuppression = enabled
     if (this.inputGainNode) {
@@ -5558,7 +5564,7 @@ export class WebRTCManager {
         return
       }
     }
-    if (this.userStreamAudioTrackIds.get(userId) === track.id) return
+    if (this.userStreamAudioTrackIds.get(userId) === track.id && this.streamSourceNodes.has(userId)) return
 
     this.initOutputMixer()
     this.userStreamAudioTrackIds.set(userId, track.id)
@@ -5579,7 +5585,8 @@ export class WebRTCManager {
       streamPull.muted = true
       this.streamAudioElements.set(userId, streamPull)
     }
-    streamPull.srcObject = stream || new MediaStream([track])
+    const audioStream = stream || new MediaStream([track])
+    streamPull.srcObject = audioStream
     void streamPull.play().catch(() => { })
 
     if (this.streamSourceNodes.has(userId)) {
@@ -5589,7 +5596,8 @@ export class WebRTCManager {
       try { this.streamLimiterNodes.get(userId)?.disconnect() } catch { }
     }
 
-    const source = this.outputMixContext!.createMediaStreamSource(new MediaStream([track]))
+    const source = this.outputMixContext!.createMediaStreamSource(audioStream)
+    ;(source as any)._mediaStream = audioStream
     const delay = new DelayNode(this.outputMixContext!, { maxDelayTime: 1.0, delayTime: 0 })
     const gain = this.outputMixContext!.createGain()
     const limiter = this.createPlaybackLimiter(PLAYBACK_STREAM_LIMIT_DB, 2, 20, 0.002, 0.080)
@@ -5642,22 +5650,46 @@ export class WebRTCManager {
           this.applyVideoZeroPlayoutDelay(receiver)
         }
       }
-    }
-
-    const knownVoiceTrackId = this.userVoiceTrackIds.get(userId)
-    const audioReceivers = pc.getReceivers().filter(r => r.track && r.track.kind === 'audio')
-    const screenAudioReceiver = audioReceivers.find(r => r.track && r.track.id !== knownVoiceTrackId && r.track.readyState !== 'ended')
-    if (screenAudioReceiver?.track) {
-      if (!screenAudioReceiver.track.onunmute) {
-        screenAudioReceiver.track.onunmute = () => {
-          this.syncRemoteVideoStream(userId)
+      const sfuAudioReceiver = sfuPc.getReceivers().find(r => r.track && r.track.kind === 'audio' && r.track.readyState !== 'ended')
+      if (sfuAudioReceiver?.track) {
+        if (!sfuAudioReceiver.track.onunmute) {
+          sfuAudioReceiver.track.onunmute = () => {
+            this.syncRemoteVideoStream(userId)
+          }
+        }
+        if (isUserStreaming || !sfuAudioReceiver.track.muted) {
+          if (this.userStreamAudioTrackIds.get(userId) !== sfuAudioReceiver.track.id || !this.streamSourceNodes.has(userId)) {
+            const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
+            this.attachRemoteStreamAudio(userId, sfuAudioReceiver.track, sfuAudioReceiver, remoteVideoStream, true)
+          }
         }
       }
-      if (isUserStreaming || !screenAudioReceiver.track.muted) {
-        if (this.userStreamAudioTrackIds.get(userId) !== screenAudioReceiver.track.id) {
-          const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
-          this.attachRemoteStreamAudio(userId, screenAudioReceiver.track, screenAudioReceiver, remoteVideoStream)
+    }
+
+    const audioReceivers = pc.getReceivers().filter(r => r.track && r.track.kind === 'audio')
+    if (audioReceivers.length > 0 && !this.userVoiceTrackIds.has(userId) && audioReceivers[0].track) {
+      this.userVoiceTrackIds.set(userId, audioReceivers[0].track.id)
+    }
+
+    if (audioReceivers.length >= 2) {
+      const knownVoiceTrackId = this.userVoiceTrackIds.get(userId)
+      const screenAudioReceiver = audioReceivers.find(r => r.track && r.track.id !== knownVoiceTrackId && r !== audioReceivers[0] && r.track.readyState !== 'ended') || (audioReceivers[1].track?.readyState !== 'ended' ? audioReceivers[1] : null)
+      if (screenAudioReceiver?.track) {
+        if (!screenAudioReceiver.track.onunmute) {
+          screenAudioReceiver.track.onunmute = () => {
+            this.syncRemoteVideoStream(userId)
+          }
         }
+        if (isUserStreaming || !screenAudioReceiver.track.muted) {
+          if (this.userStreamAudioTrackIds.get(userId) !== screenAudioReceiver.track.id || !this.streamSourceNodes.has(userId)) {
+            const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
+            this.attachRemoteStreamAudio(userId, screenAudioReceiver.track, screenAudioReceiver, remoteVideoStream)
+          }
+        }
+      }
+    } else if (audioReceivers.length === 1) {
+      if (this.userStreamAudioTrackIds.get(userId) === audioReceivers[0].track?.id) {
+        this.cleanupRemoteStreamAudio(userId)
       }
     }
   }
@@ -5706,13 +5738,20 @@ export class WebRTCManager {
         )
       )
 
+      const eventReceiver = event.receiver || pc.getReceivers().find(r => r.track === event.track)
+      const audioReceivers = pc.getReceivers().filter(r => r.track && r.track.kind === 'audio')
+      const isFirstAudioReceiver = Boolean(eventReceiver && audioReceivers.length > 0 && eventReceiver === audioReceivers[0])
+      const isSecondAudioReceiver = Boolean(eventReceiver && audioReceivers.length > 1 && eventReceiver === audioReceivers[1])
+
       let isScreenShareAudio = false
-      if (knownStreamAudioTrackId && event.track.id === knownStreamAudioTrackId) {
+      if (matchesScreenStream || isSecondAudioReceiver) {
         isScreenShareAudio = true
-      } else if (knownVoiceTrackId && event.track.id === knownVoiceTrackId) {
+      } else if (isFirstAudioReceiver || (knownVoiceTrackId && event.track.id === knownVoiceTrackId)) {
         isScreenShareAudio = false
+      } else if (knownStreamAudioTrackId && event.track.id === knownStreamAudioTrackId) {
+        isScreenShareAudio = true
       } else {
-        isScreenShareAudio = matchesScreenStream
+        isScreenShareAudio = false
       }
 
       if (isScreenShareAudio) {
@@ -6046,7 +6085,16 @@ export class WebRTCManager {
             audio: false
           })
         } catch (e) {
-          console.warn('[ScreenShare] getDisplayMedia unavailable or rejected, falling back to getUserMedia:', e)
+          console.warn('[ScreenShare] getDisplayMedia with constraints failed, retrying simple getDisplayMedia:', e)
+          try {
+            await window.windowControls?.setDisplayMediaSource?.(sourceId)
+            stream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
+              audio: false
+            })
+          } catch (e2) {
+            console.warn('[ScreenShare] simple getDisplayMedia also failed:', e2)
+          }
         }
       }
 
@@ -6063,12 +6111,20 @@ export class WebRTCManager {
         }
       }
 
+      if (!stream) {
+        throw new Error('Failed to acquire stream')
+      }
+
       this.localVideoStream = stream
       const videoTrack = stream.getVideoTracks()[0]
       let audioTrack: MediaStreamTrack | undefined
       if (includeAudio && !isCamera) {
-        audioTrack = await this.startIsolatedStreamAudio(sourceId)
-        stream.addTrack(audioTrack)
+        try {
+          audioTrack = await this.startIsolatedStreamAudio(sourceId)
+          if (audioTrack) stream.addTrack(audioTrack)
+        } catch (audioError) {
+          console.warn('[WebRTC] Stream audio capture failed, continuing without audio:', audioError)
+        }
       }
 
       if (videoTrack) {

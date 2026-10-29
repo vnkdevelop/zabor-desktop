@@ -47,7 +47,12 @@ interface NativeScreenShareAudio {
   getLoadError: () => string | null;
 }
 
-const nativeScreenShareAudio = require('electron-native-screenshare') as NativeScreenShareAudio;
+let nativeScreenShareAudio: NativeScreenShareAudio | null = null;
+try {
+  nativeScreenShareAudio = require('electron-native-screenshare') as NativeScreenShareAudio;
+} catch (e) {
+  console.warn('[Audio] Failed to load electron-native-screenshare:', e);
+}
 
 const MAX_GPU_FALLBACK_TIER = 2;
 
@@ -150,6 +155,7 @@ if (app) {
     app.commandLine.appendSwitch('enable-accelerated-video-encode');
     app.commandLine.appendSwitch('enable-accelerated-video-decode');
     app.commandLine.appendSwitch('video-capture-use-gpu-memory-buffer');
+
     app.commandLine.appendSwitch(
       'enable-features',
       'WebRtcAllowWgcScreenCapturer,WebRtcAllowWgcWindowCapturer,AcceleratedVideoEncoder'
@@ -302,7 +308,7 @@ function stopStreamAudioCapture(): void {
   if (streamAudioOwnerId === null) return;
   streamAudioOwnerId = null;
   try {
-    if (nativeScreenShareAudio.isAvailable()) nativeScreenShareAudio.stopCapture();
+    if (nativeScreenShareAudio?.isAvailable?.()) nativeScreenShareAudio.stopCapture();
   } catch (error) {
     console.warn('[StreamAudio] Failed to stop native audio capture:', error);
   }
@@ -779,7 +785,7 @@ app.whenReady().then(() => {
   });
 
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
-    desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
+    desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } }).then((sources) => {
       let chosen = selectedDisplayMediaSourceId
         ? sources.find((s) => s.id === selectedDisplayMediaSourceId)
         : null;
@@ -1005,8 +1011,8 @@ app.whenReady().then(() => {
 
   ipcMain.handle('start-stream-audio-capture', (event, sourceId: unknown) => {
     if (typeof sourceId !== 'string') throw new TypeError('A desktop source id is required')
-    if (!nativeScreenShareAudio.isAvailable()) {
-      throw new Error(nativeScreenShareAudio.getLoadError() || 'Native stream audio capture is unavailable')
+    if (!nativeScreenShareAudio || typeof nativeScreenShareAudio.isAvailable !== 'function' || !nativeScreenShareAudio.isAvailable()) {
+      throw new Error(nativeScreenShareAudio?.getLoadError?.() || 'Native stream audio capture is unavailable')
     }
 
     stopStreamAudioCapture()
@@ -1033,7 +1039,7 @@ app.whenReady().then(() => {
       throw new Error('Native stream audio capture did not start')
     } catch (error) {
       try {
-        if (nativeScreenShareAudio.isAvailable()) nativeScreenShareAudio.stopCapture()
+        if (nativeScreenShareAudio?.isAvailable?.()) nativeScreenShareAudio.stopCapture()
       } catch { }
       streamAudioOwnerId = null
       throw error
