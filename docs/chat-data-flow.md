@@ -1,6 +1,6 @@
 # Карта данных чата и связи ZABOR / ZABOR chat and connection data map
 
-> Редакция от 20 октября 2026 года. Предыдущая редакция — от 28 сентября 2026 года.
+> Редакция от 30 октября 2026 года. Предыдущая редакция — от 20 октября 2026 года.
 > Техническое описание. Русская версия является основной.
 
 Документ описывает, какие данные возникают при работе обмена сообщениями и связи, где они находятся, кому доступны и сколько хранятся. Он предназначен для внутреннего использования, для ответов на обращения пользователей и для подготовки ответов на запросы уполномоченных органов.
@@ -74,6 +74,8 @@
 
 ## 4. Маршруты соединения
 
+Обычный выход сохраняет также локальные отпечатки доверенных ключей собеседников: повторный вход не должен сбрасывать проверку ранее принятого ключа. Normal sign-out also retains trusted peer-key fingerprints: re-login must not reset verification of a previously accepted key.
+
 Различаются состояния маршрутизации, определяемые приложением:
 
 | Маршрут | Как обозначается | Защита содержимого | Что видит сервер |
@@ -87,7 +89,23 @@
 
 Для трансляции экрана переключение на маршрут `sfu` происходит автоматически, когда количество активных зрителей достигает 3 и более (`>= 3`), и возвращается на `p2p` (или `turn`), когда активных зрителей остаётся 2 или меньше (`<= 2`).
 
+Порог считает активных зрителей стрима в голосовом канале; микрофоны и личные звонки не переводятся на SFU. Публикация и подписки сериализуются, ответы SDP допускают серверное поле `sdp`. Для отключения прямого потока конкретному зрителю требуется подтверждение первого видеокадра (`SfuViewerReady` / `StreamViewerSfuReady`); до этого маршруты могут существовать параллельно. Для управляющего зрителя сохраняется P2P, при отказе SFU используется P2P/TURN. Для полного подтверждения готовности нужны обновлённые клиент и backend; смешанные версии могут сохранять параллельную передачу. Поколения SFU-сессий возрастают при повторном запуске, чтобы отложенная команда старой сессии не закрывала новую комнату.
+
+При выходе отменяются незавершённые загрузки и ожидания отправки файлов, но история IndexedDB и завершённые файлы сохраняются. Подтверждение сохранения сообщения ожидает завершения транзакции IndexedDB, а не только успеха отдельного запроса. Загрузка истории привязана к владельцу и поколению сессии и объединяется с сообщениями, пришедшими во время чтения. Одна передача файла использует один выбранный канал данных; повторный запрос файла из истории остаётся доступен, пока исходная копия есть у отправителя.
+
+The threshold counts active viewers in a voice channel; microphone audio and direct calls do not move to SFU. Publish and subscribe operations are serialized, and SDP replies accept the server's `sdp` field. Disabling a viewer's direct stream requires first-video-frame confirmation (`SfuViewerReady` / `StreamViewerSfuReady`); routes may coexist until then. A controlling viewer retains P2P, and SFU failure falls back to P2P/TURN. Full readiness confirmation requires updated client and backend versions; mixed versions may keep parallel transmission. SFU generations increase across restarts so delayed commands from an older session cannot close a new room.
+
+Sign-out cancels unfinished downloads and blocked file sends but retains IndexedDB history and completed files. Message persistence waits for transaction completion, not merely request success. History loading is bound to the owner and session generation and merges messages received during the read. Each file transfer uses one selected data channel; files remain re-requestable from history while the sender retains the source copy.
+
 Службы установления соединений: по умолчанию используются внешние службы STUN, а параметры ретрансляции и адреса медиа-узлов SFU выдаются сервером приложения. Внешние службы STUN технически получают сетевые адреса участников.
+
+Личный звонок получает идентификатор восстановления только при объявленной поддержке обоих клиентов (`EnableCallResume`). После разрыва используются `LoginAndResume` и `ResumeCall`, проверяющие учётную запись, прежнюю пару и ограничение 45 секунд. При завершении, обычном входе без намерения возобновления или истечении срока запись недействительна; фоновая очистка освобождает состояние. Идентификатор находится только в памяти и не записывается в историю чата или `session.enc`.
+
+Просматриваемое видео проверяется по росту `framesDecoded`: сначала запрашивается ключевой кадр, затем при продолжении остановки выполняется восстановление ICE либо возврат с SFU на P2P. Управление окном использует его текущие физические границы, управление экраном — границы выбранного монитора; ввод при недоступном источнике отклоняется. Запрос и подтверждение управления различаются в протоколе версии 2; одновременные противоположные роли на одном устройстве не захватывают системный ввод друг у друга.
+
+Direct calls receive a recovery identifier only when both clients advertise support (`EnableCallResume`). `LoginAndResume` and `ResumeCall` check the authenticated account, previous pair and 45-second limit. Explicit termination, a normal login without resume intent, or expiry invalidates the entry; background cleanup releases the state. The identifier is memory-only and is not stored in chat history or `session.enc`.
+
+Watched video is checked for progress in `framesDecoded`: a keyframe is requested first; a continuing stall triggers ICE recovery or a switch from SFU to P2P. Window control uses current physical window bounds, screen control uses the selected monitor bounds, and input is rejected when the source is unavailable. Control protocol v2 distinguishes requests from acceptance and arbitrates opposite roles on the same device.
 
 ---
 

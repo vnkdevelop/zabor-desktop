@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { deleteMessage, loadConversation, pruneExpired, saveMessage } from '../chat/chatDb';
 import type { ChatMessage } from '../chat/types';
+import { useAppStore } from './useAppStore';
 
 export type ChatRoute = 'p2p' | 'turn' | 'signalr' | 'unknown';
 
@@ -30,6 +31,8 @@ function ordered(messages: ChatMessage[]): ChatMessage[] {
 }
 
 const inFlightLoads = new Map<string, Promise<void>>();
+let storeEpoch = 0;
+const removedMessages = new Set<string>();
 
 export const useChatStore = create<ChatState>((set, get) => ({
   selectedFriendId: null,
@@ -53,18 +56,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
     ? state
     : { unread: { ...state.unread, [friendId]: false } }),
   load: async (ownerId, friendId) => {
+    if (useAppStore.getState().currentUser?.id !== ownerId) return;
+    const epoch = storeEpoch;
     const key = `${ownerId}:${friendId}`;
     if (get().loaded[key]) return;
     const active = inFlightLoads.get(key);
     if (active) return active;
     const pending = (async () => {
       const messages = await loadConversation(ownerId, friendId);
-      set(state => ({ messages: { ...state.messages, [friendId]: ordered(messages) }, loaded: { ...state.loaded, [key]: true } }));
-    })().finally(() => inFlightLoads.delete(key));
+      if (epoch !== storeEpoch || useAppStore.getState().currentUser?.id !== ownerId) return;
+      set(state => {
+        const merged = new Map(messages.filter(message => !removedMessages.has(`${ownerId}:${message.id}`)).map(message => [message.id, message]));
+        for (const message of state.messages[friendId] ?? []) merged.set(message.id, message);
+        return { messages: { ...state.messages, [friendId]: ordered([...merged.values()]) }, loaded: { ...state.loaded, [key]: true } };
+      });
+    })().finally(() => { if (inFlightLoads.get(key) === pending) inFlightLoads.delete(key); });
     inFlightLoads.set(key, pending);
     return pending;
   },
   upsert: async message => {
+    if (useAppStore.getState().currentUser?.id !== message.ownerId) return;
     set(state => {
       const current = state.messages[message.conversationId] ?? [];
       const index = current.findIndex(item => item.id === message.id);
@@ -86,6 +97,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return changed ? { messages: { ...state.messages, [conversationId]: next } } : state;
   }),
   updateDeliveries: async (ownerId, friendId, messageIds, delivery) => {
+    if (useAppStore.getState().currentUser?.id !== ownerId) return;
     const ids = new Set(messageIds);
     const current = get().messages[friendId] ?? [];
     const updates = current.filter(message => ids.has(message.id) && message.senderId === ownerId && message.delivery !== delivery).map(message => ({ ...message, delivery }));
@@ -94,6 +106,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await Promise.all(updates.map(saveMessage));
   },
   remove: async (ownerId, friendId, messageId) => {
+    if (useAppStore.getState().currentUser?.id !== ownerId) return;
+    removedMessages.add(`${ownerId}:${messageId}`);
     set(state => ({ messages: { ...state.messages, [friendId]: (state.messages[friendId] ?? []).filter(item => item.id !== messageId) } }));
     await deleteMessage(ownerId, messageId);
   },
@@ -104,13 +118,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     ? state
     : { routes: { ...state.routes, [friendId]: route } }),
   cleanup: async ownerId => {
+    const epoch = storeEpoch;
     await pruneExpired(ownerId);
+    if (epoch !== storeEpoch || useAppStore.getState().currentUser?.id !== ownerId) return;
     set(state => {
       const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
       return { messages: Object.fromEntries(Object.entries(state.messages).map(([id, items]) => [id, items.filter(item => item.createdAt > cutoff)])) };
     });
   },
   reset: () => {
+    storeEpoch++;
+    removedMessages.clear();
     inFlightLoads.clear();
     set({ selectedFriendId: null, messages: {}, loaded: {}, connections: {}, routes: {}, unread: {} });
   }

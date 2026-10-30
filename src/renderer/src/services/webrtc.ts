@@ -16,6 +16,8 @@ import {
   type DeepFilterPayload
 } from './audio-assets'
 import { WebRtcVadSidecar } from './webrtc-vad'
+import { MediaHealthTracker } from './media-health'
+import { logDiagnostic } from './diagnostics'
 import {
   RC_DC_LABEL,
   RC_DC_ID,
@@ -33,6 +35,8 @@ import {
   RC_OP_BUSY,
   RC_OP_START,
   RC_OP_STOP,
+  RC_OP_KEYFRAME_REQUEST,
+  RC_OP_ACCEPT,
   RemoteControlProtocol,
   isShortcutSafe
 } from './remoteControl'
@@ -684,7 +688,22 @@ export class WebRTCManager {
   private sfuPubWatchdogTimer: NodeJS.Timeout | null = null
   private pendingSfuPublish: { epoch: number; nodeId: string } | null = null
   private isStartingScreenShare = false
+  private screenShareGeneration = 0
+  private screenShareStartPromise: Promise<unknown> | null = null
+  private sfuSubscriptionTasks = new Map<string, Promise<void>>()
+  private sfuPublishTask: Promise<void> | null = null
+  private mediaSessionGeneration = 0
+  private microphoneGeneration = 0
+  private mediaHealth = new MediaHealthTracker()
+  private mediaHealthInFlight = false
+  private diagnosticConnections = new WeakMap<RTCPeerConnection, number>()
+  private nextDiagnosticConnection = 0
+  private keyframeRequestedAt = new Map<string, number>()
+  private remoteControlVersions = new Map<string, number>()
+  private hostControlRevoked = false
+  private p2pSwitchTasks = new Map<string, Promise<void>>()
   private sfuFallbackPeers: Set<string> = new Set()
+  private sfuReadyPeers = new Set<string>()
   private sfuSubConnections: Map<string, RTCPeerConnection> = new Map()
   private sfuSubEpochs: Map<string, number> = new Map()
   private sfuSubWatchdogTimers: Map<string, NodeJS.Timeout> = new Map()
@@ -743,15 +762,20 @@ export class WebRTCManager {
   private lastSoftRefreshAt: Map<string, number> = new Map()
 
   private enqueueSignalingTask(userId: string, task: () => Promise<void>): Promise<void> {
+    const generation = this.mediaSessionGeneration
     const currentQueue = this.peerSignalingQueues.get(userId) || Promise.resolve()
     const nextQueue = currentQueue
       .then(async () => {
+        if (this.mediaSessionGeneration !== generation) return
         await task()
       })
       .catch(err => {
         console.error(`[WebRTC] Signaling task error for peer ${userId}:`, err)
       })
     this.peerSignalingQueues.set(userId, nextQueue)
+    void nextQueue.finally(() => {
+      if (this.peerSignalingQueues.get(userId) === nextQueue) this.peerSignalingQueues.delete(userId)
+    })
     return nextQueue
   }
 
@@ -1191,7 +1215,7 @@ export class WebRTCManager {
     }
   }
 
-  public applyVideoZeroPlayoutDelay(receiver: RTCRtpReceiver): void {
+  public applyVideoZeroPlayoutDelay(receiver: RTCRtpReceiver, remoteControl = false): void {
     if (!receiver.track || receiver.track.kind !== 'video') return
     if ('playoutDelayHint' in receiver) {
       try {
@@ -1202,8 +1226,9 @@ export class WebRTCManager {
     }
     if ('jitterBufferTarget' in receiver) {
       try {
-        if ((receiver as any).jitterBufferTarget !== WebRTCManager.VIDEO_JITTER_RC_MS) {
-          (receiver as any).jitterBufferTarget = WebRTCManager.VIDEO_JITTER_RC_MS
+        const target = remoteControl ? WebRTCManager.VIDEO_JITTER_RC_MS : WebRTCManager.VIDEO_JITTER_MIN_MS
+        if ((receiver as any).jitterBufferTarget !== target) {
+          (receiver as any).jitterBufferTarget = target
         }
       } catch { }
     }
@@ -1215,7 +1240,7 @@ export class WebRTCManager {
       if (!pc || pc.connectionState === 'closed') continue
       for (const receiver of pc.getReceivers()) {
         if (receiver.track?.kind === 'video') {
-          this.applyVideoZeroPlayoutDelay(receiver)
+          this.applyVideoZeroPlayoutDelay(receiver, this.controllingStreamerId === userId || this.activeRemoteViewerId === userId)
         }
       }
     }
@@ -2309,6 +2334,7 @@ export class WebRTCManager {
   public setOutputVolume(volume: number) {
     this.outputVolume = volume
     this.userGainNodes.forEach((_, userId) => this.updateRemoteVolume(userId))
+    this.streamGainNodes.forEach((_, userId) => this.updateRemoteStreamVolume(userId))
     if (this.ultraLowLatency) this.audioElements.forEach((_, userId) => this.updateRemoteVolume(userId))
     if (this.micTestGain) this.micTestGain.gain.value = this.micTestVolume()
   }
@@ -3580,6 +3606,7 @@ export class WebRTCManager {
   }
 
   public async startLocalStream(deviceId?: string, useNS?: boolean, forceRestart = false): Promise<boolean> {
+    const generation = this.microphoneGeneration
     if (deviceId !== undefined) this.currentDeviceId = deviceId
     if (useNS !== undefined) this.noiseSuppression = useNS
 
@@ -3651,6 +3678,11 @@ export class WebRTCManager {
         lap('getUserMedia')
 
         this.rawStream = raw
+        if (this.microphoneGeneration !== generation) {
+          raw.getTracks().forEach(track => track.stop())
+          this.rawStream = null
+          throw new DOMException('Microphone session cancelled', 'AbortError')
+        }
         if (!this.rawStreamIsFallback && !this.activeRawDeviceId) {
           this.activeRawDeviceId = targetDeviceId
         }
@@ -3670,6 +3702,12 @@ export class WebRTCManager {
         }
 
         this.localStream = await this.createProcessedStream(raw)
+        if (this.microphoneGeneration !== generation) {
+          this.localStream.getTracks().forEach(track => track.stop())
+          this.localStream = null
+          await this.cleanupProcessedStream()
+          throw new DOMException('Microphone session cancelled', 'AbortError')
+        }
         this.activeGraphSignature = this.micGraphSignature()
         lap('graph')
 
@@ -3806,6 +3844,7 @@ export class WebRTCManager {
   }
 
   public stopLocalStream() {
+    this.microphoneGeneration++
     const me = useAppStore.getState().currentUser
     if (me) this.clearVAD(me.id)
     this.stopSilenceMonitor()
@@ -4501,8 +4540,7 @@ export class WebRTCManager {
     if (existing && (existing.readyState === 'open' || existing.readyState === 'connecting')) return existing
     try {
       const channel = pc.createDataChannel(RC_DC_LABEL, {
-        ordered: false,
-        maxRetransmits: 0,
+        ordered: true,
         negotiated: true,
         id: RC_DC_ID
       })
@@ -4602,6 +4640,7 @@ export class WebRTCManager {
   }
 
   public resetControlState(permanent = false): void {
+    this.hostControlRevoked = permanent
     try {
       window.windowControls.remoteControlReset()
       window.windowControls.remoteControlShowHostCursor?.()
@@ -4619,7 +4658,7 @@ export class WebRTCManager {
     const previousControllerId = this.activeRemoteViewerId
     this.isHostActive = false
     this.activeRemoteViewerId = null
-    if (previousControllerId && this.sfuPubActive) {
+    if (previousControllerId && this.sfuReadyPeers.has(previousControllerId)) {
       void this.setP2PScreenSenderActiveForPeer(previousControllerId, false)
     }
     try {
@@ -4628,8 +4667,8 @@ export class WebRTCManager {
 
     const st = useAppStore.getState()
     st.setRemoteControlState({
-      isHostActive: false,
-      isRevoked: permanent,
+      isHostActive: st.isRemoteControlling ? st.isHostActive : false,
+      isRevoked: st.isRemoteControlling ? st.isRemoteControlRevoked : permanent,
       activeControllerId: null
     })
 
@@ -4708,7 +4747,7 @@ export class WebRTCManager {
 
     const st = useAppStore.getState()
     st.setRemoteControlState({
-      isHostActive: true,
+      isHostActive: st.isRemoteControlling ? st.isHostActive : true,
       activeControllerId: st.currentUser?.id || null
     })
 
@@ -4726,9 +4765,8 @@ export class WebRTCManager {
           } catch { }
         }
       }
-      useAppStore.getState().setRemoteControlState({
-        isHostActive: false
-      })
+      const state = useAppStore.getState()
+      if (!state.isRemoteControlling) state.setRemoteControlState({ isHostActive: false })
     }, 2000)
   }
 
@@ -4757,6 +4795,14 @@ export class WebRTCManager {
 
     const dv = new DataView(buffer)
     const op = dv.getUint8(0)
+    if (op === RC_OP_KEYFRAME_REQUEST) {
+      if (this.localVideoStream && this.isPeerRelevant(userId)) void this.refreshVideoSender(userId)
+      return
+    }
+    const isControllingThisUser =
+      this.controllingStreamerId === userId ||
+      (useAppStore.getState().isRemoteControlling && useAppStore.getState().activeStreamId === userId)
+    if ([RC_OP_HOST_ACTIVE, RC_OP_HOST_IDLE, RC_OP_HOST_REVOKED, RC_OP_BUSY].includes(op) && !isControllingThisUser) return
 
     // 1. Host status signals directed to viewers - ALWAYS handle as viewer updates
     if (op === RC_OP_HOST_ACTIVE) {
@@ -4797,11 +4843,7 @@ export class WebRTCManager {
     }
 
     // 2. Check if we are actively attempting to control or controlling this streamer
-    const isControllingThisUser =
-      this.controllingStreamerId === userId ||
-      (useAppStore.getState().isRemoteControlling && useAppStore.getState().activeStreamId === userId)
-
-    if (isControllingThisUser && op === RC_OP_START) {
+    if (isControllingThisUser && (op === RC_OP_ACCEPT || op === RC_OP_START && (this.remoteControlVersions.get(userId) ?? 1) < 2)) {
       // Host has accepted our control request and sent an ACK
       void this.switchViewerToP2PForRemoteControl(userId)
       this.enforceVideoZeroPlayoutDelay(userId)
@@ -4816,12 +4858,18 @@ export class WebRTCManager {
       if (this.controllingStreamerId === userId) {
         this.controllingStreamerId = null
       }
+      this.scheduleStreamViewInterestReport()
       return
     }
 
     // 3. Host branch: someone wants to control our stream or send input to us
     if (op === RC_OP_START) {
-      if (!this.localVideoStream || !this.allowRemoteControl) {
+      if (this.controllingStreamerId && useAppStore.getState().isRemoteControlling) {
+        const channel = this.rcDataChannels.get(userId)
+        if (channel?.readyState === 'open') channel.send(RemoteControlProtocol.encodeSignal(RC_OP_BUSY))
+        return
+      }
+      if (!this.localVideoStream || !this.allowRemoteControl || this.hostControlRevoked) {
         // We do not permit remote control on our stream; reject politely without closing the SCTP data channel!
         const ch = this.rcDataChannels.get(userId)
         if (ch && ch.readyState === 'open') {
@@ -4844,6 +4892,7 @@ export class WebRTCManager {
       }
 
       this.activeRemoteViewerId = userId
+      this.sfuReadyPeers.delete(userId)
       this.isHostActive = false
       if (this.hostIdleTimer) {
         clearTimeout(this.hostIdleTimer)
@@ -4870,7 +4919,7 @@ export class WebRTCManager {
       const ch = this.rcDataChannels.get(userId)
       if (ch && ch.readyState === 'open') {
         try {
-          ch.send(RemoteControlProtocol.encodeSignal(RC_OP_START))
+          ch.send(RemoteControlProtocol.encodeSignal((this.remoteControlVersions.get(userId) ?? 1) >= 2 ? RC_OP_ACCEPT : RC_OP_START))
         } catch { }
       }
       return
@@ -4908,34 +4957,8 @@ export class WebRTCManager {
     }
 
     // Physical mouse movement by host takes precedence over remote viewer
-    if (this.isHostActive && op !== RC_OP_MOUSE_UP) return
-
-    if (!this.activeRemoteViewerId) {
-      this.activeRemoteViewerId = userId
-      this.isHostActive = false
-      if (this.hostIdleTimer) {
-        clearTimeout(this.hostIdleTimer)
-        this.hostIdleTimer = null
-      }
-      if (this.sfuPubActive) {
-        void this.setP2PScreenSenderActiveForPeer(userId, true)
-      }
-      this.requestSenderKeyFrame()
-      try {
-        window.windowControls.remoteControlHideHostCursor?.()
-      } catch { }
-      const ctrlName = this.resolveRemoteUserName(userId)
-      try {
-        window.windowControls.remoteControlShowPill?.({
-          controllerName: ctrlName,
-          isControlling: true
-        })
-      } catch { }
-      useAppStore.getState().setRemoteControlState({
-        activeControllerId: userId,
-        isHostActive: false
-      })
-    }
+    if (this.isHostActive && op !== RC_OP_MOUSE_UP && op !== RC_OP_KEY_UP) return
+    if (!this.activeRemoteViewerId || this.hostControlRevoked) return
 
     const now = Date.now()
     if (now - this.lastHostFailSafeRefresh > 2000) {
@@ -4968,8 +4991,9 @@ export class WebRTCManager {
       case RC_OP_WHEEL: {
         if (buffer.byteLength < 5) break
         const deltaY = dv.getInt16(1, true)
+        const deltaX = dv.getInt16(3, true)
         try {
-          window.windowControls.remoteControlMouseWheel(deltaY)
+          window.windowControls.remoteControlMouseWheel(deltaY, deltaX)
         } catch { }
         break
       }
@@ -5057,6 +5081,7 @@ export class WebRTCManager {
 
   public sendViewerSignal(streamerId: string, opcode: number): void {
     if (opcode === RC_OP_START) {
+      if (this.activeRemoteViewerId) this.resetControlState()
       this.controllingStreamerId = streamerId
     } else if (opcode === RC_OP_STOP || opcode === RC_OP_RESET) {
       if (this.controllingStreamerId === streamerId) {
@@ -5422,7 +5447,10 @@ export class WebRTCManager {
   private startAudioHealthMonitoring() {
     if (this.audioHealthInterval) return
     this.audioHealthInterval = setInterval(async () => {
-      if (this.peerConnections.size === 0) return
+      if (this.mediaHealthInFlight) return
+      this.mediaHealthInFlight = true
+      try {
+      if (this.peerConnections.size === 0 && this.sfuSubConnections.size === 0) return
       if (this.outputMixContext?.state === 'suspended') {
         void this.outputMixContext.resume().catch(() => { })
       }
@@ -5459,16 +5487,33 @@ export class WebRTCManager {
         if (pc.connectionState !== 'connected') continue
         try {
           const stats = await pc.getStats()
+          if (this.peerConnections.get(userId) !== pc) continue
+          this.checkMediaHealth(userId, pc, 'p2p', stats)
           let rttMs = 0
+          let networkRoute = 'unknown'
+          let transport = 'unknown'
           stats.forEach(report => {
             if (report.type === 'candidate-pair' && (report.nominated || report.selected) && typeof report.currentRoundTripTime === 'number') {
               rttMs = report.currentRoundTripTime * 1000
+              const local = stats.get(report.localCandidateId)
+              const remote = stats.get(report.remoteCandidateId)
+              networkRoute = local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'turn' : 'p2p'
+              transport = local?.protocol === 'udp' || local?.protocol === 'tcp' ? local.protocol : 'unknown'
             }
           })
           if (this.ultraLowLatency && rttMs > 0) this.ultraRttMs.set(userId, rttMs)
+          let audioBytes = 0
+          let audioPackets = 0
+          let audioLost = 0
+          let audioConcealed = 0
           stats.forEach(report => {
             if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+              if (report.trackIdentifier && this.userVoiceTrackIds.get(userId) && report.trackIdentifier !== this.userVoiceTrackIds.get(userId)) return
               const concealed = report.concealedSamples || 0
+              audioBytes = report.bytesReceived ?? 0
+              audioPackets = report.packetsReceived ?? 0
+              audioLost = report.packetsLost ?? 0
+              audioConcealed = concealed
               const prevConcealed = this.lastAudioConcealment.get(userId) ?? concealed
               this.lastAudioConcealment.set(userId, concealed)
 
@@ -5493,12 +5538,25 @@ export class WebRTCManager {
               }
             }
           })
+          let connection = this.diagnosticConnections.get(pc)
+          if (!connection) { connection = ++this.nextDiagnosticConnection; this.diagnosticConnections.set(pc, connection) }
+          logDiagnostic({ event: 'media', mediaKind: 'audio', route: 'p2p', networkRoute, transport, connection, bytes: audioBytes, packets: audioPackets, lost: audioLost, concealed: audioConcealed, rttMs, ultra: this.ultraLowLatency, muted: Boolean(useAppStore.getState().currentUser?.isMuted), deafened: this.isDeafened })
         } catch { }
       }
+      for (const [userId, pc] of this.sfuSubConnections) {
+        if (pc.connectionState !== 'connected') continue
+        try {
+          const stats = await pc.getStats()
+          if (this.sfuSubConnections.get(userId) === pc) this.checkMediaHealth(userId, pc, 'sfu', stats)
+        } catch {}
+      }
+      } finally { this.mediaHealthInFlight = false }
     }, 2500)
   }
 
   private stopAudioHealthMonitoring() {
+    this.mediaHealth.reset()
+    this.keyframeRequestedAt.clear()
     if (this.audioHealthInterval) {
       clearInterval(this.audioHealthInterval)
       this.audioHealthInterval = null
@@ -5531,10 +5589,72 @@ export class WebRTCManager {
     return { rttMs, concealmentRate, jitterTargetMs, frameMs }
   }
 
+  private checkMediaHealth(userId: string, pc: RTCPeerConnection, route: 'p2p' | 'sfu', stats: RTCStatsReport): void {
+    const store = useAppStore.getState()
+    if (store.activeStreamId !== userId) return
+    const track = store.remoteVideoStreams[userId]?.getVideoTracks()[0]
+    if (!track || !track.enabled || track.readyState !== 'live' || !pc.getReceivers().some(receiver => receiver.track === track)) return
+    let frames = -1
+    let bytes = 0
+    let packets = 0
+    let lost = 0
+    stats.forEach(report => {
+      if (report.type !== 'inbound-rtp' || report.kind !== 'video' || report.trackIdentifier && report.trackIdentifier !== track.id) return
+      if (typeof report.framesDecoded === 'number') frames = report.framesDecoded
+      bytes = report.bytesReceived ?? 0
+      packets = report.packetsReceived ?? 0
+      lost = report.packetsLost ?? 0
+    })
+    if (frames < 0) return
+    let connection = this.diagnosticConnections.get(pc)
+    if (!connection) { connection = ++this.nextDiagnosticConnection; this.diagnosticConnections.set(pc, connection) }
+    logDiagnostic({ event: 'media', mediaKind: 'video', connection, route, frames, bytes, packets, lost, ultra: this.ultraLowLatency })
+    const action = this.mediaHealth.observe(`${connection}:${track.id}`, frames, performance.now())
+    if (action === 'keyframe') {
+      logDiagnostic({ event: 'recovery', connection, route, reason: 'keyframe' })
+      if (route === 'sfu') void signalRService.sfuRequestKeyframe(userId)
+      else this.sendViewerSignal(userId, RC_OP_KEYFRAME_REQUEST)
+    } else if (action === 'recover') {
+      logDiagnostic({ event: 'recovery', connection, route, reason: 'video-stall' })
+      if (route === 'sfu') {
+        const epoch = this.sfuSubEpochs.get(userId)
+        if (epoch !== undefined) void signalRService.sfuReportFailure(userId, epoch)
+        void this.switchViewerFromSfuToP2P(userId)
+      } else void this.renegotiatePeer(pc, userId, true)
+    }
+  }
+
+  private async refreshVideoSender(userId: string): Promise<void> {
+    const now = performance.now()
+    if (now - (this.keyframeRequestedAt.get(userId) ?? -5000) < 3000) return
+    this.keyframeRequestedAt.set(userId, now)
+    const pc = this.peerConnections.get(userId)
+    const sender = pc?.getSenders().find(sender => sender.track?.kind === 'video')
+    if (!sender) return
+    const track = sender.track
+    try {
+      const params = sender.getParameters()
+      if (!params.encodings?.length || params.encodings[0].active === false) return
+      params.encodings[0].active = false
+      await sender.setParameters(params)
+    } catch {}
+    finally {
+      if (sender.track === track && track?.readyState === 'live' && (!this.sfuReadyPeers.has(userId) || this.activeRemoteViewerId === userId || this.sfuFallbackPeers.has(userId))) {
+        try {
+          const restored = sender.getParameters()
+          if (restored.encodings?.length) {
+            restored.encodings[0].active = true
+            await sender.setParameters(restored)
+          }
+        } catch { void this.renegotiatePeer(pc!, userId) }
+      }
+    }
+  }
+
   private attachRemoteVideo(userId: string, track: MediaStreamTrack, stream?: MediaStream, isSfu = false) {
     if (track.readyState === 'ended') return
     const videoStream = stream || new MediaStream([track])
-    const isControlling = useAppStore.getState().isRemoteControlling
+    const isControlling = useAppStore.getState().isRemoteControlling && this.controllingStreamerId === userId
     if (!isSfu) {
       this.p2pStreamsBackup.set(userId, videoStream)
       if (!isControlling && this.sfuSubConnections.has(userId) && useAppStore.getState().remoteVideoStreams[userId]) {
@@ -5558,8 +5678,11 @@ export class WebRTCManager {
 
   private attachRemoteStreamAudio(userId: string, track: MediaStreamTrack, receiver?: RTCRtpReceiver, stream?: MediaStream, isSfu = false) {
     if (track.readyState === 'ended') return
+    const audioStream = (stream && stream.getAudioTracks().some(t => t === track || t.id === track.id))
+      ? stream
+      : new MediaStream([track])
     if (!isSfu) {
-      this.p2pAudioBackup.set(userId, { track, receiver, stream })
+      this.p2pAudioBackup.set(userId, { track, receiver, stream: audioStream })
       if (this.sfuSubConnections.has(userId) && this.userStreamAudioTrackIds.has(userId)) {
         return
       }
@@ -5585,7 +5708,6 @@ export class WebRTCManager {
       streamPull.muted = true
       this.streamAudioElements.set(userId, streamPull)
     }
-    const audioStream = stream || new MediaStream([track])
     streamPull.srcObject = audioStream
     void streamPull.play().catch(() => { })
 
@@ -5596,7 +5718,14 @@ export class WebRTCManager {
       try { this.streamLimiterNodes.get(userId)?.disconnect() } catch { }
     }
 
-    const source = this.outputMixContext!.createMediaStreamSource(audioStream)
+    let source: MediaStreamAudioSourceNode
+    try {
+      source = this.outputMixContext!.createMediaStreamSource(audioStream)
+    } catch {
+      const fallbackStream = new MediaStream([track])
+      streamPull.srcObject = fallbackStream
+      source = this.outputMixContext!.createMediaStreamSource(fallbackStream)
+    }
     ;(source as any)._mediaStream = audioStream
     const delay = new DelayNode(this.outputMixContext!, { maxDelayTime: 1.0, delayTime: 0 })
     const gain = this.outputMixContext!.createGain()
@@ -5625,6 +5754,38 @@ export class WebRTCManager {
       this.scheduleStreamViewInterestReport(60)
     }
 
+    const sfuPc = this.sfuSubConnections.get(userId)
+    if (sfuPc && sfuPc.connectionState !== 'closed') {
+      for (const receiver of sfuPc.getReceivers()) {
+        if (receiver.track && receiver.track.kind === 'video' && receiver.track.readyState !== 'ended') {
+          this.applyVideoZeroPlayoutDelay(receiver)
+        }
+      }
+      const sfuAudioReceiver = sfuPc.getReceivers().find(r => r.track && r.track.kind === 'audio' && r.track.readyState !== 'ended')
+      if (sfuAudioReceiver?.track) {
+        if (!sfuAudioReceiver.track.onunmute) {
+          sfuAudioReceiver.track.onunmute = () => {
+            this.syncRemoteVideoStream(userId)
+          }
+        }
+        const isActiveStream = store.activeStreamId === userId
+        if (isUserStreaming || isActiveStream || !sfuAudioReceiver.track.muted) {
+          if (this.userStreamAudioTrackIds.get(userId) !== sfuAudioReceiver.track.id || !this.streamSourceNodes.has(userId)) {
+            this.attachRemoteStreamAudio(userId, sfuAudioReceiver.track, sfuAudioReceiver, undefined, true)
+          }
+        }
+        if (isActiveStream) {
+          if (this.outputMixContext?.state === 'suspended') {
+            void this.outputMixContext.resume().catch(() => { })
+          }
+          const streamPull = this.streamAudioElements.get(userId)
+          if (streamPull && streamPull.paused) {
+            void streamPull.play().catch(() => { })
+          }
+        }
+      }
+    }
+
     const pc = this.peerConnections.get(userId)
     if (!pc || pc.connectionState === 'closed') return
 
@@ -5643,29 +5804,6 @@ export class WebRTCManager {
       }
     }
 
-    const sfuPc = this.sfuSubConnections.get(userId)
-    if (sfuPc && sfuPc.connectionState !== 'closed') {
-      for (const receiver of sfuPc.getReceivers()) {
-        if (receiver.track && receiver.track.kind === 'video' && receiver.track.readyState !== 'ended') {
-          this.applyVideoZeroPlayoutDelay(receiver)
-        }
-      }
-      const sfuAudioReceiver = sfuPc.getReceivers().find(r => r.track && r.track.kind === 'audio' && r.track.readyState !== 'ended')
-      if (sfuAudioReceiver?.track) {
-        if (!sfuAudioReceiver.track.onunmute) {
-          sfuAudioReceiver.track.onunmute = () => {
-            this.syncRemoteVideoStream(userId)
-          }
-        }
-        if (isUserStreaming || !sfuAudioReceiver.track.muted) {
-          if (this.userStreamAudioTrackIds.get(userId) !== sfuAudioReceiver.track.id || !this.streamSourceNodes.has(userId)) {
-            const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
-            this.attachRemoteStreamAudio(userId, sfuAudioReceiver.track, sfuAudioReceiver, remoteVideoStream, true)
-          }
-        }
-      }
-    }
-
     const audioReceivers = pc.getReceivers().filter(r => r.track && r.track.kind === 'audio')
     if (audioReceivers.length > 0 && !this.userVoiceTrackIds.has(userId) && audioReceivers[0].track) {
       this.userVoiceTrackIds.set(userId, audioReceivers[0].track.id)
@@ -5680,15 +5818,24 @@ export class WebRTCManager {
             this.syncRemoteVideoStream(userId)
           }
         }
-        if (isUserStreaming || !screenAudioReceiver.track.muted) {
+        const isActiveStream = store.activeStreamId === userId
+        if (isUserStreaming || isActiveStream || !screenAudioReceiver.track.muted) {
           if (this.userStreamAudioTrackIds.get(userId) !== screenAudioReceiver.track.id || !this.streamSourceNodes.has(userId)) {
-            const remoteVideoStream = useAppStore.getState().remoteVideoStreams[userId]
-            this.attachRemoteStreamAudio(userId, screenAudioReceiver.track, screenAudioReceiver, remoteVideoStream)
+            this.attachRemoteStreamAudio(userId, screenAudioReceiver.track, screenAudioReceiver)
+          }
+        }
+        if (isActiveStream) {
+          if (this.outputMixContext?.state === 'suspended') {
+            void this.outputMixContext.resume().catch(() => { })
+          }
+          const streamPull = this.streamAudioElements.get(userId)
+          if (streamPull && streamPull.paused) {
+            void streamPull.play().catch(() => { })
           }
         }
       }
     } else if (audioReceivers.length === 1) {
-      if (this.userStreamAudioTrackIds.get(userId) === audioReceivers[0].track?.id) {
+      if (!this.sfuSubConnections.has(userId) && this.userStreamAudioTrackIds.get(userId) === audioReceivers[0].track?.id) {
         this.cleanupRemoteStreamAudio(userId)
       }
     }
@@ -5793,8 +5940,10 @@ export class WebRTCManager {
     }
 
     const checkState = () => {
+      if (this.peerConnections.get(userId) !== pc) return
       const st = pc.connectionState
       const iceSt = pc.iceConnectionState
+      logDiagnostic({ event: 'connection', state: st, route: 'p2p' })
 
       if (st === 'connected' || iceSt === 'connected' || iceSt === 'completed') {
         const startedAt = this.peerConnectStartedAt.get(userId)
@@ -5813,6 +5962,7 @@ export class WebRTCManager {
           }).catch(() => console.log(`[WebRTC] peer ${userId} connected in ${elapsed}ms`))
         }
         useAppStore.getState().setWebRTCConnectionStatus(userId, true)
+        this.syncRemoteVideoStream(userId)
         this.clearIceTimeout(userId)
         this.retryCount.delete(userId)
         const dcTimer = this.dcTimers.get(userId)
@@ -5916,9 +6066,32 @@ export class WebRTCManager {
     const store = useAppStore.getState()
     const isActive = store.activeStreamId === userId
     const vol = isActive ? (store.streamVolumes[userId] ?? 100) : 0
+
+    if (isActive) {
+      if (this.outputMixContext?.state === 'suspended') {
+        void this.outputMixContext.resume().catch(() => { })
+      }
+      const streamPull = this.streamAudioElements.get(userId)
+      if (streamPull && streamPull.paused) {
+        void streamPull.play().catch(() => { })
+      }
+      if (!this.streamSourceNodes.has(userId) || !this.streamGainNodes.has(userId)) {
+        this.syncRemoteVideoStream(userId)
+      }
+    }
+
     const gainNode = this.streamGainNodes.get(userId)
     if (gainNode) {
-      gainNode.gain.value = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+      const targetGain = Math.max(0, Math.min(4.0, (this.outputVolume / 100) * (vol / 100)))
+      if (this.outputMixContext && this.outputMixContext.state === 'running') {
+        try {
+          gainNode.gain.setTargetAtTime(targetGain, this.outputMixContext.currentTime, 0.015)
+        } catch {
+          gainNode.gain.value = targetGain
+        }
+      } else {
+        gainNode.gain.value = targetGain
+      }
     }
   }
 
@@ -5933,6 +6106,7 @@ export class WebRTCManager {
   }
 
   private async startIsolatedStreamAudio(sourceId: string): Promise<MediaStreamTrack> {
+    const generation = this.screenShareGeneration
     this.stopIsolatedStreamAudio()
 
     const context = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
@@ -5943,6 +6117,7 @@ export class WebRTCManager {
 
     try {
       await context.audioWorklet.addModule(playbackBufferProcessorUrl)
+      if (generation !== this.screenShareGeneration) throw new DOMException('Screen share cancelled', 'AbortError')
       const node = new AudioWorkletNode(context, 'playback-buffer-processor', {
         numberOfInputs: 0,
         numberOfOutputs: 1,
@@ -5970,6 +6145,10 @@ export class WebRTCManager {
       })
 
       await window.windowControls.startStreamAudioCapture(sourceId)
+      if (generation !== this.screenShareGeneration) {
+        await window.windowControls.stopStreamAudioCapture().catch(() => {})
+        throw new DOMException('Screen share cancelled', 'AbortError')
+      }
       if (context.state === 'suspended') await context.resume()
 
       const track = destination.stream.getAudioTracks()[0]
@@ -5978,6 +6157,7 @@ export class WebRTCManager {
       return track
     } catch (error) {
       this.stopIsolatedStreamAudio()
+      if (context.state !== 'closed') await context.close().catch(() => {})
       throw error
     }
   }
@@ -6019,10 +6199,38 @@ export class WebRTCManager {
     includeAudio: boolean,
     allowRemoteControl = false
   ) {
+    allowRemoteControl = allowRemoteControl && !sourceId.startsWith('camera:') && quality !== 'camera'
+    const previousStart = this.screenShareStartPromise
+    if (this.localVideoStream || this.isStartingScreenShare || previousStart) this.stopScreenShare()
+    else this.screenShareGeneration++
+    const generation = this.screenShareGeneration
+    const operation = this.startScreenShareOperation(sourceId, quality, includeAudio, allowRemoteControl, generation, previousStart)
+    this.screenShareStartPromise = operation
+    try {
+      return await operation
+    } finally {
+      if (this.screenShareStartPromise === operation) this.screenShareStartPromise = null
+    }
+  }
+
+  private async startScreenShareOperation(
+    sourceId: string,
+    quality: 'high' | 'medium' | 'low' | 'camera',
+    includeAudio: boolean,
+    allowRemoteControl: boolean,
+    generation: number,
+    previousStart: Promise<unknown> | null
+  ) {
+    if (previousStart) await previousStart.catch(() => {})
+    const assertCurrent = () => {
+      if (generation !== this.screenShareGeneration) throw new DOMException('Screen share cancelled', 'AbortError')
+    }
+    assertCurrent()
     if (this.localVideoStream) {
-      this.stopScreenShare()
+      throw new Error('Screen share is already active')
     }
     this.allowRemoteControl = allowRemoteControl
+    this.hostControlRevoked = false
     useAppStore.getState().setRemoteControlState({ isRevoked: false })
     if (allowRemoteControl) {
       this.startHostRemoteControl()
@@ -6075,6 +6283,7 @@ export class WebRTCManager {
       if (!isCamera && typeof navigator !== 'undefined' && navigator.mediaDevices?.getDisplayMedia) {
         try {
           await window.windowControls?.setDisplayMediaSource?.(sourceId)
+          assertCurrent()
           stream = await navigator.mediaDevices.getDisplayMedia({
             video: {
               cursor: allowRemoteControl ? 'never' : 'always',
@@ -6085,20 +6294,24 @@ export class WebRTCManager {
             audio: false
           })
         } catch (e) {
+          assertCurrent()
           console.warn('[ScreenShare] getDisplayMedia with constraints failed, retrying simple getDisplayMedia:', e)
           try {
             await window.windowControls?.setDisplayMediaSource?.(sourceId)
+            assertCurrent()
             stream = await navigator.mediaDevices.getDisplayMedia({
               video: true,
               audio: false
             })
           } catch (e2) {
+            assertCurrent()
             console.warn('[ScreenShare] simple getDisplayMedia also failed:', e2)
           }
         }
       }
 
       if (!stream) {
+        assertCurrent()
         try {
           stream = await navigator.mediaDevices.getUserMedia(constraints)
         } catch (err) {
@@ -6114,15 +6327,25 @@ export class WebRTCManager {
       if (!stream) {
         throw new Error('Failed to acquire stream')
       }
+      if (generation !== this.screenShareGeneration) {
+        stream.getTracks().forEach(track => track.stop())
+        assertCurrent()
+      }
 
       this.localVideoStream = stream
       const videoTrack = stream.getVideoTracks()[0]
+      if (videoTrack) {
+        const settings = videoTrack.getSettings()
+        logDiagnostic({ event: 'capture', state: 'active', sourceKind: isCamera ? 'camera' : sourceId.startsWith('window:') ? 'window' : 'screen', width: settings.width ?? 0, height: settings.height ?? 0, generation })
+      }
       let audioTrack: MediaStreamTrack | undefined
       if (includeAudio && !isCamera) {
         try {
           audioTrack = await this.startIsolatedStreamAudio(sourceId)
+          assertCurrent()
           if (audioTrack) stream.addTrack(audioTrack)
         } catch (audioError) {
+          assertCurrent()
           console.warn('[WebRTC] Stream audio capture failed, continuing without audio:', audioError)
         }
       }
@@ -6147,11 +6370,13 @@ export class WebRTCManager {
       }
 
       for (const [userId, pc] of this.peerConnections.entries()) {
+        assertCurrent()
+        if (pc.connectionState === 'closed') continue
         if (this.allowRemoteControl) {
           this.ensureRemoteControlChannel(pc, userId)
         }
         const isController = this.allowRemoteControl && this.activeRemoteViewerId === userId
-        const keepP2PActive = !this.sfuPubActive || this.sfuFallbackPeers.has(userId) || isController
+        const keepP2PActive = !this.sfuReadyPeers.has(userId) || this.sfuFallbackPeers.has(userId) || isController
         if (videoTrack) {
           const videoTransceiver = pc.getTransceivers().find(t => t.receiver.track.kind === 'video' && !t.stopped)
           let sender: RTCRtpSender
@@ -6208,6 +6433,7 @@ export class WebRTCManager {
       }
 
       this.isStartingScreenShare = false
+      assertCurrent()
       if (this.pendingSfuPublish) {
         const pending = this.pendingSfuPublish
         void this.handleSfuPublishRequired(pending.epoch, pending.nodeId)
@@ -6215,8 +6441,10 @@ export class WebRTCManager {
       this.startStatsMonitoring()
       return true
     } catch (e) {
-      this.isStartingScreenShare = false
-      this.stopScreenShare()
+      if (generation === this.screenShareGeneration) {
+        this.isStartingScreenShare = false
+        this.stopScreenShare()
+      }
       throw e
     }
   }
@@ -6240,7 +6468,7 @@ export class WebRTCManager {
         this.ensureRemoteControlChannel(pc, userId)
       }
       const isController = this.allowRemoteControl && this.activeRemoteViewerId === userId
-      const keepP2PActive = !this.sfuPubActive || this.sfuFallbackPeers.has(userId) || isController
+      const keepP2PActive = !this.sfuReadyPeers.has(userId) || this.sfuFallbackPeers.has(userId) || isController
 
       if (videoTrack) {
         const videoTransceiver = pc.getTransceivers().find(t => t.receiver.track.kind === 'video' && !t.stopped)
@@ -6334,6 +6562,8 @@ export class WebRTCManager {
   }
 
   public stopScreenShare() {
+    this.screenShareGeneration++
+    this.isStartingScreenShare = false
     if (this.statsInterval) {
       clearInterval(this.statsInterval)
       this.statsInterval = null
@@ -6449,7 +6679,7 @@ export class WebRTCManager {
         await pc.setLocalDescription({ type: 'offer', sdp: optimizedSDP })
         const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
         this.offerEpoch.set(userId, offerEpoch)
-        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch, allowRemoteControl: this.allowRemoteControl }))
+        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch, allowRemoteControl: this.allowRemoteControl, remoteControlProtocol: 2 }))
         this.pendingIceRestart.delete(userId)
       } catch (e) {
         console.error('[WebRTC] renegotiation failed', e)
@@ -6619,7 +6849,7 @@ export class WebRTCManager {
   private updateVideoJitterBuffer(userId: string, receiver: RTCRtpReceiver, stats: RTCStatsReport) {
     if (!('jitterBufferTarget' in receiver)) return
 
-    if (this.rcDataChannels.has(userId) || useAppStore.getState().isRemoteControlling || this.allowRemoteControl) {
+    if ((useAppStore.getState().isRemoteControlling && this.controllingStreamerId === userId) || this.activeRemoteViewerId === userId) {
       try {
         if ((receiver as any).jitterBufferTarget !== WebRTCManager.VIDEO_JITTER_RC_MS) {
           (receiver as any).jitterBufferTarget = WebRTCManager.VIDEO_JITTER_RC_MS
@@ -6766,8 +6996,7 @@ export class WebRTCManager {
       const params = sender.getParameters()
       if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
       params.degradationPreference = 'maintain-framerate'
-      const isController = Boolean(this.allowRemoteControl || this.activeRemoteViewerId === userId)
-      params.encodings[0].priority = isController ? 'high' : 'medium'
+      const isController = this.activeRemoteViewerId === userId
       params.encodings[0].networkPriority = 'high'
       params.encodings[0].scaleResolutionDownBy = isController ? 1.0 : profile.scale
       params.encodings[0].maxBitrate = profile.bitrate
@@ -6824,9 +7053,8 @@ export class WebRTCManager {
     if (this.statsInterval) clearInterval(this.statsInterval)
     this.statsInterval = setInterval(async () => {
       if (this.currentStreamQuality === 'camera') return
-      const entries: Array<[string, RTCPeerConnection]> = this.sfuPubActive && this.sfuPubConnection
-        ? [['__sfu__', this.sfuPubConnection]]
-        : [...this.peerConnections.entries()]
+      const entries: Array<[string, RTCPeerConnection]> = [...this.peerConnections.entries()]
+      if (this.sfuPubActive && this.sfuPubConnection) entries.push(['__sfu__', this.sfuPubConnection])
 
       for (const [userId, pc] of entries) {
         if (pc.connectionState !== 'connected') continue
@@ -6891,7 +7119,6 @@ export class WebRTCManager {
       if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
       params.encodings[0].maxBitrate = OPUS_AUDIO_BITRATE
       params.encodings[0].networkPriority = 'high'
-      params.encodings[0].priority = 'high'
       sender.setParameters(params)
         .then(() => {
           console.info('[WebRTC] Audio sender configured', {
@@ -6929,6 +7156,7 @@ export class WebRTCManager {
   }
 
   public async connectToPeer(userId: string, preserveRemoteVideoOnFailure = false) {
+    const generation = this.mediaSessionGeneration
     if (userId === useAppStore.getState().currentUser?.id) return
     if (!this.isPeerRelevant(userId)) return
     const existingPc = this.peerConnections.get(userId)
@@ -6957,6 +7185,7 @@ export class WebRTCManager {
       iceMs = Math.round(performance.now() - iceStartedAt)
     })
     await Promise.all([localStreamPromise, iceServersPromise])
+    if (generation !== this.mediaSessionGeneration) return
     if (!this.isPeerRelevant(userId)) return
 
     return this.enqueueSignalingTask(userId, async () => {
@@ -7006,14 +7235,14 @@ export class WebRTCManager {
                 params.encodings[0].networkPriority = 'high'
               }
               const isController = this.allowRemoteControl && this.activeRemoteViewerId === userId
-              if (this.sfuPubActive && !this.sfuFallbackPeers.has(userId) && !isController) {
+              if (this.sfuReadyPeers.has(userId) && !this.sfuFallbackPeers.has(userId) && !isController) {
                 params.encodings[0].active = false
               }
               sender.setParameters(params).catch(() => { })
             } catch { }
           } else if (track.kind === 'audio') {
             this.configureAudioSender(sender)
-            if (this.sfuPubActive) {
+            if (this.sfuReadyPeers.has(userId) && !this.sfuFallbackPeers.has(userId) && this.activeRemoteViewerId !== userId) {
               try {
                 const params = sender.getParameters()
                 if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
@@ -7055,7 +7284,7 @@ export class WebRTCManager {
         }
         const offerEpoch = (this.offerEpoch.get(userId) ?? 0) + 1
         this.offerEpoch.set(userId, offerEpoch)
-        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch, allowRemoteControl: this.allowRemoteControl }))
+        signalRService.sendWebRTCOffer(userId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: offerEpoch, allowRemoteControl: this.allowRemoteControl, remoteControlProtocol: 2 }))
         console.log(`[WebRTC] offer to ${userId} sent in ${Math.round(performance.now() - startedAt)}ms (ice servers ${iceMs}ms)`)
       } catch (e) {
         console.error('[WebRTC] connectToPeer failed', e)
@@ -7126,14 +7355,14 @@ export class WebRTCManager {
                   params.encodings[0].networkPriority = 'high'
                 }
                 const isController = this.allowRemoteControl && this.activeRemoteViewerId === senderId
-                if (this.sfuPubActive && !this.sfuFallbackPeers.has(senderId) && !isController) {
+                if (this.sfuReadyPeers.has(senderId) && !this.sfuFallbackPeers.has(senderId) && !isController) {
                   params.encodings[0].active = false
                 }
                 sender.setParameters(params).catch(() => { })
               } catch { }
             } else if (track.kind === 'audio') {
               this.configureAudioSender(sender)
-              if (this.sfuPubActive) {
+              if (this.sfuReadyPeers.has(senderId) && !this.sfuFallbackPeers.has(senderId) && this.activeRemoteViewerId !== senderId) {
                 try {
                   const params = sender.getParameters()
                   if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
@@ -7151,6 +7380,7 @@ export class WebRTCManager {
 
       try {
         const offer = JSON.parse(offerStr)
+        this.remoteControlVersions.set(senderId, Number(offer.remoteControlProtocol ?? 1))
         if (typeof (offer as { allowRemoteControl?: boolean }).allowRemoteControl === 'boolean') {
           const rcAllowed = Boolean((offer as { allowRemoteControl: boolean }).allowRemoteControl)
           store.setStreamRemoteControlAllowed(senderId, rcAllowed)
@@ -7196,7 +7426,7 @@ export class WebRTCManager {
           this.disconnectFromPeer(senderId)
           return
         }
-        signalRService.sendWebRTCAnswer(senderId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: (offer as { epoch?: number }).epoch, allowRemoteControl: this.allowRemoteControl }))
+        signalRService.sendWebRTCAnswer(senderId, JSON.stringify({ type: pc.localDescription!.type, sdp: pc.localDescription!.sdp, epoch: (offer as { epoch?: number }).epoch, allowRemoteControl: this.allowRemoteControl, remoteControlProtocol: 2 }))
         this.flushPendingRenegotiation(senderId)
         this.syncRemoteVideoStream(senderId)
 
@@ -7232,6 +7462,7 @@ export class WebRTCManager {
         this.isSettingRemoteAnswerPending.set(senderId, true)
         try {
           const answer = JSON.parse(answerStr)
+          this.remoteControlVersions.set(senderId, Number(answer.remoteControlProtocol ?? 1))
           if (typeof (answer as { allowRemoteControl?: boolean }).allowRemoteControl === 'boolean') {
             const rcAllowed = Boolean((answer as { allowRemoteControl: boolean }).allowRemoteControl)
             const store = useAppStore.getState()
@@ -7382,7 +7613,6 @@ export class WebRTCManager {
     this.pendingCandidates.delete(userId)
     this.pendingRenegotiation.delete(userId)
     this.pendingIceRestart.delete(userId)
-    this.peerSignalingQueues.delete(userId)
     this.isMakingOffer.delete(userId)
     this.isSettingRemoteAnswerPending.delete(userId)
     this.offerEpoch.delete(userId)
@@ -7411,6 +7641,7 @@ export class WebRTCManager {
     this.appliedVideoProfiles.delete(userId)
     this.viewerStates.delete(userId)
     this.reportedViewStates.delete(userId)
+    this.remoteControlVersions.delete(userId)
   }
 
   public cleanupRemoteStreamAudio(userId: string) {
@@ -7447,6 +7678,10 @@ export class WebRTCManager {
     this.p2pAudioBackup.delete(userId)
     this.cleanupRemoteStreamAudio(userId)
     const st = useAppStore.getState()
+    if (this.controllingStreamerId === userId) {
+      this.controllingStreamerId = null
+      st.setRemoteControlState({ isControlling: false, isHostActive: false, isRevoked: false })
+    }
     st.setRemoteVideoStream(userId, null)
     if (st.activeStreamId === userId) {
       st.setRemoteControlState({ isControlling: false, isRevoked: false })
@@ -7472,10 +7707,11 @@ export class WebRTCManager {
     })
   }
 
-  private waitForFirstVideoFrame(stream: MediaStream, timeoutMs = 550): Promise<void> {
+  private waitForFirstVideoFrame(stream: MediaStream, timeoutMs = 6500): Promise<boolean> {
     const track = stream.getVideoTracks()[0]
-    if (!track || track.readyState === 'ended') return Promise.resolve()
-    return new Promise<void>(resolve => {
+    if (!track || track.readyState === 'ended') return Promise.resolve(false)
+    track.enabled = true
+    return new Promise<boolean>(resolve => {
       let settled = false
       const video = document.createElement('video')
       video.muted = true
@@ -7487,33 +7723,41 @@ export class WebRTCManager {
         cancelVideoFrameCallback?: (h: number) => void
       }
       let frameHandle = 0
-      const done = () => {
+      const onFrame = () => {
+        if (!track.muted && video.videoWidth > 0 && video.readyState >= 2) done(true)
+        else if (typeof anyVideo.requestVideoFrameCallback === 'function') frameHandle = anyVideo.requestVideoFrameCallback(onFrame)
+      }
+      const onPlaying = () => { if (video.readyState >= 2 && video.videoWidth > 0 && !track.muted) done(true) }
+      const done = (ready = false) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
         if (frameHandle && typeof anyVideo.cancelVideoFrameCallback === 'function') {
           try { anyVideo.cancelVideoFrameCallback(frameHandle) } catch { }
         }
-        video.removeEventListener('loadeddata', done)
-        video.removeEventListener('playing', done)
+        video.removeEventListener('loadeddata', onPlaying)
+        video.removeEventListener('playing', onPlaying)
         try {
           video.pause()
           video.srcObject = null
         } catch { }
-        resolve()
+        resolve(ready)
       }
-      const timer = setTimeout(done, timeoutMs)
+      const timer = setTimeout(() => done(false), timeoutMs)
+      video.addEventListener('loadeddata', onPlaying)
+      video.addEventListener('playing', onPlaying)
       if (typeof anyVideo.requestVideoFrameCallback === 'function') {
-        frameHandle = anyVideo.requestVideoFrameCallback(done)
+        frameHandle = anyVideo.requestVideoFrameCallback(onFrame)
       } else {
-        video.addEventListener('loadeddata', done, { once: true })
-        video.addEventListener('playing', done, { once: true })
+        video.addEventListener('loadeddata', onPlaying, { once: true })
+        video.addEventListener('playing', onPlaying, { once: true })
       }
       void video.play().catch(() => { })
     })
   }
 
   private closeSfuPublisher() {
+    this.sfuReadyPeers.clear()
     if (this.sfuPubPauseTimer) {
       clearTimeout(this.sfuPubPauseTimer)
       this.sfuPubPauseTimer = null
@@ -7605,9 +7849,8 @@ export class WebRTCManager {
       const videoTransceiver = transceivers.find(t =>
         !t.stopped && (
           t.sender.track === videoTrack ||
-          (t.sender.track && t.sender.track.kind === 'video') ||
-          t.direction === 'sendrecv' ||
-          t.direction === 'sendonly'
+          t.sender.track?.kind === 'video' ||
+          t.receiver.track.kind === 'video'
         )
       ) ?? transceivers.find(t => t.receiver.track.kind === 'video' && !t.stopped)
       if (videoTransceiver) {
@@ -7619,7 +7862,6 @@ export class WebRTCManager {
         if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
         params.encodings[0].active = active
         if (active) {
-          params.encodings[0].priority = 'high'
           params.encodings[0].networkPriority = 'high'
           params.encodings[0].maxFramerate = 60
           params.encodings[0].scaleResolutionDownBy = 1.0
@@ -7631,6 +7873,18 @@ export class WebRTCManager {
           await this.applyVideoProfile(peerId, pc)
         }
       }
+      const screenAudioTrack = localVideo.getAudioTracks()[0]
+      const audioTransceiver = transceivers.find(t => !t.stopped && t.sender.track === screenAudioTrack && screenAudioTrack)
+        ?? transceivers.filter(t => !t.stopped && t.receiver.track.kind === 'audio')[1]
+      if (audioTransceiver && screenAudioTrack) {
+        const sender = audioTransceiver.sender
+        if (active && sender.track !== screenAudioTrack) await sender.replaceTrack(screenAudioTrack)
+        const params = sender.getParameters()
+        if (params.encodings?.length) {
+          params.encodings[0].active = active
+          await sender.setParameters(params)
+        }
+      }
     } catch { }
   }
 
@@ -7640,6 +7894,7 @@ export class WebRTCManager {
 
   public async handleViewerSfuFallback(viewerId: string, epoch: number) {
     if (!viewerId || !this.localVideoStream || this.sfuPubEpoch !== epoch) return
+    this.sfuReadyPeers.delete(viewerId)
     this.sfuFallbackPeers.add(viewerId)
     const pc = this.peerConnections.get(viewerId)
     if (!pc || pc.connectionState === 'closed') return
@@ -7679,10 +7934,23 @@ export class WebRTCManager {
   }
 
   public async handleSfuPublishRequired(epoch: number, _nodeId: string) {
+    const previous = this.sfuPublishTask ?? Promise.resolve()
+    const generation = this.screenShareGeneration
+    const task = previous.catch(() => {}).then(async () => {
+      if (this.screenShareGeneration !== generation || epoch < this.sfuPubEpoch) return
+      await this.handleSfuPublishRequiredOperation(epoch, _nodeId)
+    })
+    this.sfuPublishTask = task
+    try { await task }
+    finally { if (this.sfuPublishTask === task) this.sfuPublishTask = null }
+  }
+
+  private async handleSfuPublishRequiredOperation(epoch: number, _nodeId: string) {
     this.pendingSfuPublish = { epoch, nodeId: _nodeId }
     if (!this.localVideoStream || this.isStartingScreenShare) return
     this.pendingSfuPublish = null
     this.sfuFallbackPeers.clear()
+    this.sfuReadyPeers.clear()
     if (this.sfuPubCloseTimer) {
       clearTimeout(this.sfuPubCloseTimer)
       this.sfuPubCloseTimer = null
@@ -7802,6 +8070,7 @@ export class WebRTCManager {
     const epoch = Number(dto?.epoch ?? dto?.Epoch ?? 0)
     const nodeId: string | undefined = dto?.nodeId ?? dto?.NodeId
     if (!streamerId) return
+    logDiagnostic({ event: 'sfu', route: mode, epoch })
 
     const prev = this.streamDeliveryModes.get(streamerId)
     if (prev && prev.epoch > epoch) return
@@ -7817,19 +8086,13 @@ export class WebRTCManager {
           this.sfuPubCloseTimer = null
         }
         this.sfuPubActive = true
-        if (this.sfuPubPauseTimer) clearTimeout(this.sfuPubPauseTimer)
-        this.sfuPubPauseTimer = setTimeout(() => {
-          this.sfuPubPauseTimer = null
-          if (this.sfuPubActive) {
-            void this.setP2PScreenSendersActive(false)
-          }
-        }, 350)
       } else {
         if (this.sfuPubPauseTimer) {
           clearTimeout(this.sfuPubPauseTimer)
           this.sfuPubPauseTimer = null
         }
         this.sfuPubActive = false
+        this.sfuReadyPeers.clear()
         this.sfuFallbackPeers.clear()
         await this.setP2PScreenSendersActive(true)
         if (this.sfuPubCloseTimer) clearTimeout(this.sfuPubCloseTimer)
@@ -7888,7 +8151,27 @@ export class WebRTCManager {
     }
   }
 
-  private async subscribeToSfuStream(streamerId: string, epoch: number, forPreviewSnapshot = false) {
+  public async handleViewerSfuReady(viewerId: string, epoch: number): Promise<void> {
+    if (!this.sfuPubActive || this.sfuPubEpoch !== epoch || !this.localVideoStream) return
+    if (this.activeRemoteViewerId === viewerId) return
+    this.sfuReadyPeers.add(viewerId)
+    if (!this.sfuFallbackPeers.has(viewerId) && this.activeRemoteViewerId !== viewerId) {
+      await this.setP2PScreenSenderActiveForPeer(viewerId, false)
+    }
+  }
+
+  private async subscribeToSfuStream(streamerId: string, epoch: number, forPreviewSnapshot = false): Promise<void> {
+    const previous = this.sfuSubscriptionTasks.get(streamerId) ?? Promise.resolve()
+    const task = previous.catch(() => {}).then(() => this.subscribeToSfuStreamOperation(streamerId, epoch, forPreviewSnapshot))
+    this.sfuSubscriptionTasks.set(streamerId, task)
+    try {
+      await task
+    } finally {
+      if (this.sfuSubscriptionTasks.get(streamerId) === task) this.sfuSubscriptionTasks.delete(streamerId)
+    }
+  }
+
+  private async subscribeToSfuStreamOperation(streamerId: string, epoch: number, forPreviewSnapshot = false) {
     const existingPc = this.sfuSubConnections.get(streamerId)
     const existingEpoch = this.sfuSubEpochs.get(streamerId)
     if (existingPc && existingEpoch === epoch && existingPc.connectionState !== 'failed' && existingPc.connectionState !== 'closed') {
@@ -7920,10 +8203,21 @@ export class WebRTCManager {
           this.applyVideoZeroPlayoutDelay(event.receiver)
         }
         void (async () => {
-          await this.waitForFirstVideoFrame(sfuCombinedStream, 550)
+          const ready = await this.waitForFirstVideoFrame(sfuCombinedStream)
           if (this.sfuSubConnections.get(streamerId) !== pc) return
+          if (!ready) {
+            void signalRService.sfuReportFailure(streamerId, epoch)
+            await this.switchViewerFromSfuToP2P(streamerId)
+            return
+          }
           videoAttached = true
+          const watchdog = this.sfuSubWatchdogTimers.get(streamerId)
+          if (watchdog) clearTimeout(watchdog)
+          this.sfuSubWatchdogTimers.delete(streamerId)
           this.attachRemoteVideo(streamerId, event.track, sfuCombinedStream, true)
+          if (!forPreviewSnapshot || useAppStore.getState().activeStreamId === streamerId) {
+            void signalRService.sfuViewerReady(streamerId, epoch)
+          }
           if (forPreviewSnapshot && useAppStore.getState().activeStreamId !== streamerId) {
             const t = setTimeout(() => {
               this.sfuPreviewTearDownTimers.delete(streamerId)
@@ -7945,11 +8239,6 @@ export class WebRTCManager {
       const iceSt = pc.iceConnectionState
       if (st === 'connected' || iceSt === 'connected' || iceSt === 'completed') {
         subConnected = true
-        const wd = this.sfuSubWatchdogTimers.get(streamerId)
-        if (wd) {
-          clearTimeout(wd)
-          this.sfuSubWatchdogTimers.delete(streamerId)
-        }
         void signalRService.sfuRequestKeyframe(streamerId)
       } else if (st === 'failed' || iceSt === 'failed') {
         const wd = this.sfuSubWatchdogTimers.get(streamerId)
@@ -7966,11 +8255,11 @@ export class WebRTCManager {
 
     const watchdog = setTimeout(() => {
       this.sfuSubWatchdogTimers.delete(streamerId)
-      if (this.sfuSubConnections.get(streamerId) === pc && !subConnected) {
+      if (this.sfuSubConnections.get(streamerId) === pc && (!subConnected || !videoAttached)) {
         void this.switchViewerFromSfuToP2P(streamerId)
         void signalRService.sfuReportFailure(streamerId, epoch)
       }
-    }, 6500)
+    }, 10000)
     this.sfuSubWatchdogTimers.set(streamerId, watchdog)
 
     try {
@@ -8003,6 +8292,31 @@ export class WebRTCManager {
   }
 
   public async switchViewerFromSfuToP2P(streamerId: string, immediate = false) {
+    const pending = this.p2pSwitchTasks.get(streamerId)
+    if (pending) return pending
+    const task = this.switchViewerFromSfuToP2POperation(streamerId, immediate)
+    this.p2pSwitchTasks.set(streamerId, task)
+    try { await task }
+    finally { if (this.p2pSwitchTasks.get(streamerId) === task) this.p2pSwitchTasks.delete(streamerId) }
+  }
+
+  private async waitForVideoProgress(pc: RTCPeerConnection, timeoutMs = 6500): Promise<boolean> {
+    const deadline = performance.now() + timeoutMs
+    let firstFrames: number | undefined
+    while (performance.now() < deadline && pc.connectionState !== 'closed') {
+      const stats = await pc.getStats().catch(() => null)
+      let frames = 0
+      stats?.forEach(report => { if (report.type === 'inbound-rtp' && report.kind === 'video') frames += report.framesDecoded ?? 0 })
+      if (firstFrames !== undefined && frames > firstFrames) return true
+      firstFrames ??= frames
+      await new Promise(resolve => setTimeout(resolve, 250))
+    }
+    return false
+  }
+
+  private async switchViewerFromSfuToP2POperation(streamerId: string, immediate = false) {
+    const generation = this.mediaSessionGeneration
+    const sfuPc = this.sfuSubConnections.get(streamerId)
     const isControlling = immediate || useAppStore.getState().isRemoteControlling
     const p2pPc = this.peerConnections.get(streamerId)
     let p2pVideoStream = this.p2pStreamsBackup.get(streamerId)
@@ -8015,11 +8329,9 @@ export class WebRTCManager {
       }
     }
 
-    if (p2pVideoStream && !isControlling) {
-      await this.waitForFirstVideoFrame(p2pVideoStream, 450)
-    }
-
-    const hasP2PVideo = Boolean(p2pVideoStream && p2pVideoStream.getVideoTracks().some(t => t.readyState !== 'ended'))
+    const fresh = !sfuPc || !p2pPc || await this.waitForVideoProgress(p2pPc)
+    if (generation !== this.mediaSessionGeneration || this.sfuSubConnections.get(streamerId) !== sfuPc || this.peerConnections.get(streamerId) !== p2pPc) return
+    const hasP2PVideo = Boolean(fresh && p2pVideoStream && await this.waitForFirstVideoFrame(p2pVideoStream))
     if (hasP2PVideo && p2pVideoStream) {
       this.closeSfuSubscriber(streamerId, false)
       this.attachRemoteVideo(streamerId, p2pVideoStream.getVideoTracks()[0], p2pVideoStream, false)
@@ -8067,6 +8379,8 @@ export class WebRTCManager {
   }
 
   public leaveAll() {
+    this.mediaSessionGeneration++
+    this.p2pSwitchTasks.clear()
     this.stopAudioHealthMonitoring()
     this.stopStreamSyncMonitoring()
     this.pendingSfuPublish = null

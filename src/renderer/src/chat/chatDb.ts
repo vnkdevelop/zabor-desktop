@@ -17,9 +17,14 @@ function openDb(): Promise<IDBDatabase> {
       store.createIndex('ownerConversation', ['ownerId', 'conversationId', 'createdAt']);
       store.createIndex('ownerCreatedAt', ['ownerId', 'createdAt']);
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => { db.close(); openPromise = null; };
+      resolve(db);
+    };
     request.onerror = () => reject(request.error);
   });
+  void openPromise.catch(() => { openPromise = null; });
   return openPromise;
 }
 
@@ -27,6 +32,14 @@ function requestValue<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+
+function transactionComplete(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error('chat-transaction-aborted'));
+    transaction.onerror = () => reject(transaction.error ?? new Error('chat-transaction-failed'));
   });
 }
 
@@ -41,13 +54,17 @@ export async function loadConversation(ownerId: string, conversationId: string):
 export async function saveMessage(message: ChatMessage): Promise<void> {
   const db = await openDb();
   const tx = db.transaction(STORE_NAME, 'readwrite');
-  await requestValue(tx.objectStore(STORE_NAME).put(message));
+  const completion = transactionComplete(tx);
+  tx.objectStore(STORE_NAME).put(message);
+  await completion;
 }
 
 export async function deleteMessage(ownerId: string, id: string): Promise<void> {
   const db = await openDb();
   const tx = db.transaction(STORE_NAME, 'readwrite');
-  await requestValue(tx.objectStore(STORE_NAME).delete([ownerId, id]));
+  const completion = transactionComplete(tx);
+  tx.objectStore(STORE_NAME).delete([ownerId, id]);
+  await completion;
 }
 
 export async function loadPending(ownerId: string): Promise<ChatMessage[]> {
@@ -73,6 +90,8 @@ export async function pruneExpired(ownerId: string): Promise<void> {
     if (removed !== uniqueStoredNames.length) throw new Error('chat-file-cleanup-failed');
   }
   const deleteTx = db.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(deleteTx);
   const deleteStore = deleteTx.objectStore(STORE_NAME);
-  await Promise.all(expired.map(message => requestValue(deleteStore.delete([ownerId, message.id]))));
+  for (const message of expired) deleteStore.delete([ownerId, message.id]);
+  await completion;
 }

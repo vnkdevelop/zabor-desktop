@@ -51,6 +51,8 @@ declare global {
       };
     };
     windowControls: {
+      writeDiagnostic?: (record: unknown) => void;
+      diagnosticsDirectory: () => Promise<string>;
       minimize: () => void;
       maximize: () => void;
       close: () => void;
@@ -129,7 +131,7 @@ declare global {
       remoteControlMove: (absX: number, absY: number) => void;
       remoteControlMoveNormalized: (xNorm: number, yNorm: number) => void;
       remoteControlMouseButton: (button: number, down: boolean) => void;
-      remoteControlMouseWheel: (delta: number) => void;
+      remoteControlMouseWheel: (delta: number, horizontal?: number) => void;
       remoteControlKey: (vk: number, down: boolean) => void;
       remoteControlShowPill?: (data: { controllerName: string; isControlling: boolean }) => void;
       remoteControlHidePill?: () => void;

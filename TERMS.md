@@ -1,6 +1,6 @@
 # Условия использования сервиса ZABOR / ZABOR Terms of Service
 
-> Редакция от 20 октября 2026 года. Предыдущая редакция — от 26 сентября 2026 года.
+> Редакция от 30 октября 2026 года. Предыдущая редакция — от 20 октября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 >
@@ -88,10 +88,13 @@
 6. **Резервный маршрут, ретрансляция и селективная пересылка.** Если прямое соединение не установлено, зашифрованные пакеты сообщений передаются через сервер Оператора; содержимое при этом остаётся недоступным. Для части соединений применяется ретрансляция трафика (TURN), а для трансляции экрана при 3 и более зрителях — медиа-узел селективной пересылки (SFU); в этих случаях сетевые адреса подключившихся участников технически видит соответствующий узел. Для определения маршрутов используются внешние службы установления соединений (STUN).
 7. Оператор не продаёт и не передаёт данные третьим лицам, за исключением случаев, предусмотренных законом.
 8. Сервер ведёт технические журналы подключений, включая версию и канал сборки приложения, время подключения и результат проверки подписи. Журналы используются для диагностики и защиты Сервиса.
-9. Удаление учётной записи возможно по обращению к Оператору.
+9. Удаление учётной записи доступно в приложении с подтверждением пользователя, а также по обращению к Оператору.
 10. Состав обрабатываемых данных, цели и правовые основания обработки, сроки хранения и порядок реализации прав субъекта определены в [PRIVACY.md](PRIVACY.md), который является неотъемлемой частью Условий.
+11. При поддержке восстановления обоими клиентами личный звонок может автоматически возобновляться после кратковременного разрыва серверной сессии в пределах 45 секунд. Завершённый пользователем звонок и обычный выход из аккаунта не запускают новый звонок автоматически. Служебный идентификатор и пара участников хранятся в оперативной памяти, без записи содержимого разговора. Локальные диагностические журналы ограничены ротацией и не отправляются Оператору автоматически.
 
 ### 8. Шифрование и недоступность содержимого
+
+Порог переключения на SFU относится к активным зрителям трансляции в голосовом канале. При переходе допускается временная передача по обоим маршрутам до подтверждения первого видеокадра; при недоступности SFU используется P2P/TURN. Голос микрофонов и поток для удалённого управления остаются на прямом маршруте. Обычный выход из учётной записи прекращает связь и незавершённые передачи, но сохраняет локальную историю чата и файлы в пределах правил хранения раздела 7.
 
 1. Обмен сообщениями защищён шифрованием: содержимое недоступно ни Оператору, ни третьим лицам, участвующим в передаче. Ключи формируются и хранятся **исключительно на устройствах пользователей**; Оператор не формирует, не получает и не хранит ключи шифрования переписки.
 2. Защита устроена по-разному в зависимости от маршрута: при прямом соединении между участниками применяется транспортное шифрование WebRTC, при передаче через сервер Оператора — прикладное шифрование AES-GCM с ключом, выведенным по ECDH. Различие и его последствия описаны в [CRYPTO-NOTICE.md](CRYPTO-NOTICE.md).
@@ -211,10 +214,13 @@ Responsibility for content transmitted through the Service rests with the user w
 6. **Fallback route, relaying and selective forwarding.** Where a direct connection is not established, encrypted message packets are transmitted through the Operator's server; their content remains unavailable. Some connections use traffic relaying (TURN), and screen shares with 3 or more viewers use a Selective Forwarding Unit (SFU) media node; in those cases the network addresses of connected participants are technically visible to the respective node. External connection-establishment services (STUN) are used to determine routes.
 7. The Operator does not sell or transfer data to third parties except as required by law.
 8. The server keeps technical connection logs, including application version and build channel, connection time and signature verification result. Logs are used for diagnostics and to protect the Service.
-9. Account deletion is available on request to the Operator.
+9. Account deletion is available in the application with user confirmation and on request to the Operator.
 10. The categories of data processed, the purposes and legal bases of processing, retention periods and the procedure for exercising data subject rights are set out in [PRIVACY.md](PRIVACY.md), which forms an integral part of these Terms.
+11. If both clients support recovery, a direct call may automatically resume within 45 seconds after a brief server-session interruption. Explicit termination or normal sign-out does not initiate a new call automatically. The control identifier and participant pair remain in memory without recording conversation contents. Local diagnostic logs are rotated and are not sent to the Operator automatically.
 
 ### 8. Encryption and unavailability of content
+
+The SFU threshold counts active viewers of a share in a voice channel. During a transition, both routes may remain active until reception of a first video frame is confirmed; P2P/TURN is used if SFU is unavailable. Microphone audio and the remote-control stream retain the direct route. Normal sign-out terminates communication and unfinished transfers but retains local chat history and files under the retention rules in section 7.
 
 1. Messaging is protected by encryption: the content is unavailable both to the Operator and to third parties involved in transmission. Keys are generated and stored **exclusively on users' devices**; the Operator does not generate, receive or store messaging encryption keys.
 2. Protection differs by route: on a direct connection between participants, WebRTC transport encryption applies; when traffic passes through the Operator's server, application-layer AES-GCM encryption with an ECDH-derived key applies. The difference and its consequences are described in [CRYPTO-NOTICE.md](CRYPTO-NOTICE.md).

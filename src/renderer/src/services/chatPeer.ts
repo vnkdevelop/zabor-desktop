@@ -91,6 +91,7 @@ class ChatPeerManager {
   private deliveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private deliveryAttempts = new Map<string, number>();
   private diagnostics = new Map<string, ChatPeerDiagnostics>();
+  private sessionEpoch = 0;
 
   public isChatSignal(payload: string): boolean {
     return payload.startsWith(CHAT_SDP_PREFIX);
@@ -105,7 +106,9 @@ class ChatPeerManager {
     if (!ownerId) return;
     if (this.initializedOwnerId === ownerId) return;
     this.initializedOwnerId = ownerId;
+    const epoch = this.sessionEpoch;
     await useChatStore.getState().cleanup(ownerId);
+    if (this.sessionEpoch !== epoch || this.ownerId() !== ownerId) return;
     for (const friend of useAppStore.getState().friends) {
       if (friend.isOnline) {
         if (signaling?.isReady?.() ?? true) {
@@ -131,6 +134,7 @@ class ChatPeerManager {
     const ownerId = state.currentUser?.id;
     if (!ownerId || !state.friends.some(friend => friend.id === friendId)) return;
     await useChatStore.getState().load(ownerId, friendId);
+    if (this.ownerId() !== ownerId) return;
     void this.markVisibleAsRead(friendId);
     const friend = state.friends.find(f => f.id === friendId);
     if (!friend?.isOnline) return;
@@ -194,6 +198,8 @@ class ChatPeerManager {
     if (!value || value.length > 4000) return;
     const ownerId = this.ownerId();
     if (!ownerId || !this.isFriend(friendId)) return;
+    await this.ensureLoaded(friendId);
+    if (this.ownerId() !== ownerId) return;
     const message = this.createMessage(ownerId, friendId, 'text', value, null);
     await useChatStore.getState().upsert(message);
     await this.sendMessage(message);
@@ -216,6 +222,8 @@ class ChatPeerManager {
   private async sendPickedFiles(friendId: string, files: PickedChatFile[]): Promise<void> {
     const ownerId = this.ownerId();
     if (!ownerId || !this.isFriend(friendId)) return;
+    await this.ensureLoaded(friendId);
+    if (this.ownerId() !== ownerId) return;
     for (const picked of files) {
       const message = this.createMessage(ownerId, friendId, 'file', '', {
         name: picked.name,
@@ -332,6 +340,8 @@ class ChatPeerManager {
   }
 
   public close(): void {
+    this.sessionEpoch++;
+    for (const transferId of this.incoming.keys()) void window.windowControls.chatFileAbort(transferId).catch(() => {});
     for (const channel of this.channels.values()) channel.close();
     for (const channel of this.fileChannels.values()) channel.close();
     for (const peer of this.peers.values()) peer.close();
@@ -359,6 +369,8 @@ class ChatPeerManager {
     this.deliveryTimers.clear();
     this.deliveryAttempts.clear();
     this.diagnostics.clear();
+    this.sequences.clear();
+    this.iceExpiresAt = 0;
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = null;
     this.initializedOwnerId = null;
@@ -369,29 +381,38 @@ class ChatPeerManager {
   }
 
   private async connect(friendId: string): Promise<void> {
+    if (!this.ownerId() || !this.isFriend(friendId)) return;
+    const active = this.connecting.get(friendId);
+    if (active) return active;
     if (this.channels.get(friendId)?.readyState === 'open') return;
     const existing = this.peers.get(friendId);
     if (existing?.connectionState === 'connected') return;
     if (existing) this.disconnect(friendId);
-    const active = this.connecting.get(friendId);
-    if (active) return active;
+    const epoch = this.sessionEpoch;
     const attempt = (async () => {
       const pc = await this.createPeer(friendId, true);
       await pc.setLocalDescription(await pc.createOffer());
       signaling?.sendOffer(friendId, CHAT_SDP_PREFIX + JSON.stringify(pc.localDescription));
       await this.waitForChannel(friendId);
+      if (this.sessionEpoch !== epoch) return;
       if (this.channels.get(friendId)?.readyState !== 'open') {
         this.disconnect(friendId);
         this.scheduleReconnect(friendId);
       }
-    })().finally(() => this.connecting.delete(friendId));
+    })().catch(() => {
+      if (this.sessionEpoch === epoch) this.scheduleReconnect(friendId);
+    }).finally(() => { if (this.connecting.get(friendId) === attempt) this.connecting.delete(friendId); });
     this.connecting.set(friendId, attempt);
     return attempt;
   }
 
   private async createPeer(friendId: string, initiator: boolean): Promise<RTCPeerConnection> {
+    const epoch = this.sessionEpoch;
     this.disconnect(friendId);
     await this.refreshIce();
+    if (this.sessionEpoch !== epoch || !this.ownerId() || !this.isFriend(friendId)) throw new Error('Chat session changed');
+    const existing = this.peers.get(friendId);
+    if (existing && existing.connectionState !== 'closed') return existing;
     const pc = new RTCPeerConnection({ ...this.iceConfig, bundlePolicy: 'max-bundle', iceCandidatePoolSize: 4 });
     this.peers.set(friendId, pc);
     pc.onicecandidate = event => {
@@ -401,6 +422,7 @@ class ChatPeerManager {
       signaling?.sendIceCandidate(friendId, CHAT_SDP_PREFIX + JSON.stringify(event.candidate));
     };
     pc.onconnectionstatechange = () => {
+      if (this.peers.get(friendId) !== pc || this.sessionEpoch !== epoch) return;
       if (pc.connectionState === 'failed') {
         const friend = useAppStore.getState().friends.find(f => f.id === friendId);
         if (friend?.isOnline && (signaling?.isReady?.() ?? true)) {
@@ -440,13 +462,14 @@ class ChatPeerManager {
   }
 
   private attachChannel(friendId: string, channel: RTCDataChannel): void {
+    const epoch = this.sessionEpoch;
     if (channel.label === 'zabor-chat-files-v1') {
       channel.binaryType = 'arraybuffer';
       channel.bufferedAmountLowThreshold = BUFFER_LIMIT / 2;
       channel.onopen = () => this.fileChannels.set(friendId, channel);
-      channel.onclose = () => this.fileChannels.delete(friendId);
+      channel.onclose = () => { if (this.fileChannels.get(friendId) === channel) this.fileChannels.delete(friendId); };
       let fileQueue = Promise.resolve();
-      channel.onmessage = event => { fileQueue = fileQueue.then(() => this.receive(friendId, event.data)).catch(() => { }); };
+      channel.onmessage = event => { fileQueue = fileQueue.then(() => { if (epoch === this.sessionEpoch) return this.receive(friendId, event.data); }).catch(() => { }); };
       return;
     }
     channel.binaryType = 'arraybuffer';
@@ -463,6 +486,7 @@ class ChatPeerManager {
       void this.sendKey(friendId);
     };
     channel.onclose = () => {
+      if (this.channels.get(friendId) !== channel || epoch !== this.sessionEpoch) return;
       const friend = useAppStore.getState().friends.find(f => f.id === friendId);
       if (friend?.isOnline && (signaling?.isReady?.() ?? true)) {
         useChatStore.getState().setConnection(friendId, true);
@@ -490,7 +514,7 @@ class ChatPeerManager {
     };
     let receiveQueue = Promise.resolve();
     channel.onmessage = event => {
-      receiveQueue = receiveQueue.then(() => this.receive(friendId, event.data)).catch(() => { });
+      receiveQueue = receiveQueue.then(() => { if (epoch === this.sessionEpoch) return this.receive(friendId, event.data); }).catch(() => { });
     };
   }
 
@@ -507,9 +531,11 @@ class ChatPeerManager {
   }
 
   private async receiveControl(friendId: string, packet: ChatControlPacket): Promise<void> {
+    const epoch = this.sessionEpoch;
     const ownerId = this.ownerId();
     if (!ownerId) return;
     await this.ensureLoaded(friendId);
+    if (this.sessionEpoch !== epoch || this.ownerId() !== ownerId || !this.isFriend(friendId)) return;
     if (packet.type === 'key' && packet.publicKey) {
       try {
         const fingerprint = JSON.stringify({ kty: packet.publicKey.kty, crv: packet.publicKey.crv, x: packet.publicKey.x, y: packet.publicKey.y });
@@ -518,7 +544,9 @@ class ChatPeerManager {
         if (trusted && trusted !== fingerprint) return;
         if (!trusted) localStorage.setItem(fingerprintKey, fingerprint);
         const hadKey = this.cryptoKeys.has(friendId);
-        this.cryptoKeys.set(friendId, await deriveChatKey(packet.publicKey));
+        const key = await deriveChatKey(packet.publicKey);
+        if (this.sessionEpoch !== epoch || this.ownerId() !== ownerId) return;
+        this.cryptoKeys.set(friendId, key);
         if (!packet.reply && !hadKey) await this.sendKey(friendId, true);
         await this.flushSecurePackets(friendId);
       } catch { }
@@ -532,6 +560,7 @@ class ChatPeerManager {
       }
       try {
         const inner = JSON.parse(await decryptChatPayload(key, packet.payload)) as ChatControlPacket;
+        if (this.sessionEpoch !== epoch) return;
         if (!this.validPacket(friendId, inner) || inner.type === 'encrypted' || inner.type === 'key') return;
         await this.receiveControl(friendId, inner);
       } catch { }
@@ -617,6 +646,7 @@ class ChatPeerManager {
       return;
     }
     if (packet.type === 'message-delete' && packet.messageId) {
+      this.storeIncomingDeletion(ownerId, friendId, packet);
       const message = this.findMessage(friendId, packet.messageId);
       if (!message) {
         this.storeIncomingDeletion(ownerId, friendId, packet);
@@ -627,6 +657,7 @@ class ChatPeerManager {
       return;
     }
     if (packet.type === 'file-delete' && packet.messageId) {
+      this.storeIncomingDeletion(ownerId, friendId, packet);
       const message = this.findMessage(friendId, packet.messageId);
       if (!message) {
         this.storeIncomingDeletion(ownerId, friendId, packet);
@@ -673,13 +704,17 @@ class ChatPeerManager {
     } catch {
       return;
     }
-    if (header.senderId !== friendId || header.targetId !== this.ownerId()) return;
+    if (header.version !== 1 || header.senderId !== friendId || header.targetId !== this.ownerId()) return;
     if (typeof header.messageId !== 'string' || typeof header.transferId !== 'string') return;
     if (header.type === 'file-begin') return this.beginIncoming(friendId, header);
-    if (header.type === 'file-complete') return this.completeIncoming(friendId, header.transferId);
+    if (header.type === 'file-complete') {
+      const transfer = this.incoming.get(header.transferId);
+      if (!transfer || transfer.friendId !== friendId || transfer.messageId !== header.messageId) return;
+      return this.completeIncoming(friendId, header.transferId);
+    }
     if (header.type !== 'file-chunk') return;
     const transfer = this.incoming.get(header.transferId);
-    if (!transfer || transfer.messageId !== header.messageId || header.offset !== transfer.written) return;
+    if (!transfer || transfer.friendId !== friendId || transfer.messageId !== header.messageId || header.offset !== transfer.written) return;
     const chunk = new Uint8Array(data, 4 + headerLength);
     if (chunk.byteLength === 0) return;
     if (transfer.written + chunk.byteLength > transfer.expected) {
@@ -871,10 +906,12 @@ class ChatPeerManager {
   }
 
   private async sendKey(friendId: string, reply = false): Promise<void> {
+    const epoch = this.sessionEpoch;
     const fallback = signaling?.sendFallback;
     const ownerId = this.ownerId();
     if (!fallback || !ownerId) return;
     const packet: ChatControlPacket = { version: 1, senderId: ownerId, targetId: friendId, type: 'key', publicKey: await chatPublicKey(), reply };
+    if (this.sessionEpoch !== epoch || this.ownerId() !== ownerId) return;
     await fallback(friendId, JSON.stringify(packet));
   }
 
@@ -905,6 +942,8 @@ class ChatPeerManager {
   }
 
   private async sendFile(friendId: string, message: ChatMessage): Promise<void> {
+    const epoch = this.sessionEpoch;
+    if (this.outgoingActive.has(message.id) || message.ownerId !== this.ownerId()) return;
     const file = message.file;
     if (!file?.storedName) return;
     const stat = await window.windowControls.chatFileStat(file.storedName);
@@ -913,8 +952,12 @@ class ChatPeerManager {
       return;
     }
     const ownerId = this.ownerId();
-    if (!ownerId) return;
+    if (!ownerId || this.sessionEpoch !== epoch) return;
     const readId = await window.windowControls.chatFileReadOpen(file.storedName);
+    if (this.sessionEpoch !== epoch) {
+      if (readId) void window.windowControls.chatFileReadClose(readId);
+      return;
+    }
     if (!readId) {
       await this.sendControl(friendId, { type: 'file-unavailable', messageId: message.id });
       return;
@@ -925,12 +968,14 @@ class ChatPeerManager {
     this.outgoingCancels.delete(message.id);
     this.outgoingActive.add(message.id);
     try {
-      const activeChannel = this.fileChannels.get(friendId) ?? this.channels.get(friendId);
+      let activeChannel = this.fileChannels.get(friendId) ?? this.channels.get(friendId);
       if (!activeChannel || activeChannel.readyState !== 'open') {
         void this.connect(friendId);
         await this.waitForChannel(friendId, 4000);
+        activeChannel = this.fileChannels.get(friendId) ?? this.channels.get(friendId);
       }
-      if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-begin', messageId: message.id, transferId }, empty)) {
+      if (!activeChannel || activeChannel.readyState !== 'open' || this.sessionEpoch !== epoch) return;
+      if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-begin', messageId: message.id, transferId }, empty, activeChannel)) {
         await this.sendControl(friendId, { type: 'file-unavailable', messageId: message.id });
         return;
       }
@@ -939,8 +984,9 @@ class ChatPeerManager {
         ? window.windowControls.chatFileReadBlock(readId, offset, Math.min(READ_BLOCK_BYTES, file.size - offset))
         : null;
       while (nextBlock) {
-        if (this.outgoingCancels.has(message.id)) return;
+        if (this.sessionEpoch !== epoch || this.outgoingCancels.has(message.id)) return;
         const block = await nextBlock;
+        if (this.sessionEpoch !== epoch) return;
         if (!block || block.byteLength === 0) return;
         const blockStart = offset;
         offset += block.byteLength;
@@ -950,11 +996,11 @@ class ChatPeerManager {
         for (let cursor = 0; cursor < block.byteLength; cursor += wireBytes) {
           if (this.outgoingCancels.has(message.id)) return;
           const slice = block.subarray(cursor, Math.min(cursor + wireBytes, block.byteLength));
-          if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-chunk', messageId: message.id, transferId, offset: blockStart + cursor }, slice)) return;
+          if (!await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-chunk', messageId: message.id, transferId, offset: blockStart + cursor }, slice, activeChannel)) return;
         }
       }
       if (this.outgoingCancels.has(message.id)) return;
-      await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-complete', messageId: message.id, transferId }, empty);
+      await this.sendBinary(friendId, { version: 1, senderId: ownerId, targetId: friendId, type: 'file-complete', messageId: message.id, transferId }, empty, activeChannel);
     } finally {
       this.outgoingActive.delete(message.id);
       this.outgoingCancels.delete(message.id);
@@ -1033,10 +1079,30 @@ class ChatPeerManager {
     localStorage.setItem(key, JSON.stringify(queued.slice(-1000)));
   }
 
-  private async sendBinary(friendId: string, header: ChatChunkHeader, chunk: Uint8Array): Promise<boolean> {
-    const channel = this.fileChannels.get(friendId) ?? this.channels.get(friendId);
+  private async sendBinary(friendId: string, header: ChatChunkHeader, chunk: Uint8Array, transferChannel?: RTCDataChannel): Promise<boolean> {
+    if (header.senderId !== this.ownerId()) return false;
+    const channel = transferChannel ?? this.fileChannels.get(friendId) ?? this.channels.get(friendId);
     if (!channel || channel.readyState !== 'open') return false;
-    while (channel.readyState === 'open' && channel.bufferedAmount > BUFFER_LIMIT) await new Promise<void>(resolve => { channel.onbufferedamountlow = () => { channel.onbufferedamountlow = null; resolve(); }; });
+    while (channel.readyState === 'open' && channel.bufferedAmount > BUFFER_LIMIT) {
+      const drained = await new Promise<boolean>(resolve => {
+        const finish = (ok: boolean) => {
+          clearTimeout(timer);
+          channel.removeEventListener('bufferedamountlow', onLow);
+          channel.removeEventListener('close', onClose);
+          channel.removeEventListener('error', onClose);
+          resolve(ok);
+        };
+        const onLow = () => finish(true);
+        const onClose = () => finish(false);
+        const timer = setTimeout(onClose, DOWNLOAD_STALL_MS);
+        channel.addEventListener('bufferedamountlow', onLow, { once: true });
+        channel.addEventListener('close', onClose, { once: true });
+        channel.addEventListener('error', onClose, { once: true });
+        if (channel.readyState !== 'open') onClose();
+        else if (channel.bufferedAmount <= BUFFER_LIMIT) onLow();
+      });
+      if (!drained || header.senderId !== this.ownerId()) return false;
+    }
     if (channel.readyState !== 'open') return false;
     const encoded = new TextEncoder().encode(JSON.stringify(header));
     const packet = new Uint8Array(4 + encoded.byteLength + chunk.byteLength);
@@ -1083,7 +1149,8 @@ class ChatPeerManager {
   }
 
   private nextSequence(friendId: string): number {
-    const current = Math.max(this.sequences.get(friendId) ?? 0, ...(useChatStore.getState().messages[friendId] ?? []).map(message => message.sequence));
+    let current = this.sequences.get(friendId) ?? 0;
+    for (const message of useChatStore.getState().messages[friendId] ?? []) current = Math.max(current, message.sequence);
     const next = current + 1;
     this.sequences.set(friendId, next);
     return next;
@@ -1205,13 +1272,15 @@ class ChatPeerManager {
   private async sendSyncState(friendId: string): Promise<void> {
     const messages = (useChatStore.getState().messages[friendId] ?? []).filter(message => message.senderId === friendId).sort((a, b) => a.sequence - b.sequence);
     let sequence = 0;
+    let acknowledgedThrough = 0;
     const missing: Array<[number, number]> = [];
     for (const message of messages) {
+      if (message.sequence === acknowledgedThrough + 1) acknowledgedThrough = message.sequence;
       if (message.sequence > sequence + 1) missing.push([sequence + 1, message.sequence - 1]);
       sequence = Math.max(sequence, message.sequence);
     }
     await this.sendControl(friendId, { type: 'sync-state', sequence, missing: missing.slice(-MAX_SYNC_RANGES) });
-    if (sequence) await this.sendControl(friendId, { type: 'ack-through', sequence });
+    if (acknowledgedThrough) await this.sendControl(friendId, { type: 'ack-through', sequence: acknowledgedThrough });
   }
 
   private pingOpenChannels(): void {

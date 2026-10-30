@@ -29,6 +29,27 @@ namespace ZaborInputSimulator {
         private static extern bool SetProcessDPIAware();
 
         [DllImport("user32.dll")]
+        private static extern bool SetProcessDpiAwarenessContext(IntPtr context);
+
+        [DllImport("user32.dll")]
+        private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindow(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hwnd);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT rect, int size);
+
+        [DllImport("user32.dll")]
         private static extern int GetSystemMetrics(int nIndex);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
@@ -198,6 +219,9 @@ namespace ZaborInputSimulator {
         private static int cachedScreenWidth = 0;
         private static int cachedScreenHeight = 0;
         private static long lastScreenMetricsTicks = 0;
+        private static IntPtr captureWindow = IntPtr.Zero;
+        private static RECT captureRect;
+        private static bool captureConfigured = false;
 
         private static readonly int[] simPointsX = new int[64];
         private static readonly int[] simPointsY = new int[64];
@@ -273,10 +297,34 @@ namespace ZaborInputSimulator {
             }
         }
 
+        private static bool TryGetCaptureRect(out RECT rect) {
+            rect = captureRect;
+            if (!captureConfigured) return false;
+            if (captureWindow != IntPtr.Zero) {
+                if (!IsWindow(captureWindow) || IsIconic(captureWindow)) return false;
+                if (DwmGetWindowAttribute(captureWindow, 9, out rect, Marshal.SizeOf(typeof(RECT))) != 0 && !GetWindowRect(captureWindow, out rect)) return false;
+            }
+            return rect.Right > rect.Left && rect.Bottom > rect.Top;
+        }
+
+        private static POINT MapNormalized(RECT rect, double x, double y) {
+            return new POINT {
+                x = rect.Left + (int)Math.Round(Math.Max(0, Math.Min(1, x)) * Math.Max(0, rect.Right - rect.Left - 1)),
+                y = rect.Top + (int)Math.Round(Math.Max(0, Math.Min(1, y)) * Math.Max(0, rect.Bottom - rect.Top - 1))
+            };
+        }
+
+        private static bool EnsureCaptureForeground() {
+            if (captureWindow == IntPtr.Zero) return captureConfigured;
+            return GetForegroundWindow() == captureWindow || SetForegroundWindow(captureWindow);
+        }
+
         private static void SendMouseMove(int x, int y) {
             UpdateScreenMetrics();
-            int w = cachedScreenWidth;
-            int h = cachedScreenHeight;
+            int originX = GetSystemMetrics(76);
+            int originY = GetSystemMetrics(77);
+            int w = GetSystemMetrics(78);
+            int h = GetSystemMetrics(79);
             if (w <= 0 || h <= 0) return;
 
             long now = Environment.TickCount;
@@ -285,8 +333,8 @@ namespace ZaborInputSimulator {
             lastSimulatedMoveTicks = now;
             RecordSimulatedPoint(x, y, now);
 
-            int normX = (int)Math.Round((x * 65535.0) / (w - 1));
-            int normY = (int)Math.Round((y * 65535.0) / (h - 1));
+            int normX = (int)Math.Round(((x - originX) * 65535.0) / Math.Max(1, w - 1));
+            int normY = (int)Math.Round(((y - originY) * 65535.0) / Math.Max(1, h - 1));
 
             var input = new INPUT {
                 type = INPUT_MOUSE,
@@ -295,7 +343,7 @@ namespace ZaborInputSimulator {
                         dx = normX,
                         dy = normY,
                         mouseData = 0,
-                        dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
+                        dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
                         time = 0,
                         dwExtraInfo = SIMULATED_EXTRA_INFO
                     }
@@ -370,9 +418,18 @@ namespace ZaborInputSimulator {
         }
 
         public static void Main(string[] args) {
+            if (args != null && args.Length > 0 && args[0] == "--self-test") {
+                var rect = new RECT { Left = -1920, Top = 120, Right = 0, Bottom = 1200 };
+                var first = MapNormalized(rect, 0, 0);
+                var last = MapNormalized(rect, 1, 1);
+                var center = MapNormalized(rect, 0.5, 0.5);
+                if (first.x != -1920 || first.y != 120 || last.x != -1 || last.y != 1199 || center.x != -960 || center.y != 660) Environment.Exit(1);
+                Console.WriteLine("capture geometry self-test passed");
+                return;
+            }
             try {
-                SetProcessDPIAware();
-            } catch {}
+                if (!SetProcessDpiAwarenessContext(new IntPtr(-4))) SetProcessDPIAware();
+            } catch { try { SetProcessDPIAware(); } catch {} }
 
             try {
                 AppDomain.CurrentDomain.ProcessExit += (s, e) => {
@@ -486,20 +543,37 @@ namespace ZaborInputSimulator {
                     string[] parts = line.Split(' ');
                     string cmd = parts[0];
 
-                    if (cmd == "mn" && parts.Length >= 3) {
+                    if (cmd == "source-none") {
+                        captureConfigured = false;
+                        captureWindow = IntPtr.Zero;
+                        ResetAll();
+                    } else if (cmd == "source-window" && parts.Length >= 2) {
+                        long hwnd;
+                        if (long.TryParse(parts[1], out hwnd) && hwnd > 0) {
+                            captureWindow = new IntPtr(hwnd);
+                            captureConfigured = true;
+                        }
+                    } else if (cmd == "source-screen" && parts.Length >= 5) {
+                        int x, y, w, h;
+                        if (int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y) && int.TryParse(parts[3], out w) && int.TryParse(parts[4], out h) && w > 0 && h > 0) {
+                            captureWindow = IntPtr.Zero;
+                            captureRect = new RECT { Left = x, Top = y, Right = checked(x + w), Bottom = checked(y + h) };
+                            captureConfigured = true;
+                        }
+                    } else if (cmd == "mn" && parts.Length >= 3) {
                         float xn, yn;
                         if (float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out xn) &&
                             float.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out yn)) {
-                            UpdateScreenMetrics();
-                            int w = cachedScreenWidth;
-                            int h = cachedScreenHeight;
-                            int x = (int)Math.Round(xn * (w - 1));
-                            int y = (int)Math.Round(yn * (h - 1));
-                            SendMouseMove(x, y);
+                            RECT rect;
+                            if (float.IsNaN(xn) || float.IsNaN(yn) || float.IsInfinity(xn) || float.IsInfinity(yn) || !TryGetCaptureRect(out rect)) continue;
+                            var position = MapNormalized(rect, xn, yn);
+                            SendMouseMove(position.x, position.y);
                         }
                     } else if (cmd == "m" && parts.Length >= 3) {
                         int x, y;
-                        if (int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y)) {
+                        RECT rect;
+                        if (int.TryParse(parts[1], out x) && int.TryParse(parts[2], out y) && TryGetCaptureRect(out rect)
+                            && x >= rect.Left && x < rect.Right && y >= rect.Top && y < rect.Bottom) {
                             SendMouseMove(x, y);
                         }
                     } else if (cmd == "d" && parts.Length >= 2) {
@@ -517,6 +591,9 @@ namespace ZaborInputSimulator {
                         if (int.TryParse(parts[1], out delta)) {
                             SendMouseWheel(delta);
                         }
+                    } else if (cmd == "wh" && parts.Length >= 2) {
+                        int delta;
+                        if (int.TryParse(parts[1], out delta)) SendMouseWheel(delta, true);
                     } else if (cmd == "kd" && parts.Length >= 2) {
                         ushort vk;
                         if (ushort.TryParse(parts[1], out vk)) {
@@ -563,6 +640,8 @@ namespace ZaborInputSimulator {
         }
 
         private static void SendMouseButton(int button, bool down) {
+            RECT rect;
+            if (down && (!TryGetCaptureRect(out rect) || !EnsureCaptureForeground())) return;
             uint flag = 0;
             if (button == 0) {
                 flag = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
@@ -594,13 +673,15 @@ namespace ZaborInputSimulator {
             SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
         }
 
-        private static void SendMouseWheel(int delta) {
+        private static void SendMouseWheel(int delta, bool horizontal = false) {
+            RECT rect;
+            if (!TryGetCaptureRect(out rect) || !EnsureCaptureForeground()) return;
             var input = new INPUT {
                 type = INPUT_MOUSE,
                 u = new InputUnion {
                     mi = new MOUSEINPUT {
-                        dwFlags = MOUSEEVENTF_WHEEL,
-                        mouseData = (uint)(delta * 120),
+                        dwFlags = horizontal ? 0x1000 : MOUSEEVENTF_WHEEL,
+                        mouseData = unchecked((uint)delta),
                         time = 0,
                         dwExtraInfo = SIMULATED_EXTRA_INFO
                     }
@@ -611,6 +692,8 @@ namespace ZaborInputSimulator {
         }
 
         private static void SendKeyboardKey(ushort vk, bool down) {
+            RECT rect;
+            if (down && (!TryGetCaptureRect(out rect) || !EnsureCaptureForeground())) return;
             if (vk == 0 || vk >= 256) return;
 
             uint flags = 0;

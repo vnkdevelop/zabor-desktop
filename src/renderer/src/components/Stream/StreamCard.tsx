@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { CornersIn, CornersOut } from '@phosphor-icons/react'
+import { CornersOut } from '@phosphor-icons/react'
 import { animate, spring, utils, prefersReducedMotion } from '../../lib/anime'
 import { useTranslation } from 'react-i18next'
 import { User, useAppStore } from '../../store/useAppStore'
@@ -282,7 +282,7 @@ export const StreamCard = ({
         e.stopPropagation()
         e.stopImmediatePropagation?.()
 
-        if (!isHostActive) {
+        if (!isHostActive && hasFirstFrame) {
           const vk = getWinVkCode(e)
           const modifiers = {
             alt: e.altKey,
@@ -320,22 +320,15 @@ export const StreamCard = ({
         e.stopPropagation()
         e.stopImmediatePropagation?.()
 
-        if (!isHostActive) {
-          const vk = getWinVkCode(e)
-          const modifiers = {
-            alt: e.altKey,
-            ctrl: e.ctrlKey,
-            shift: e.shiftKey,
-            win: e.metaKey
-          }
-          if (isShortcutSafe(vk, modifiers)) {
-            let modBits = 0
-            if (e.shiftKey) modBits |= 1
-            if (e.ctrlKey) modBits |= 2
-            if (e.altKey) modBits |= 4
-            if (e.metaKey) modBits |= 8
-            webrtcService.sendViewerKey(user.id, vk, false, modBits)
-          }
+        const vk = getWinVkCode(e)
+        const modifiers = { alt: e.altKey, ctrl: e.ctrlKey, shift: e.shiftKey, win: e.metaKey }
+        if (isShortcutSafe(vk, modifiers)) {
+          let modBits = 0
+          if (e.shiftKey) modBits |= 1
+          if (e.ctrlKey) modBits |= 2
+          if (e.altKey) modBits |= 4
+          if (e.metaKey) modBits |= 8
+          webrtcService.sendViewerKey(user.id, vk, false, modBits)
         }
         return
       }
@@ -347,7 +340,7 @@ export const StreamCard = ({
       window.removeEventListener('keydown', handleKeyDown, { capture: true })
       window.removeEventListener('keyup', handleKeyUp, { capture: true })
     }
-  }, [isFullscreen, isLocal, user.id, isRemoteControlling, isHostActive, isRemoteControlRevoked, setRemoteControlState, isCursorClipped, clipCursorToVideo, t])
+  }, [isFullscreen, isLocal, user.id, user.allowRemoteControl, user.streamQuality, remoteStreamsAllowControl, isRemoteControlling, isHostActive, hasFirstFrame, isRemoteControlRevoked, setRemoteControlState, isCursorClipped, clipCursorToVideo, t])
 
   useEffect(() => {
     if (isLocal || !isRemoteControlling) return
@@ -377,6 +370,8 @@ export const StreamCard = ({
       setIsCursorClipped(false)
       setRemoteControlState({ isCursorHidden: false })
       if (isRemoteControlling) {
+        webrtcService.sendViewerSignal(user.id, RC_OP_RESET)
+        setRemoteControlState({ isControlling: false })
         webrtcService.sendViewerMouseButton(user.id, 0, false)
         webrtcService.sendViewerMouseButton(user.id, 1, false)
         webrtcService.sendViewerMouseButton(user.id, 2, false)
@@ -396,7 +391,7 @@ export const StreamCard = ({
   }, [isFullscreen, isLocal, isRemoteControlling, user.id])
 
   const handleMouseMove = (e: React.MouseEvent<HTMLVideoElement>) => {
-    if (!isRemoteControlling || isHostActive || !videoRef.current) return
+    if (!isRemoteControlling || isHostActive || !hasFirstFrame || !videoRef.current) return
     const video = videoRef.current
     const renderRect = getVideoRenderRect(video)
     if (renderRect.width <= 0 || renderRect.height <= 0) return
@@ -443,7 +438,7 @@ export const StreamCard = ({
   }
 
   const handleMouseDown = (e: React.MouseEvent<HTMLVideoElement>) => {
-    if (!isRemoteControlling || isHostActive) return
+    if (!isRemoteControlling || isHostActive || !hasFirstFrame) return
     e.preventDefault()
     e.stopPropagation()
     if (moveThrottleTimer.current) {
@@ -502,7 +497,7 @@ export const StreamCard = ({
   }
 
   const handleWheel = (e: React.WheelEvent<HTMLVideoElement>) => {
-    if (!isRemoteControlling || isHostActive) return
+    if (!isRemoteControlling || isHostActive || !hasFirstFrame) return
     e.preventDefault()
     e.stopPropagation()
     webrtcService.sendViewerMouseWheel(user.id, Math.round(e.deltaY), Math.round(e.deltaX))
@@ -623,7 +618,7 @@ export const StreamCard = ({
   }, [isCapturing, stream, snapshot, isLocal])
 
   useEffect(() => {
-    if (!stream) setHasFirstFrame(false)
+    setHasFirstFrame(false)
   }, [stream])
 
   const videoOnlyStream = useMemo(() => {
@@ -639,6 +634,7 @@ export const StreamCard = ({
       return
     }
     if (video.srcObject !== videoOnlyStream) video.srcObject = videoOnlyStream
+    void video.play().catch(() => {})
     if ('playoutDelayHint' in video) {
       try { (video as any).playoutDelayHint = 0 } catch { }
     }
@@ -868,47 +864,25 @@ export const StreamCard = ({
       </div>
 
       {!isFullscreen && (
-        <>
-          <div className="absolute inset-0 z-10 pointer-events-none flex items-end justify-start p-4">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                if (onClick) onClick()
-              }}
-              style={{ willChange: 'transform, opacity' }}
-              className="group/mode-button relative w-10 h-10 flex items-center justify-center bg-[#09090B]/70 backdrop-blur-xl border border-primaryHover/30 border-t-primaryHover/50 rounded-full hover:scale-110 active:scale-95 transition-[transform,opacity] duration-200 ease-out cursor-pointer pointer-events-auto opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0"
-              aria-label={t('stream.minimizeHint')}
+        <div className="absolute inset-0 z-10 pointer-events-none flex items-end justify-end p-4">
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              if (onToggleFullscreen) onToggleFullscreen()
+            }}
+            style={{ willChange: 'transform, opacity' }}
+            className="group/mode-button relative w-10 h-10 flex items-center justify-center bg-[#09090B]/70 backdrop-blur-xl border border-primaryHover/30 border-t-primaryHover/50 rounded-full hover:scale-110 active:scale-95 transition-[transform,opacity] duration-200 ease-out cursor-pointer pointer-events-auto opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0"
+            aria-label={t('stream.fullscreenHint')}
+          >
+            <span
+              role="tooltip"
+              className="absolute bottom-full right-0 mb-2 pointer-events-none whitespace-nowrap opacity-0 group-hover/mode-button:opacity-100 delay-0 group-hover/mode-button:delay-[2000ms] transition-opacity duration-150 bg-[#09090B]/80 backdrop-blur-md border border-white/[0.07] border-t-white/[0.14] rounded-md px-2 py-1 text-[9px] font-bold text-white"
             >
-              <span
-                role="tooltip"
-                className="absolute bottom-full left-0 mb-2 pointer-events-none whitespace-nowrap opacity-0 group-hover/mode-button:opacity-100 delay-0 group-hover/mode-button:delay-[2000ms] transition-opacity duration-150 bg-[#09090B]/80 backdrop-blur-md border border-white/[0.07] border-t-white/[0.14] rounded-md px-2 py-1 text-[9px] font-bold text-white"
-              >
-                {t('stream.minimizeHint')}
-              </span>
-              <CornersIn weight="bold" size={20} className="text-primaryHover shrink-0" />
-            </button>
-          </div>
-
-          <div className="absolute inset-0 z-10 pointer-events-none flex items-end justify-end p-4">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                if (onToggleFullscreen) onToggleFullscreen()
-              }}
-              style={{ willChange: 'transform, opacity' }}
-              className="group/mode-button relative w-10 h-10 flex items-center justify-center bg-[#09090B]/70 backdrop-blur-xl border border-primaryHover/30 border-t-primaryHover/50 rounded-full hover:scale-110 active:scale-95 transition-[transform,opacity] duration-200 ease-out cursor-pointer pointer-events-auto opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0"
-              aria-label={t('stream.fullscreenHint')}
-            >
-              <span
-                role="tooltip"
-                className="absolute bottom-full right-0 mb-2 pointer-events-none whitespace-nowrap opacity-0 group-hover/mode-button:opacity-100 delay-0 group-hover/mode-button:delay-[2000ms] transition-opacity duration-150 bg-[#09090B]/80 backdrop-blur-md border border-white/[0.07] border-t-white/[0.14] rounded-md px-2 py-1 text-[9px] font-bold text-white"
-              >
-                {t('stream.fullscreenHint')}
-              </span>
-              <CornersOut weight="bold" size={20} className="text-primaryHover shrink-0" />
-            </button>
-          </div>
-        </>
+              {t('stream.fullscreenHint')}
+            </span>
+            <CornersOut weight="bold" size={20} className="text-primaryHover shrink-0" />
+          </button>
+        </div>
       )}
     </div>
   )

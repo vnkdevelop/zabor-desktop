@@ -1,6 +1,6 @@
 # Политика в отношении обработки персональных данных ZABOR / ZABOR Privacy Policy
 
-> Редакция от 20 октября 2026 года. Предыдущая редакция — от 26 сентября 2026 года.
+> Редакция от 30 октября 2026 года. Предыдущая редакция — от 20 октября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -44,6 +44,7 @@
 - данные достижений в приложении;
 - технические журналы подключений: версия и канал сборки приложения, время подключения, результат проверки подписи сборки, сетевой адрес подключения;
 - идентификатор учётной записи во внутренних структурах сервера.
+- служебное состояние личного звонка: идентификатор сессии, пара участников и срок допустимого восстановления. Оно находится в оперативной памяти до завершения звонка; при приостановке восстановление ограничено 45 секундами, затем запись очищается. Содержимое разговора в эту запись не входит.
 
 #### 3.3. Метаданные обмена сообщениями
 
@@ -66,6 +67,8 @@
 
 Для ряда соединений используется ретрансляция трафика (TURN), а при 3 и более зрителях трансляции экрана — медиа-узел селективной пересылки (SFU); в этих случаях соответствующий узел технически видит сетевые адреса подключившихся к нему участников.
 
+Порог SFU относится к активным зрителям трансляции в голосовом канале, а не к числу участников канала. Голос микрофонов и личные звонки сохраняют прямой маршрут WebRTC, при необходимости через TURN. При переключении трансляции прямой поток может передаваться параллельно до подтверждения получения первого видеокадра зрителем. При отказе SFU сохраняется или восстанавливается P2P/TURN; для зрителя, использующего удалённое управление, также сохраняется прямой маршрут. Эти переходы не добавляют запись медиапотока на сервере.
+
 ### 5. Цели и правовые основания обработки
 
 Обработка осуществляется в следующих целях:
@@ -87,10 +90,15 @@
 | Ключ шифрования переписки | файл `chat-identity.enc`, шифруется средствами операционной системы (DPAPI / Keychain) | до удаления данных приложения |
 | Данные сессии | файл `session.enc`, шифруется средствами операционной системы | до выхода из учётной записи |
 | Настройки шумоподавления, калибровка звука, достижения, отметки о прочтении | локальное хранилище приложения | до очистки данных приложения |
+| Диагностические события соединений и числовые счётчики медиа | локальный каталог `logs`, файлы `diagnostics.jsonl`, `.1`, `.2` | ротация, не более трёх файлов по 512 КиБ |
 
 Удаление сообщения в интерфейсе удаляет его **на устройстве пользователя**; копия, уже переданная собеседнику, удалению Оператором не подлежит.
 
+Обычный выход из учётной записи прекращает соединения и незавершённые передачи файлов, удаляет данные сессии, но не удаляет историю чата и сохранённые файлы. История повторно загружается для той же учётной записи в пределах срока хранения 14 суток. История разных учётных записей разделяется идентификатором владельца; незавершённая загрузка предыдущей сессии не должна заполнять интерфейс новой сессии. Кратковременный кэш профилей находится только в оперативной памяти, ограничен 100 профилями и сроком 15 секунд и очищается при выходе.
+
 ### 7. Передача третьим лицам
+
+Диагностические журналы не передаются автоматически. В них не записываются содержимое сообщений и файлов, названия захватываемых окон, пароли, ключи, адреса участников или SDP. Записываются время, состояния соединений, тип маршрута и транспорта, счётчики кадров/пакетов, потерь и задержки. Пользователь может самостоятельно передать журналы для разбора неисправности.
 
 Оператор **не продаёт** персональные данные и **не передаёт** их третьим лицам для маркетинговых целей.
 
@@ -113,7 +121,7 @@
 3. Метаданные обмена сообщениями хранятся в объёме и в сроки, определяемые конфигурацией сервера и требованиями законодательства.
 4. Данные на устройстве пользователя хранятся в соответствии с разделом 6 и удаляются вместе с данными приложения.
 
-Удаление учётной записи производится по обращению пользователя через [GitHub Issues](https://github.com/vnkdevelop/zabor-desktop/issues). Удаление учётной записи влечёт удаление данных учётной записи; данные, хранящиеся на устройствах участников обмена сообщениями, Оператором не контролируются.
+Удаление учётной записи доступно в приложении с подтверждением пользователя, а также по обращению через [GitHub Issues](https://github.com/vnkdevelop/zabor-desktop/issues). Удаление учётной записи влечёт удаление данных учётной записи и прекращение её серверных сессий; данные, хранящиеся на устройствах участников обмена сообщениями, Оператором не контролируются.
 
 ### 10. Права субъекта персональных данных
 
@@ -178,6 +186,7 @@ The Controller does **not** request given names, surnames, email addresses, phon
 - in-app achievement data;
 - technical connection logs: application version and build channel, connection time, result of build signature verification, connection network address;
 - account identifier within the Service's internal structures.
+- direct-call control state: session identifier, participant pair and permitted recovery deadline. It remains in memory until the call ends; suspended-call recovery is limited to 45 seconds, after which the entry is cleaned up. No conversation content is included.
 
 #### 3.3. Message metadata
 
@@ -200,6 +209,8 @@ Application-layer encryption (AES-GCM with a key derived via ECDH) is applied wh
 
 Some connections use traffic relaying (TURN), and screen shares with 3 or more viewers use a Selective Forwarding Unit (SFU) media node; in those cases the respective node technically sees the network addresses of participants connected to it.
 
+The SFU threshold counts active viewers of a share in a voice channel, not all channel members. Microphone audio and direct calls retain the direct WebRTC route, using TURN when necessary. During a share transition, the direct stream may remain active in parallel until the viewer confirms reception of a first video frame. If SFU fails, P2P/TURN is retained or restored; a viewer using remote control also retains the direct route. These transitions do not add server-side media recording.
+
 ### 5. Purposes and legal bases
 
 Processing is carried out for the following purposes:
@@ -221,10 +232,15 @@ Much of the data is processed **locally on the user's device** and never reaches
 | Messaging encryption key | `chat-identity.enc`, encrypted by the operating system (DPAPI / Keychain) | until application data is deleted |
 | Session data | `session.enc`, encrypted by the operating system | until sign-out |
 | Noise-suppression settings, audio calibration, achievements, read markers | local application storage | until application data is cleared |
+| Connection diagnostic events and numeric media counters | local `logs` directory, `diagnostics.jsonl`, `.1`, `.2` | rotation, at most three files of 512 KiB each |
 
 Deleting a message in the interface deletes it **on the user's device**; a copy already delivered to the other participant is not subject to deletion by the Controller.
 
+Normal sign-out terminates connections and unfinished file transfers and removes session data, but does not delete chat history or saved files. History is reloaded for the same account within its 14-day retention period. Histories of different accounts are separated by owner identifier; an unfinished load from a previous session must not populate a new session's interface. The short-lived profile cache exists only in memory, is limited to 100 profiles and 15 seconds, and is cleared on sign-out.
+
 ### 7. Disclosure to third parties
+
+Diagnostic logs are not transmitted automatically. They do not contain message or file contents, captured window titles, passwords, keys, participant addresses or SDP. They contain time, connection states, route and transport types, frame/packet counters, loss and delay measurements. A user may voluntarily share logs to investigate a fault.
 
 The Controller does **not sell** personal data and does **not disclose** it to third parties for marketing purposes.
 
@@ -247,7 +263,7 @@ Primary databases containing personal data of citizens of the Russian Federation
 3. Message metadata is retained in the scope and for the periods determined by the server configuration and legal requirements.
 4. Data on the user's device is retained in accordance with section 6 and is deleted together with the application data.
 
-Account deletion is performed on request via [GitHub Issues](https://github.com/vnkdevelop/zabor-desktop/issues). Account deletion results in deletion of account data; data held on the devices of messaging participants is not controlled by the Controller.
+Account deletion is available in the application with user confirmation and on request via [GitHub Issues](https://github.com/vnkdevelop/zabor-desktop/issues). Deletion removes account data and terminates its server sessions; data held on the devices of messaging participants is not controlled by the Controller.
 
 ### 10. Data subject rights
 

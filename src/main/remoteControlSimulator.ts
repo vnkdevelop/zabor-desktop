@@ -3,6 +3,8 @@ import { spawn, ChildProcess } from 'child_process';
 import { join } from 'path';
 import { existsSync } from 'fs';
 
+export type CaptureTarget = { kind: 'window'; handle: string } | { kind: 'screen'; x: number; y: number; width: number; height: number };
+
 export class RemoteControlSimulatorManager {
   private child: ChildProcess | null = null;
   private isRunning = false;
@@ -11,6 +13,7 @@ export class RemoteControlSimulatorManager {
   private lastSimulatedY = -1;
   private lastSimulatedTime = 0;
   private getWindow: () => BrowserWindow | null;
+  private captureTarget: CaptureTarget | null = null;
 
   // Intentional displacement threshold: 120 pixels
   private readonly DISPLACEMENT_THRESHOLD = 120;
@@ -53,19 +56,23 @@ export class RemoteControlSimulatorManager {
     }
 
     try {
-      this.child = spawn(exePath, [String(process.pid)], {
+      const child = spawn(exePath, [String(process.pid)], {
         stdio: ['pipe', 'pipe', 'ignore'],
         windowsHide: true
       });
+      this.child = child;
 
       this.child.stdin?.on('error', (err) => {
         console.warn('[RemoteControl] stdin error suppressed:', err?.message);
       });
 
       this.child.on('exit', () => {
+        if (this.child !== child) return;
         this.isRunning = false;
         this.child = null;
         this.stopMonitoring();
+        this.unregisterPanicHotkeys();
+        if (this.captureTarget) this.getWindow()?.webContents.send('remote-control:panic-revoke');
       });
 
       this.child.on('error', (err) => {
@@ -74,6 +81,7 @@ export class RemoteControlSimulatorManager {
       });
 
       this.isRunning = true;
+      this.applyCaptureTarget();
       this.registerPanicHotkeys();
       this.startMonitoring();
       return true;
@@ -105,6 +113,18 @@ export class RemoteControlSimulatorManager {
 
   public reset(): void {
     this.safeWrite('unclip\nshow_cursor\nreset\n');
+  }
+
+  public setCaptureTarget(target: CaptureTarget | null): void {
+    this.captureTarget = target;
+    this.applyCaptureTarget();
+  }
+
+  private applyCaptureTarget(): void {
+    const target = this.captureTarget;
+    if (!target) this.safeWrite('source-none\n');
+    else if (target.kind === 'window') this.safeWrite(`source-window ${target.handle}\n`);
+    else this.safeWrite(`source-screen ${Math.round(target.x)} ${Math.round(target.y)} ${Math.round(target.width)} ${Math.round(target.height)}\n`);
   }
 
   public hideHostCursor(): void {
@@ -144,6 +164,7 @@ export class RemoteControlSimulatorManager {
   }
 
   public moveNormalized(xNorm: number, yNorm: number): void {
+    if (!this.captureTarget || !Number.isFinite(xNorm) || !Number.isFinite(yNorm)) return;
     if (!this.isRunning || !this.child) {
       this.start();
     }
@@ -160,11 +181,13 @@ export class RemoteControlSimulatorManager {
     this.safeWrite(`${cmd} ${button}\n`);
   }
 
-  public mouseWheel(delta: number): void {
+  public mouseWheel(delta: number, horizontal = 0): void {
+    if (!Number.isFinite(delta) || !Number.isFinite(horizontal)) return;
     if (!this.isRunning || !this.child) {
       this.start();
     }
-    this.safeWrite(`w ${Math.round(delta)}\n`);
+    this.safeWrite(`w ${Math.round(-delta)}\n`);
+    if (horizontal) this.safeWrite(`wh ${Math.round(horizontal)}\n`);
   }
 
   public key(vk: number, down: boolean): void {

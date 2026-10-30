@@ -115,6 +115,8 @@ const windowControls = {
   },
   setDisplayMediaSource: (sourceId: string | null): Promise<boolean> =>
     ipcRenderer.invoke('set-display-media-source', sourceId),
+  writeDiagnostic: (record: unknown): void => ipcRenderer.send('write-diagnostic', record),
+  diagnosticsDirectory: (): Promise<string> => ipcRenderer.invoke('diagnostics-directory'),
   remoteControlStart: (): Promise<boolean> => ipcRenderer.invoke('remote-control:start'),
   remoteControlStop: (): Promise<boolean> => ipcRenderer.invoke('remote-control:stop'),
   remoteControlReset: (): Promise<boolean> => ipcRenderer.invoke('remote-control:reset'),
@@ -133,7 +135,7 @@ const windowControls = {
     ipcRenderer.send('remote-control:move-normalized', xNorm, yNorm),
   remoteControlMouseButton: (button: number, down: boolean) =>
     ipcRenderer.send('remote-control:mouse-button', button, down),
-  remoteControlMouseWheel: (delta: number) => ipcRenderer.send('remote-control:mouse-wheel', delta),
+  remoteControlMouseWheel: (delta: number, horizontal = 0) => ipcRenderer.send('remote-control:mouse-wheel', delta, horizontal),
   remoteControlKey: (vk: number, down: boolean) => ipcRenderer.send('remote-control:key', vk, down),
   remoteControlShowPill: (data: { controllerName: string; isControlling: boolean }) =>
     ipcRenderer.send('remote-control:show-pill', data),

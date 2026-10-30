@@ -8,6 +8,7 @@ import channelJoinSound from '../assets/sounds/join.mp3';
 import channelLeaveSound from '../assets/sounds/leave.mp3';
 import achievementSound from '../assets/sounds/achievement.mp3';
 import { registerHiddenAchievement } from '../achievements';
+import { logDiagnostic } from './diagnostics';
 
 const SERVER_URL = "https://vnkboltik.ru:8080/zabor_v3";
 
@@ -64,6 +65,9 @@ export interface AudioSettingsPayload {
 }
 
 class SignalRService {
+  private activeCallSession: string | null = null;
+  private callResumeTimer: NodeJS.Timeout | null = null;
+  private callResumeDeadline = 0;
   private connection: signalR.HubConnection | null = null;
   private listenersAttached = false;
   private reconnectAttempts = 0;
@@ -71,6 +75,11 @@ class SignalRService {
   private isReconnecting = false;
   private intentionalDisconnect = false;
   private sessionReady = false;
+  private sessionEpoch = 0;
+  private pendingAudioSettings: string | null = null;
+  private audioSettingsSaveTask: Promise<void> | null = null;
+  private profileCache = new Map<string, { user: User; expiresAt: number }>();
+  private profileRequests = new Map<string, Promise<User | null>>();
   private pingTimer: NodeJS.Timeout | null = null;
   private pingInFlight = false;
   private pingWindow: (number | null)[] = [];
@@ -113,7 +122,7 @@ class SignalRService {
   private static readonly PING_WINDOW_SIZE = 10;
   private static readonly PING_MISSES_BEFORE_OFFLINE = 2;
   private static readonly PEER_CONNECT_STAGGER_MS = 60;
-  private static readonly PEER_CONNECT_DELAY_MS = 150;
+  private static readonly PEER_CONNECT_DELAY_MS = 0;
   private static readonly STREAM_DROP_GRACE_MS = 30000;
   private static readonly SPEAKING_HANGOVER_MS = 350;
   private static readonly CHANNEL_REJOIN_MAX_ATTEMPTS = 5;
@@ -453,6 +462,10 @@ class SignalRService {
       this.wasStreaming = webrtc.localVideoStream !== null;
       this.wasStreamQuality = store.currentUser.streamQuality || 'low';
     }
+    if (this.activeCallSession && store.callStatus === 'connected') {
+      if (!this.callResumeDeadline) this.callResumeDeadline = Date.now() + 45000;
+      this.scheduleCallResume();
+    }
   }
 
   private setupReconnectionHandlers(connection: signalR.HubConnection) {
@@ -460,6 +473,8 @@ class SignalRService {
       if (this.connection !== connection) return;
       if (this.intentionalDisconnect) return;
       this.isReconnecting = true;
+      logDiagnostic({ event: 'connection', state: 'disconnected', route: 'signalr' });
+      this.sessionEpoch++;
       this.sessionReady = false;
       this.resetPingStats();
       this.saveReconnectionState();
@@ -518,6 +533,12 @@ class SignalRService {
   }
 
   public disconnect() {
+    this.cancelCallResume();
+    this.activeCallSession = null;
+    this.sessionEpoch++;
+    this.pendingAudioSettings = null;
+    this.profileCache.clear();
+    this.profileRequests.clear();
     this.intentionalDisconnect = true;
     this.isReconnecting = false;
     this.sessionReady = false;
@@ -548,6 +569,29 @@ class SignalRService {
     this.streamDropTimers.clear();
   }
 
+  public async signOut(): Promise<void> {
+    const connection = this.connection;
+    this.intentionalDisconnect = true;
+    this.sessionReady = false;
+    this.sessionEpoch++;
+    this.cancelChannelRejoinRetry();
+    webrtc.stopScreenShare();
+    webrtc.stopLocalStream();
+    chatPeer.close();
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      if (connection?.state === signalR.HubConnectionState.Connected) {
+        await Promise.race([
+          connection.invoke('EndCall').catch(() => {}),
+          new Promise<void>(resolve => { timer = setTimeout(resolve, 1500); })
+        ]);
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.disconnect();
+    }
+  }
+
   private setupListeners() {
     if (!this.connection || this.listenersAttached) return;
     const connection = this.connection;
@@ -555,7 +599,7 @@ class SignalRService {
     const store = useAppStore.getState;
     const on = (methodName: string, handler: (...args: any[]) => void | Promise<void>) => {
       connection.on(methodName, (...args: any[]) => {
-        if (this.connection !== connection) return;
+        if (this.connection !== connection || this.intentionalDisconnect) return;
         return handler(...args);
       });
     };
@@ -565,11 +609,13 @@ class SignalRService {
     });
 
     on("UserJoined", (user: User) => {
+      this.profileCache.delete(user.username.toLowerCase());
       store().updateUserStatus(user.id, { ...user, isOnline: true });
       void chatPeer.handleOnline(user.id);
     });
 
     on("UserLeft", (userId: string, lastOnline?: string) => {
+      for (const [key, cached] of this.profileCache) if (cached.user.id === userId) this.profileCache.delete(key);
       chatPeer.handleOffline(userId);
       this.clearStreamDropTimer(userId);
       const offlineTime = lastOnline || new Date().toISOString();
@@ -585,8 +631,17 @@ class SignalRService {
     });
 
     on("UserUpdated", (user: User) => {
+      this.profileCache.delete(user.username.toLowerCase());
       if (store().currentUser?.id === user.id) store().setCurrentUser({ ...store().currentUser!, ...user });
       store().updateUserStatus(user.id, user);
+    });
+
+    on("UserDeleted", (userId: string) => {
+      const state = store();
+      state.setFriends(state.friends.filter(user => user.id !== userId));
+      state.setFriendRequests(state.friendRequests.filter(user => user.id !== userId));
+      state.setChannelInvites(state.channelInvites.filter(invite => invite.senderId !== userId));
+      if (state.selectedProfileUser?.id === userId) state.closeProfileOnly();
     });
 
     on("UserJoinedChannel", (user: User, channelId?: string) => {
@@ -810,6 +865,7 @@ class SignalRService {
     });
 
     on("CallDeclined", () => {
+      if (store().callStatus === 'connected') return;
       store().setCallStatus('idle');
       store().setIncomingCall(null);
       store().setModal('incomingCall', false);
@@ -818,7 +874,10 @@ class SignalRService {
       webrtc.enterBackgroundMode();
     });
 
-    on("CallEnded", () => {
+    on("CallEnded", (sessionId?: string) => {
+      if (sessionId && sessionId !== this.activeCallSession || !sessionId && this.activeCallSession) return;
+      this.cancelCallResume();
+      this.activeCallSession = null;
       const callStatus = store().callStatus;
       const callUser = store().currentCallUser;
       if (store().currentUser?.isStreaming || webrtc.localVideoStream) {
@@ -853,6 +912,26 @@ class SignalRService {
       this.stopRingtone();
 
       this.playSfx(channelJoinSound, 0.3);
+    });
+
+    on('CallSession', (sessionId: string) => {
+      if (/^[a-f0-9]{32}$/.test(sessionId) && store().callStatus === 'connected' && store().currentCallUser) this.activeCallSession = sessionId;
+    });
+    on('CallSuspended', (sessionId: string, remainingMs: number) => {
+      if (!store().currentCallUser || store().callStatus !== 'connected' || this.activeCallSession && this.activeCallSession !== sessionId) return;
+      this.activeCallSession = sessionId;
+      logDiagnostic({ event: 'call', state: 'resuming' });
+      this.callResumeDeadline = this.callResumeDeadline || Date.now() + Math.max(0, Math.min(45000, remainingMs));
+      this.scheduleCallResume();
+    });
+    on('CallResumed', (peer: User, sessionId: string) => {
+      if (this.activeCallSession !== sessionId || store().currentCallUser?.id !== peer.id) return;
+      this.cancelCallResume();
+      logDiagnostic({ event: 'call', state: 'resumed' });
+      store().setCurrentCallUser(peer);
+      store().setCallStatus('connected');
+      void webrtc.connectToPeer(peer.id, true);
+      void this.restoreStreamAfterRejoin();
     });
 
     on("AchievementUnlocked", (achievementId: string, hiddenDef?: any) => {
@@ -892,9 +971,16 @@ class SignalRService {
     on("StreamViewerSfuFallback", (viewerId: string, epoch: number) => {
       void webrtc.handleViewerSfuFallback(viewerId, Number(epoch));
     });
+    on("StreamViewerSfuReady", (viewerId: string, epoch: number) => {
+      void webrtc.handleViewerSfuReady(viewerId, Number(epoch));
+    });
 
     on("ForceLogout", async () => {
-      try { await window.windowControls?.clearSession?.(); await window.windowControls?.wipeAppData?.(); } catch { }
+      webrtc.stopScreenShare();
+      webrtc.stopLocalStream();
+      chatPeer.close();
+      this.disconnect();
+      try { await window.windowControls?.clearSession?.(); } catch { }
       const appStore = useAppStore.getState();
       appStore.logout();
       appStore.setFullChannelState({});
@@ -1012,12 +1098,17 @@ class SignalRService {
 
   private invokeWithTimeout<T>(method: string, timeoutMs: number, ...args: any[]): Promise<T> {
     const connection = this.connection;
+    const epoch = this.sessionEpoch;
     if (!connection) return Promise.reject(new Error(`${method}: no connection`));
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error(`${method} timeout after ${timeoutMs}ms`)), timeoutMs);
     });
     return Promise.race([connection.invoke<T>(method, ...args), timeout])
+      .then(result => {
+        if (this.connection !== connection || this.sessionEpoch !== epoch) throw new Error(`${method}: session changed`);
+        return result;
+      })
       .finally(() => { if (timer) clearTimeout(timer); });
   }
 
@@ -1043,8 +1134,8 @@ class SignalRService {
   private async invokeCommand(method: string, ...args: any[]): Promise<boolean> {
     if (!await this.ensureSessionReady()) return false;
     try {
-      await this.invokeWithTimeout(method, SignalRService.INVOKE_TIMEOUT_MS, ...args);
-      return true;
+      const result = await this.invokeWithTimeout(method, SignalRService.INVOKE_TIMEOUT_MS, ...args);
+      return result !== false;
     } catch (error) {
       console.warn(`[SignalR] ${method} failed`, error);
       return false;
@@ -1123,7 +1214,11 @@ class SignalRService {
         return;
       }
       const res = await this.joinChannel(channelId);
-      if (res === 'ok' || res === 'full') { this.wasInChannel = null; return; }
+      if (res === 'ok' || res === 'full') {
+        this.wasInChannel = null;
+        if (res === 'ok') await this.restoreStreamAfterRejoin();
+        return;
+      }
       this.scheduleChannelRejoinRetry(channelId, attempt + 1);
     }, delay);
   }
@@ -1131,7 +1226,7 @@ class SignalRService {
   public async login(username: string, password: string): Promise<'ok' | 'invalid' | 'network' | 'throttled'> {
     if (!this.isConnected()) return 'network';
     const currentUser = useAppStore.getState().currentUser;
-    if (this.sessionReady && currentUser && currentUser.login === username) {
+    if (this.sessionReady && currentUser && currentUser.username.toLowerCase() === username.toLowerCase()) {
       return 'ok';
     }
     if (this.loginPromise) {
@@ -1141,12 +1236,15 @@ class SignalRService {
     this.loginPromise = (async () => {
       try {
         const user = await this.invokeWithTimeout<User | null>(
-          "Login", SignalRService.LOGIN_INVOKE_TIMEOUT_MS, username, password
+          this.activeCallSession && this.callResumeDeadline ? 'LoginAndResume' : 'Login',
+          SignalRService.LOGIN_INVOKE_TIMEOUT_MS,
+          ...this.activeCallSession && this.callResumeDeadline ? [username, password, this.activeCallSession] : [username, password]
         );
         if (user) {
           this.sessionReady = true;
           this.savedLogin = username;
           this.savedPassword = password;
+          try { await this.invokeWithTimeout('EnableCallResume', 3000); } catch {}
           useAppStore.getState().setCurrentUser(user);
           webrtc.warmUpConnectivity();
 
@@ -1159,11 +1257,11 @@ class SignalRService {
           const deafenedToRestore = this.wasDeafened;
 
           this.wasInChannel = null;
-          this.wasStreaming = false;
+          this.wasStreaming = streamToRejoin;
           this.wasMuted = false;
           this.wasDeafened = false;
 
-          await this.loadData();
+          const dataPromise = this.loadData();
 
           if (mutedToRestore || deafenedToRestore) {
             const store = useAppStore.getState();
@@ -1179,17 +1277,16 @@ class SignalRService {
 
           if (channelToRejoin) {
             const res = await this.joinChannel(channelToRejoin);
-            if (res === 'ok' && streamToRejoin && webrtc.localVideoStream) {
-              const isStreamActive = webrtc.localVideoStream.getTracks().some(t => t.readyState === 'live');
-              if (isStreamActive) {
-                await this.startStream(streamQuality);
-                await webrtc.restoreLocalVideoStream(streamQuality);
-              }
+            if (res === 'ok') {
+              this.wasStreamQuality = streamQuality;
+              await this.restoreStreamAfterRejoin();
             } else if (res === 'network' || res === 'mic_failed') {
               this.wasInChannel = channelToRejoin;
               this.scheduleChannelRejoinRetry(channelToRejoin, 1);
             }
           }
+          await dataPromise;
+          if (this.activeCallSession && this.callResumeDeadline) this.scheduleCallResume();
 
           return 'ok';
         }
@@ -1284,8 +1381,49 @@ class SignalRService {
     await this.safeInvoke("UpdateProfile", displayName, avatarBase64, avatarColor, aboutMe);
   }
 
+  private async restoreStreamAfterRejoin(): Promise<void> {
+    if (!this.wasStreaming || !webrtc.localVideoStream?.getVideoTracks().some(track => track.readyState === 'live')) return;
+    if (!await this.startStream(this.wasStreamQuality)) return;
+    await webrtc.restoreLocalVideoStream(this.wasStreamQuality);
+    this.wasStreaming = false;
+  }
+
+  private cancelCallResume(): void {
+    if (this.callResumeTimer) clearTimeout(this.callResumeTimer);
+    this.callResumeTimer = null;
+    this.callResumeDeadline = 0;
+  }
+
+  private scheduleCallResume(): void {
+    if (this.callResumeTimer || !this.activeCallSession || !this.callResumeDeadline || this.intentionalDisconnect) return;
+    const sessionId = this.activeCallSession;
+    this.callResumeTimer = setTimeout(async () => {
+      this.callResumeTimer = null;
+      if (this.activeCallSession !== sessionId || this.intentionalDisconnect) return;
+      if (Date.now() >= this.callResumeDeadline) { await this.endCall(); return; }
+      if (!this.isSessionReady()) { this.scheduleCallResume(); return; }
+      try {
+        const result = await this.invokeWithTimeout<{ state: string; peer?: User }>('ResumeCall', 5000, sessionId);
+        if (this.activeCallSession !== sessionId || !this.callResumeDeadline) return;
+        if (result.state === 'resumed' && result.peer) {
+          logDiagnostic({ event: 'call', state: 'resumed' });
+          this.cancelCallResume();
+          const state = useAppStore.getState();
+          state.setCurrentCallUser(result.peer);
+          state.setCallStatus('connected');
+          await webrtc.connectToPeer(result.peer.id, true);
+          await this.restoreStreamAfterRejoin();
+        } else if (result.state === 'ended') await this.endCall();
+        else this.scheduleCallResume();
+      } catch { this.scheduleCallResume(); }
+    }, 1000);
+  }
+
   public async changePassword(newPassword: string): Promise<boolean> {
-    return await this.safeInvoke<boolean>("UpdateUserPassword", newPassword) ?? false;
+    const epoch = this.sessionEpoch;
+    const success = await this.safeInvoke<boolean>("UpdateUserPassword", newPassword) ?? false;
+    if (success && this.sessionEpoch === epoch) this.savedPassword = newPassword;
+    return success;
   }
 
   public async deleteAccount(): Promise<boolean> {
@@ -1294,7 +1432,25 @@ class SignalRService {
 
 
   public async saveAudioSettings(settings: AudioSettingsPayload): Promise<void> {
-    await this.safeInvoke("SaveAudioSettings", JSON.stringify(settings));
+    this.pendingAudioSettings = JSON.stringify(settings);
+    if (this.audioSettingsSaveTask) return this.audioSettingsSaveTask;
+    const epoch = this.sessionEpoch;
+    const task = (async () => {
+      while (this.pendingAudioSettings && this.sessionEpoch === epoch && this.isSessionReady()) {
+        const next = this.pendingAudioSettings;
+        this.pendingAudioSettings = null;
+        if (!await this.invokeCommand('SaveAudioSettings', next)) {
+          if (this.sessionEpoch === epoch && this.pendingAudioSettings === null) this.pendingAudioSettings = next;
+          return;
+        }
+      }
+    })();
+    this.audioSettingsSaveTask = task;
+    try {
+      await task;
+    } finally {
+      if (this.audioSettingsSaveTask === task) this.audioSettingsSaveTask = null;
+    }
   }
 
   public async setShowLastOnline(value: boolean): Promise<void> {
@@ -1355,7 +1511,24 @@ class SignalRService {
 
   public async viewProfile(userId: string): Promise<void> { await this.safeInvoke("ViewProfile", userId); }
   public async getUserByUsername(username: string): Promise<User | null> {
-    return await this.safeInvoke<User>("GetUserByUsername", username);
+    const key = username.trim().toLowerCase();
+    const cached = this.profileCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.user;
+    const existing = this.profileRequests.get(key);
+    if (existing) return existing;
+    const epoch = this.sessionEpoch;
+    const request = this.safeInvoke<User>('GetUserByUsername', username.trim());
+    this.profileRequests.set(key, request);
+    try {
+      const user = await request;
+      if (user && epoch === this.sessionEpoch) {
+        if (this.profileCache.size >= 100) this.profileCache.delete(this.profileCache.keys().next().value!);
+        this.profileCache.set(key, { user, expiresAt: Date.now() + 15000 });
+      }
+      return user;
+    } finally {
+      if (this.profileRequests.get(key) === request) this.profileRequests.delete(key);
+    }
   }
   private jokeCache: { date: string; joke: string } | null = null;
   public async getJokeOfTheDay(): Promise<string> {
@@ -1374,6 +1547,8 @@ class SignalRService {
   }
 
   public async loadData(): Promise<void> {
+    const epoch = this.sessionEpoch;
+    const userId = useAppStore.getState().currentUser?.id;
     const [channels, friends, requests, channelInvites] = await Promise.all([
       this.safeInvoke<VoiceChannel[]>("GetChannels"),
       this.safeInvoke<User[]>("GetFriends"),
@@ -1381,6 +1556,7 @@ class SignalRService {
       this.safeInvoke<ChannelInvite[]>("GetChannelInvites")
     ]);
     const store = useAppStore.getState();
+    if (epoch !== this.sessionEpoch || store.currentUser?.id !== userId) return;
     if (Array.isArray(channels)) store.setChannels(channels);
     if (Array.isArray(friends)) store.setFriends(friends);
     if (Array.isArray(requests)) store.setFriendRequests(requests);
@@ -1429,9 +1605,9 @@ class SignalRService {
     const result = await this.safeInvoke<boolean>("UpdateChannel", { channelId: id, name: trimmed });
     if (!result) {
       const latest = useAppStore.getState();
-      latest.setChannels(prevChannels);
       const original = prevChannels.find(c => c.id === id);
       if (original) {
+        latest.setChannels(latest.channels.map(channel => channel.id === id && channel.name === trimmed ? original : channel));
         if (latest.selectedChannelForMembers?.id === id) latest.setSelectedChannelForMembers(original);
         if (latest.selectedChannelForInvite?.id === id) latest.setSelectedChannelForInvite(original);
       }
@@ -1495,7 +1671,9 @@ class SignalRService {
     store.setChannelInvites(previousInvites.filter(i => i.channelId !== channelId));
     const succeeded = await this.invokeCommand("AcceptChannelInvite", channelId);
     if (!succeeded) {
-      useAppStore.getState().setChannelInvites(previousInvites);
+      const latest = useAppStore.getState();
+      const original = previousInvites.find(invite => invite.channelId === channelId);
+      if (original && !latest.channelInvites.some(invite => invite.channelId === channelId)) latest.setChannelInvites([...latest.channelInvites, original]);
       return false;
     }
     return true;
@@ -1507,7 +1685,9 @@ class SignalRService {
     store.setChannelInvites(previousInvites.filter(i => i.channelId !== channelId));
     const succeeded = await this.invokeCommand("DeclineChannelInvite", channelId);
     if (!succeeded) {
-      useAppStore.getState().setChannelInvites(previousInvites);
+      const latest = useAppStore.getState();
+      const original = previousInvites.find(invite => invite.channelId === channelId);
+      if (original && !latest.channelInvites.some(invite => invite.channelId === channelId)) latest.setChannelInvites([...latest.channelInvites, original]);
       return false;
     }
     return true;
@@ -1800,6 +1980,9 @@ class SignalRService {
     if (targetUser && !targetUser.isOnline) {
       return false;
     }
+    if (store.callStatus === 'connected' && store.currentCallUser) await this.endCall();
+    this.cancelCallResume();
+    this.activeCallSession = null;
 
     store.closeProfileOnly();
     store.setCallStatus('calling');
@@ -1834,6 +2017,8 @@ class SignalRService {
       if (store.callStatus !== 'idle') {
         const activeCallUser = store.currentCallUser;
         if (activeCallUser && activeCallUser.id !== callerId) {
+          this.cancelCallResume();
+          this.activeCallSession = null;
           webrtc.disconnectFromPeer(activeCallUser.id);
           await this.invokeCommand("EndCall");
           store.setCallStatus('idle');
@@ -1913,6 +2098,9 @@ class SignalRService {
   }
 
   public async endCall(): Promise<void> {
+    logDiagnostic({ event: 'call', state: 'ended' });
+    this.cancelCallResume();
+    this.activeCallSession = null;
     const callStatus = useAppStore.getState().callStatus;
     const callUser = useAppStore.getState().currentCallUser;
     const store = useAppStore.getState();
@@ -2028,7 +2216,8 @@ class SignalRService {
   public async sfuPublish(epoch: number, offerSdp: string, hasAudio: boolean): Promise<{ ok: boolean; answerSdp?: string; nodeId?: string; error?: string } | null> {
     if (!this.sessionReady || !this.isConnected()) return null;
     try {
-      return await this.invokeWithTimeout("SfuPublish", 10000, epoch, offerSdp, hasAudio);
+      const result = await this.invokeWithTimeout<any>("SfuPublish", 10000, epoch, offerSdp, hasAudio);
+      return result ? { ...result, ok: result.ok ?? result.Ok ?? false, answerSdp: result.answerSdp ?? result.sdp ?? result.Sdp } : null;
     } catch {
       return null;
     }
@@ -2041,7 +2230,8 @@ class SignalRService {
   public async sfuSubscribe(streamerId: string, epoch: number, offerSdp: string): Promise<{ ok: boolean; answerSdp?: string; nodeId?: string; error?: string } | null> {
     if (!this.sessionReady || !this.isConnected()) return null;
     try {
-      return await this.invokeWithTimeout("SfuSubscribe", 10000, streamerId, epoch, offerSdp);
+      const result = await this.invokeWithTimeout<any>("SfuSubscribe", 10000, streamerId, epoch, offerSdp);
+      return result ? { ...result, ok: result.ok ?? result.Ok ?? false, answerSdp: result.answerSdp ?? result.sdp ?? result.Sdp } : null;
     } catch {
       return null;
     }
@@ -2050,6 +2240,9 @@ class SignalRService {
     if (this.sessionReady && this.isConnected()) {
       await this.connection?.send("SfuUnsubscribe", streamerId).catch(() => { });
     }
+  }
+  public async sfuViewerReady(streamerId: string, epoch: number): Promise<void> {
+    if (this.isSessionReady()) await this.connection?.send('SfuViewerReady', streamerId, epoch).catch(() => {});
   }
   public async sfuRequestKeyframe(streamerId: string): void | Promise<void> {
     if (this.sessionReady && this.isConnected()) {

@@ -11,6 +11,7 @@ import { createHmac, randomBytes } from 'crypto';
 import { setupUpdater } from './updater';
 import { disposeChatFileWriters, registerChatFileHandlers } from './chatFiles';
 import { RemoteControlSimulatorManager } from './remoteControlSimulator';
+import { DiagnosticLog } from './diagnosticLog';
 
 declare const __ZABOR_CLIENT_SECRET__: string;
 declare const __ZABOR_CLIENT_CHANNEL__: string;
@@ -763,6 +764,11 @@ function createUpdaterWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  const diagnostics = new DiagnosticLog(join(app.getPath('userData'), 'logs'));
+  ipcMain.on('write-diagnostic', (event, value: unknown) => {
+    if (event.sender.id === mainWindow?.webContents.id) diagnostics.write(value);
+  });
+  ipcMain.handle('diagnostics-directory', async () => { await diagnostics.flush(); return diagnostics.directory; });
   if (!isDev) {
     Menu.setApplicationMenu(null);
   }
@@ -785,14 +791,25 @@ app.whenReady().then(() => {
   });
 
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    const requestedSourceId = selectedDisplayMediaSourceId;
     desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } }).then((sources) => {
-      let chosen = selectedDisplayMediaSourceId
-        ? sources.find((s) => s.id === selectedDisplayMediaSourceId)
+      const chosen = requestedSourceId
+        ? sources.find((s) => s.id === requestedSourceId)
         : null;
-      if (!chosen && sources.length > 0) {
-        chosen = sources[0];
-      }
       if (chosen) {
+        diagnostics.write({ event: 'capture', state: 'starting', sourceKind: chosen.id.startsWith('window:') ? 'window' : 'screen' });
+        const handle = getWindowHandle(chosen.id);
+        if (handle !== null) {
+          remoteControlSimulator?.setCaptureTarget({ kind: 'window', handle: handle.toString() });
+        } else {
+          const display = screen.getAllDisplays().find(display => String(display.id) === chosen.display_id);
+          if (display) {
+            const bounds = screen.dipToScreenRect(null, display.bounds);
+            remoteControlSimulator?.setCaptureTarget({ kind: 'screen', x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
+          } else {
+            remoteControlSimulator?.setCaptureTarget(null);
+          }
+        }
         callback({ video: chosen });
       } else {
         callback({});
@@ -862,7 +879,7 @@ app.whenReady().then(() => {
       'blob_storage'
     ];
     for (const dir of dirsToKill) {
-      if (preserveChat && dir === 'IndexedDB') continue;
+      if (preserveChat && (dir === 'IndexedDB' || dir === 'Local Storage')) continue;
       const fullPath = join(userDataPath, dir);
       try {
         if (existsSync(fullPath)) {
@@ -889,8 +906,14 @@ app.whenReady().then(() => {
   const SESSION_PATH = join(app.getPath('userData'), 'session.json');
   const SESSION_ENC_PATH = join(app.getPath('userData'), 'session.enc');
   const CHAT_IDENTITY_PATH = join(app.getPath('userData'), 'chat-identity.enc');
+  let sessionFileQueue: Promise<unknown> = Promise.resolve();
+  const queueSessionFile = <T>(operation: () => Promise<T>): Promise<T> => {
+    const next = sessionFileQueue.catch(() => {}).then(operation);
+    sessionFileQueue = next;
+    return next;
+  };
 
-  ipcMain.handle('save-session', async (_event, data: string) => {
+  ipcMain.handle('save-session', (_event, data: string) => queueSessionFile(async () => {
     try {
       if (safeStorage.isEncryptionAvailable()) {
         await fsPromises.writeFile(SESSION_ENC_PATH, safeStorage.encryptString(data));
@@ -899,9 +922,9 @@ app.whenReady().then(() => {
       }
       return false;
     } catch { return false; }
-  });
+  }));
 
-  ipcMain.handle('load-session', async () => {
+  ipcMain.handle('load-session', () => queueSessionFile(async () => {
     try {
       if (existsSync(SESSION_ENC_PATH) && safeStorage.isEncryptionAvailable()) {
         return safeStorage.decryptString(await fsPromises.readFile(SESSION_ENC_PATH));
@@ -920,13 +943,13 @@ app.whenReady().then(() => {
       }
     } catch {}
     return null;
-  });
+  }));
 
-  ipcMain.handle('clear-session', async () => {
+  ipcMain.handle('clear-session', () => queueSessionFile(async () => {
     try { if (existsSync(SESSION_PATH)) await fsPromises.rm(SESSION_PATH, { force: true }); } catch {}
     try { if (existsSync(SESSION_ENC_PATH)) await fsPromises.rm(SESSION_ENC_PATH, { force: true }); } catch {}
     return true;
-  });
+  }));
   ipcMain.handle('chat-identity-load', async () => {
     try {
       if (!safeStorage.isEncryptionAvailable() || !existsSync(CHAT_IDENTITY_PATH)) return null;
@@ -1060,6 +1083,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('remote-control:stop', () => {
+    remoteControlSimulator?.setCaptureTarget(null);
     hidePillOverlay();
   remoteControlSimulator?.unclipCursor();
     remoteControlSimulator.stop();
@@ -1151,8 +1175,8 @@ app.whenReady().then(() => {
     remoteControlSimulator.mouseButton(button, down);
   });
 
-  ipcMain.on('remote-control:mouse-wheel', (_event, delta: number) => {
-    remoteControlSimulator.mouseWheel(delta);
+  ipcMain.on('remote-control:mouse-wheel', (_event, delta: number, horizontal = 0) => {
+    remoteControlSimulator.mouseWheel(delta, horizontal);
   });
 
   ipcMain.on('remote-control:key', (_event, vk: number, down: boolean) => {

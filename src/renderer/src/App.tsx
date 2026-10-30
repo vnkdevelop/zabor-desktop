@@ -872,6 +872,7 @@ export default function App() {
   }, []);
 
   const saveLocalCache = useCallback(() => {
+    if (isLoggingOutRef.current) return;
     try {
       const currentUser = useAppStore.getState().currentUser;
       const creds = credentialsRef.current;
@@ -1167,6 +1168,9 @@ export default function App() {
   }, [store.activeStreamId, store.remoteVideoStreams, store.voiceUsers, store.currentCallUser, store.currentUser]);
 
   useEffect(() => {
+    if (store.activeStreamId) {
+      webrtc.syncRemoteVideoStream(store.activeStreamId);
+    }
     const relevantUsers = store.currentCallUser ? [store.currentCallUser] : store.voiceUsers;
     relevantUsers.forEach(user => {
       webrtc.updateRemoteStreamVolume(user.id);
@@ -1988,16 +1992,7 @@ export default function App() {
 
       closeAndResetModals();
 
-      if (store.currentCallUser) {
-        await signalRService.endCall();
-      }
-
-      if (store.currentChannelId) {
-        await signalRService.leaveChannel();
-      }
-
-      webrtc.stopLocalStream();
-      signalRService.disconnect();
+      await signalRService.signOut();
 
       await deepWipeOnLogout();
 
@@ -2477,6 +2472,7 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
+      if ((e as Error)?.name === 'AbortError' && (e as Error)?.message === 'Screen share cancelled') return;
       webrtc.stopScreenShare();
       await signalRService.stopStream();
       store.setStreamRemoteControlAllowed(false);
@@ -3910,6 +3906,23 @@ export default function App() {
                 controlsShake ? "animate-shake" : ""
               ].join(" ")}>
                 <button onClick={openCallChat} className="group w-14 h-14 rounded-full flex items-center justify-center bg-surface/70 hover:bg-surfaceHover/80 text-white transition-colors active:scale-95" title={t('chat.open')}><ChatCircle weight="bold" size={24} /></button>
+                {Boolean(store.activeStreamId) && (
+                  <button
+                    onClick={() => store.setActiveStreamId(null)}
+                    className="group group/mode-button relative w-14 h-14 rounded-full flex items-center justify-center bg-surface/70 hover:bg-surfaceHover/80 text-white transition-colors active:scale-95"
+                    aria-label={t('stream.minimizeHint')}
+                  >
+                    <span
+                      role="tooltip"
+                      className="absolute bottom-full left-1/2 mb-3 -translate-x-1/2 pointer-events-none whitespace-nowrap opacity-0 group-hover/mode-button:opacity-100 delay-0 group-hover/mode-button:delay-[2000ms] transition-opacity duration-150 bg-[#09090B]/95 border border-[#303035]/70 rounded-md px-2.5 py-1.5 text-[10px] font-bold text-white lowercase"
+                    >
+                      {t('stream.minimizeHint')}
+                    </span>
+                    <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover/mode-button:scale-110">
+                      <CornersIn weight="bold" size={24} />
+                    </div>
+                  </button>
+                )}
                 <button
                   onClick={toggleMute}
                   className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)
@@ -3960,6 +3973,23 @@ export default function App() {
                 "absolute bottom-10 left-1/2 -translate-x-1/2 bg-panelBg/70 backdrop-blur-xl px-6 py-4 rounded-full flex gap-4 items-center border border-white/[0.07] border-t-white/[0.14] z-50",
                 controlsShake ? "animate-shake" : ""
               ].join(" ")}>
+                {Boolean(store.activeStreamId) && (
+                  <button
+                    onClick={() => store.setActiveStreamId(null)}
+                    className="group group/mode-button relative w-14 h-14 rounded-full flex items-center justify-center bg-surface/70 hover:bg-surfaceHover/80 text-white transition-colors active:scale-95"
+                    aria-label={t('stream.minimizeHint')}
+                  >
+                    <span
+                      role="tooltip"
+                      className="absolute bottom-full left-1/2 mb-3 -translate-x-1/2 pointer-events-none whitespace-nowrap opacity-0 group-hover/mode-button:opacity-100 delay-0 group-hover/mode-button:delay-[2000ms] transition-opacity duration-150 bg-[#09090B]/95 border border-[#303035]/70 rounded-md px-2.5 py-1.5 text-[10px] font-bold text-white lowercase"
+                    >
+                      {t('stream.minimizeHint')}
+                    </span>
+                    <div className="flex items-center justify-center transition-transform duration-200 group-active:scale-95 group-hover/mode-button:scale-110">
+                      <CornersIn weight="bold" size={24} />
+                    </div>
+                  </button>
+                )}
                 <button
                   onClick={toggleMute}
                   className={`group w-14 h-14 rounded-full flex items-center justify-center relative transition-colors ${(store.currentUser?.isMuted || store.currentUser?.isServerMuted || store.currentUser?.isServerDeafened)

@@ -16,6 +16,8 @@ export const RC_OP_HOST_REVOKED = 0x14;
 export const RC_OP_BUSY = 0x15;
 export const RC_OP_START = 0x16;
 export const RC_OP_STOP = 0x17;
+export const RC_OP_KEYFRAME_REQUEST = 0x18;
+export const RC_OP_ACCEPT = 0x19;
 
 // Safe Virtual Key Codes Whitelist & Blacklist for Security Filtering
 const SAFE_VK_CODES = new Set<number>([
