@@ -1,5 +1,6 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { createProductionStreamEngine } from './helpers/webrtc-production-methods.mjs';
 import {
   MockMediaStreamTrack,
   MockMediaStream,
@@ -8,6 +9,236 @@ import {
   createMockAppStore,
   StreamEngine
 } from './helpers/webrtc-stream-mock.mjs';
+
+describe('Production WebRTC: first-frame recovery and receiver races', () => {
+  let store;
+  let engine;
+  let signals;
+  let setTime;
+  let pc;
+
+  beforeEach(() => {
+    store = createMockAppStore({
+      voiceUsers: [{ id: 'streamer', isStreaming: true }],
+      activeStreamId: 'streamer'
+    });
+    store.getState().setStreamRemoteControlAllowed = () => {};
+    ({ engine, signals, setTime } = createProductionStreamEngine(store));
+    pc = new MockRTCPeerConnection();
+    engine.peerConnections.set('streamer', pc);
+  });
+
+  const addVideo = (connection, { muted = false, direction = 'recvonly' } = {}) => {
+    const transceiver = connection.addTransceiver('video', { direction });
+    transceiver.receiver.track = new MockMediaStreamTrack({ kind: 'video', muted });
+    return transceiver;
+  };
+
+  const drainQueue = async () => {
+    while (engine.peerSignalingQueues.size) {
+      await Promise.all([...engine.peerSignalingQueues.values()]);
+    }
+  };
+
+  test('a later empty receiver must not overwrite the receiving video track', () => {
+    const active = addVideo(pc);
+    addVideo(pc, { muted: true });
+    engine.syncRemoteVideoStream('streamer');
+    assert.equal(store.getState().remoteVideoStreams.streamer.getVideoTracks()[0], active.receiver.track);
+  });
+
+  test('stopped and send-only transceivers must not replace the incoming video', () => {
+    const active = addVideo(pc);
+    addVideo(pc, { direction: 'sendonly' });
+    addVideo(pc).stop();
+    engine.syncRemoteVideoStream('streamer');
+    assert.equal(store.getState().remoteVideoStreams.streamer.getVideoTracks()[0], active.receiver.track);
+  });
+
+  test('the selected receiver remains stable when two receiving tracks are live', () => {
+    const active = addVideo(pc);
+    engine.attachRemoteVideo('streamer', active.receiver.track);
+    addVideo(pc);
+    const initial = store.getState().remoteVideoStreams.streamer;
+    engine.syncRemoteVideoStream('streamer');
+    assert.equal(store.getState().remoteVideoStreams.streamer, initial);
+  });
+
+  test('video binding is independent of browser-owned stream track mutations', () => {
+    const video = addVideo(pc).receiver.track;
+    const browserStream = new MockMediaStream([video]);
+    engine.attachRemoteVideo('streamer', video, browserStream);
+    browserStream.removeTrack(video);
+    assert.equal(store.getState().remoteVideoStreams.streamer.getVideoTracks()[0], video);
+    assert.equal(engine.userScreenStreamIds.get('streamer'), browserStream.id);
+  });
+
+  test('late ontrack from a replaced connection cannot overwrite the current stream', () => {
+    engine.setupPeerHandlers(pc, 'streamer');
+    const lateOnTrack = pc.ontrack;
+    const replacement = new MockRTCPeerConnection();
+    const currentVideo = addVideo(replacement).receiver.track;
+    engine.peerConnections.set('streamer', replacement);
+    engine.attachRemoteVideo('streamer', currentVideo);
+    const oldVideo = addVideo(pc).receiver.track;
+    lateOnTrack({ track: oldVideo, streams: [new MockMediaStream([oldVideo])] });
+    assert.equal(store.getState().remoteVideoStreams.streamer.getVideoTracks()[0], currentVideo);
+  });
+
+  test('a newly arrived video track resynchronizes on unmute', () => {
+    engine.setupPeerHandlers(pc, 'streamer');
+    const transceiver = addVideo(pc, { muted: true });
+    pc.ontrack({ track: transceiver.receiver.track, receiver: transceiver.receiver, streams: [] });
+    let syncs = 0;
+    engine.syncRemoteVideoStream = () => { syncs++; };
+    transceiver.receiver.track.muted = false;
+    assert.equal(syncs, 1);
+  });
+
+  test('missing video receiver and RTP stats trigger bounded recovery without leaving the channel', async () => {
+    for (const time of [0, 5000, 12500]) {
+      setTime(time);
+      engine.checkMediaHealth('streamer', pc, 'p2p', new Map());
+      await drainQueue();
+    }
+    assert.equal(signals.filter(signal => signal.type === 'keyframe').length, 1);
+    assert.equal(signals.filter(signal => signal.type === 'offer').length, 1);
+    assert.equal(engine.peerConnections.get('streamer'), pc);
+    assert.equal(store.getState().activeStreamId, 'streamer');
+  });
+
+  test('a muted receiver with no initial RTP report still recovers', async () => {
+    const video = addVideo(pc, { muted: true }).receiver.track;
+    engine.attachRemoteVideo('streamer', video);
+    for (const time of [0, 5000, 12500]) {
+      setTime(time);
+      engine.checkMediaHealth('streamer', pc, 'p2p', new Map());
+      await drainQueue();
+    }
+    assert.equal(signals.filter(signal => signal.type === 'offer').length, 1);
+  });
+
+  test('decoded video progress cancels initial-frame recovery', () => {
+    const video = addVideo(pc).receiver.track;
+    engine.attachRemoteVideo('streamer', video);
+    for (const [time, frames] of [[0, 0], [4000, 1], [8000, 2], [12500, 3]]) {
+      setTime(time);
+      engine.checkMediaHealth('streamer', pc, 'p2p', new Map([['video', {
+        type: 'inbound-rtp', kind: 'video', trackIdentifier: video.id, framesDecoded: frames
+      }]]));
+    }
+    assert.equal(signals.length, 0);
+  });
+
+  test('preview, stopped streams and intentionally disabled video do not trigger recovery', () => {
+    const video = addVideo(pc).receiver.track;
+    engine.attachRemoteVideo('streamer', video);
+    for (const state of [
+      { activeStreamId: null },
+      { activeStreamId: 'streamer', voiceUsers: [{ id: 'streamer', isStreaming: false }] },
+      { activeStreamId: 'streamer', voiceUsers: [{ id: 'streamer', isStreaming: true }] }
+    ]) {
+      store.setState(state);
+      video.enabled = !state.voiceUsers?.[0]?.isStreaming;
+      for (const time of [0, 5000, 12500]) {
+        setTime(time);
+        engine.checkMediaHealth('streamer', pc, 'p2p', new Map());
+      }
+    }
+    assert.equal(signals.length, 0);
+  });
+
+  test('P2P health checks do not recover video currently received through SFU', () => {
+    const sfuPc = new MockRTCPeerConnection();
+    engine.sfuSubConnections.set('streamer', sfuPc);
+    const video = addVideo(sfuPc).receiver.track;
+    engine.attachRemoteVideo('streamer', video, undefined, true);
+    for (const time of [0, 5000, 12500]) {
+      setTime(time);
+      engine.checkMediaHealth('streamer', pc, 'p2p', new Map());
+    }
+    assert.equal(signals.length, 0);
+  });
+
+  test('an SFU receiver with no RTP stats requests a keyframe then fallback', () => {
+    const sfuPc = new MockRTCPeerConnection();
+    engine.sfuSubConnections.set('streamer', sfuPc);
+    engine.sfuSubEpochs.set('streamer', 1);
+    for (const time of [0, 5000, 12500]) {
+      setTime(time);
+      engine.checkMediaHealth('streamer', sfuPc, 'sfu', new Map());
+    }
+    assert.deepEqual(signals.map(signal => signal.type), ['sfu-keyframe', 'sfu-failure', 'p2p-fallback']);
+  });
+
+  test('an unnegotiated or inactive video receiver is not treated as an incoming stream', () => {
+    for (const direction of [null, 'inactive']) {
+      const transceiver = addVideo(pc);
+      transceiver.currentDirection = direction;
+    }
+    engine.syncRemoteVideoStream('streamer');
+    assert.equal(store.getState().remoteVideoStreams.streamer, undefined);
+  });
+
+  test('recovery queued during an outstanding offer is flushed after its answer', async () => {
+    pc.signalingState = 'have-local-offer';
+    engine.offerEpoch.set('streamer', 1);
+    for (const time of [0, 5000, 12500]) {
+      setTime(time);
+      engine.checkMediaHealth('streamer', pc, 'p2p', new Map());
+      await drainQueue();
+    }
+    assert.equal(signals.filter(signal => signal.type === 'offer').length, 0);
+    assert.equal(engine.pendingIceRestart.has('streamer'), true);
+    await engine.handleAnswer('streamer', JSON.stringify({ type: 'answer', sdp: 'v=0', epoch: 1 }));
+    await drainQueue();
+    assert.equal(signals.filter(signal => signal.type === 'offer').length, 1);
+    assert.equal(engine.pendingIceRestart.has('streamer'), false);
+  });
+
+  test('video arriving after recovery is bound without replacing the voice connection', async () => {
+    for (const time of [0, 5000, 12500]) {
+      setTime(time);
+      engine.checkMediaHealth('streamer', pc, 'p2p', new Map());
+      await drainQueue();
+    }
+    const setRemoteDescription = pc.setRemoteDescription.bind(pc);
+    let video;
+    pc.setRemoteDescription = async description => {
+      await setRemoteDescription(description);
+      video = addVideo(pc).receiver.track;
+    };
+    await engine.handleAnswer('streamer', JSON.stringify({ type: 'answer', sdp: 'v=0', epoch: 1 }));
+    assert.equal(store.getState().remoteVideoStreams.streamer.getVideoTracks()[0], video);
+    assert.equal(engine.peerConnections.get('streamer'), pc);
+    assert.equal(store.getState().activeStreamId, 'streamer');
+  });
+
+  test('a local screen sender on a bundled transport still needs a sending media direction', async () => {
+    const localVideo = new MockMediaStreamTrack({ kind: 'video', muted: false });
+    const transceiver = pc.addTransceiver(localVideo, { direction: 'sendrecv' });
+    engine.localVideoStream = new MockMediaStream([localVideo]);
+    const setRemoteDescription = pc.setRemoteDescription.bind(pc);
+    pc.setRemoteDescription = async description => {
+      await setRemoteDescription(description);
+      transceiver.currentDirection = 'recvonly';
+    };
+    assert.ok(transceiver.sender.transport);
+    await engine.handleOffer('streamer', JSON.stringify({ type: 'offer', sdp: 'v=0', epoch: 1 }));
+    await drainQueue();
+    assert.equal(signals.filter(signal => signal.type === 'answer').length, 1);
+    assert.equal(signals.filter(signal => signal.type === 'offer').length, 1);
+  });
+
+  test('an already negotiated sending screen does not trigger redundant renegotiation', async () => {
+    const localVideo = new MockMediaStreamTrack({ kind: 'video', muted: false });
+    pc.addTransceiver(localVideo, { direction: 'sendrecv' });
+    engine.localVideoStream = new MockMediaStream([localVideo]);
+    await engine.handleOffer('streamer', JSON.stringify({ type: 'offer', sdp: 'v=0', epoch: 1 }));
+    await drainQueue();
+    assert.equal(signals.filter(signal => signal.type === 'offer').length, 0);
+  });
+});
 
 describe('Tier 5: WebRTC Remote Stream & Dynamic Negotiation Lifecycle', () => {
   let store;

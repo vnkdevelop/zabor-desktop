@@ -5592,24 +5592,30 @@ export class WebRTCManager {
   private checkMediaHealth(userId: string, pc: RTCPeerConnection, route: 'p2p' | 'sfu', stats: RTCStatsReport): void {
     const store = useAppStore.getState()
     if (store.activeStreamId !== userId) return
-    const track = store.remoteVideoStreams[userId]?.getVideoTracks()[0]
-    if (!track || !track.enabled || track.readyState !== 'live' || !pc.getReceivers().some(receiver => receiver.track === track)) return
-    let frames = -1
+    const user = store.voiceUsers.find(user => user.id === userId) || (store.currentCallUser?.id === userId ? store.currentCallUser : null)
+    if (!user?.isStreaming) return
+    const currentPc = route === 'sfu' ? this.sfuSubConnections.get(userId) : this.peerConnections.get(userId)
+    if (currentPc !== pc) return
+    const displayedTrack = store.remoteVideoStreams[userId]?.getVideoTracks()[0]
+    if (displayedTrack?.readyState === 'live' && !displayedTrack.enabled) return
+    if (displayedTrack?.readyState === 'live' && !pc.getReceivers().some(receiver => receiver.track === displayedTrack)) return
+    if (!displayedTrack && route === 'p2p' && this.sfuSubConnections.has(userId)) return
+    const track = this.findRemoteVideoReceiver(pc, displayedTrack)?.track
+    let frames = 0
     let bytes = 0
     let packets = 0
     let lost = 0
     stats.forEach(report => {
-      if (report.type !== 'inbound-rtp' || report.kind !== 'video' || report.trackIdentifier && report.trackIdentifier !== track.id) return
+      if (report.type !== 'inbound-rtp' || report.kind !== 'video' || !track || report.trackIdentifier && report.trackIdentifier !== track.id) return
       if (typeof report.framesDecoded === 'number') frames = report.framesDecoded
       bytes = report.bytesReceived ?? 0
       packets = report.packetsReceived ?? 0
       lost = report.packetsLost ?? 0
     })
-    if (frames < 0) return
     let connection = this.diagnosticConnections.get(pc)
     if (!connection) { connection = ++this.nextDiagnosticConnection; this.diagnosticConnections.set(pc, connection) }
     logDiagnostic({ event: 'media', mediaKind: 'video', connection, route, frames, bytes, packets, lost, ultra: this.ultraLowLatency })
-    const action = this.mediaHealth.observe(`${connection}:${track.id}`, frames, performance.now())
+    const action = this.mediaHealth.observe(`${connection}:${track?.id ?? 'pending'}`, frames, performance.now())
     if (action === 'keyframe') {
       logDiagnostic({ event: 'recovery', connection, route, reason: 'keyframe' })
       if (route === 'sfu') void signalRService.sfuRequestKeyframe(userId)
@@ -5653,9 +5659,10 @@ export class WebRTCManager {
 
   private attachRemoteVideo(userId: string, track: MediaStreamTrack, stream?: MediaStream, isSfu = false) {
     if (track.readyState === 'ended') return
-    const videoStream = stream || new MediaStream([track])
+    const videoStream = new MediaStream([track])
     const isControlling = useAppStore.getState().isRemoteControlling && this.controllingStreamerId === userId
     if (!isSfu) {
+      if (stream) this.userScreenStreamIds.set(userId, stream.id)
       this.p2pStreamsBackup.set(userId, videoStream)
       if (!isControlling && this.sfuSubConnections.has(userId) && useAppStore.getState().remoteVideoStreams[userId]) {
         return
@@ -5745,6 +5752,22 @@ export class WebRTCManager {
     this.startStreamSyncMonitoring()
   }
 
+  private findRemoteVideoReceiver(pc: RTCPeerConnection, preferredTrack?: MediaStreamTrack): RTCRtpReceiver | undefined {
+    let selected: RTCRtpReceiver | undefined
+    let selectedScore = -1
+    for (const transceiver of pc.getTransceivers()) {
+      const track = transceiver.receiver.track
+      if (transceiver.stopped || track.kind !== 'video' || track.readyState !== 'live') continue
+      if (transceiver.currentDirection !== 'recvonly' && transceiver.currentDirection !== 'sendrecv') continue
+      const score = (track.muted ? 0 : 2) + (track === preferredTrack ? 1 : 0)
+      if (score > selectedScore) {
+        selected = transceiver.receiver
+        selectedScore = score
+      }
+    }
+    return selected
+  }
+
   public syncRemoteVideoStream(userId: string): void {
     const store = useAppStore.getState()
     const user = store.voiceUsers.find(u => u.id === userId) || (store.currentCallUser?.id === userId ? store.currentCallUser : null)
@@ -5795,13 +5818,16 @@ export class WebRTCManager {
         this.applyVideoZeroPlayoutDelay(receiver)
         if (!track.onunmute) {
           track.onunmute = () => {
-            this.syncRemoteVideoStream(userId)
+            if (this.peerConnections.get(userId) === pc) this.syncRemoteVideoStream(userId)
           }
         }
-        if (isUserStreaming || !track.muted) {
-          this.attachRemoteVideo(userId, track)
-        }
       }
+    }
+
+    const preferredTrack = store.remoteVideoStreams[userId]?.getVideoTracks()[0]
+    const videoReceiver = this.findRemoteVideoReceiver(pc, preferredTrack)
+    if (videoReceiver && (isUserStreaming || !videoReceiver.track.muted)) {
+      this.attachRemoteVideo(userId, videoReceiver.track)
     }
 
     const audioReceivers = pc.getReceivers().filter(r => r.track && r.track.kind === 'audio')
@@ -5848,13 +5874,14 @@ export class WebRTCManager {
         if (track && track.kind === 'video') {
           this.applyVideoZeroPlayoutDelay(transceiver.receiver)
           track.onunmute = () => {
-            this.syncRemoteVideoStream(userId)
+            if (this.peerConnections.get(userId) === pc) this.syncRemoteVideoStream(userId)
           }
         }
       })
     } catch { }
 
     pc.ontrack = (event) => {
+      if (this.peerConnections.get(userId) !== pc) return
       if (userId === useAppStore.getState().currentUser?.id) {
         event.track.stop()
         this.disconnectFromPeer(userId)
@@ -5864,6 +5891,9 @@ export class WebRTCManager {
       this.initOutputMixer()
 
       if (event.track.kind === 'video') {
+        event.track.onunmute = () => {
+          if (this.peerConnections.get(userId) === pc) this.syncRemoteVideoStream(userId)
+        }
         if (event.receiver) {
           this.applyVideoZeroPlayoutDelay(event.receiver)
         }
@@ -7431,11 +7461,12 @@ export class WebRTCManager {
         this.syncRemoteVideoStream(senderId)
 
         if (this.localVideoStream) {
-          const senders = pc.getSenders()
+          const transceivers = pc.getTransceivers()
           const tracks = this.localVideoStream.getTracks()
           const hasUnnegotiated = tracks.some(t => {
-            const s = senders.find(sender => sender.track === t)
-            return !s || !s.transport
+            if (t.readyState !== 'live') return false
+            const transceiver = transceivers.find(transceiver => !transceiver.stopped && transceiver.sender.track === t)
+            return !transceiver || (transceiver.currentDirection !== 'sendonly' && transceiver.currentDirection !== 'sendrecv')
           })
           if (hasUnnegotiated) {
             void this.renegotiatePeer(pc, senderId)
