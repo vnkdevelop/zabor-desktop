@@ -22,7 +22,7 @@ npm-debug.log*
 .temp/
 push.bat
 release.bat
-release-beta.bat
+!release-beta.bat
 build.cmd
 TECHNICAL_DOCUMENTATION.md
 *.tsbuildinfo
@@ -70,4 +70,6 @@ renders/
 tmp/
 temp/
 *.local
+/rust/target/
+/migration-artifacts/
 

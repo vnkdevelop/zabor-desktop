@@ -6,12 +6,28 @@ if (!app || typeof app.whenReady !== 'function') {
   process.exit(1);
 }
 import { join } from 'path';
-import { existsSync, rmSync, readFileSync, writeFileSync, promises as fsPromises } from 'fs';
+import { existsSync, rmSync, readFileSync, writeFileSync, mkdirSync, promises as fsPromises } from 'fs';
 import { createHmac, randomBytes } from 'crypto';
 import { setupUpdater } from './updater';
 import { disposeChatFileWriters, registerChatFileHandlers } from './chatFiles';
 import { RemoteControlSimulatorManager } from './remoteControlSimulator';
 import { DiagnosticLog } from './diagnosticLog';
+import { distributionChannel, distributionProfile } from './updatePolicy';
+
+declare const __ZABOR_DISTRIBUTION_CHANNEL__: string;
+
+const DISTRIBUTION_CHANNEL = typeof __ZABOR_DISTRIBUTION_CHANNEL__ === 'string' && __ZABOR_DISTRIBUTION_CHANNEL__ === 'beta'
+  ? 'beta' : distributionChannel(app.getVersion());
+const DISTRIBUTION_PROFILE = distributionProfile(DISTRIBUTION_CHANNEL);
+
+if (DISTRIBUTION_CHANNEL === 'beta') {
+  app.setName(DISTRIBUTION_PROFILE.profileName);
+  const betaUserData = join(app.getPath('appData'), DISTRIBUTION_PROFILE.profileName);
+  mkdirSync(betaUserData, { recursive: true });
+  app.setPath('userData', betaUserData);
+  app.setPath('sessionData', betaUserData);
+  if (process.platform === 'win32') app.setAppUserModelId(DISTRIBUTION_PROFILE.appId);
+}
 
 declare const __ZABOR_CLIENT_SECRET__: string;
 declare const __ZABOR_CLIENT_CHANNEL__: string;
@@ -388,7 +404,7 @@ function loadAppSettings(): AppSettings {
   return {
     openAtLogin: parsed.openAtLogin !== undefined
       ? parsed.openAtLogin
-      : (isDev ? false : app.getLoginItemSettings({ args: ['--autostart'] }).openAtLogin),
+      : (isDev ? false : app.getLoginItemSettings({ args: ['--autostart'], ...(DISTRIBUTION_CHANNEL === 'beta' ? { name: DISTRIBUTION_PROFILE.profileName } : {}) }).openAtLogin),
     minimizeToTray: parsed.minimizeToTray !== undefined
       ? parsed.minimizeToTray
       : true
@@ -403,12 +419,13 @@ function saveAppSettings(settings: AppSettings): void {
 
 function applyAutoLaunch(enabled: boolean): void {
   if (isDev) {
-    app.setLoginItemSettings({ openAtLogin: false });
+    app.setLoginItemSettings({ openAtLogin: false, ...(DISTRIBUTION_CHANNEL === 'beta' ? { name: DISTRIBUTION_PROFILE.profileName } : {}) });
     return;
   }
   app.setLoginItemSettings({
     openAtLogin: enabled,
     args: enabled ? ['--autostart'] : [],
+    ...(DISTRIBUTION_CHANNEL === 'beta' ? { name: DISTRIBUTION_PROFILE.profileName } : {}),
   });
 }
 

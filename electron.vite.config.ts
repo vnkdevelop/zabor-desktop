@@ -2,11 +2,14 @@ import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import { loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'node:fs'
+import { distributionChannel } from './src/main/updatePolicy'
 
 const fileEnv = loadEnv(process.env.NODE_ENV === 'development' ? 'development' : 'production', process.cwd(), '')
 const clientSecret = process.env.ZABOR_CLIENT_SECRET || fileEnv.ZABOR_CLIENT_SECRET || ''
 const clientChannel =
   process.env.ZABOR_CLIENT_CHANNEL || fileEnv.ZABOR_CLIENT_CHANNEL || (clientSecret ? 'official' : 'unofficial')
+const packageVersion = JSON.parse(readFileSync(resolve('package.json'), 'utf8')).version as string
 
 function relaxCspForDevServer() {
   return {
@@ -24,6 +27,7 @@ export default defineConfig({
     define: {
       __ZABOR_CLIENT_SECRET__: JSON.stringify(clientSecret),
       __ZABOR_CLIENT_CHANNEL__: JSON.stringify(clientChannel),
+      __ZABOR_DISTRIBUTION_CHANNEL__: JSON.stringify(distributionChannel(packageVersion)),
       __ZABOR_UPDATE_SIGNER__: JSON.stringify(
         process.env.ZABOR_UPDATE_SIGNER || fileEnv.ZABOR_UPDATE_SIGNER || ''
       )

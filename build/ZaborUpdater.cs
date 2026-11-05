@@ -15,10 +15,11 @@ namespace ZaborUpdater {
             if (args != null && args.Length > 0) {
                 int.TryParse(args[0], out parentPid);
             }
+            bool beta = args != null && args.Length > 1 && args[1] == "beta";
 
             var app = new Application();
             var window = new Window {
-                Title = "ZaborUpdater",
+                Title = beta ? "ZaborUpdaterBeta" : "ZaborUpdater",
                 WindowStyle = WindowStyle.None,
                 AllowsTransparency = true,
                 Background = Brushes.Transparent,
@@ -120,7 +121,7 @@ namespace ZaborUpdater {
                         foreach (var p in allProcs) {
                             try {
                                 string name = p.ProcessName;
-                                if (name.IndexOf("ZABOR-Setup", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                if (name.IndexOf(beta ? "ZABOR-Beta-Setup" : "ZABOR-Setup", StringComparison.OrdinalIgnoreCase) >= 0 ||
                                     name.IndexOf("Au_", StringComparison.OrdinalIgnoreCase) >= 0) {
                                     setupRunning = true;
                                     break;
@@ -135,7 +136,7 @@ namespace ZaborUpdater {
 
                         // If setup has finished and at least 10s elapsed:
                         if (stopwatch.Elapsed.TotalSeconds > 10) {
-                            var zaborProcs = Process.GetProcessesByName("ZABOR");
+                            var zaborProcs = Process.GetProcessesByName(beta ? "ZABOR-Beta" : "ZABOR");
                             if (zaborProcs != null && zaborProcs.Length > 0) {
                                 bool foundRunningApp = false;
                                 foreach (var zp in zaborProcs) {

@@ -1,6 +1,6 @@
 # Политика в отношении обработки персональных данных ZABOR / ZABOR Privacy Policy
 
-> Редакция от 30 октября 2026 года. Предыдущая редакция — от 20 октября 2026 года.
+> Редакция от 5 ноября 2026 года. Предыдущая редакция — от 30 октября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -91,6 +91,8 @@
 | Данные сессии | файл `session.enc`, шифруется средствами операционной системы | до выхода из учётной записи |
 | Настройки шумоподавления, калибровка звука, достижения, отметки о прочтении | локальное хранилище приложения | до очистки данных приложения |
 | Диагностические события соединений и числовые счётчики медиа | локальный каталог `logs`, файлы `diagnostics.jsonl`, `.1`, `.2` | ротация, не более трёх файлов по 512 КиБ |
+
+Экспериментальная beta-сборка использует отдельный профиль `zabor-desktop-beta` в каталоге данных пользователя Windows. История IndexedDB, каталог `chat-files`, настройки, сессия и ключ переписки находятся внутри этого профиля и автоматически из stable-профиля не копируются. Очистка или удаление beta не удаляет stable-профиль. Срок хранения сообщений остаётся 14 суток от создания. Импорт и обратное слияние профилей пока не реализованы; для испытаний используются отдельные тестовые учётные записи.
 
 Удаление сообщения в интерфейсе удаляет его **на устройстве пользователя**; копия, уже переданная собеседнику, удалению Оператором не подлежит.
 
@@ -233,6 +235,8 @@ Much of the data is processed **locally on the user's device** and never reaches
 | Session data | `session.enc`, encrypted by the operating system | until sign-out |
 | Noise-suppression settings, audio calibration, achievements, read markers | local application storage | until application data is cleared |
 | Connection diagnostic events and numeric media counters | local `logs` directory, `diagnostics.jsonl`, `.1`, `.2` | rotation, at most three files of 512 KiB each |
+
+The experimental beta build uses a separate `zabor-desktop-beta` profile in the Windows user's application-data directory. IndexedDB history, `chat-files`, settings, session data and the messaging key reside within that profile and are not automatically copied from stable. Clearing or uninstalling beta does not delete the stable profile. Message retention remains 14 days from creation. Profile import and reverse merging are not implemented yet; testing uses separate test accounts.
 
 Deleting a message in the interface deletes it **on the user's device**; a copy already delivered to the other participant is not subject to deletion by the Controller.
 

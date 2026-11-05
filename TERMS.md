@@ -1,6 +1,6 @@
 # Условия использования сервиса ZABOR / ZABOR Terms of Service
 
-> Редакция от 30 октября 2026 года. Предыдущая редакция — от 20 октября 2026 года.
+> Редакция от 5 ноября 2026 года. Предыдущая редакция — от 30 октября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 >
@@ -91,6 +91,7 @@
 9. Удаление учётной записи доступно в приложении с подтверждением пользователя, а также по обращению к Оператору.
 10. Состав обрабатываемых данных, цели и правовые основания обработки, сроки хранения и порядок реализации прав субъекта определены в [PRIVACY.md](PRIVACY.md), который является неотъемлемой частью Условий.
 11. При поддержке восстановления обоими клиентами личный звонок может автоматически возобновляться после кратковременного разрыва серверной сессии в пределах 45 секунд. Завершённый пользователем звонок и обычный выход из аккаунта не запускают новый звонок автоматически. Служебный идентификатор и пара участников хранятся в оперативной памяти, без записи содержимого разговора. Локальные диагностические журналы ограничены ротацией и не отправляются Оператору автоматически.
+12. Экспериментальная beta хранит локальные данные отдельно от stable (`zabor-desktop-beta`) и не копирует их автоматически. Очистка и удаление beta не удаляют stable-профиль. Импорт и обратное слияние профилей пока не доступны; раздельные профили не обеспечивают два одновременных входа одного аккаунта на сервере. Срок хранения и правила шифрования не изменяются.
 
 ### 8. Шифрование и недоступность содержимого
 
@@ -217,6 +218,7 @@ Responsibility for content transmitted through the Service rests with the user w
 9. Account deletion is available in the application with user confirmation and on request to the Operator.
 10. The categories of data processed, the purposes and legal bases of processing, retention periods and the procedure for exercising data subject rights are set out in [PRIVACY.md](PRIVACY.md), which forms an integral part of these Terms.
 11. If both clients support recovery, a direct call may automatically resume within 45 seconds after a brief server-session interruption. Explicit termination or normal sign-out does not initiate a new call automatically. The control identifier and participant pair remain in memory without recording conversation contents. Local diagnostic logs are rotated and are not sent to the Operator automatically.
+12. Experimental beta stores local data separately from stable (`zabor-desktop-beta`) and does not copy it automatically. Clearing and uninstalling beta do not delete the stable profile. Profile import and reverse merging are not yet available; separate profiles do not provide two simultaneous server logins for one account. Retention and encryption rules are unchanged.
 
 ### 8. Encryption and unavailability of content
 

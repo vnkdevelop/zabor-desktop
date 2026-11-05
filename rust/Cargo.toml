@@ -1,0 +1,17 @@
+[workspace]
+members = ["crates/zabor-core", "crates/zabor-dsp"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "GPL-3.0-only"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+lto = true
+codegen-units = 1

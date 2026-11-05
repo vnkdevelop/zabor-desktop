@@ -46,6 +46,14 @@ npm run dev
 
 Backend не входит в этот репозиторий.
 
+### Экспериментальная миграция на Rust
+
+Работа ведётся только в `beta/rust-migration`. В `rust/` добавлены собственные `zabor-core` и `zabor-dsp` без сторонних crates. Первый DSP-прототип сравнивается с действующими TypeScript-методами офлайн и пока не включён в поставку или живой медиатракт. React, модели, Chromium WebRTC, .NET backend и Go SFU сохранены.
+
+Beta использует отдельный профиль и канал обновлений; импорт реального stable-профиля пока не поддержан. Состояние этапов, проверки и блокеры: [docs/migration/status.md](docs/migration/status.md).
+
+Rust migration is experimental and restricted to `beta/rust-migration`. The first dependency-free core/DSP crates are tested offline, not enabled in packaged runtime or live media. Beta uses a separate profile/update channel; importing a real stable profile is not supported yet. See the linked status report for gates and blockers.
+
 
 ## Команды
 

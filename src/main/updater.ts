@@ -3,6 +3,19 @@ import { join } from 'path';
 import { createWriteStream, mkdirSync, existsSync, rmSync, createReadStream, writeFileSync, copyFileSync } from 'fs';
 import { spawn, execFile } from 'child_process';
 import { createHash } from 'crypto';
+import { BETA_MANIFEST_NAME, compareVersions, distributionChannel, distributionProfile, isReleaseDownloadUrl, parseVersion, validateBetaManifest } from './updatePolicy';
+
+declare const __ZABOR_DISTRIBUTION_CHANNEL__: string;
+
+function getDistributionChannel() {
+  return typeof __ZABOR_DISTRIBUTION_CHANNEL__ === 'string' && __ZABOR_DISTRIBUTION_CHANNEL__ === 'beta'
+    ? 'beta' as const
+    : distributionChannel(app.getVersion());
+}
+
+function getProfile() {
+  return distributionProfile(getDistributionChannel());
+}
 
 declare const __ZABOR_UPDATE_SIGNER__: string;
 const UPDATE_SIGNER = typeof __ZABOR_UPDATE_SIGNER__ === 'string' ? __ZABOR_UPDATE_SIGNER__ : '';
@@ -45,20 +58,21 @@ const GITHUB_REPO = 'vnkdevelop/zabor-desktop';
 const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 
 function getUpdateTempDir(): string {
-  return join(app.getPath('temp'), 'zabor-update');
+  return join(app.getPath('temp'), getProfile().updateDirectory);
 }
 
 export function cleanUpdateDirectory(): void {
+  if (updateState.status === 'downloading' || updateState.status === 'downloaded' || updateState.status === 'installing') return;
   try {
     const tempDir = getUpdateTempDir();
     if (existsSync(tempDir)) {
       rmSync(tempDir, { recursive: true, force: true });
     }
-    const tempSplash = join(app.getPath('temp'), 'zabor-install-splash.ps1');
+    const tempSplash = join(app.getPath('temp'), getProfile().splashFile);
     if (existsSync(tempSplash)) {
       rmSync(tempSplash, { force: true });
     }
-    const tempExe = join(app.getPath('temp'), 'ZaborUpdater.exe');
+    const tempExe = join(app.getPath('temp'), `${getProfile().updater}.exe`);
     if (existsSync(tempExe)) {
       rmSync(tempExe, { force: true });
     }
@@ -81,20 +95,7 @@ export function scheduleCleanUpdateDirectory(delayMs: number = 3000, retries: nu
 }
 
 export function isNewerVersion(remote: string, current: string): boolean {
-  const cleanRemote = (remote || '').trim().replace(/^v/i, '');
-  const cleanCurrent = (current || '').trim().replace(/^v/i, '');
-
-  const rParts = cleanRemote.split(/[-+]/)[0].split('.').map(n => parseInt(n, 10) || 0);
-  const cParts = cleanCurrent.split(/[-+]/)[0].split('.').map(n => parseInt(n, 10) || 0);
-
-  const maxLen = Math.max(rParts.length, cParts.length);
-  for (let i = 0; i < maxLen; i++) {
-    const r = rParts[i] ?? 0;
-    const c = cParts[i] ?? 0;
-    if (r > c) return true;
-    if (r < c) return false;
-  }
-  return false;
+  return (compareVersions(remote, current || '0.0.0') ?? 0) > 0;
 }
 
 let downloadAbortController: AbortController | null = null;
@@ -124,9 +125,59 @@ function getSnapshot(): UpdateSnapshot {
   };
 }
 
+async function fetchBetaRelease(currentVersion: string): Promise<UpdateInfo | undefined> {
+  const releases: any[] = [];
+  let pageUrl: string | null = `https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100`;
+  let pages = 0;
+  while (pageUrl && pages < 20) {
+    const response = await fetch(pageUrl, {
+      headers: { 'User-Agent': 'zabor-desktop', 'Accept': 'application/vnd.github.v3+json' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!response.ok) throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+    const data: unknown = await response.json();
+    if (!Array.isArray(data)) throw new Error('Invalid GitHub releases list');
+    releases.push(...data.filter(release => release && release.prerelease === true && release.draft !== true &&
+      distributionChannel(release.tag_name) === 'beta' && isNewerVersion(release.tag_name, currentVersion)));
+    const next = /<([^>]+)>;\s*rel="next"/.exec(response.headers.get('link') ?? '')?.[1];
+    if (next && !next.startsWith(`https://api.github.com/repos/${GITHUB_REPO}/releases?`)) throw new Error('Invalid GitHub pagination link');
+    pageUrl = next ?? null;
+    pages++;
+  }
+  if (pageUrl) throw new Error('GitHub release pagination limit reached');
+  releases.sort((a, b) => -(compareVersions(a.tag_name, b.tag_name) ?? 0));
+  for (const release of releases) {
+    const version = parseVersion(release.tag_name)?.normalized;
+    if (!version || !Array.isArray(release.assets)) continue;
+    const asset = release.assets.find((item: any) => item?.name === BETA_MANIFEST_NAME);
+    if (!asset || !isReleaseDownloadUrl(asset.browser_download_url) || asset.size > 65536) continue;
+    const response = await fetch(asset.browser_download_url, { signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error(`Beta manifest error: ${response.status}`);
+    const text = await response.text();
+    if (text.length > 65536) throw new Error('Beta manifest too large');
+    let manifest: unknown;
+    try { manifest = JSON.parse(text); } catch { continue; }
+    if (!validateBetaManifest(manifest, version, process.arch)) continue;
+    const installer = release.assets.find((item: any) => item?.name === manifest.artifact.name && item.size === manifest.artifact.size);
+    if (!installer || !isReleaseDownloadUrl(installer.browser_download_url)) continue;
+    if (typeof installer.digest === 'string' && installer.digest && installer.digest.toLowerCase() !== `sha256:${manifest.artifact.sha256}`) continue;
+    return {
+      version, currentVersion, releaseName: release.name || `zabor ${version}`,
+      releaseNotes: release.body || '', publishedAt: release.published_at || '',
+      downloadUrl: installer.browser_download_url, releaseUrl: release.html_url || `https://github.com/${GITHUB_REPO}/releases`,
+      fileSize: manifest.artifact.size, sha256: manifest.artifact.sha256
+    };
+  }
+  return undefined;
+}
+
 export async function checkGitHubRelease(): Promise<UpdateCheckResult> {
   const currentVersion = app.getVersion();
   try {
+    if (getDistributionChannel() === 'beta') {
+      const updateInfo = await fetchBetaRelease(currentVersion);
+      return { updateAvailable: !!updateInfo, currentVersion, ...(updateInfo ? { updateInfo } : {}) };
+    }
     const response = await fetch(GITHUB_API_URL, {
       headers: {
         'User-Agent': 'zabor-desktop',
@@ -144,10 +195,10 @@ export async function checkGitHubRelease(): Promise<UpdateCheckResult> {
 
     const data = await response.json() as any;
     const tagName = (data.tag_name || '').toString();
-    const isNewer = isNewerVersion(tagName, currentVersion);
+    const isNewer = data.prerelease !== true && data.draft !== true && !parseVersion(tagName)?.prerelease.length && isNewerVersion(tagName, currentVersion);
 
     if (!isNewer) {
-      if (updateState.status !== 'downloading' && updateState.status !== 'installing') {
+      if (updateState.status !== 'downloading' && updateState.status !== 'downloaded' && updateState.status !== 'installing') {
         updateState.status = 'idle';
         updateState.updateInfo = null;
         updateState.progress = null;
@@ -244,6 +295,9 @@ function verifyAuthenticode(filePath: string): Promise<{ valid: boolean; subject
 }
 
 async function verifyInstaller(filePath: string, expectedSha256: string): Promise<{ ok: boolean; reason: string }> {
+  if (getDistributionChannel() === 'beta' && !/^[0-9a-f]{64}$/.test(expectedSha256)) {
+    return { ok: false, reason: 'expected-sha256-missing' };
+  }
   if (expectedSha256) {
     let actual: string;
     try {
@@ -371,15 +425,17 @@ export function launchInstallSplash(): void {
   if (process.platform !== 'win32') return;
 
   try {
+    const profile = getProfile();
+    const splashArgs = [String(process.pid), ...(getDistributionChannel() === 'beta' ? ['beta'] : [])];
     const devPath = join(app.getAppPath(), 'build', 'ZaborUpdater.exe');
-    const prodPath = typeof process.resourcesPath === 'string' ? join(process.resourcesPath, 'ZaborUpdater.exe') : '';
+    const prodPath = typeof process.resourcesPath === 'string' ? join(process.resourcesPath, `${profile.updater}.exe`) : '';
     const updaterExe = (prodPath && existsSync(prodPath)) ? prodPath : existsSync(devPath) ? devPath : null;
 
     if (updaterExe) {
       try {
-        const tempExe = join(app.getPath('temp'), 'ZaborUpdater.exe');
+        const tempExe = join(app.getPath('temp'), `${profile.updater}.exe`);
         copyFileSync(updaterExe, tempExe);
-        const child = spawn(tempExe, [String(process.pid)], {
+        const child = spawn(tempExe, splashArgs, {
           detached: true,
           stdio: 'ignore'
         });
@@ -389,7 +445,7 @@ export function launchInstallSplash(): void {
         child.unref();
         return;
       } catch {
-        const child = spawn(updaterExe, [String(process.pid)], {
+        const child = spawn(updaterExe, splashArgs, {
           detached: true,
           stdio: 'ignore'
         });
@@ -401,8 +457,11 @@ export function launchInstallSplash(): void {
       }
     }
 
-    const scriptPath = join(app.getPath('temp'), 'zabor-install-splash.ps1');
-    writeFileSync(scriptPath, INSTALL_SPLASH_SCRIPT.trim(), 'utf-8');
+    const scriptPath = join(app.getPath('temp'), profile.splashFile);
+    const splashScript = getDistributionChannel() === 'beta'
+      ? INSTALL_SPLASH_SCRIPT.replace(/ZaborUpdater/g, profile.updater).replace(/ZABOR-Setup/g, 'ZABOR-Beta-Setup').replace(/"ZABOR"/g, `"${profile.executable}"`)
+      : INSTALL_SPLASH_SCRIPT;
+    writeFileSync(scriptPath, splashScript.trim(), 'utf-8');
 
     const currentPid = process.pid;
     const child = spawn(
@@ -466,7 +525,7 @@ export function setupUpdater(
       updateState.progress = null;
       updateState.error = null;
     } else if (!result.updateAvailable) {
-      if (updateState.status !== 'downloading' && updateState.status !== 'installing') {
+      if (updateState.status !== 'downloading' && updateState.status !== 'downloaded' && updateState.status !== 'installing') {
         updateState.status = 'idle';
         updateState.updateInfo = null;
         updateState.progress = null;
@@ -505,6 +564,12 @@ export function setupUpdater(
       return { success: false, message: 'Invalid download url' };
     }
 
+    if (getDistributionChannel() === 'beta' && (!isReleaseDownloadUrl(downloadUrl) ||
+      updateState.updateInfo?.downloadUrl !== downloadUrl || updateState.updateInfo.version !== version ||
+      !/^[0-9a-f]{64}$/.test(updateState.updateInfo.sha256))) {
+      return { success: false, message: 'Unverified beta update' };
+    }
+
     cleanUpdateDirectory();
 
     const tempDir = getUpdateTempDir();
@@ -514,12 +579,16 @@ export function setupUpdater(
       }
     } catch {}
 
-    const safeVersion = version ? String(version).replace(/[^a-zA-Z0-9.-]/g, '') : '';
+    const safeVersion = getDistributionChannel() === 'beta'
+      ? parseVersion(version)?.normalized ?? ''
+      : version ? String(version).replace(/[^a-zA-Z0-9.-]/g, '') : '';
     if (!safeVersion) {
       return { success: false, message: 'Invalid version identifier' };
     }
 
-    const fileName = `ZABOR-Setup-${safeVersion}.exe`;
+    const fileName = getDistributionChannel() === 'beta'
+      ? `ZABOR-Beta-Setup-${safeVersion}-${process.arch}.exe`
+      : `ZABOR-Setup-${safeVersion}.exe`;
     const targetPath = join(tempDir, fileName);
 
     updateState.status = 'downloading';
@@ -585,14 +654,15 @@ export function setupUpdater(
         } catch {}
         fileStream = null;
       }
-      cleanUpdateDirectory();
       if (updateState.status === 'downloading') {
         updateState.status = 'error';
         updateState.error = err?.message || 'Download error';
         updateState.progress = null;
+        cleanUpdateDirectory();
         sendToWindow('update-error', err?.message || 'Download error');
         return { success: false, error: err?.message };
       }
+      cleanUpdateDirectory();
       return { success: false };
     }
   });
@@ -618,13 +688,8 @@ export function setupUpdater(
 
     const installerPath = updateState.installerPath;
 
-    launchInstallSplash();
-
     const verification = await verifyInstaller(installerPath, updateState.expectedSha256);
     if (!verification.ok) {
-      try {
-        exec('taskkill /F /IM ZaborUpdater.exe');
-      } catch {}
       updateState.status = 'error';
       updateState.error = `installer-verification-failed:${verification.reason}`;
       updateState.installerPath = null;
@@ -632,6 +697,8 @@ export function setupUpdater(
       sendToWindow('update-error', `installer-verification-failed:${verification.reason}`);
       return { success: false, message: `Installer verification failed: ${verification.reason}` };
     }
+
+    launchInstallSplash();
 
     const installerArgs = ['/S', '--updated', '--keep-app-data', '--force-run'];
 
@@ -716,7 +783,7 @@ export function setupUpdater(
       }
       sendToWindow('update-available', result.updateInfo);
     } else if (!result.updateAvailable) {
-      if (updateState.status !== 'downloading' && updateState.status !== 'installing') {
+      if (updateState.status !== 'downloading' && updateState.status !== 'downloaded' && updateState.status !== 'installing') {
         updateState.status = 'idle';
         updateState.updateInfo = null;
         updateState.progress = null;

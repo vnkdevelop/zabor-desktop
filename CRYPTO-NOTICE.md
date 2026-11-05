@@ -1,6 +1,6 @@
 # Криптография в ZABOR: состав и свойства / ZABOR Cryptography Notice
 
-> Редакция от 30 октября 2026 года. Предыдущая редакция — от 20 октября 2026 года.
+> Редакция от 5 ноября 2026 года. Предыдущая редакция — от 30 октября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -42,6 +42,8 @@
 **Следствие, которое Оператор указывает прямо:** согласование ключей ECDH и проверка отпечатка относятся **только к резервному маршруту**. На прямом маршруте прикладного согласования ключей не происходит, поэтому данная проверка его не защищает; там действует защита транспорта WebRTC. Документ [docs/chat-data-flow.md](docs/chat-data-flow.md) фиксирует это соответствие, а [docs/compliance-checklist.md](docs/compliance-checklist.md) — как открытый вопрос.
 
 ### 4. Границы защитных свойств
+
+Beta использует отдельный локальный профиль `zabor-desktop-beta` с тем же механизмом Electron `safeStorage`. Ключи и доверенные отпечатки stable автоматически не переносятся. Совместимость прямого Rust/DPAPI-импорта с форматом `safeStorage` не подтверждена, такой импорт не включён; испытания проводятся отдельными аккаунтами. Алгоритмы и маршруты шифрования остаются прежними.
 
 Оператор прямо указывает ограничения, чтобы заявления о защите не толковались шире, чем они есть:
 
@@ -112,6 +114,8 @@ Protection differs by route, and the difference is fundamental.
 **A consequence the Controller states expressly:** ECDH key agreement and fingerprint checking apply to the **fallback route only**. On the direct route there is no application-layer key agreement, so this check does not protect it; WebRTC transport protection applies there instead. [docs/chat-data-flow.md](docs/chat-data-flow.md) records this correspondence, and [docs/compliance-checklist.md](docs/compliance-checklist.md) lists it as an open issue.
 
 ### 4. Limits of the protective properties
+
+Beta uses a separate local `zabor-desktop-beta` profile with the same Electron `safeStorage` mechanism. Stable keys and trusted fingerprints are not transferred automatically. Compatibility of direct Rust/DPAPI import with the `safeStorage` format has not been established and such import is not enabled; testing uses separate accounts. Encryption algorithms and routes remain unchanged.
 
 The Controller states these limitations expressly so that protection claims are not read more broadly than they are:
 

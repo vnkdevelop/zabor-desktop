@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Ensure Windows Audio Service is running
         shell: powershell
@@ -63,7 +65,7 @@ jobs:
   release:
     name: Package & Publish Windows Release
     needs: verify
-    if: (github.event_name == 'release' && github.event.action == 'published') || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: ((github.event_name == 'release' && github.event.action == 'published') || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && github.event.release.prerelease != true && !contains(github.ref, '-beta') && !startsWith(github.ref, 'refs/heads/beta/')
     runs-on: windows-latest
 
     steps:

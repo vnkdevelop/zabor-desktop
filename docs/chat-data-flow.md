@@ -1,6 +1,6 @@
 # Карта данных чата и связи ZABOR / ZABOR chat and connection data map
 
-> Редакция от 30 октября 2026 года. Предыдущая редакция — от 20 октября 2026 года.
+> Редакция от 5 ноября 2026 года. Предыдущая редакция — от 30 октября 2026 года.
 > Техническое описание. Русская версия является основной.
 
 Документ описывает, какие данные возникают при работе обмена сообщениями и связи, где они находятся, кому доступны и сколько хранятся. Он предназначен для внутреннего использования, для ответов на обращения пользователей и для подготовки ответов на запросы уполномоченных органов.
@@ -55,6 +55,10 @@
 ---
 
 ## 3. Что хранится на устройстве пользователя
+
+Beta устанавливает `userData` и `sessionData` в отдельный профиль `zabor-desktop-beta` до получения single-instance lock и до чтения настроек. В нём находятся собственные IndexedDB, `chat-files`, настройки, сессия и `chat-identity.enc`; stable-профиль не открывается и не копируется автоматически. Beta-установщик использует отдельные appId, executable, ярлыки и ключ автозапуска; очистка данных ограничена beta-профилем текущего пользователя. Импорт/обратное слияние ещё не включены. Тесты используют отдельные аккаунты: раздельные профили не меняют серверное соответствие user → primary connection.
+
+Beta sets `userData` and `sessionData` to a separate `zabor-desktop-beta` profile before obtaining the single-instance lock or reading settings. It holds its own IndexedDB, `chat-files`, settings, session and `chat-identity.enc`; stable is neither opened nor copied automatically. The beta installer uses separate appId, executable, shortcuts and autostart entry; data clearing is limited to the current user's beta profile. Import/reverse merging is not enabled yet. Tests use separate accounts: profile separation does not change the server's user → primary connection mapping.
 
 | Данные | Место | Срок | Удаляется |
 | --- | --- | --- | --- |

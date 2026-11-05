@@ -1,0 +1,31 @@
+name: Rust migration beta checks
+
+on:
+  push:
+    branches: [beta/rust-migration]
+  pull_request:
+    branches: [beta/rust-migration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:migration
+      - run: npm run test:rust
+      - run: npm run typecheck
+      - run: npm run build
