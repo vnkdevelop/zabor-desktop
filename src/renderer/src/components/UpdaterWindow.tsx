@@ -3,6 +3,15 @@ import { useTranslation } from 'react-i18next';
 import { X, CircleNotch, Warning } from '@phosphor-icons/react';
 import type { UpdateProgress, UpdateStatus } from '../global';
 
+function betaUpdateErrorKey(error: string | null): string | null {
+  if (error === 'Unverified beta update') return 'updater.betaUnverified';
+  if (error === 'Invalid GitHub releases list' || error === 'Invalid GitHub pagination link' ||
+    error === 'GitHub release pagination limit reached' || error === 'Beta manifest too large' ||
+    error?.startsWith('Beta manifest error:')) return 'updater.betaManifestInvalid';
+  if (error?.endsWith('expected-sha256-missing')) return 'updater.checksumMissing';
+  return null;
+}
+
 export const UpdaterWindow: React.FC = () => {
   const { t } = useTranslation();
   const [status, setStatus] = useState<UpdateStatus>('downloading');
@@ -140,6 +149,8 @@ export const UpdaterWindow: React.FC = () => {
   const percent = Math.min(100, Math.max(0, progress.percent || 0));
   const cleanVersion = version ? version.replace(/^v/i, '') : '';
   const displayVersion = cleanVersion ? `${t('updater.version', 'версия')} ${cleanVersion}` : '';
+  const errorKey = betaUpdateErrorKey(error);
+  const displayError = errorKey ? t(errorKey) : error;
 
   return (
     <div
@@ -176,7 +187,7 @@ export const UpdaterWindow: React.FC = () => {
             </div>
 
             <div className="glass-field rounded-xl p-3 text-xs text-textMuted/90 break-words max-h-[72px] overflow-y-auto leading-relaxed border border-danger/30">
-              {error || t('updater.errorUnknown', 'произошла непредвиденная ошибка')}
+              {displayError || t('updater.errorUnknown', 'произошла непредвиденная ошибка')}
             </div>
 
             <div className="flex items-center justify-end gap-2.5 title-no-drag">

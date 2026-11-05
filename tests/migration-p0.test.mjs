@@ -10,6 +10,7 @@ import { validateReleaseState } from '../scripts/release-guard.mjs';
 import { createMockFetchResponse } from './helpers/fixtures.mjs';
 import { createHash } from 'node:crypto';
 import { spawnedProcesses, resetSpawnedProcesses } from './helpers/child-process-mock.mjs';
+import ts from 'typescript';
 
 const originalFetch = globalThis.fetch;
 const current = '3.7.2-beta.rust.1';
@@ -47,6 +48,33 @@ test('malformed versions fail closed without coercion', () => {
     assert.equal(parseVersion(value), null, value);
     assert.equal(isNewerVersion(value, '1.0.0'), false, value);
   }
+});
+
+test('new beta failures use bilingual lowercase translations without changing legacy errors', () => {
+  const text = readFileSync('src/renderer/src/components/UpdaterWindow.tsx', 'utf8');
+  const source = ts.createSourceFile('UpdaterWindow.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const node = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'betaUpdateErrorKey');
+  assert.ok(node?.body);
+  const keyForError = new Function('error', node.body.getText(source).slice(1, -1));
+  const cases = [
+    ['Unverified beta update', 'betaUnverified'],
+    ['Invalid GitHub releases list', 'betaManifestInvalid'],
+    ['Invalid GitHub pagination link', 'betaManifestInvalid'],
+    ['GitHub release pagination limit reached', 'betaManifestInvalid'],
+    ['Beta manifest too large', 'betaManifestInvalid'],
+    ['Beta manifest error: 404', 'betaManifestInvalid'],
+    ['installer-verification-failed:expected-sha256-missing', 'checksumMissing']
+  ];
+  for (const [error, key] of cases) {
+    assert.equal(keyForError(error), `updater.${key}`);
+    for (const language of ['ru', 'en']) {
+      const value = JSON.parse(readFileSync(`src/renderer/src/locales/${language}.json`, 'utf8')).updater[key];
+      assert.equal(typeof value, 'string');
+      assert.equal(value, value.toLowerCase());
+    }
+  }
+  assert.equal(keyForError(null), null);
+  assert.equal(keyForError('existing legacy error'), null);
 });
 
 test('stable and beta profiles have distinct resource names', () => {
