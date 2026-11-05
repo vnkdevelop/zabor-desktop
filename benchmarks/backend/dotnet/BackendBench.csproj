@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ZaborBackendRoot)/src/Zabor.Core/Security/EncryptionService.cs" Link="Legacy/EncryptionService.cs" />
+    <Compile Include="$(ZaborBackendRoot)/src/Zabor.Server/Services/CallSessionRegistry.cs" Link="Legacy/CallSessionRegistry.cs" />
+  </ItemGroup>
+  <Target Name="ValidateBackendSource" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(ZaborBackendRoot)' == ''" Text="ZaborBackendRoot must identify the read-only backend source directory." />
+  </Target>
+</Project>

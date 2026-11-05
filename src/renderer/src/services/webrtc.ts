@@ -3415,9 +3415,10 @@ export class WebRTCManager {
   }
 
   public async prepareMicTest(): Promise<void> {
+    let ctx: AudioContext | null = null
     try {
       if (!await this.prewarmLocalStream()) return
-      const ctx = this.processedContext
+      ctx = this.processedContext
       if (!ctx || ctx.state === 'closed') return
       await this.ensureMicTestCaptureModule(ctx)
     } catch (error) {
@@ -4785,7 +4786,7 @@ export class WebRTCManager {
   }
 
   private onRemoteControlMessage(userId: string, data: unknown): void {
-    let buffer: ArrayBuffer | null = null
+    let buffer: ArrayBufferLike | null = null
     if (data instanceof ArrayBuffer) {
       buffer = data
     } else if (ArrayBuffer.isView(data)) {
@@ -6684,7 +6685,7 @@ export class WebRTCManager {
         const offer = await pc.createOffer(
           needsIceRestart ? SILENCE_SUPPRESSION_OFF_WITH_ICE_RESTART : SILENCE_SUPPRESSION_OFF
         )
-        if (this.peerConnections.get(userId) !== pc || pc.signalingState === 'closed' || pc.connectionState === 'closed') {
+        if (this.peerConnections.get(userId) !== pc || (pc.signalingState as RTCSignalingState) === 'closed' || (pc.connectionState as RTCPeerConnectionState) === 'closed') {
           this.pendingRenegotiation.delete(userId)
           this.pendingIceRestart.delete(userId)
           return

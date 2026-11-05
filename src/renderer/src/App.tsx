@@ -511,6 +511,12 @@ export default function App() {
   const [editChannelName, setEditChannelName] = useState('');
   const [editChannelId, setEditChannelId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (store.modals.channelEdit && editChannelId && !store.channels.some(channel => channel.id === editChannelId)) {
+      store.setModal('channelEdit', false);
+    }
+  }, [store.modals.channelEdit, store.channels, store.setModal, editChannelId]);
+
   const [friendName, setFriendName] = useState('');
   const [friendRequestStatus, setFriendRequestStatus] = useState<'idle' | 'loading' | 'sent' | 'notfound' | 'alreadyfriend'>('idle');
   const [profileFriendRequestStatus, setProfileFriendRequestStatus] = useState<'idle' | 'loading' | 'sent'>('idle');
@@ -3351,7 +3357,7 @@ export default function App() {
                     const isRcPermitted = streamerUser && streamerUser.streamQuality !== 'camera' && (
                       streamerUser.allowRemoteControl === true ||
                       (streamerUser.allowRemoteControl !== false && streamerUser.streamQuality === 'medium') ||
-                      store.remoteStreamsAllowControl?.[store.activeStreamId] === true
+                      store.remoteStreamsAllowControl?.[streamerUser.id] === true
                     );
                     const normalMaxW = windowSize.width - 40;
                     const normalMaxH = windowSize.height - 140;
@@ -3649,7 +3655,7 @@ export default function App() {
                     const isRcPermitted = streamerUser && streamerUser.streamQuality !== 'camera' && (
                       streamerUser.allowRemoteControl === true ||
                       (streamerUser.allowRemoteControl !== false && streamerUser.streamQuality === 'medium') ||
-                      store.remoteStreamsAllowControl?.[store.activeStreamId] === true
+                      store.remoteStreamsAllowControl?.[streamerUser.id] === true
                     );
                     const normalMaxW = windowSize.width - 40;
                     const normalMaxH = windowSize.height - 140;

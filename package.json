@@ -8,6 +8,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:migration": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/helpers/register-hooks.mjs --test --test-concurrency=1 tests/migration-p0.test.mjs",
+    "test:readiness": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/migration-p0-readiness.test.mjs",
     "test:rust": "node scripts/check-rust.mjs",
     "migration:inventory": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/migration-inventory.mjs",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/helpers/register-hooks.mjs --test --test-concurrency=1 tests/tier1-feature-coverage.test.mjs tests/tier2-boundary-corner-cases.test.mjs tests/tier3-cross-feature-combinations.test.mjs tests/tier4-real-world-lifecycle.test.mjs tests/tier5-webrtc-stream-lifecycle.test.mjs tests/tier6-audio-devices-microphone.test.mjs tests/tier7-webrtc-vad-hierarchy.test.mjs tests/tier8-remote-control.test.mjs",

@@ -72,4 +72,7 @@ temp/
 *.local
 /rust/target/
 /migration-artifacts/
+/benchmarks/backend/.build/
+/benchmarks/backend/rust/target/
+**/__pycache__/
 

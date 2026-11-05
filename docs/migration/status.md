@@ -12,6 +12,8 @@
 - Backend-каталог по-прежнему не является Git-репозиторием. До его изменения нужен отдельный проверенный checkpoint; исходники обследованы только для карты контрактов.
 - Production-серверы, .NET backend и Go SFU не менялись.
 
+Последующий checkpoint в изолированной ветке `rust/p0-backend-bench`: [P0 readiness](p0-readiness-backend-experiment.md). В нём закрыты перечисленные ниже исторические renderer type blockers и выполнен [сравнительный backend-kernel эксперимент](backend-rust-benchmark-2026-11-05.md). Открытая сборка из `beta/rust-migration` не заменяется автоматически; этот документ сохраняет результаты первого checkpoint отдельно от последующих gates.
+
 ## Выполнено
 
 1. Использованы оба графа знаний, затем выполнена структурная инвентаризация desktop/backend. `migration-artifacts/inventory.json` содержит актуальные количества и пути исходников (включая Rust), символы, IPC/SignalR/UI/test вызовы, хеши assets/существующих установщиков и обоих lock-файлов. Динамические вызовы явно помечены; это навигационный каталог, не доказательство функционального паритета.
@@ -66,5 +68,7 @@ npm run dist:win:beta
 `dist:win:beta` требует чистой проверенной beta-ветки; build-generated изменения двух существующих C# helper binaries допускаются только при последующей сверке manifest. `npm run release:beta` дополнительно требует всех проверок, доступа к GitHub и публикует prerelease. В ходе этого checkpoint release publishing не выполняется.
 
 ## English summary
+
+A later isolated `rust/p0-backend-bench` checkpoint closes the historical renderer type blockers and records a completed backend-kernel comparison. See the linked readiness and measurement reports above. It does not automatically replace the currently open beta build or complete the remaining migration gates.
 
 The migration has started on an isolated beta branch from the stable baseline. P0 is **in progress**, not accepted. Beta channel/profile separation and dependency-free Rust core/DSP prototypes are implemented. Existing desktop tests and native DSP parity tests pass; the actual main typecheck, Electron build and local NSIS packaging/manifest verification pass. The installer was neither installed nor published. The actual renderer typecheck exposes pre-existing errors and blocks publishing. Import/reverse merging, real Windows install/uninstall, mixed-client media and performance acceptance remain pending. Rust is not enabled in the live or packaged media path. UI styling and existing copy are preserved; new beta failures have lowercase RU/EN translations. Codecs/models, storage format, .NET backend and Go SFU remain unchanged. No release or production cutover was performed.

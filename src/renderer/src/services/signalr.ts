@@ -718,10 +718,6 @@ class SignalRService {
         store().setSelectedChannelForInvite(null);
         store().setModal('inviteToChannel', false);
       }
-      if (s.channelEdit?.id === channelId) {
-        store().setChannelEdit(null);
-        store().setModal('editChannel', false);
-      }
       if (s.incomingChannelInvite?.channelId === channelId) {
         store().setIncomingChannelInvite(null);
         store().setModal('incomingChannelInvite', false);
@@ -2244,7 +2240,7 @@ class SignalRService {
   public async sfuViewerReady(streamerId: string, epoch: number): Promise<void> {
     if (this.isSessionReady()) await this.connection?.send('SfuViewerReady', streamerId, epoch).catch(() => {});
   }
-  public async sfuRequestKeyframe(streamerId: string): void | Promise<void> {
+  public async sfuRequestKeyframe(streamerId: string): Promise<void> {
     if (this.sessionReady && this.isConnected()) {
       await this.connection?.send("SfuRequestKeyframe", streamerId).catch(() => { });
     }

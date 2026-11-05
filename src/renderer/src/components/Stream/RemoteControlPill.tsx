@@ -31,7 +31,7 @@ export const RemoteControlPill = () => {
 
   return (
     <div
-      style={{ WebkitAppRegion: 'no-drag' as any }}
+      style={{ WebkitAppRegion: 'no-drag' }}
       className="title-no-drag fixed top-2 left-1/2 -translate-x-1/2 z-[999999] pointer-events-none select-none flex items-center gap-2 px-3 py-1 rounded-full bg-[#161618]/90 backdrop-blur-xl border border-white/[0.08] border-t-white/[0.14]"
     >
       <div className="w-1.5 h-1.5 rounded-full bg-white shrink-0" />

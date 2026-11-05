@@ -26,5 +26,5 @@
     },
     "types": ["node"]
   },
-  "include": ["src/renderer/src/**/*"]
+  "include": ["src/renderer/src/**/*", "src/shared/**/*"]
 }

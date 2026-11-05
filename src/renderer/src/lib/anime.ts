@@ -114,7 +114,13 @@ const createTimeline: typeof animeCreateTimeline = (parameters?: any) => {
   return tl
 }
 
-const utils = {
+type SafeAnimeUtils = Omit<typeof animeUtils, 'set' | 'remove' | 'cleanInlineStyles'> & {
+  set: (targets: any, parameters: any) => ReturnType<typeof animeUtils.set> | undefined
+  remove: (targets: any) => ReturnType<typeof animeUtils.remove> | undefined
+  cleanInlineStyles: (targets: any) => ReturnType<typeof animeUtils.cleanInlineStyles> | undefined
+}
+
+const utils: SafeAnimeUtils = {
   ...animeUtils,
   set: (targets: any, parameters: any) => {
     const sanitized = sanitizeTargets(targets)

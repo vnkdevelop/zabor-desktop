@@ -161,7 +161,7 @@ export class RemoteControlProtocol {
   private static keyBuf = new ArrayBuffer(4);
   private static keyDv = new DataView(RemoteControlProtocol.keyBuf);
 
-  private static singleByteBufs = new Map<number, Uint8Array>([
+  private static singleByteBufs = new Map<number, Uint8Array<ArrayBuffer>>([
     [RC_OP_PING, new Uint8Array([RC_OP_PING])],
     [RC_OP_HOST_ACTIVE, new Uint8Array([RC_OP_HOST_ACTIVE])],
     [RC_OP_HOST_IDLE, new Uint8Array([RC_OP_HOST_IDLE])],
@@ -179,7 +179,7 @@ export class RemoteControlProtocol {
     return this.moveBuf;
   }
 
-  public static encodeMouseButton(button: number, down: boolean): Uint8Array {
+  public static encodeMouseButton(button: number, down: boolean): Uint8Array<ArrayBuffer> {
     this.btnBuf[0] = down ? RC_OP_MOUSE_DOWN : RC_OP_MOUSE_UP;
     this.btnBuf[1] = button & 0xff;
     return this.btnBuf;
@@ -199,7 +199,7 @@ export class RemoteControlProtocol {
     return this.keyBuf;
   }
 
-  public static encodeSignal(opcode: number): Uint8Array {
+  public static encodeSignal(opcode: number): Uint8Array<ArrayBuffer> {
     return this.singleByteBufs.get(opcode) || new Uint8Array([opcode]);
   }
 }
