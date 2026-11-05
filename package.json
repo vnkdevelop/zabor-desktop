@@ -1,11 +1,11 @@
 {
   "name": "zabor-desktop",
-  "version": "3.7.2-beta.rust.1",
+  "version": "3.7.2-beta.rust.2",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
   "author": "vnkdevelop",
   "license": "GPL-3.0-only",
-  "zaborRuntime": { "rustVoicing": false },
+  "zaborRuntime": { "rustVoicing": true },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:migration": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/helpers/register-hooks.mjs --test --test-concurrency=1 tests/migration-p0.test.mjs",

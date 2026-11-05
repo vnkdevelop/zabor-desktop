@@ -18,7 +18,15 @@ const git = (...args) => execFileSync('git', args, { encoding: 'utf8', windowsHi
 function githubRelease(tag) {
   const result = spawnSync('gh', ['api', `repos/${repository}/releases/tags/${encodeURIComponent(tag)}`], { encoding: 'utf8', windowsHide: true });
   if (result.status === 0) return JSON.parse(result.stdout);
-  if (result.stderr?.includes('404')) return null;
+  if (result.stderr?.includes('404')) {
+    for (let page = 1; page <= 20; page++) {
+      const releases = JSON.parse(execFileSync('gh', ['api', `repos/${repository}/releases?per_page=100&page=${page}`], { encoding: 'utf8', windowsHide: true }));
+      const found = releases.find(release => release.tag_name === tag);
+      if (found) return found;
+      if (releases.length < 100) return null;
+    }
+    throw new Error('Release lookup pagination limit reached');
+  }
   throw new Error('GitHub release lookup failed');
 }
 
