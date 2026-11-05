@@ -17,14 +17,15 @@ export async function writeBetaManifest() {
   for await (const chunk of createReadStream(installer)) hash.update(chunk);
   const { extractFile } = require('@electron/asar');
   const bundled = JSON.parse(extractFile(join(directory, 'win-unpacked/resources/app.asar'), 'package.json').toString('utf8'));
-  if (bundled.version !== state.version || bundled.zaborBuild?.commit !== state.commit || bundled.zaborBuild?.channel !== 'beta') {
+  if (bundled.version !== state.version || bundled.zaborBuild?.commit !== state.commit || bundled.zaborBuild?.channel !== 'beta' ||
+    bundled.zaborBuild?.runtime?.rustVoicing !== bundled.zaborRuntime?.rustVoicing) {
     throw new Error('Packaged application does not match beta commit/version/channel');
   }
   const manifest = {
     manifestVersion: 1, channel: 'beta', version: state.version, commit: state.commit,
     platform: 'win32', architecture: 'x64', dataSchema: LOCAL_DATA_SCHEMA,
     minimumDataSchema: LOCAL_DATA_SCHEMA, maximumDataSchema: LOCAL_DATA_SCHEMA,
-    enabledModules: [], artifact: { name, size: statSync(installer).size, sha256: hash.digest('hex') }
+    enabledModules: bundled.zaborRuntime?.rustVoicing === true ? ['rust_voicing'] : [], artifact: { name, size: statSync(installer).size, sha256: hash.digest('hex') }
   };
   writeFileSync(join(directory, BETA_MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;

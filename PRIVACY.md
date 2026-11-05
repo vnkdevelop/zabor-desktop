@@ -1,6 +1,6 @@
 # Политика в отношении обработки персональных данных ZABOR / ZABOR Privacy Policy
 
-> Редакция от 5 ноября 2026 года. Предыдущая редакция — от 30 октября 2026 года.
+> Редакция от 6 ноября 2026 года. Предыдущая редакция — от 5 ноября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -80,6 +80,8 @@
 Оператор не использует данные для рекламы, профилирования, таргетинга и не принимает основанных на них автоматизированных решений, порождающих юридические последствия.
 
 ### 6. Обработка данных на устройстве пользователя
+
+Клиентский Rust WASM-модуль voicing выполняет локальные математические вычисления внутри AudioWorklet. Он не добавляет сохранение или передачу записи микрофона, новые внешние службы или телеметрию. Новые установщики по умолчанию сохраняют локальные данные; явная очистка относится только к выбранному каналу и не удаляет соседний stable/beta-профиль.
 
 Значительная часть данных обрабатывается **локально на устройстве пользователя** и Оператору не передаётся:
 
@@ -224,6 +226,8 @@ Processing is carried out for the following purposes:
 The Controller does not use the data for advertising, profiling or targeting, and does not take automated decisions producing legal effects.
 
 ### 6. Processing on the user's device
+
+The client Rust WASM voicing module performs local mathematical work inside the AudioWorklet. It adds no microphone recording storage/transmission, external service or telemetry. New installers preserve local data by default; explicit clearing applies only to the selected channel and does not remove the neighboring stable/beta profile.
 
 Much of the data is processed **locally on the user's device** and never reaches the Controller:
 

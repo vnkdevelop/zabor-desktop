@@ -39,8 +39,6 @@ if %errorlevel% neq 0 (
 )
 
 :: Read version from package.json
-node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release-guard.mjs beta
-if errorlevel 1 exit /b 1
 
 :: Build
 echo Verification, packaging and publishing are handled by the beta-only pipeline.
@@ -50,5 +48,5 @@ echo Verification, packaging and publishing are handled by the beta-only pipelin
 :: Commit and Push
 
 :: Create GitHub Release
-node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/publish-beta.mjs
+node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.mjs beta %*
 exit /b %errorlevel%

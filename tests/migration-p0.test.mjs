@@ -11,6 +11,8 @@ import { createMockFetchResponse } from './helpers/fixtures.mjs';
 import { createHash } from 'node:crypto';
 import { spawnedProcesses, resetSpawnedProcesses } from './helpers/child-process-mock.mjs';
 import ts from 'typescript';
+import { execFileSync } from 'node:child_process';
+import { releaseChannelForBranch, suggestReleaseVersion, validateReleaseVersion } from '../scripts/release-plan.mjs';
 
 const originalFetch = globalThis.fetch;
 const current = '3.7.2-beta.rust.1';
@@ -104,7 +106,7 @@ test('beta cleanup never removes the neighboring stable updater resources', () =
 
 test('manifest binds channel, schema, architecture, artifact and checksum', () => {
   assert.equal(validateBetaManifest(manifest(), version, process.arch), true);
-  for (const patch of [{ channel: 'stable' }, { version: current }, { architecture: 'other' }, { minimumDataSchema: 2 }, { maximumDataSchema: 0 }, { dataSchema: 2 }, { enabledModules: ['rust_storage'] }, { commit: 'main' }]) {
+  for (const patch of [{ channel: 'stable' }, { version: current }, { architecture: 'other' }, { minimumDataSchema: 2 }, { maximumDataSchema: 0 }, { dataSchema: 0 }, { enabledModules: ['invalid module'] }, { commit: 'main' }]) {
     assert.equal(validateBetaManifest({ ...manifest(), ...patch }, version, process.arch), false);
   }
   for (const patch of [{ name: 'setup.exe' }, { sha256: '' }, { size: -1 }]) {
@@ -112,6 +114,62 @@ test('manifest binds channel, schema, architecture, artifact and checksum', () =
   }
   assert.equal(isReleaseDownloadUrl(`${prefix}v${version}/file.exe`), true);
   for (const url of ['https://evil.test/file.exe', `${prefix}../file.exe`, `${prefix}v1/file.exe?redirect=1`]) assert.equal(isReleaseDownloadUrl(url), false);
+});
+
+test('old beta updater receives the honest legacy bridge before Rust-enabled beta', async () => {
+  const old = execFileSync('git', ['show', '9e9f796:src/main/updatePolicy.ts'], { encoding: 'utf8' });
+  const code = ts.transpileModule(old, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  const previous = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+  const bridgeVersion = '3.7.2-beta.rust.1';
+  const rustVersion = '3.7.2-beta.rust.2';
+  const bridge = { ...manifest(), version: bridgeVersion, artifact: { ...manifest().artifact, name: `ZABOR-Beta-Setup-${bridgeVersion}-${process.arch}.exe` } };
+  const rust = { ...bridge, version: rustVersion, enabledModules: ['rust_voicing'], artifact: { ...bridge.artifact, name: `ZABOR-Beta-Setup-${rustVersion}-${process.arch}.exe` } };
+  assert.equal(previous.validateBetaManifest(bridge, bridgeVersion, process.arch), true);
+  assert.equal(previous.validateBetaManifest(rust, rustVersion, process.arch), false);
+  assert.equal(validateBetaManifest(rust, rustVersion, process.arch), true);
+  assert.equal(validateBetaManifest({ ...rust, enabledModules: ['future_client_module'], dataSchema: 2 }, rustVersion, process.arch), true);
+  assert.equal(validateBetaManifest({ ...rust, minimumDataSchema: 2 }, rustVersion, process.arch), false);
+  assert.equal(validateBetaManifest({ ...rust, enabledModules: ['rust_voicing', 'rust_voicing'] }, rustVersion, process.arch), false);
+});
+
+test('one-click release planning respects branches, SemVer counters and occupied versions', () => {
+  assert.equal(releaseChannelForBranch('main'), 'stable');
+  assert.equal(releaseChannelForBranch('beta/rust-migration'), 'beta');
+  assert.throws(() => releaseChannelForBranch('rust/client-beta'));
+  assert.throws(() => releaseChannelForBranch('main', 'beta'));
+  assert.equal(suggestReleaseVersion('3.7.2-beta.rust.9', 'beta', true), '3.7.2-beta.rust.10');
+  assert.equal(suggestReleaseVersion('3.7.2-beta.rust.2', 'stable'), '3.7.2');
+  assert.equal(suggestReleaseVersion('3.7.2-beta.rust.2', 'stable', true), '3.7.3');
+  assert.equal(suggestReleaseVersion('3.7.2', 'beta'), '3.7.3-beta.rust.1');
+  assert.doesNotThrow(() => validateReleaseVersion('3.7.2', '3.7.2-beta.rust.2', 'stable'));
+  assert.throws(() => validateReleaseVersion('3.7.1', '3.7.2', 'stable'));
+  for (const file of ['release.bat', 'release-beta.bat', 'scripts/release.mjs']) {
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /git add \.|--autostash|--rebase/);
+  }
+  const installer = readFileSync('build/installer-stable.nsh', 'utf8');
+  assert.doesNotMatch(installer, /zabor-desktop-beta|ZABOR-Beta\.exe|Temp\\zabor\*/);
+  assert.doesNotMatch(readFileSync('.github/workflows/build.yml', 'utf8'), /softprops\/action-gh-release/);
+});
+
+test('cancel/retry waits for the previous update writer and cannot be overwritten by a late completion', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  app.setVersion('3.7.1');
+  const { setupUpdater } = await import('../src/main/updater.ts?cancel-retry-owner');
+  setupUpdater(() => new MockBrowserWindow());
+  const url = `${prefix}v3.7.2/ZABOR-Setup-3.7.2.exe`;
+  let finishFetch;
+  globalThis.fetch = () => new Promise(resolve => { finishFetch = resolve; });
+  const first = ipcRenderer.invoke('start-update-download', url, '3.7.2');
+  assert.equal(await ipcRenderer.invoke('cancel-update-download'), true);
+  const premature = await ipcRenderer.invoke('start-update-download', url, '3.7.2');
+  assert.equal(premature.success, false);
+  assert.equal(premature.message, 'Already downloading');
+  finishFetch(createMockFetchResponse({ bodyStream: new ReadableStream({ start(controller) { controller.close(); } }) }));
+  assert.equal((await first).success, false);
+  globalThis.fetch = async () => createMockFetchResponse({ contentLength: 3, bodyStream: new ReadableStream({ start(controller) { controller.enqueue(Buffer.from([1, 2, 3])); controller.close(); } }) });
+  const next = await ipcRenderer.invoke('start-update-download', url, '3.7.2');
+  assert.equal(next.success, true);
+  assert.equal((await ipcRenderer.invoke('get-update-status')).status, 'downloaded');
 });
 
 test('beta discovery follows pagination and never uses releases/latest', async () => {
@@ -152,6 +210,24 @@ test('beta rejects missing or incompatible manifests and GitHub checksum mismatc
 test('stable never offers a prerelease returned by an unexpected API response', async () => {
   app.setVersion('3.7.1');
   globalThis.fetch = async () => createMockFetchResponse({ jsonBody: release() });
+  assert.equal((await checkGitHubRelease()).updateAvailable, false);
+});
+
+test('modern stable manifest selects the exact installer and binds schema/checksum without confusing helpers', async () => {
+  app.setVersion('3.7.1');
+  const stableVersion = '3.7.2';
+  const stableManifest = { ...manifest(), channel: 'stable', version: stableVersion, artifact: { ...manifest().artifact, name: `ZABOR-Setup-${stableVersion}.exe` } };
+  const api = { tag_name: `v${stableVersion}`, prerelease: false, assets: [
+    { name: 'ZaborHelper.exe', size: 10, browser_download_url: `${prefix}v${stableVersion}/ZaborHelper.exe` },
+    { name: stableManifest.artifact.name, size: 100, digest: `sha256:${stableManifest.artifact.sha256}`, browser_download_url: `${prefix}v${stableVersion}/${stableManifest.artifact.name}` },
+    { name: 'zabor-stable-manifest.json', size: 500, browser_download_url: `${prefix}v${stableVersion}/zabor-stable-manifest.json` }
+  ] };
+  globalThis.fetch = async url => createMockFetchResponse({ jsonBody: url.includes('api.github.com') ? api : stableManifest });
+  const result = await checkGitHubRelease();
+  assert.equal(result.updateAvailable, true);
+  assert.ok(result.updateInfo.downloadUrl.endsWith(stableManifest.artifact.name));
+  assert.equal(result.updateInfo.sha256, stableManifest.artifact.sha256);
+  api.assets[1].digest = `sha256:${'e'.repeat(64)}`;
   assert.equal((await checkGitHubRelease()).updateAvailable, false);
 });
 

@@ -48,11 +48,13 @@ Backend не входит в этот репозиторий.
 
 ### Экспериментальная миграция на Rust
 
-Работа ведётся только в `beta/rust-migration`. В `rust/` добавлены собственные `zabor-core` и `zabor-dsp` без сторонних crates. Первый DSP-прототип сравнивается с действующими TypeScript-методами офлайн и пока не включён в поставку или живой медиатракт. React, модели, Chromium WebRTC, .NET backend и Go SFU сохранены.
+Работа ведётся через `beta/rust-migration` и её изолированные рабочие ветки. Первый клиентский Rust-модуль — voicing autocorrelation — выполняется в WASM внутри существующего AudioWorklet, с фиксированной памятью и совместимым legacy fallback. Это частичный перенос DSP, не полностью нативный клиент: React, Electron, модели и Chromium WebRTC сохранены. Перепись backend на Rust отменена владельцем; .NET backend и Go SFU остаются прежними.
 
 Beta использует отдельный профиль и канал обновлений; импорт реального stable-профиля пока не поддержан. Состояние этапов, проверки и блокеры: [docs/migration/status.md](docs/migration/status.md).
 
-Rust migration is experimental and restricted to `beta/rust-migration`. The first dependency-free core/DSP crates are tested offline, not enabled in packaged runtime or live media. Beta uses a separate profile/update channel; importing a real stable profile is not supported yet. See the linked status report for gates and blockers.
+Rust migration is experimental on the beta branch and its work branches. The first block-based voicing module runs as WASM inside the existing AudioWorklet with fixed memory and a legacy fallback; this is not a fully native shell/media client. React, Electron, models, Chromium WebRTC, .NET backend and Go SFU are retained. The owner cancelled the Rust backend rewrite. Beta uses a separate profile/update channel; importing a real stable profile is not supported yet.
+
+Выпуск и проверки двух устройств: [docs/migration/client-beta-testing.md](docs/migration/client-beta-testing.md). `release.bat` выбирает stable на `main` и beta на `beta/rust-migration`; `release-beta.bat` принудительно выбирает beta. Они не используют автоматический `git add .`, stash/rebase или неизвестную ветку. Переход в main выполняется отдельно после явного подтверждения тестов владельцем.
 
 
 ## Команды

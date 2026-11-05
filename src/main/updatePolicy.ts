@@ -6,9 +6,9 @@ export interface ParsedVersion {
   normalized: string;
 }
 
-export interface BetaUpdateManifest {
+export interface ReleaseUpdateManifest {
   manifestVersion: 1;
-  channel: 'beta';
+  channel: DistributionChannel;
   version: string;
   commit: string;
   platform: 'win32';
@@ -19,6 +19,8 @@ export interface BetaUpdateManifest {
   enabledModules: string[];
   artifact: { name: string; size: number; sha256: string };
 }
+
+export type BetaUpdateManifest = ReleaseUpdateManifest & { channel: 'beta' };
 
 export const LOCAL_DATA_SCHEMA = 1;
 export const BETA_MANIFEST_NAME = 'zabor-beta-manifest.json';
@@ -81,15 +83,20 @@ export function isReleaseDownloadUrl(value: unknown): value is string {
   }
 }
 
-export function validateBetaManifest(value: unknown, version: string, architecture: string): value is BetaUpdateManifest {
+export function validateReleaseManifest(value: unknown, channel: DistributionChannel, version: string, architecture: string): value is ReleaseUpdateManifest {
   if (!value || typeof value !== 'object') return false;
-  const m = value as BetaUpdateManifest;
-  return m.manifestVersion === 1 && m.channel === 'beta' && m.version === version &&
-    distributionChannel(version) === 'beta' && /^[0-9a-f]{40}$/.test(m.commit) &&
+  const m = value as ReleaseUpdateManifest;
+  return m.manifestVersion === 1 && m.channel === channel && m.version === version &&
+    distributionChannel(version) === channel && (channel === 'beta' || !parseVersion(version)?.prerelease.length) && /^[0-9a-f]{40}$/.test(m.commit) &&
     m.platform === 'win32' && m.architecture === architecture &&
-    m.dataSchema === LOCAL_DATA_SCHEMA && Number.isSafeInteger(m.minimumDataSchema) && Number.isSafeInteger(m.maximumDataSchema) &&
-    m.minimumDataSchema > 0 && m.minimumDataSchema <= LOCAL_DATA_SCHEMA && m.maximumDataSchema >= LOCAL_DATA_SCHEMA &&
-    Array.isArray(m.enabledModules) && m.enabledModules.length === 0 &&
-    !!m.artifact && m.artifact.name === `ZABOR-Beta-Setup-${version}-${architecture}.exe` &&
+    Number.isSafeInteger(m.dataSchema) && m.dataSchema > 0 && m.dataSchema <= 1000 && Number.isSafeInteger(m.minimumDataSchema) && Number.isSafeInteger(m.maximumDataSchema) &&
+    m.minimumDataSchema > 0 && m.minimumDataSchema <= LOCAL_DATA_SCHEMA && m.maximumDataSchema >= LOCAL_DATA_SCHEMA && m.maximumDataSchema <= 1000 &&
+    Array.isArray(m.enabledModules) && m.enabledModules.length <= 32 && new Set(m.enabledModules).size === m.enabledModules.length &&
+    m.enabledModules.every(module => typeof module === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(module)) &&
+    !!m.artifact && m.artifact.name === (channel === 'beta' ? `ZABOR-Beta-Setup-${version}-${architecture}.exe` : `ZABOR-Setup-${version}.exe`) &&
     Number.isSafeInteger(m.artifact.size) && m.artifact.size > 0 && /^[0-9a-f]{64}$/.test(m.artifact.sha256);
+}
+
+export function validateBetaManifest(value: unknown, version: string, architecture: string): value is BetaUpdateManifest {
+  return validateReleaseManifest(value, 'beta', version, architecture);
 }

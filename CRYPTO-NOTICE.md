@@ -1,6 +1,6 @@
 # Криптография в ZABOR: состав и свойства / ZABOR Cryptography Notice
 
-> Редакция от 5 ноября 2026 года. Предыдущая редакция — от 30 октября 2026 года.
+> Редакция от 6 ноября 2026 года. Предыдущая редакция — от 5 ноября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -15,6 +15,8 @@
 Криптография в ZABOR применяется для защиты **обмена сообщениями, файлами и служебными пакетами** между участниками, а также для защиты **данных сессии и закрытого ключа переписки**, хранящихся локально на устройстве пользователя. Прочие локально хранимые данные — история сообщений и полученные файлы — в состоянии покоя не шифруются (см. п. 4.4). Защита голосового и видеотракта обеспечивается штатными средствами WebRTC (DTLS-SRTP для медиапотока RTP; в режиме низкой задержки голос может дополнительно передаваться по каналу данных WebRTC — SCTP поверх DTLS) и в настоящем документе подробно не рассматривается. При трансляции экрана с 1–2 зрителями соединение DTLS-SRTP устанавливается напрямую между участниками (P2P), а при 3 и более активных зрителях (`>= 3`) — между участниками и серверным медиа-узлом селективной пересылки (SFU), который пересылает пакеты RTP в оперативной памяти без декодирования и без сохранения. Отдельная криптозащита прикладного уровня (E2EE поверх RTP) для голоса и видео не добавляется.
 
 ### 2. Применяемые алгоритмы
+
+Клиентский модуль Rust WASM для voicing не выполняет криптографические операции и не меняет перечисленные алгоритмы, ключи, safeStorage или модель доверия. Сравнительный режим `--legacy-dsp` также не меняет шифрование и маршруты передачи.
 
 При переключении P2P/SFU возможно временное параллельное существование транспортных соединений до подтверждения первого видеокадра зрителем. Голос микрофона не переключается на SFU; для удалённого управления используется прямой канал данных WebRTC с упорядоченной надёжной доставкой. Это не добавляет прикладное E2EE и не изменяет перечисленные ниже ограничения модели доверия.
 
@@ -87,6 +89,8 @@ Beta использует отдельный локальный профиль `
 Cryptography in ZABOR protects the **exchange of messages, files and control packets** between participants, and protects the **session data and the private messaging key** stored locally on the user's device. Other locally stored data — message history and received files — is not encrypted at rest (see section 4.4). Protection of the voice and video path is provided by native WebRTC facilities (DTLS-SRTP for the RTP media stream; in low-latency mode voice may additionally be carried over the WebRTC data channel — SCTP over DTLS) and is not covered in detail by this document. For screen shares watched by 1–2 active viewers, the DTLS-SRTP connection is established directly between participants (P2P); when watched by 3 or more active viewers (`>= 3`), DTLS-SRTP connections are established between participants and the Controller's Selective Forwarding Unit (SFU) media node, which forwards RTP packets in volatile memory without decoding or recording. No separate application-layer cryptographic protection (E2EE over RTP) for voice and video is added.
 
 ### 2. Algorithms used
+
+The client Rust WASM voicing module performs no cryptographic operations and does not change the listed algorithms, keys, safeStorage or trust model. The `--legacy-dsp` comparison mode does not change encryption or transmission routes either.
 
 During P2P/SFU transitions, transport connections may temporarily coexist until the viewer confirms reception of a first video frame. Microphone audio does not switch to SFU; remote control uses a direct WebRTC data channel with ordered, reliable delivery. This does not add application-layer E2EE or change the trust-model limitations listed below.
 

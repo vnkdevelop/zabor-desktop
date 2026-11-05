@@ -15,10 +15,12 @@ import { DiagnosticLog } from './diagnosticLog';
 import { distributionChannel, distributionProfile } from './updatePolicy';
 
 declare const __ZABOR_DISTRIBUTION_CHANNEL__: string;
+declare const __ZABOR_RUST_VOICING__: boolean;
 
 const DISTRIBUTION_CHANNEL = typeof __ZABOR_DISTRIBUTION_CHANNEL__ === 'string' && __ZABOR_DISTRIBUTION_CHANNEL__ === 'beta'
   ? 'beta' : distributionChannel(app.getVersion());
 const DISTRIBUTION_PROFILE = distributionProfile(DISTRIBUTION_CHANNEL);
+const RUST_VOICING_ENABLED = typeof __ZABOR_RUST_VOICING__ === 'boolean' && __ZABOR_RUST_VOICING__ && !process.argv.includes('--legacy-dsp');
 
 if (DISTRIBUTION_CHANNEL === 'beta') {
   app.setName(DISTRIBUTION_PROFILE.profileName);
@@ -224,7 +226,7 @@ function bundledAssetBases(): string[] {
   ];
 }
 
-async function readBundledAsset(relativePath: string): Promise<Uint8Array | null> {
+async function readBundledAsset(relativePath: string, minimumBytes = MIN_DEEPFILTER_ASSET_BYTES): Promise<Uint8Array | null> {
   const candidates = bundledAssetBase
     ? [bundledAssetBase, ...bundledAssetBases()]
     : bundledAssetBases();
@@ -238,7 +240,7 @@ async function readBundledAsset(relativePath: string): Promise<Uint8Array | null
     try {
       if (!existsSync(full)) continue;
       const bytes = await fsPromises.readFile(full);
-      if (bytes.byteLength < MIN_DEEPFILTER_ASSET_BYTES) continue;
+      if (bytes.byteLength < minimumBytes) continue;
       bundledAssetBase = base;
       return bytes;
     } catch {
@@ -994,6 +996,9 @@ app.whenReady().then(() => {
     if (!model) throw new Error('silero_vad.onnx not found in any known location');
     return model;
   });
+
+  ipcMain.handle('get-client-runtime', () => ({ rustVoicing: RUST_VOICING_ENABLED, channel: DISTRIBUTION_CHANNEL, version: app.getVersion() }));
+  ipcMain.handle('load-rust-voicing', () => RUST_VOICING_ENABLED ? readBundledAsset('rust-voicing/zabor_voicing.wasm', 8) : null);
 
   ipcMain.handle('load-deepfilter-asset', async (_event, assetPath: unknown) => {
     if (typeof assetPath !== 'string' || !DEEPFILTER_ASSETS.has(assetPath)) return null;

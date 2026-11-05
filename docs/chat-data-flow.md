@@ -1,6 +1,6 @@
 # Карта данных чата и связи ZABOR / ZABOR chat and connection data map
 
-> Редакция от 5 ноября 2026 года. Предыдущая редакция — от 30 октября 2026 года.
+> Редакция от 6 ноября 2026 года. Предыдущая редакция — от 5 ноября 2026 года.
 > Техническое описание. Русская версия является основной.
 
 Документ описывает, какие данные возникают при работе обмена сообщениями и связи, где они находятся, кому доступны и сколько хранятся. Он предназначен для внутреннего использования, для ответов на обращения пользователей и для подготовки ответов на запросы уполномоченных органов.
@@ -10,6 +10,10 @@
 ---
 
 ## 1. Общая схема
+
+Клиентская beta может выполнять voicing autocorrelation в собственном Rust WASM-модуле внутри AudioWorklet. Используются те же 512-sample pitch ring, f32 storage/f64 accumulation и прежние кадры/пороги; доступен legacy fallback и запуск `--legacy-dsp`. Это не меняет маршруты голоса/чата/файлов, шифрование, server state или retention. UI и Electron не заменяются. Beta installer/update channel отделены от stable; новые stable installers не удаляют beta-профиль и не создают временную вторую копию истории.
+
+Client beta may run voicing autocorrelation in its own Rust WASM module inside the existing AudioWorklet. The same 512-sample pitch ring, f32 storage/f64 accumulation and existing frames/thresholds are retained, with legacy fallback and a `--legacy-dsp` comparison mode. Voice/chat/file routes, encryption, server state and retention are unchanged. UI/Electron are not replaced. Beta installation/update channels are separate from stable; new stable installers do not remove the beta profile or create a temporary second history copy.
 
 ```
 Отправитель                     Сервер Оператора                  Получатель

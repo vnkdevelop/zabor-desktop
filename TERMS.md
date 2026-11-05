@@ -1,6 +1,6 @@
 # Условия использования сервиса ZABOR / ZABOR Terms of Service
 
-> Редакция от 5 ноября 2026 года. Предыдущая редакция — от 30 октября 2026 года.
+> Редакция от 6 ноября 2026 года. Предыдущая редакция — от 5 ноября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 >
@@ -79,6 +79,8 @@
 3. Оператор не обязан обосновывать решения о блокировке и восстанавливать доступ, но рассматривает обращения через [GitHub Issues](https://github.com/vnkdevelop/zabor-desktop/issues).
 
 ### 7. Данные пользователей
+
+Клиентская Rust beta меняет только указанные локальные вычисления DSP; серверы .NET/Go, маршруты и сроки хранения сохраняются. Новые установщики/update channels stable и beta разделены и по умолчанию сохраняют данные. Переход экспериментального клиента в stable выполняется после отдельного подтверждения испытаний владельцем, а не автоматически при выпуске beta.
 
 1. Сервер хранит: имя пользователя, хеш пароля, отображаемое имя, аватар, цвет аватара, текст «о себе», настройки звука, данные достижений, статус присутствия, время последнего входа и настройку его видимости.
 2. **Голос, видео и трансляции экрана.** Голосовая связь и трансляции экрана при 1–2 активных зрителях передаются напрямую между участниками по технологии WebRTC (P2P). При прямом соединении участники звонка получают сетевые адреса друг друга — это неотъемлемое свойство P2P-связи. Когда трансляцию экрана смотрят 3 и более активных зрителей (`>= 3`), медиапоток трансляции экрана переключается на селективную пересылку через медиа-узел (SFU) Оператора для разгрузки канала отправителя; при этом пакеты пересылаются в оперативной памяти без декодирования, записи и хранения на сервере.
@@ -206,6 +208,8 @@ Responsibility for content transmitted through the Service rests with the user w
 3. The Operator is not obliged to justify enforcement decisions or restore access, but will consider appeals via [GitHub Issues](https://github.com/vnkdevelop/zabor-desktop/issues).
 
 ### 7. User data
+
+The client Rust beta changes only the stated local DSP calculations; .NET/Go servers, routes and retention remain unchanged. New stable/beta installers and update channels are separate and preserve data by default. Promotion of the experimental client to stable requires separate owner test approval and does not occur automatically when a beta is released.
 
 1. The server stores: username, password hash, display name, avatar, avatar colour, "about me" text, audio settings, achievement data, presence status, last-seen time and its visibility setting.
 2. **Voice, video and screen shares.** Voice calls and screen shares watched by 1–2 active viewers are transmitted directly between participants over WebRTC (P2P). In a direct connection, call participants learn each other's network addresses — this is inherent to P2P communication. When a screen share is watched by 3 or more active viewers (`>= 3`), the screen-share media stream switches to selective forwarding through the Operator's media node (SFU) to offload the sender's upstream; packets are forwarded in volatile memory without decoding, recording, or storage on the server.

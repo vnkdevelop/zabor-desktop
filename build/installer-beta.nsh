@@ -50,6 +50,8 @@
 !macroend
 
 !macro customUnInstall
+  SetShellVarContext all
+  Delete "$SMPROGRAMS\ZABOR Beta (legacy dsp).lnk"
   StrCpy $shouldDeleteAppData "0"
   ${GetParameters} $R0
   ${GetOptions} $R0 "--delete-app-data" $R1
@@ -64,6 +66,7 @@
 !macroend
 
 !macro customInstall
+  CreateShortCut "$SMPROGRAMS\ZABOR Beta (legacy dsp).lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "--legacy-dsp" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0
   WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\${UNINSTALL_APP_KEY}" "InstallLocation" "$INSTDIR"
   ${if} ${isUpdated}
     SetAutoClose true

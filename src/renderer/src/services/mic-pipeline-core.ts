@@ -1,4 +1,5 @@
 import { TonalNoiseSuppressor, VoiceShaper } from './voice-shaping'
+import { RustVoicing } from './rust-voicing'
 
 const WASM_ASSET = 'pkg/df_bg.wasm'
 const MODEL_ASSET = 'models/DeepFilterNet3_onnx.tar.gz'
@@ -41,6 +42,8 @@ if (typeof globalThis.performance === 'undefined') {
 }
 
 class MicPipelineProcessor extends AudioWorkletProcessor {
+  private rustVoicing: RustVoicing | null = null
+  private disposed = false
   private inputBuffer: Float32Array
   private outputBuffer: Float32Array
   private inputReadIndex = 0
@@ -305,8 +308,12 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
   private meterFrameCounter = 0
   private gainFactor = 1
 
-  constructor() {
+  constructor(options?: { processorOptions?: { rustVoicingModule?: WebAssembly.Module | null } }) {
     super()
+    const module = options?.processorOptions?.rustVoicingModule
+    if (module) {
+      try { this.rustVoicing = new RustVoicing(module) } catch { this.rustVoicing = null }
+    }
     this.inputBuffer = new Float32Array(this.BUFFER_SIZE)
     this.outputBuffer = new Float32Array(this.BUFFER_SIZE)
     this.frameToProcess = new Float32Array(this.FRAME_SIZE)
@@ -347,7 +354,13 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
     }
 
     this.port.onmessage = (event) => {
-      if (event.data.type === 'loadWasm') {
+      if (event.data.type === 'dispose') {
+        this.disposed = true
+        try { this.rustVoicing?.dispose() } catch { }
+        this.rustVoicing = null
+      } else if (event.data.type === 'getDspDiagnostics') {
+        this.port.postMessage({ type: 'dspDiagnostics', runtime: this.rustVoicing ? 'rust-voicing' : 'legacy', frame: this.audioFrameId, score: this.voicing, lag: this.voicingLag })
+      } else if (event.data.type === 'loadWasm') {
         if (typeof event.data.assetBase === 'string' && event.data.assetBase) {
           this.assetBase = event.data.assetBase
         }
@@ -702,6 +715,7 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
         }
       }
     }
+    this.port.postMessage({ type: 'dspRuntime', runtime: this.rustVoicing ? 'rust-voicing' : 'legacy' })
   }
 
   private refreshVadThresholds() {
@@ -830,6 +844,17 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
   }
 
   private measureVoicing(): number {
+    if (this.rustVoicing) {
+      try {
+        const result = this.rustVoicing.measure(this.pitchBuffer, this.pitchWriteIndex, this.pitchFilled)
+        this.voicingLag = this.rustVoicing.lag
+        return result
+      } catch {
+        try { this.rustVoicing.dispose() } catch { }
+        this.rustVoicing = null
+        this.port.postMessage({ type: 'dspRuntime', runtime: 'legacy', reason: 'rust-voicing-fallback' })
+      }
+    }
     const size = this.pitchBuffer.length
     const window = this.PITCH_WINDOW
     const maxLag = this.PITCH_MAX_LAG
@@ -1052,6 +1077,7 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
+    if (this.disposed) return false
     const input = inputs[0]
     const output = outputs[0]
 

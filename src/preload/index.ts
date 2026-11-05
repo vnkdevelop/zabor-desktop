@@ -15,6 +15,8 @@ const windowControls = {
   wipeAppData: (options?: { preserveChat?: boolean }) => ipcRenderer.invoke('wipe-app-data', options),
   getUserDataPath: () => ipcRenderer.invoke('get-userdata-path'),
   loadSileroModel: (): Promise<Uint8Array> => ipcRenderer.invoke('load-silero-model'),
+  getClientRuntime: (): Promise<{ rustVoicing: boolean; channel: 'stable' | 'beta'; version: string }> => ipcRenderer.invoke('get-client-runtime'),
+  loadRustVoicing: (): Promise<Uint8Array | null> => ipcRenderer.invoke('load-rust-voicing'),
   loadDeepFilterAsset: (assetPath: string): Promise<Uint8Array | null> =>
     ipcRenderer.invoke('load-deepfilter-asset', assetPath),
   getAutoLaunch: (): Promise<boolean> => ipcRenderer.invoke('get-auto-launch'),

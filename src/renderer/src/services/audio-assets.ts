@@ -13,6 +13,25 @@ let sileroInFlight: Promise<void> | null = null
 let deepfilterPreload: Promise<void> | null = null
 let sileroPreload: Promise<void> | null = null
 const inFlightAssets = new Map<string, Promise<ArrayBuffer | null>>()
+let rustVoicingModule: Promise<WebAssembly.Module | null> | null = null
+
+export function getRustVoicingModule(): Promise<WebAssembly.Module | null> {
+  if (!rustVoicingModule) {
+    rustVoicingModule = (async () => {
+      if (typeof window.windowControls.getClientRuntime !== 'function') return null
+      const runtime = await window.windowControls.getClientRuntime()
+      if (!runtime.rustVoicing) return null
+      const bytes = await window.windowControls.loadRustVoicing()
+      if (!bytes) throw new Error('rust-voicing-asset-missing')
+      return await WebAssembly.compile(toArrayBuffer(bytes))
+    })().catch(error => {
+      console.warn('[AudioAssets] Rust voicing unavailable; preserving legacy DSP:', error)
+      rustVoicingModule = null
+      return null
+    })
+  }
+  return rustVoicingModule
+}
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength

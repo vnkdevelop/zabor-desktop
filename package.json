@@ -1,22 +1,26 @@
 {
   "name": "zabor-desktop",
-  "version": "3.7.2-beta.rust.0",
+  "version": "3.7.2-beta.rust.1",
   "description": "ZABOR - Разговорчики",
   "main": "./out/main/index.js",
   "author": "vnkdevelop",
   "license": "GPL-3.0-only",
+  "zaborRuntime": { "rustVoicing": false },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:migration": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/helpers/register-hooks.mjs --test --test-concurrency=1 tests/migration-p0.test.mjs",
     "test:readiness": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/migration-p0-readiness.test.mjs",
+    "test:client-rust": "node scripts/build-rust-voicing.cjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/client-rust-dsp.test.mjs",
+    "test:audio-worklet": "electron tests/client-audio-smoke.cjs",
+    "benchmark:client-dsp": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/benchmark-client-dsp.mjs",
     "test:rust": "node scripts/check-rust.mjs",
     "migration:inventory": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/migration-inventory.mjs",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/helpers/register-hooks.mjs --test --test-concurrency=1 tests/tier1-feature-coverage.test.mjs tests/tier2-boundary-corner-cases.test.mjs tests/tier3-cross-feature-combinations.test.mjs tests/tier4-real-world-lifecycle.test.mjs tests/tier5-webrtc-stream-lifecycle.test.mjs tests/tier6-audio-devices-microphone.test.mjs tests/tier7-webrtc-vad-hierarchy.test.mjs tests/tier8-remote-control.test.mjs",
     "start": "node scripts/build-input-simulator.cjs && node scripts/fetch-deepfilter-assets.cjs && cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite dev",
     "dev": "node scripts/build-input-simulator.cjs && node scripts/fetch-deepfilter-assets.cjs && cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite dev",
     "dev:4k": "cross-env ZABOR_SCALE_FACTOR=2 npm run dev",
-    "build": "node scripts/build-input-simulator.cjs && node scripts/fetch-deepfilter-assets.cjs && node scripts/build-splash.cjs && cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite build",
-    "dist:win": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release-guard.mjs stable && node scripts/build-input-simulator.cjs && node scripts/fetch-deepfilter-assets.cjs && node scripts/build-splash.cjs && cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite build && electron-builder --win",
+    "build": "node scripts/build-rust-voicing.cjs && node scripts/build-input-simulator.cjs && node scripts/fetch-deepfilter-assets.cjs && node scripts/build-splash.cjs && cross-env RUSTFLAGS=\"-C target-feature=+simd128,+bulk-memory,+nontrapping-fptoint\" electron-vite build",
+    "dist:win": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release-guard.mjs stable && npm run build && electron-builder --win --config electron-builder.stable.cjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/stable-manifest.mjs",
     "dist:win:beta": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release-guard.mjs beta && npm run build && electron-builder --win --config electron-builder.beta.cjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/beta-manifest.mjs",
     "postinstall": "node scripts/rebuild-native-audio.cjs && node scripts/fetch-deepfilter-assets.cjs --allow-missing",
     "release": "release.bat",
@@ -28,6 +32,10 @@
     "productName": "ZABOR",
     "npmRebuild": false,
     "extraResources": [
+      {
+        "from": "build/start-legacy-dsp.bat",
+        "to": "start-legacy-dsp.bat"
+      },
       {
         "from": "build/icon.ico",
         "to": "icon.ico"

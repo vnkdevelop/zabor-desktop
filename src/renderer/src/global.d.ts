@@ -60,6 +60,8 @@ declare global {
       wipeAppData: (options?: { preserveChat?: boolean }) => Promise<boolean>;
       getUserDataPath: () => Promise<string>;
       loadSileroModel: () => Promise<Uint8Array>;
+      getClientRuntime: () => Promise<{ rustVoicing: boolean; channel: 'stable' | 'beta'; version: string }>;
+      loadRustVoicing: () => Promise<Uint8Array | null>;
       loadDeepFilterAsset: (assetPath: string) => Promise<Uint8Array | null>;
       getAutoLaunch: () => Promise<boolean>;
       setAutoLaunch: (enabled: boolean) => Promise<boolean>;

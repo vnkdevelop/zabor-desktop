@@ -3,7 +3,8 @@ import { join } from 'path';
 import { createWriteStream, mkdirSync, existsSync, rmSync, createReadStream, writeFileSync, copyFileSync } from 'fs';
 import { spawn, execFile } from 'child_process';
 import { createHash } from 'crypto';
-import { BETA_MANIFEST_NAME, compareVersions, distributionChannel, distributionProfile, isReleaseDownloadUrl, parseVersion, validateBetaManifest } from './updatePolicy';
+import { once } from 'node:events';
+import { BETA_MANIFEST_NAME, compareVersions, distributionChannel, distributionProfile, isReleaseDownloadUrl, parseVersion, validateBetaManifest, validateReleaseManifest } from './updatePolicy';
 
 declare const __ZABOR_DISTRIBUTION_CHANNEL__: string;
 
@@ -99,6 +100,8 @@ export function isNewerVersion(remote: string, current: string): boolean {
 }
 
 let downloadAbortController: AbortController | null = null;
+let downloadInFlight = false;
+let installInFlight = false;
 
 const updateState: {
   status: UpdateStatus;
@@ -212,12 +215,27 @@ export async function checkGitHubRelease(): Promise<UpdateCheckResult> {
     }
 
     const assets = Array.isArray(data.assets) ? data.assets : [];
-    const setupAsset = assets.find((a: any) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe'));
+    let setupAsset = assets.find((a: any) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.exe'));
+    let manifestSha256 = '';
+    const stableManifestAsset = assets.find((asset: any) => asset?.name === 'zabor-stable-manifest.json');
+    if (stableManifestAsset) {
+      if (!isReleaseDownloadUrl(stableManifestAsset.browser_download_url) || stableManifestAsset.size > 65536) throw new Error('stable-release-manifest-invalid');
+      const response = await fetch(stableManifestAsset.browser_download_url, { signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error('stable-release-manifest-unavailable');
+      const text = await response.text();
+      if (text.length > 65536) throw new Error('stable-release-manifest-invalid');
+      const manifest: unknown = JSON.parse(text);
+      const version = parseVersion(tagName)?.normalized ?? '';
+      if (!validateReleaseManifest(manifest, 'stable', version, process.arch)) throw new Error('stable-release-manifest-invalid');
+      setupAsset = assets.find((asset: any) => asset?.name === manifest.artifact.name && asset.size === manifest.artifact.size);
+      if (!setupAsset || !isReleaseDownloadUrl(setupAsset.browser_download_url) || setupAsset.digest && setupAsset.digest.toLowerCase() !== `sha256:${manifest.artifact.sha256}`) throw new Error('stable-release-artifact-invalid');
+      manifestSha256 = manifest.artifact.sha256;
+    }
 
     const downloadUrl = setupAsset ? setupAsset.browser_download_url : data.html_url;
     const fileSize = setupAsset ? setupAsset.size : 0;
     const digest = setupAsset && typeof setupAsset.digest === 'string' ? setupAsset.digest : '';
-    const sha256 = digest.toLowerCase().startsWith('sha256:') ? digest.slice(7).toLowerCase() : '';
+    const sha256 = manifestSha256 || (digest.toLowerCase().startsWith('sha256:') ? digest.slice(7).toLowerCase() : '');
 
     const updateInfo: UpdateInfo = {
       version: tagName.replace(/^v/i, ''),
@@ -558,7 +576,7 @@ export function setupUpdater(
   });
 
   ipcMain.handle('start-update-download', async (_event, downloadUrl: string, version: string) => {
-    if (updateState.status === 'downloading') return { success: false, message: 'Already downloading' };
+    if (downloadInFlight || installInFlight || updateState.status === 'downloading') return { success: false, message: 'Already downloading' };
     const allowedPrefix = `https://github.com/${GITHUB_REPO}/releases/download/`;
     if (!downloadUrl || typeof downloadUrl !== 'string' || !downloadUrl.startsWith(allowedPrefix)) {
       return { success: false, message: 'Invalid download url' };
@@ -599,14 +617,18 @@ export function setupUpdater(
       updateState.updateInfo && updateState.updateInfo.version === safeVersion.replace(/^v/i, '')
         ? updateState.updateInfo.sha256
         : '';
-    downloadAbortController = new AbortController();
+    const controller = new AbortController();
+    downloadAbortController = controller;
+    downloadInFlight = true;
     let fileStream: ReturnType<typeof createWriteStream> | null = null;
+    let streamClosed: Promise<void> | null = null;
 
     try {
       const response = await fetch(downloadUrl, {
         headers: { 'User-Agent': 'zabor-desktop' },
-        signal: downloadAbortController.signal
+        signal: controller.signal
       });
+      if (controller.signal.aborted) throw new DOMException('update-cancelled', 'AbortError');
 
       if (!response.ok || !response.body) {
         throw new Error(`Download response not ok: ${response.status} ${response.statusText}`);
@@ -617,14 +639,16 @@ export function setupUpdater(
 
       const reader = response.body.getReader();
       fileStream = createWriteStream(targetPath);
+      streamClosed = new Promise(resolve => fileStream!.once('close', resolve));
       fileStream.on('error', () => {});
 
       while (true) {
         const { done, value } = await reader.read();
+        if (controller.signal.aborted) throw new DOMException('update-cancelled', 'AbortError');
         if (done) break;
 
         transferred += value.length;
-        fileStream.write(Buffer.from(value));
+        if (!fileStream.write(Buffer.from(value))) await once(fileStream, 'drain', { signal: controller.signal });
 
         const percent = total > 0 ? Math.round((transferred / total) * 100) : 0;
         const progress: UpdateProgress = { percent, transferred, total };
@@ -637,6 +661,7 @@ export function setupUpdater(
         fileStream.on('error', reject);
         fileStream.end(() => resolve());
       });
+      if (controller.signal.aborted) throw new DOMException('update-cancelled', 'AbortError');
 
       updateState.status = 'downloaded';
       updateState.installerPath = targetPath;
@@ -664,6 +689,11 @@ export function setupUpdater(
       }
       cleanUpdateDirectory();
       return { success: false };
+    } finally {
+      if (streamClosed) await streamClosed;
+      downloadInFlight = false;
+      const settledStatus = updateState.status as UpdateStatus;
+      if (settledStatus !== 'downloaded' && settledStatus !== 'installing') cleanUpdateDirectory();
     }
   });
 
@@ -682,12 +712,14 @@ export function setupUpdater(
   });
 
   ipcMain.handle('install-update', async () => {
+    if (installInFlight || downloadInFlight || updateState.status === 'installing') return { success: false, message: 'Already downloading' };
     if (!updateState.installerPath || !existsSync(updateState.installerPath)) {
       return { success: false, message: 'Installer not found' };
     }
 
     const installerPath = updateState.installerPath;
-
+    installInFlight = true;
+    try {
     const verification = await verifyInstaller(installerPath, updateState.expectedSha256);
     if (!verification.ok) {
       updateState.status = 'error';
@@ -765,6 +797,9 @@ export function setupUpdater(
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message };
+    }
+    } finally {
+      installInFlight = false;
     }
   });
 

@@ -1,11 +1,12 @@
-const base = require('./package.json').build;
+const pkg = require('./package.json');
+const base = pkg.build;
 const { execFileSync } = require('node:child_process');
 
 module.exports = {
   ...base,
   appId: 'com.zabor.desktop.beta',
   productName: 'ZABOR Beta',
-  extraMetadata: { zaborBuild: { channel: 'beta', commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true }).trim() } },
+  extraMetadata: { zaborBuild: { channel: 'beta', commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', windowsHide: true }).trim(), runtime: pkg.zaborRuntime } },
   directories: { ...base.directories, output: 'release/beta' },
   extraResources: base.extraResources.map(resource => resource.to === 'ZaborUpdater.exe'
     ? { ...resource, to: 'ZaborUpdaterBeta.exe' } : resource),

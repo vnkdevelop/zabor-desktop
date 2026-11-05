@@ -9,7 +9,8 @@ const fileEnv = loadEnv(process.env.NODE_ENV === 'development' ? 'development' :
 const clientSecret = process.env.ZABOR_CLIENT_SECRET || fileEnv.ZABOR_CLIENT_SECRET || ''
 const clientChannel =
   process.env.ZABOR_CLIENT_CHANNEL || fileEnv.ZABOR_CLIENT_CHANNEL || (clientSecret ? 'official' : 'unofficial')
-const packageVersion = JSON.parse(readFileSync(resolve('package.json'), 'utf8')).version as string
+const packageMetadata = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
+const packageVersion = packageMetadata.version as string
 
 function relaxCspForDevServer() {
   return {
@@ -28,6 +29,7 @@ export default defineConfig({
       __ZABOR_CLIENT_SECRET__: JSON.stringify(clientSecret),
       __ZABOR_CLIENT_CHANNEL__: JSON.stringify(clientChannel),
       __ZABOR_DISTRIBUTION_CHANNEL__: JSON.stringify(distributionChannel(packageVersion)),
+      __ZABOR_RUST_VOICING__: JSON.stringify(packageMetadata.zaborRuntime?.rustVoicing === true),
       __ZABOR_UPDATE_SIGNER__: JSON.stringify(
         process.env.ZABOR_UPDATE_SIGNER || fileEnv.ZABOR_UPDATE_SIGNER || ''
       )

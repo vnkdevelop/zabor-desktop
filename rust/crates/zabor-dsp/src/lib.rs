@@ -105,45 +105,59 @@ impl VoicingEstimator {
     }
 
     pub fn measure(&mut self) -> Voicing {
-        let empty = Voicing { score: 0.0, lag: 0 };
-        if self.filled < SPAN {
-            return empty;
-        }
-        let mut index = (self.write_index + PITCH_SIZE - 1) % PITCH_SIZE;
-        for sample in &mut self.scratch[..SPAN] {
-            *sample = self.buffer[index];
-            index = (index + PITCH_SIZE - 1) % PITCH_SIZE;
-        }
-        let mut frame_energy = 0.0_f64;
-        for &sample in &self.scratch[..WINDOW] {
-            frame_energy += f64::from(sample) * f64::from(sample);
-        }
-        if frame_energy < 1e-9 {
-            return empty;
-        }
-        let mut lag_energy = 0.0_f64;
-        for &sample in &self.scratch[MIN_LAG..MIN_LAG + WINDOW] {
-            lag_energy += f64::from(sample) * f64::from(sample);
-        }
-        let mut best = empty;
-        for lag in MIN_LAG..=MAX_LAG {
-            if lag_energy > 1e-9 {
-                let mut correlation = 0.0_f64;
-                for i in 0..WINDOW {
-                    correlation += f64::from(self.scratch[i]) * f64::from(self.scratch[i + lag]);
-                }
-                let score = correlation / (frame_energy * lag_energy).sqrt();
-                if score > best.score {
-                    best = Voicing { score, lag };
-                }
-            }
-            let entering = f64::from(self.scratch[lag + WINDOW]);
-            let leaving = f64::from(self.scratch[lag]);
-            lag_energy += entering * entering - leaving * leaving;
-        }
-        best.score = best.score.clamp(0.0, 1.0);
-        best
+        measure_voicing_ring(
+            &self.buffer,
+            &mut self.scratch,
+            self.write_index,
+            self.filled,
+        )
     }
+}
+
+pub fn measure_voicing_ring(
+    buffer: &[f32; PITCH_SIZE],
+    scratch: &mut [f32; PITCH_SIZE],
+    write_index: usize,
+    filled: usize,
+) -> Voicing {
+    let empty = Voicing { score: 0.0, lag: 0 };
+    if !(SPAN..=PITCH_SIZE).contains(&filled) || write_index >= PITCH_SIZE {
+        return empty;
+    }
+    let mut index = (write_index + PITCH_SIZE - 1) % PITCH_SIZE;
+    for sample in &mut scratch[..SPAN] {
+        *sample = buffer[index];
+        index = (index + PITCH_SIZE - 1) % PITCH_SIZE;
+    }
+    let mut frame_energy = 0.0_f64;
+    for &sample in &scratch[..WINDOW] {
+        frame_energy += f64::from(sample) * f64::from(sample);
+    }
+    if frame_energy < 1e-9 {
+        return empty;
+    }
+    let mut lag_energy = 0.0_f64;
+    for &sample in &scratch[MIN_LAG..MIN_LAG + WINDOW] {
+        lag_energy += f64::from(sample) * f64::from(sample);
+    }
+    let mut best = empty;
+    for lag in MIN_LAG..=MAX_LAG {
+        if lag_energy > 1e-9 {
+            let mut correlation = 0.0_f64;
+            for i in 0..WINDOW {
+                correlation += f64::from(scratch[i]) * f64::from(scratch[i + lag]);
+            }
+            let score = correlation / (frame_energy * lag_energy).sqrt();
+            if score > best.score {
+                best = Voicing { score, lag };
+            }
+        }
+        let entering = f64::from(scratch[lag + WINDOW]);
+        let leaving = f64::from(scratch[lag]);
+        lag_energy += entering * entering - leaving * leaving;
+    }
+    best.score = best.score.clamp(0.0, 1.0);
+    best
 }
 
 #[cfg(test)]

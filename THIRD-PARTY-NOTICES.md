@@ -1,7 +1,18 @@
 # Third-party notices
 
+Updated: 2026-11-06.
+
 ZABOR Desktop is distributed under GPL-3.0-only. It redistributes the third-party
 components listed below. Their own licence terms apply to them.
+
+## Rust client voicing module
+
+- File: `src/renderer/public/rust-voicing/zabor_voicing.wasm`; size and SHA-256 are recorded in its adjacent `manifest.json`
+- Own ZABOR code: `zabor-dsp` and the narrow `zabor-dsp-wasm` adapter, GPL-3.0-only
+- Bundles the Rust standard-library/core/allocation code, MIT OR Apache-2.0, The Rust Project Developers, <https://github.com/rust-lang/rust>
+- Copyright (c) 2010 The Rust Project Developers
+- Purpose: block-based voicing autocorrelation inside the existing AudioWorklet; it does not replace DeepFilterNet, RNNoise, Silero, WebRTC codecs or the desktop shell
+- No external Rust crates are used by this client WASM module. Benchmark-only server dependencies are not shipped with it.
 
 ## DeepFilterNet 3 — model weights
 

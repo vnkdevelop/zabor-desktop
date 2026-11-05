@@ -10,6 +10,7 @@ import ultraJitterProcessorUrl from './ultra-jitter-processor?worker&url'
 import VadWorker from './silero-vad.worker?worker'
 import {
   getDeepFilterAsset,
+  getRustVoicingModule,
   getDeepFilterPayload,
   getSileroModel,
   preloadNoiseAssets,
@@ -1983,6 +1984,7 @@ export class WebRTCManager {
     this.audioProcessorError = null
 
     const levelSeedKeys = this.levelSeedKeys()
+    const processingEpoch = this.vadEpoch
     const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' })
     this.processedContext = ctx
 
@@ -2005,14 +2007,18 @@ export class WebRTCManager {
     const processorName = model === 'deepfilter' ? 'mic-pipeline-deepfilter' : 'mic-pipeline-rnnoise'
 
     try {
+      const rustVoicingModule = await getRustVoicingModule()
+      if (this.processedContext !== ctx || this.vadEpoch !== processingEpoch || ctx.state === 'closed') throw new DOMException('stale-mic-graph', 'AbortError')
       await ctx.audioWorklet.addModule(moduleUrl)
+      if (this.processedContext !== ctx || this.vadEpoch !== processingEpoch || (ctx.state as AudioContextState) === 'closed') throw new DOMException('stale-mic-graph', 'AbortError')
       this.micNode = new AudioWorkletNode(ctx, processorName, {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [1],
         channelCount: 1,
         channelCountMode: 'explicit',
-        channelInterpretation: 'speakers'
+        channelInterpretation: 'speakers',
+        processorOptions: { rustVoicingModule }
       })
       this.micNodeReady = false
       const me = useAppStore.getState().currentUser
@@ -2020,6 +2026,10 @@ export class WebRTCManager {
         this.clearVAD(me.id)
       }
     } catch (e) {
+      if (this.processedContext !== ctx || e instanceof DOMException && e.name === 'AbortError') {
+        if (ctx.state !== 'closed') await ctx.close().catch(() => {})
+        throw e
+      }
       this.micEngineError = `AudioWorklet module failed: ${e instanceof Error ? e.message : String(e)}`
       console.error(`[WebRTC] Failed to load ${processorName}`, e)
     }
@@ -2027,7 +2037,9 @@ export class WebRTCManager {
     if (this.micNode) {
       const graphEpoch = this.vadEpoch
       this.micNode.port.onmessage = (event) => {
-        if (event.data.type === 'vad') {
+        if (event.data.type === 'dspRuntime') {
+          console.info(`[WebRTC] Mic voicing runtime: ${String(event.data.runtime)}`)
+        } else if (event.data.type === 'vad') {
           if (this.getActiveVadBranch() === 'silero' || this.getActiveVadBranch() === 'manual-gate') {
             this.applyLocalSpeaking(Boolean(event.data.isSpeaking))
           }
@@ -2248,6 +2260,7 @@ export class WebRTCManager {
   private async cleanupProcessedStream(): Promise<void> {
     this.cleanupProcessedStreamSourceOnly()
     if (this.micNode) {
+      try { this.micNode.port.postMessage({ type: 'dispose' }) } catch { }
       try { this.micNode.port.close() } catch { }
       this.micNode = null
     }

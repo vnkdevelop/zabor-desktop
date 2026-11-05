@@ -4,6 +4,8 @@
 
 ## Исходное состояние
 
+Обновление направления: перепись backend на Rust отменена владельцем. Текущий этап — клиентская voicing WASM beta и безопасные release/updater workflows; .NET backend и Go SFU остаются прежними. Подготовка двух устройств описана в [client-beta-testing.md](client-beta-testing.md).
+
 - План владельца: `zabor-rust-migration-beta-plan-2026-11-05.md`, разделы 0, 6, 18, 23.
 - Desktop baseline: `a4934d378a498fadecbd680e381bad794546634e`, версия `3.7.1`.
 - Baseline-тег: `migration-baseline-2026-11-05`; история не переписывалась.
