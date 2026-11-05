@@ -16,7 +16,10 @@ export function clientSourceHash(root = '.') {
   const hash = createHash('sha256');
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   hash.update(JSON.stringify(pkg.zaborRuntime || {}));
-  for (const file of files.sort()) hash.update(relative(root, file).replaceAll('\\', '/')).update(readFileSync(file));
+  for (const file of files.sort()) {
+    const bytes = readFileSync(file);
+    hash.update(relative(root, file).replaceAll('\\', '/')).update(file.endsWith('.wasm') ? bytes : bytes.toString('utf8').replace(/\r\n/g, '\n'));
+  }
   return hash.digest('hex');
 }
 

@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 const root = join(__dirname, '..');
 const files = ['rust/Cargo.toml', 'rust/Cargo.lock', 'rust/crates/zabor-dsp/Cargo.toml', 'rust/crates/zabor-dsp/src/lib.rs', 'rust/crates/zabor-dsp-wasm/Cargo.toml', 'rust/crates/zabor-dsp-wasm/src/lib.rs', 'scripts/build-rust-voicing.cjs'];
 const hash = createHash('sha256');
-for (const file of files) hash.update(file).update(readFileSync(join(root, file)));
+for (const file of files) hash.update(file).update(readFileSync(join(root, file), 'utf8').replace(/\r\n/g, '\n'));
 const sourceSha256 = hash.digest('hex');
 const directory = join(root, 'src/renderer/public/rust-voicing');
 const asset = join(directory, 'zabor_voicing.wasm');
