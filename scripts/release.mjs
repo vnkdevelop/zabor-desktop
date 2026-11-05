@@ -116,7 +116,7 @@ export async function runRelease(requested = 'auto', args = []) {
     existing = githubRelease(tag);
     if (existing && existing.draft !== true) throw new Error('Release became public during preparation; assets will not be overwritten');
     if (!existing) {
-      execFileSync('gh', ['release', 'create', tag, ...files, '--repo', repository, '--verify-tag', '--draft', '--latest=false',
+      execFileSync('gh', ['release', 'create', tag, ...files, '--repo', repository, '--verify-tag', '--target', state.commit, '--draft', '--latest=false',
         ...(channel === 'beta' ? ['--prerelease'] : []), '--title', `ZABOR ${channel} ${version}`, '--notes-file', notes], { stdio: 'inherit', windowsHide: true });
     } else {
       execFileSync('gh', ['release', 'upload', tag, ...files, '--repo', repository, '--clobber'], { stdio: 'inherit', windowsHide: true });
@@ -127,7 +127,7 @@ export async function runRelease(requested = 'auto', args = []) {
       const asset = uploaded?.assets?.find(asset => asset.name === file.name);
       if (!asset || asset.size !== file.size || asset.digest && asset.digest.toLowerCase() !== `sha256:${file.sha256}`) throw new Error('Uploaded artifact validation failed; draft retained for safe retry');
     }
-    execFileSync('gh', ['release', 'edit', tag, '--repo', repository, '--draft=false', `--prerelease=${channel === 'beta'}`, `--latest=${channel === 'stable'}`], { stdio: 'inherit', windowsHide: true });
+    execFileSync('gh', ['release', 'edit', tag, '--repo', repository, '--target', state.commit, '--draft=false', `--prerelease=${channel === 'beta'}`, `--latest=${channel === 'stable'}`], { stdio: 'inherit', windowsHide: true });
     console.log(`Published ${channel} ${tag}; existing tags and neighboring profiles were not changed`);
   } finally {
     if (generatedHelpers) {
