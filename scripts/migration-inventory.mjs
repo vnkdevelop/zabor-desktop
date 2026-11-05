@@ -15,7 +15,7 @@ function scan(root, sources, assets) {
     const file = join(root, entry.name);
     if (entry.isDirectory()) {
       if (!ignoredDirectories.has(entry.name)) scan(file, sources, assets);
-    } else if (/\.(ts|tsx|js|mjs|cjs|py|cs|go|proto)$/.test(entry.name)) sources.push(file);
+    } else if (/\.(ts|tsx|js|mjs|cjs|py|cs|go|rs|proto)$/.test(entry.name)) sources.push(file);
     else if (/\.(wasm|onnx|tar\.gz|node|exe|ico)$/.test(entry.name)) assets.push(file);
   }
 }
@@ -44,10 +44,11 @@ function inspectTypeScript(file, root) {
 }
 
 const root = resolve('.');
-for (const directory of ['src', 'build', 'tests', 'scripts']) scan(join(root, directory), sourceFiles, assetFiles);
-if (existsSync('release')) {
-  for (const entry of readdirSync('release', { withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith('.exe')) assetFiles.push(resolve('release', entry.name));
+for (const directory of ['src', 'build', 'tests', 'scripts', 'rust']) scan(join(root, directory), sourceFiles, assetFiles);
+for (const directory of ['release', 'release/beta']) {
+  if (!existsSync(directory)) continue;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.exe')) assetFiles.push(resolve(directory, entry.name));
   }
 }
 const inventory = {
@@ -60,7 +61,7 @@ const inventory = {
     path: normalizedPath(relative(root, file)), sha256: createHash('sha256').update(readFileSync(file)).digest('hex')
   }),
   assets: assetFiles.sort().map(file => ({ path: normalizedPath(relative(root, file)), bytes: statSync(file).size, sha256: createHash('sha256').update(readFileSync(file)).digest('hex') })),
-  lockfiles: ['package-lock.json'].map(file => ({ path: file, sha256: createHash('sha256').update(readFileSync(file)).digest('hex') })),
+  lockfiles: ['package-lock.json', 'rust/Cargo.lock'].map(file => ({ path: file, sha256: createHash('sha256').update(readFileSync(file)).digest('hex') })),
   runtimeAcceptance: 'pending',
   backend: null
 };

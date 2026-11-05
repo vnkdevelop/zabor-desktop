@@ -14,7 +14,7 @@
 
 ## Выполнено
 
-1. Использованы оба графа знаний, затем выполнена структурная инвентаризация: 116 desktop source files, 31 backend source file, 1406 статических/динамических вызовов и 20 assets/существующих установщиков. `migration-artifacts/inventory.json` содержит пути, символы, IPC/SignalR/UI/test вызовы и хеши. Динамические вызовы явно помечены; это навигационный каталог, не доказательство функционального паритета.
+1. Использованы оба графа знаний, затем выполнена структурная инвентаризация desktop/backend. `migration-artifacts/inventory.json` содержит актуальные количества и пути исходников (включая Rust), символы, IPC/SignalR/UI/test вызовы, хеши assets/существующих установщиков и обоих lock-файлов. Динамические вызовы явно помечены; это навигационный каталог, не доказательство функционального паритета.
 2. Добавлены корректное сравнение SemVer, числовых prerelease identifiers, `v`-префиксов и build metadata; совместимость legacy четырёхкомпонентного сравнения сохранена.
 3. Stable updater продолжает использовать stable endpoint, но не принимает prerelease. Beta использует пагинированный список releases и обязательный manifest с commit, channel, architecture, schema и SHA-256. Отсутствие совместимой beta не переключает клиент на stable.
 4. Beta получает отдельные appId, executable, install directory, shortcut, autostart entry, userData/sessionData, updater temp directory и splash namespace. Внешний вид React, иконки, локализация и модели не изменены.
@@ -32,6 +32,7 @@
 | Tiers 1–8 после изменений | 176/176 |
 | `tsc --noEmit -p tsconfig.node.json` | проходит |
 | `npm run build` | проходит; DeepFilter WASM/model hashes проверены |
+| `npm run dist:win:beta` | проходит; локальный NSIS и manifest для commit `f901ae0`, SHA-256 установщика проверен повторно; установка и публикация не выполнялись |
 | Cargo fmt, clippy с `-D warnings`, unit tests | проходят; 4 unit tests |
 | Native Rust ↔ действующий TS DSP | 10/10; допуск `1e-12`, pitch lag совпадает |
 | Beta policy/update tests | 15/15; pagination, schema/channel isolation, download/install, checksum, build metadata, prepared-installer preservation |
@@ -66,4 +67,4 @@ npm run dist:win:beta
 
 ## English summary
 
-The migration has started on an isolated beta branch from the stable baseline. P0 is **in progress**, not accepted. Beta channel/profile separation and dependency-free Rust core/DSP prototypes are implemented. Existing desktop tests and native DSP parity tests pass; the actual main typecheck and Electron build pass. The actual renderer typecheck exposes pre-existing errors and blocks publishing. Import/reverse merging, real Windows install/uninstall, mixed-client media and performance acceptance remain pending. Rust is not enabled in the live or packaged media path; UI, codecs/models, storage format, .NET backend and Go SFU remain unchanged. No release or production cutover was performed.
+The migration has started on an isolated beta branch from the stable baseline. P0 is **in progress**, not accepted. Beta channel/profile separation and dependency-free Rust core/DSP prototypes are implemented. Existing desktop tests and native DSP parity tests pass; the actual main typecheck, Electron build and local NSIS packaging/manifest verification pass. The installer was neither installed nor published. The actual renderer typecheck exposes pre-existing errors and blocks publishing. Import/reverse merging, real Windows install/uninstall, mixed-client media and performance acceptance remain pending. Rust is not enabled in the live or packaged media path; UI, codecs/models, storage format, .NET backend and Go SFU remain unchanged. No release or production cutover was performed.
