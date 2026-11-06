@@ -23,6 +23,12 @@ pub struct OutboundPacket {
     pub direct: Option<String>,
 }
 
+struct Download {
+    metadata: Value,
+    transfer: Option<String>,
+    touched: i64,
+}
+
 pub struct ChatEngine {
     owner: String,
     identity: ChatIdentity,
@@ -32,7 +38,7 @@ pub struct ChatEngine {
     files: Option<FileBroker>,
     file_requests: Vec<(String, String)>,
     file_cancels: Vec<(String, String)>,
-    downloads: BTreeSet<(String, String)>,
+    downloads: BTreeMap<(String, String), Download>,
 }
 
 impl ChatEngine {
@@ -46,22 +52,101 @@ impl ChatEngine {
             files: None,
             file_requests: Vec::new(),
             file_cancels: Vec::new(),
-            downloads: BTreeSet::new(),
+            downloads: BTreeMap::new(),
         }
     }
 
     pub fn set_friends(&mut self, friends: impl IntoIterator<Item = String>) {
         self.friends = friends.into_iter().collect();
         self.keys.retain(|peer, _| self.friends.contains(peer));
+        let revoked: Vec<_> = self
+            .downloads
+            .keys()
+            .filter(|(peer, _)| !self.friends.contains(peer))
+            .cloned()
+            .collect();
+        for (peer, id) in revoked {
+            let _ = self.finish_download(&peer, &id, "failed", 0);
+        }
+        self.file_requests
+            .retain(|(peer, _)| self.friends.contains(peer));
+        if let Some(files) = self.files.as_mut() {
+            files.retain_peers(&self.friends);
+        }
     }
 
     pub fn set_file_root(&mut self, path: &Path) -> Result<(), ChatError> {
         self.files = Some(FileBroker::new(path).map_err(|_| ChatError::Storage)?);
+        self.file_broker()?
+            .recover_partials()
+            .map_err(|_| ChatError::Storage)?;
+        self.store
+            .recover_transfers(&self.owner)
+            .map_err(|_| ChatError::Storage)?;
         Ok(())
     }
 
     pub fn owner(&self) -> &str {
         &self.owner
+    }
+
+    pub fn is_friend(&self, peer: &str) -> bool {
+        self.friends.contains(peer)
+    }
+
+    pub fn saved_file(
+        &self,
+        peer: &str,
+        id: &str,
+        stored: &str,
+        path: &Path,
+        now: i64,
+    ) -> Result<(), ChatError> {
+        self.ensure_friend(peer)?;
+        if let Some(message) = self
+            .store
+            .message(&self.owner, peer, id, now)
+            .map_err(|_| ChatError::Storage)?
+        {
+            if let Some(mut file) = message.file.filter(|file| file["storedName"] == stored) {
+                file["savedPath"] = json!(path.to_string_lossy());
+                self.store
+                    .set_file(&self.owner, peer, id, &file, now)
+                    .map_err(|_| ChatError::Storage)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn saved_path(
+        &self,
+        peer: &str,
+        id: &str,
+        now: i64,
+    ) -> Result<Option<std::path::PathBuf>, ChatError> {
+        self.ensure_friend(peer)?;
+        Ok(self
+            .store
+            .message(&self.owner, peer, id, now)
+            .map_err(|_| ChatError::Storage)?
+            .and_then(|message| message.file)
+            .and_then(|file| file["savedPath"].as_str().map(std::path::PathBuf::from)))
+    }
+
+    pub fn forget_saved_path(&self, peer: &str, id: &str, now: i64) -> Result<(), ChatError> {
+        self.ensure_friend(peer)?;
+        if let Some(mut file) = self
+            .store
+            .message(&self.owner, peer, id, now)
+            .map_err(|_| ChatError::Storage)?
+            .and_then(|message| message.file)
+        {
+            file["savedPath"] = Value::Null;
+            self.store
+                .set_file(&self.owner, peer, id, &file, now)
+                .map_err(|_| ChatError::Storage)?;
+        }
+        Ok(())
     }
 
     pub fn file_broker(&self) -> Result<&FileBroker, ChatError> {
@@ -83,6 +168,7 @@ impl ChatEngine {
             .max()
             .unwrap_or(0)
             .checked_add(1)
+            .filter(|sequence| *sequence <= 9_007_199_254_740_991)
             .ok_or(ChatError::Packet)?;
         let message = ChatMessage {
             id,
@@ -99,17 +185,22 @@ impl ChatEngine {
                 json!({"name":file.name,"size":file.size,"sha256":file.sha256,"storedName":file.stored_name,"savedPath":null,"sourceAvailable":true,"transferState":"available","progress":0}),
             ),
         };
-        self.store
-            .save(&message, now)
-            .map_err(|_| ChatError::Storage)?;
-        if self.keys.contains_key(peer) {
-            Ok(vec![self.secure(
+        let packet = if self.keys.contains_key(peer) {
+            self.secure(
                 peer,
                 json!({"type":"message","message":wire_message(&message)}),
-            )?])
+            )?
         } else {
-            Ok(vec![self.key_packet(peer, false)?])
+            self.key_packet(peer, false)?
+        };
+        if !self
+            .store
+            .save(&message, now)
+            .map_err(|_| ChatError::Storage)?
+        {
+            return Err(ChatError::Storage);
         }
+        Ok(vec![packet])
     }
 
     pub fn request_file(
@@ -118,16 +209,45 @@ impl ChatEngine {
         id: &str,
         now: i64,
     ) -> Result<OutboundPacket, ChatError> {
-        let message = self
-            .messages(peer, now)?
-            .into_iter()
-            .find(|message| message.id == id && message.kind == "file")
-            .ok_or(ChatError::Packet)?;
-        if message.sender_id != peer {
+        self.ensure_friend(peer)?;
+        if self.downloads.len() >= 8 || self.downloads.contains_key(&(peer.into(), id.into())) {
             return Err(ChatError::Packet);
         }
-        self.downloads.insert((peer.into(), id.into()));
-        self.secure(peer, json!({"type":"file-request","messageId":id}))
+        let message = self
+            .store
+            .message(&self.owner, peer, id, now)
+            .map_err(|_| ChatError::Storage)?
+            .ok_or(ChatError::Packet)?;
+        if message.sender_id != peer || message.kind != "file" {
+            return Err(ChatError::Packet);
+        }
+        let mut metadata = message.file.ok_or(ChatError::Packet)?;
+        if let Some(name) = metadata["storedName"].as_str() {
+            if self.file_broker()?.open_source(name).is_ok() {
+                return Err(ChatError::Packet);
+            }
+            metadata["storedName"] = Value::Null;
+            metadata["sourceAvailable"] = json!(false);
+        }
+        let packet = self.secure(peer, json!({"type":"file-request","messageId":id}))?;
+        metadata["transferState"] = json!("transferring");
+        metadata["progress"] = json!(0);
+        if !self
+            .store
+            .set_file(&self.owner, peer, id, &metadata, now)
+            .map_err(|_| ChatError::Storage)?
+        {
+            return Err(ChatError::Packet);
+        }
+        self.downloads.insert(
+            (peer.into(), id.into()),
+            Download {
+                metadata,
+                transfer: None,
+                touched: now,
+            },
+        );
+        Ok(packet)
     }
 
     pub fn take_file_requests(&mut self) -> Vec<(String, String)> {
@@ -137,13 +257,122 @@ impl ChatEngine {
         std::mem::take(&mut self.file_cancels)
     }
 
-    pub fn cancel_file(&mut self, peer: &str, id: &str) -> Result<OutboundPacket, ChatError> {
+    pub fn cancel_file(
+        &mut self,
+        peer: &str,
+        id: &str,
+        now: i64,
+    ) -> Result<OutboundPacket, ChatError> {
         self.ensure_friend(peer)?;
-        self.downloads.remove(&(peer.into(), id.into()));
+        self.finish_download(peer, id, "missing", now)?;
+        self.secure(peer, json!({"type":"file-cancel","messageId":id}))
+    }
+
+    fn finish_download(
+        &mut self,
+        peer: &str,
+        id: &str,
+        state: &str,
+        now: i64,
+    ) -> Result<(), ChatError> {
         if let Some(files) = self.files.as_mut() {
             files.abort_message(peer, id);
         }
-        self.secure(peer, json!({"type":"file-cancel","messageId":id}))
+        if let Some(mut download) = self.downloads.remove(&(peer.into(), id.into())) {
+            download.metadata["transferState"] = json!(state);
+            download.metadata["progress"] = json!(0);
+            self.store
+                .set_file(
+                    &self.owner,
+                    peer,
+                    id,
+                    &download.metadata,
+                    now.max(download.touched),
+                )
+                .map_err(|_| ChatError::Storage)?;
+        }
+        Ok(())
+    }
+
+    pub fn fail_downloads(&mut self, peer: Option<&str>, now: i64) -> Vec<OutboundPacket> {
+        let pending: Vec<_> = self
+            .downloads
+            .keys()
+            .filter(|(id, _)| peer.is_none_or(|peer| peer == id))
+            .cloned()
+            .collect();
+        let mut packets = Vec::new();
+        for (peer, id) in pending {
+            let _ = self.finish_download(&peer, &id, "failed", now);
+            if let Ok(packet) = self.secure(&peer, json!({"type":"file-cancel","messageId":id})) {
+                packets.push(packet);
+            }
+        }
+        packets
+    }
+
+    pub fn has_downloads(&self) -> bool {
+        !self.downloads.is_empty()
+    }
+    pub fn is_downloading(&self, peer: &str, id: &str) -> bool {
+        self.downloads.contains_key(&(peer.into(), id.into()))
+    }
+
+    pub fn clear_file(
+        &mut self,
+        peer: &str,
+        id: &str,
+        now: i64,
+    ) -> Result<Vec<OutboundPacket>, ChatError> {
+        self.ensure_friend(peer)?;
+        self.finish_download(peer, id, "deleted", now)?;
+        if self.file_cancels.len() < 8 {
+            self.file_cancels.push((peer.into(), id.into()));
+        }
+        let message = self
+            .store
+            .message(&self.owner, peer, id, now)
+            .map_err(|_| ChatError::Storage)?
+            .ok_or(ChatError::Packet)?;
+        let mut file = message.file.ok_or(ChatError::Packet)?;
+        self.store
+            .store_file_deletion(&self.owner, peer, id, false, now)
+            .map_err(|_| ChatError::Storage)?;
+        if let Some(name) = file["storedName"].as_str() {
+            self.file_broker()?
+                .delete(name)
+                .map_err(|_| ChatError::Storage)?;
+        }
+        file["storedName"] = Value::Null;
+        file["savedPath"] = Value::Null;
+        file["sourceAvailable"] = json!(false);
+        file["progress"] = json!(0);
+        file["transferState"] = json!("deleted");
+        self.store
+            .set_file(&self.owner, peer, id, &file, now)
+            .map_err(|_| ChatError::Storage)?;
+        Ok(vec![if self.keys.contains_key(peer) {
+            self.secure(peer, json!({"type":"file-delete","messageId":id}))?
+        } else {
+            self.key_packet(peer, false)?
+        }])
+    }
+
+    pub fn expire_downloads(&mut self, now: i64) -> Vec<OutboundPacket> {
+        let expired: Vec<_> = self
+            .downloads
+            .iter()
+            .filter(|(_, item)| now.saturating_sub(item.touched) >= 30_000)
+            .map(|(key, _)| key.clone())
+            .collect();
+        let mut packets = Vec::new();
+        for (peer, id) in expired {
+            let _ = self.finish_download(&peer, &id, "failed", now);
+            if let Ok(packet) = self.secure(&peer, json!({"type":"file-cancel","messageId":id})) {
+                packets.push(packet);
+            }
+        }
+        packets
     }
 
     pub fn cached_file(
@@ -151,18 +380,27 @@ impl ChatEngine {
         peer: &str,
         id: &str,
         now: i64,
-    ) -> Result<(std::fs::File, String), ChatError> {
+    ) -> Result<(std::fs::File, FileInfo), ChatError> {
+        self.ensure_friend(peer)?;
         let message = self
-            .messages(peer, now)?
-            .into_iter()
-            .find(|message| message.id == id)
+            .store
+            .message(&self.owner, peer, id, now)
+            .map_err(|_| ChatError::Storage)?
             .ok_or(ChatError::Packet)?;
         let metadata = message.file.ok_or(ChatError::Packet)?;
         Ok((
             self.file_broker()?
                 .open_source(metadata["storedName"].as_str().ok_or(ChatError::Packet)?)
                 .map_err(|_| ChatError::Storage)?,
-            metadata["name"].as_str().ok_or(ChatError::Packet)?.into(),
+            FileInfo {
+                name: metadata["name"].as_str().ok_or(ChatError::Packet)?.into(),
+                size: metadata["size"].as_u64().ok_or(ChatError::Packet)?,
+                sha256: metadata["sha256"].as_str().ok_or(ChatError::Packet)?.into(),
+                stored_name: metadata["storedName"]
+                    .as_str()
+                    .ok_or(ChatError::Packet)?
+                    .into(),
+            },
         ))
     }
 
@@ -175,11 +413,13 @@ impl ChatEngine {
         peer: &str,
         id: &str,
         now: i64,
-    ) -> Result<(std::fs::File, u64), ChatError> {
+    ) -> Result<(std::fs::File, u64, String), ChatError> {
+        self.ensure_friend(peer)?;
         let message = self
-            .messages(peer, now)?
-            .into_iter()
-            .find(|message| message.id == id && message.sender_id == self.owner)
+            .store
+            .message(&self.owner, peer, id, now)
+            .map_err(|_| ChatError::Storage)?
+            .filter(|message| message.sender_id == self.owner)
             .ok_or(ChatError::Packet)?;
         let metadata = message.file.as_ref().ok_or(ChatError::Packet)?;
         let file = self
@@ -190,7 +430,11 @@ impl ChatEngine {
         if file.metadata().map_err(|_| ChatError::Storage)?.len() != size {
             return Err(ChatError::Storage);
         }
-        Ok((file, size))
+        Ok((
+            file,
+            size,
+            metadata["sha256"].as_str().ok_or(ChatError::Packet)?.into(),
+        ))
     }
 
     pub fn receive_file(
@@ -201,62 +445,78 @@ impl ChatEngine {
     ) -> Result<(String, f32, bool), ChatError> {
         self.ensure_friend(peer)?;
         let (header, bytes) = crate::files::decode_frame(frame).map_err(|_| ChatError::Packet)?;
-        if header.sender_id != peer
-            || header.target_id != self.owner
-            || !self
-                .downloads
-                .contains(&(peer.into(), header.message_id.clone()))
+        if header.sender_id != peer || header.target_id != self.owner {
+            return Err(ChatError::Packet);
+        }
+        let key = (peer.to_owned(), header.message_id.clone());
+        let download = self.downloads.get_mut(&key).ok_or(ChatError::Packet)?;
+        if (header.kind == "file-begin" && download.transfer.is_some())
+            || (header.kind != "file-begin"
+                && download.transfer.as_deref() != Some(&header.transfer_id))
         {
             return Err(ChatError::Packet);
         }
-        let mut message = self
-            .messages(peer, now)?
-            .into_iter()
-            .find(|message| {
-                message.id == header.message_id
-                    && message.sender_id == peer
-                    && message.kind == "file"
-            })
-            .ok_or(ChatError::Packet)?;
-        let metadata = message.file.as_mut().ok_or(ChatError::Packet)?;
+        let metadata = &mut download.metadata;
         let files = self.files.as_mut().ok_or(ChatError::Storage)?;
-        let progress = match header.kind.as_str() {
-            "file-begin" => {
-                files
-                    .begin(
-                        peer,
-                        &header.message_id,
-                        &header.transfer_id,
-                        metadata["size"].as_u64().ok_or(ChatError::Packet)?,
-                        metadata["sha256"].as_str().ok_or(ChatError::Packet)?,
-                    )
-                    .map_err(|_| ChatError::Storage)?;
-                metadata["transferState"] = json!("transferring");
-                0.0
+        let result = (|| {
+            let progress = match header.kind.as_str() {
+                "file-begin" => {
+                    files
+                        .begin(
+                            peer,
+                            &header.message_id,
+                            &header.transfer_id,
+                            metadata["size"].as_u64().ok_or(ChatError::Packet)?,
+                            metadata["sha256"].as_str().ok_or(ChatError::Packet)?,
+                        )
+                        .map_err(|_| ChatError::Storage)?;
+                    metadata["transferState"] = json!("transferring");
+                    download.transfer = Some(header.transfer_id.clone());
+                    0.0
+                }
+                "file-chunk" => files
+                    .append(peer, &header, bytes)
+                    .map_err(|_| ChatError::Storage)?,
+                "file-complete" => {
+                    let name = files
+                        .complete(peer, &header.message_id, &header.transfer_id)
+                        .map_err(|_| ChatError::Storage)?;
+                    metadata["storedName"] = json!(name);
+                    metadata["transferState"] = json!("available");
+                    metadata["sourceAvailable"] = json!(true);
+                    metadata["progress"] = json!(1);
+                    if !matches!(
+                        self.store
+                            .set_file(&self.owner, peer, &header.message_id, metadata, now),
+                        Ok(true)
+                    ) {
+                        let _ = files.delete(&name);
+                        return Err(ChatError::Storage);
+                    }
+                    1.0
+                }
+                _ => return Err(ChatError::Packet),
+            };
+            metadata["progress"] = json!(progress);
+            download.touched = now;
+            Ok((
+                header.message_id.clone(),
+                progress,
+                header.kind == "file-complete",
+            ))
+        })();
+        match result {
+            Ok(result) => {
+                if result.2 {
+                    self.downloads.remove(&key);
+                }
+                Ok(result)
             }
-            "file-chunk" => files
-                .append(peer, &header, bytes)
-                .map_err(|_| ChatError::Storage)?,
-            "file-complete" => {
-                let name = files
-                    .complete(peer, &header.message_id, &header.transfer_id)
-                    .map_err(|_| ChatError::Storage)?;
-                metadata["storedName"] = json!(name);
-                metadata["transferState"] = json!("available");
-                metadata["sourceAvailable"] = json!(true);
-                metadata["progress"] = json!(1);
-                self.downloads
-                    .remove(&(peer.into(), header.message_id.clone()));
-                1.0
+            Err(error) => {
+                let _ = self.finish_download(peer, &header.message_id, "failed", now);
+                Err(error)
             }
-            _ => return Err(ChatError::Packet),
-        };
-        if header.kind != "file-chunk" {
-            self.store
-                .save(&message, now)
-                .map_err(|_| ChatError::Storage)?;
         }
-        Ok((header.message_id, progress, header.kind == "file-complete"))
     }
 
     pub fn open(&self, peer: &str) -> Result<OutboundPacket, ChatError> {
@@ -266,9 +526,16 @@ impl ChatEngine {
 
     pub fn messages(&self, peer: &str, now: i64) -> Result<Vec<ChatMessage>, ChatError> {
         self.ensure_friend(peer)?;
-        self.store
+        let mut messages = self
+            .store
             .conversation(&self.owner, peer, now)
-            .map_err(|_| ChatError::Storage)
+            .map_err(|_| ChatError::Storage)?;
+        for message in &mut messages {
+            if let Some(download) = self.downloads.get(&(peer.into(), message.id.clone())) {
+                message.file = Some(download.metadata.clone());
+            }
+        }
+        Ok(messages)
     }
 
     pub fn send_text(
@@ -352,8 +619,30 @@ impl ChatEngine {
         )?])
     }
 
-    pub fn remove(&self, peer: &str, id: &str) -> Result<Vec<OutboundPacket>, ChatError> {
+    pub fn remove(
+        &mut self,
+        peer: &str,
+        id: &str,
+        now: i64,
+    ) -> Result<Vec<OutboundPacket>, ChatError> {
         self.ensure_friend(peer)?;
+        self.finish_download(peer, id, "missing", now)?;
+        self.file_cancels.push((peer.into(), id.into()));
+        if let Some(message) = self
+            .store
+            .message(&self.owner, peer, id, now)
+            .map_err(|_| ChatError::Storage)?
+        {
+            if let Some(name) = message
+                .file
+                .as_ref()
+                .and_then(|file| file["storedName"].as_str())
+            {
+                self.file_broker()?
+                    .delete(name)
+                    .map_err(|_| ChatError::Storage)?;
+            }
+        }
         self.store
             .store_deletion(&self.owner, peer, id, false)
             .map_err(|_| ChatError::Storage)?;
@@ -430,6 +719,13 @@ impl ChatEngine {
             {
                 output.push(self.secure(peer, json!({"type":"message-delete","messageId":id}))?);
             }
+            for id in self
+                .store
+                .file_deletions(&self.owner, peer, false, now)
+                .map_err(|_| ChatError::Storage)?
+            {
+                output.push(self.secure(peer, json!({"type":"file-delete","messageId":id}))?);
+            }
             if !had_key {
                 output.push(self.secure(peer, json!({"type":"sync-request"}))?);
             }
@@ -498,7 +794,7 @@ impl ChatEngine {
                     .as_str()
                     .filter(|text| text.encode_utf16().count() <= 4000)
                     .ok_or(ChatError::Packet)?;
-                let file = if raw["kind"] == "file" {
+                let mut file = if raw["kind"] == "file" {
                     let file = &raw["file"];
                     let name = file["name"]
                         .as_str()
@@ -529,6 +825,23 @@ impl ChatEngine {
                     }
                     None
                 };
+                if let Some(file) = &mut file {
+                    if self
+                        .store
+                        .file_deletions(&self.owner, peer, true, now)
+                        .map_err(|_| ChatError::Storage)?
+                        .iter()
+                        .chain(
+                            self.store
+                                .file_deletions(&self.owner, peer, false, now)
+                                .map_err(|_| ChatError::Storage)?
+                                .iter(),
+                        )
+                        .any(|deleted| deleted == id)
+                    {
+                        file["transferState"] = json!("deleted");
+                    }
+                }
                 let created_at = raw["createdAt"]
                     .as_i64()
                     .filter(|created| {
@@ -641,6 +954,10 @@ impl ChatEngine {
                     .as_str()
                     .filter(|id| id.len() <= 128)
                     .ok_or(ChatError::Packet)?;
+                self.finish_download(peer, id, "missing", now)?;
+                if self.file_cancels.len() < 8 {
+                    self.file_cancels.push((peer.into(), id.into()));
+                }
                 self.store
                     .store_deletion(&self.owner, peer, id, true)
                     .map_err(|_| ChatError::Storage)?;
@@ -663,7 +980,16 @@ impl ChatEngine {
             }
             "pong" | "sync-complete" => {}
             "file-request" => {
-                let id = packet["messageId"].as_str().ok_or(ChatError::Packet)?;
+                let id = packet["messageId"]
+                    .as_str()
+                    .filter(|id| !id.is_empty() && id.len() <= 128)
+                    .ok_or(ChatError::Packet)?;
+                if !messages.iter().any(|message| {
+                    message.id == id && message.sender_id == self.owner && message.kind == "file"
+                }) {
+                    output.push(self.unavailable(peer, id)?);
+                    return Ok(output);
+                }
                 if self.file_requests.len() < 8
                     && !self
                         .file_requests
@@ -674,10 +1000,33 @@ impl ChatEngine {
                 }
             }
             "file-unavailable" | "file-delete" => {
-                if let Some(mut message) = messages
-                    .into_iter()
-                    .find(|message| Some(message.id.as_str()) == packet["messageId"].as_str())
+                if packet["type"] == "file-delete" {
+                    let id = packet["messageId"]
+                        .as_str()
+                        .filter(|id| !id.is_empty() && id.len() <= 128)
+                        .ok_or(ChatError::Packet)?;
+                    self.store
+                        .store_file_deletion(&self.owner, peer, id, true, now)
+                        .map_err(|_| ChatError::Storage)?;
+                    if self.file_cancels.len() < 8 {
+                        self.file_cancels.push((peer.into(), id.into()));
+                    }
+                }
+                if packet["type"] == "file-unavailable"
+                    && !self.downloads.contains_key(&(
+                        peer.into(),
+                        packet["messageId"].as_str().unwrap_or("").into(),
+                    ))
                 {
+                    return Ok(output);
+                }
+                if let Some(id) = packet["messageId"].as_str() {
+                    self.finish_download(peer, id, "deleted", now)?;
+                }
+                if let Some(mut message) = messages.into_iter().find(|message| {
+                    (packet["type"] == "file-delete" || message.sender_id == peer)
+                        && Some(message.id.as_str()) == packet["messageId"].as_str()
+                }) {
                     if let Some(file) = message.file.as_mut() {
                         if let Some(name) = file["storedName"].as_str() {
                             self.file_broker()?

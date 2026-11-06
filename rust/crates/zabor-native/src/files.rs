@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +19,28 @@ pub struct FileInfo {
 #[derive(Debug, thiserror::Error)]
 #[error("file transfer failed")]
 pub struct FileError;
+
+pub struct StagedFile {
+    info: Option<FileInfo>,
+    root: PathBuf,
+}
+
+impl StagedFile {
+    pub fn info(&self) -> &FileInfo {
+        self.info.as_ref().expect("uncommitted staged file")
+    }
+    pub fn commit(mut self) -> FileInfo {
+        self.info.take().expect("uncommitted staged file")
+    }
+}
+
+impl Drop for StagedFile {
+    fn drop(&mut self) {
+        if let Some(info) = &self.info {
+            let _ = std::fs::remove_file(self.root.join(&info.stored_name));
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +90,15 @@ impl FileBroker {
     }
 
     pub fn stage(&self, source: &Path) -> Result<FileInfo, FileError> {
+        self.stage_cancellable(source, &CancellationToken::new())
+            .map(StagedFile::commit)
+    }
+
+    pub fn stage_cancellable(
+        &self,
+        source: &Path,
+        stop: &CancellationToken,
+    ) -> Result<StagedFile, FileError> {
         let name = source
             .file_name()
             .and_then(|name| name.to_str())
@@ -90,6 +122,9 @@ impl FileBroker {
             let mut digest = Sha256::new();
             let mut size = 0_u64;
             loop {
+                if stop.is_cancelled() {
+                    return Err(FileError);
+                }
                 let count = input.read(&mut buffer).map_err(|_| FileError)?;
                 if count == 0 {
                     break;
@@ -117,7 +152,10 @@ impl FileBroker {
         if result.is_err() {
             let _ = std::fs::remove_file(temporary);
         }
-        result
+        result.map(|info| StagedFile {
+            info: Some(info),
+            root: self.root.clone(),
+        })
     }
 
     pub fn open_source(&self, name: &str) -> Result<File, FileError> {
@@ -145,6 +183,12 @@ impl FileBroker {
     ) -> Result<(), FileError> {
         if self.incoming.len() >= 8
             || self.incoming.contains_key(transfer)
+            || self
+                .incoming
+                .values()
+                .any(|item| item.peer == peer && item.message == message)
+            || transfer.is_empty()
+            || message.is_empty()
             || transfer.len() > 128
             || message.len() > 128
             || size == 0
@@ -254,6 +298,38 @@ impl FileBroker {
             .retain(|_, transfer| transfer.peer != peer || transfer.message != message);
     }
 
+    pub fn retain_peers(&mut self, peers: &std::collections::BTreeSet<String>) {
+        self.incoming
+            .retain(|_, transfer| peers.contains(&transfer.peer));
+    }
+
+    pub fn recover_partials(&self) -> Result<(), FileError> {
+        for entry in std::fs::read_dir(&self.root).map_err(|_| FileError)? {
+            let entry = entry.map_err(|_| FileError)?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let Some(id) = name
+                .strip_prefix('.')
+                .and_then(|name| name.strip_suffix(".part"))
+                .map(|name| name.strip_suffix(".bin").unwrap_or(name))
+            else {
+                continue;
+            };
+            if id.len() != 32 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                continue;
+            }
+            if let Err(error) = std::fs::remove_file(entry.path()) {
+                if !matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+                ) {
+                    return Err(FileError);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn delete(&self, name: &str) -> Result<(), FileError> {
         if !valid_stored_name(name) {
             return Err(FileError);
@@ -296,10 +372,18 @@ pub fn decode_frame(frame: &[u8]) -> Result<(ChunkHeader, &[u8]), FileError> {
     let header: ChunkHeader =
         serde_json::from_slice(&frame[4..4 + length]).map_err(|_| FileError)?;
     if header.version != 1
+        || header.message_id.is_empty()
+        || header.transfer_id.is_empty()
         || header.message_id.len() > 128
         || header.transfer_id.len() > 128
         || !["file-begin", "file-chunk", "file-complete"].contains(&header.kind.as_str())
     {
+        return Err(FileError);
+    }
+    if header.kind != "file-chunk" && (frame.len() != 4 + length || header.offset.is_some()) {
+        return Err(FileError);
+    }
+    if header.kind == "file-chunk" && header.offset.is_none() {
         return Err(FileError);
     }
     Ok((header, &frame[4 + length..]))
@@ -312,23 +396,47 @@ pub fn random_id() -> Result<String, FileError> {
 }
 
 #[cfg(feature = "native-media")]
+pub struct FileTransfer {
+    pub owner: String,
+    pub peer: String,
+    pub message: String,
+    pub size: u64,
+    pub sha256: String,
+}
+
+#[cfg(feature = "native-media")]
 pub async fn send_file(
     mut input: tokio::fs::File,
     channel: libwebrtc::data_channel::DataChannel,
-    owner: String,
-    peer: String,
-    message: String,
-    size: u64,
+    file: FileTransfer,
     stop: tokio_util::sync::CancellationToken,
 ) -> Result<(), FileError> {
     use libwebrtc::data_channel::DataChannelState;
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let mut hash = Sha256::new();
+    let mut verify = vec![0_u8; 1024 * 1024];
+    let mut verified = 0_u64;
+    loop {
+        let count = tokio::select! { _ = stop.cancelled() => return Err(FileError), count = input.read(&mut verify) => count.map_err(|_| FileError)? };
+        if count == 0 {
+            break;
+        }
+        verified = verified
+            .checked_add(count as u64)
+            .filter(|size| *size <= file.size)
+            .ok_or(FileError)?;
+        hash.update(&verify[..count]);
+    }
+    if verified != file.size || format!("{:x}", hash.finalize()) != file.sha256 {
+        return Err(FileError);
+    }
+    input.rewind().await.map_err(|_| FileError)?;
     let transfer = random_id()?;
     let mut header = ChunkHeader {
         version: 1,
-        sender_id: owner,
-        target_id: peer,
-        message_id: message,
+        sender_id: file.owner,
+        target_id: file.peer,
+        message_id: file.message,
         transfer_id: transfer,
         kind: "file-begin".into(),
         offset: None,
@@ -346,7 +454,7 @@ pub async fn send_file(
         }
         if offset
             .checked_add(count as u64)
-            .is_none_or(|end| end > size)
+            .is_none_or(|end| end > file.size)
         {
             return Err(FileError);
         }
@@ -355,12 +463,70 @@ pub async fn send_file(
         send_chunk(&channel, &encode_frame(&header, &buffer[..count])?, &stop).await?;
         offset += count as u64;
     }
-    if offset != size {
+    if offset != file.size {
         return Err(FileError);
     }
     header.kind = "file-complete".into();
     header.offset = None;
     send_chunk(&channel, &encode_frame(&header, &[])?, &stop).await
+}
+
+pub fn save_verified(
+    mut source: File,
+    target: &Path,
+    size: u64,
+    sha256: &str,
+    stop: &CancellationToken,
+) -> Result<PathBuf, FileError> {
+    let parent = target
+        .parent()
+        .filter(|parent| parent.is_dir())
+        .ok_or(FileError)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|_| FileError)?;
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    let mut hash = Sha256::new();
+    let mut written = 0_u64;
+    loop {
+        if stop.is_cancelled() {
+            return Err(FileError);
+        }
+        let count = source.read(&mut buffer).map_err(|_| FileError)?;
+        if count == 0 {
+            break;
+        }
+        written = written
+            .checked_add(count as u64)
+            .filter(|total| *total <= size)
+            .ok_or(FileError)?;
+        hash.update(&buffer[..count]);
+        temporary
+            .write_all(&buffer[..count])
+            .map_err(|_| FileError)?;
+    }
+    if written != size || format!("{:x}", hash.finalize()) != sha256 || stop.is_cancelled() {
+        return Err(FileError);
+    }
+    temporary.as_file().sync_all().map_err(|_| FileError)?;
+    temporary.persist(target).map_err(|_| FileError)?;
+    Ok(target.to_owned())
+}
+
+pub fn reveal_saved(path: &Path) -> Result<(), FileError> {
+    if !path.is_file() || !path.is_absolute() {
+        return Err(FileError);
+    }
+    #[cfg(windows)]
+    {
+        let windows = std::env::var_os("WINDIR").ok_or(FileError)?;
+        std::process::Command::new(PathBuf::from(windows).join("explorer.exe"))
+            .arg("/select,")
+            .arg(path)
+            .spawn()
+            .map_err(|_| FileError)?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    Err(FileError)
 }
 
 #[cfg(feature = "native-media")]

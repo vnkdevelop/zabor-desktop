@@ -1,6 +1,6 @@
 # Условия использования сервиса ZABOR / ZABOR Terms of Service
 
-> Редакция от 6 ноября 2026 года. Предыдущая редакция — от 5 ноября 2026 года.
+> Редакция от 7 ноября 2026 года. Предыдущая редакция — от 6 ноября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 >
@@ -80,7 +80,7 @@
 
 ### 7. Данные пользователей
 
-Полностью нативный Rust-клиент находится в разработке отдельно от опубликованной WASM beta. Его модули авторизации, голосового транспорта, защищённого текстового чата и локального хранения проходят локальные испытания. Native beta использует отдельный профиль `zabor-desktop-native-beta`, Windows DPAPI для сессии/ключа и SQLite для истории со сроком 14 суток. P2P text chat и screen/video интеграция экспериментальные; импорт старого профиля и файловый workflow ещё не подключены. Наличие исходников и успешная сборка не означают выпуска полноценного клиента или изменения указанных ниже обязательств Сервиса.
+Полностью нативный Rust-клиент находится в разработке отдельно от опубликованной WASM beta. Его модули авторизации, медиасвязи, чата, файлов и локального хранения проходят локальные испытания. Native beta использует отдельный профиль `zabor-desktop-native-beta`, Windows DPAPI для сессии/ключа и SQLite для истории со сроком 14 суток. Файловый workflow включает подтверждение отправки, копирование исходного файла, получение по запросу, проверку размера/SHA-256, отмену, повтор и сохранение в выбранное место. К файлам применяются раздел 5 и ACCEPTABLE-USE.md; проверка целостности не является модерацией или антивирусной проверкой. Импорт старого профиля ещё не подключён. Наличие исходников и успешная сборка не означают выпуска полноценного клиента или изменения указанных ниже обязательств Сервиса.
 
 Клиентская Rust beta меняет только указанные локальные вычисления DSP; серверы .NET/Go, маршруты и сроки хранения сохраняются. Новые установщики/update channels stable и beta разделены и по умолчанию сохраняют данные. Переход экспериментального клиента в stable выполняется после отдельного подтверждения испытаний владельцем, а не автоматически при выпуске beta.
 
@@ -211,7 +211,7 @@ Responsibility for content transmitted through the Service rests with the user w
 
 ### 7. User data
 
-The fully native Rust client is being developed separately from the published WASM beta. Its authentication, voice transport, encrypted text chat and persistence modules undergo local testing. Native beta uses a separate `zabor-desktop-native-beta` profile, Windows DPAPI for sessions/keys and SQLite history with 14-day retention. P2P text chat and screen/video integration are experimental; legacy-profile import and the file workflow are not connected yet. Available source code and a successful build do not constitute a full client release or change the Service commitments below.
+The fully native Rust client is being developed separately from the published WASM beta. Its authentication, media, chat, file and persistence modules undergo local testing. Native beta uses a separate `zabor-desktop-native-beta` profile, current-user Windows DPAPI for sessions/keys and SQLite history with 14-day retention. File handling includes send confirmation, source copying, requested downloads, size/SHA-256 verification, cancellation, retry and saving to a chosen location. Section 5 and ACCEPTABLE-USE.md apply to files; integrity checking is neither moderation nor antivirus scanning. Legacy-profile import is not connected yet. Available source and a successful build do not constitute a full client release or change the Service commitments below.
 
 The client Rust beta changes only the stated local DSP calculations; .NET/Go servers, routes and retention remain unchanged. New stable/beta installers and update channels are separate and preserve data by default. Promotion of the experimental client to stable requires separate owner test approval and does not occur automatically when a beta is released.
 

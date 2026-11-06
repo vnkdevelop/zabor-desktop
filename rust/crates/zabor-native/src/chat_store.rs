@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -35,6 +35,7 @@ impl ChatStore {
             .busy_timeout(std::time::Duration::from_secs(2))
             .map_err(|_| StoreError)?;
         connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS messages(owner TEXT NOT NULL,id TEXT NOT NULL,conversation TEXT NOT NULL,created INTEGER NOT NULL,sequence INTEGER NOT NULL,body TEXT NOT NULL,PRIMARY KEY(owner,id)); CREATE INDEX IF NOT EXISTS messages_conversation ON messages(owner,conversation,sequence,created); CREATE INDEX IF NOT EXISTS messages_retention ON messages(owner,created);").map_err(|_| StoreError)?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS file_deletions(owner TEXT NOT NULL,peer TEXT NOT NULL,id TEXT NOT NULL,incoming INTEGER NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(owner,peer,id,incoming));").map_err(|_| StoreError)?;
         Ok(Self { connection })
     }
 
@@ -85,6 +86,64 @@ impl ChatStore {
             )
             .map_err(|_| StoreError)?;
         Ok(())
+    }
+
+    pub fn message(
+        &self,
+        owner: &str,
+        peer: &str,
+        id: &str,
+        now: i64,
+    ) -> Result<Option<ChatMessage>, StoreError> {
+        let body: Option<String> = self.connection.query_row("SELECT body FROM messages WHERE owner=?1 AND conversation=?2 AND id=?3 AND created>?4", params![owner, peer, id, now.saturating_sub(RETENTION_MS)], |row| row.get(0)).optional().map_err(|_| StoreError)?;
+        body.map(|body| serde_json::from_str(&body).map_err(|_| StoreError))
+            .transpose()
+    }
+
+    pub fn set_file(
+        &self,
+        owner: &str,
+        peer: &str,
+        id: &str,
+        file: &serde_json::Value,
+        now: i64,
+    ) -> Result<bool, StoreError> {
+        let file = serde_json::to_string(file).map_err(|_| StoreError)?;
+        self.connection.execute("UPDATE messages SET body=json_set(body,'$.file',json(?1)) WHERE owner=?2 AND conversation=?3 AND id=?4 AND created>?5 AND json_extract(body,'$.kind')='file'", params![file, owner, peer, id, now.saturating_sub(RETENTION_MS)]).map(|count| count == 1).map_err(|_| StoreError)
+    }
+
+    pub fn store_file_deletion(
+        &self,
+        owner: &str,
+        peer: &str,
+        id: &str,
+        incoming: bool,
+        now: i64,
+    ) -> Result<(), StoreError> {
+        self.connection.execute("INSERT INTO file_deletions(owner,peer,id,incoming,created) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(owner,peer,id,incoming) DO UPDATE SET created=excluded.created", params![owner, peer, id, incoming, now]).map_err(|_| StoreError)?;
+        Ok(())
+    }
+
+    pub fn recover_transfers(&self, owner: &str) -> Result<(), StoreError> {
+        self.connection.execute("UPDATE messages SET body=json_set(body,'$.file.transferState','failed','$.file.progress',0) WHERE owner=?1 AND json_extract(body,'$.file.transferState')='transferring'", params![owner]).map_err(|_| StoreError)?;
+        Ok(())
+    }
+
+    pub fn file_deletions(
+        &self,
+        owner: &str,
+        peer: &str,
+        incoming: bool,
+        now: i64,
+    ) -> Result<Vec<String>, StoreError> {
+        let mut query = self.connection.prepare("SELECT id FROM file_deletions WHERE owner=?1 AND peer=?2 AND incoming=?3 AND created>?4").map_err(|_| StoreError)?;
+        let rows = query
+            .query_map(
+                params![owner, peer, incoming, now.saturating_sub(RETENTION_MS)],
+                |row| row.get(0),
+            )
+            .map_err(|_| StoreError)?;
+        rows.map(|row| row.map_err(|_| StoreError)).collect()
     }
 
     pub fn delete_from_conversation(
@@ -160,6 +219,12 @@ impl ChatStore {
     pub fn prune(&mut self, owner: &str, now: i64, files: &Path) -> Result<usize, StoreError> {
         let cutoff = now.saturating_sub(RETENTION_MS);
         let transaction = self.connection.transaction().map_err(|_| StoreError)?;
+        transaction
+            .execute(
+                "DELETE FROM file_deletions WHERE owner=?1 AND created<=?2",
+                params![owner, cutoff],
+            )
+            .map_err(|_| StoreError)?;
         {
             let mut query = transaction.prepare("SELECT DISTINCT json_extract(body,'$.file.storedName') FROM messages WHERE owner=?1 AND created<=?2 AND json_extract(body,'$.file.storedName') IS NOT NULL AND json_extract(body,'$.file.storedName') NOT IN (SELECT json_extract(body,'$.file.storedName') FROM messages WHERE created>?2 AND json_extract(body,'$.file.storedName') IS NOT NULL)").map_err(|_| StoreError)?;
             let names = query

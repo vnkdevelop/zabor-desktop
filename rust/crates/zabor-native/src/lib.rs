@@ -7,6 +7,8 @@ pub mod chat_crypto;
 pub mod chat_store;
 #[cfg(feature = "native-media")]
 pub mod chat_transport;
+#[cfg(feature = "native-media")]
+pub mod file_jobs;
 pub mod files;
 pub mod hub;
 pub mod localization;

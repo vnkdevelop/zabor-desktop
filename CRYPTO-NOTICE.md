@@ -1,6 +1,6 @@
 # Криптография в ZABOR: состав и свойства / ZABOR Cryptography Notice
 
-> Редакция от 6 ноября 2026 года. Предыдущая редакция — от 5 ноября 2026 года.
+> Редакция от 7 ноября 2026 года. Предыдущая редакция — от 6 ноября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -32,6 +32,8 @@
 | Защита данных сессии и ключа переписки | Шифрование средствами операционной системы: DPAPI (Windows), Keychain (macOS) | Electron `safeStorage` | Локально на устройстве |
 
 ### 3. Как защищается содержимое: два маршрута
+
+Нативный файловый маршрут использует `zabor-chat-files-v1` (SCTP поверх DTLS). JSON-заголовок каждого блока содержит version/senderId/targetId/messageId/transferId/type/offset и предваряется четырёхбайтовой big-endian длиной. Файловые байты не передаются через SignalR. Имя, размер и SHA-256 передаются в metadata обычного защищённого управляющего канала; локальные пути, имена кэша и savedPath исключены из wire-format. SHA-256 проверяет соответствие полученных байтов объявленному хешу, не заменяя аутентификацию собеседника и не добавляя прямую секретность. Кэш и самостоятельно сохранённые копии не получают дополнительного шифрования на диске.
 
 Защита содержимого устроена по-разному в зависимости от маршрута, и это различие принципиально.
 
@@ -108,6 +110,8 @@ During P2P/SFU transitions, transport connections may temporarily coexist until 
 | Session data and messaging key protection | Operating system encryption: DPAPI (Windows), Keychain (macOS) | Electron `safeStorage` | Locally on device |
 
 ### 3. How content is protected: two routes
+
+Native file transfer uses `zabor-chat-files-v1` (SCTP over DTLS). Each chunk's JSON header carries version/senderId/targetId/messageId/transferId/type/offset, prefixed with a four-byte big-endian header length. File bytes do not pass through SignalR. Name, size and SHA-256 travel in metadata on the regular protected control channel; local paths, cache names and savedPath are excluded from the wire format. SHA-256 checks received bytes against the announced hash; it neither substitutes for peer authentication nor adds forward secrecy. Cached and independently saved copies receive no additional at-rest encryption.
 
 Protection differs by route, and the difference is fundamental.
 

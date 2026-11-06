@@ -26,6 +26,7 @@ use zabor_native::chat::{ChatEngine, ChatError};
 use zabor_native::chat_crypto::ChatIdentity;
 use zabor_native::chat_store::{ChatMessage, ChatStore};
 use zabor_native::chat_transport::{ChatTransport, ChatTransportEvent};
+use zabor_native::file_jobs::{FileEvent, FileJobs};
 use zabor_native::hub::{HubConnection, HubEvent};
 use zabor_native::media::{MediaError, MediaEvent};
 use zabor_native::profile::Profile;
@@ -64,6 +65,20 @@ enum Command {
     CheckShare,
     ExpireStreams,
     Notification(NotificationKind, String, bool),
+    File {
+        owner: String,
+        peer: String,
+        action: FileAction,
+    },
+    MaintainFiles,
+}
+
+enum FileAction {
+    Stage(Vec<PathBuf>),
+    Save(String, PathBuf),
+    Cancel(String),
+    Clear(String),
+    Reveal(String),
 }
 
 enum UiEvent {
@@ -88,6 +103,9 @@ enum UiEvent {
     Sharing(bool),
     RemoveVideo(String),
     NotificationResolved(NotificationKind, String, bool),
+    PickedFiles(String, String, Vec<PathBuf>),
+    FileProgress(String, String, f32),
+    ChooseDestination(String, String),
 }
 
 struct FrameUpdate {
@@ -210,6 +228,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let captcha_id = Rc::new(RefCell::new(String::new()));
     let setup_avatar = Rc::new(RefCell::new(None::<String>));
     let latest = Rc::new(RefCell::new(Bootstrap::default()));
+    let pending_files = Rc::new(RefCell::new(None::<(String, String, Vec<PathBuf>)>));
     let video_generation = Arc::new(AtomicU64::new(0));
     let mailbox = Arc::new(Mutex::new(BTreeMap::<String, FrameUpdate>::new()));
     let scheduled = Arc::new(AtomicBool::new(false));
@@ -389,8 +408,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let _ = language_commands.try_send(Command::Language(language.to_string()));
     });
     let image_runtime = runtime.handle().clone();
+    let avatar_update = send_update.clone();
     ui.on_choose_avatar(move || {
-        let update = send_update.clone();
+        let update = avatar_update.clone();
         image_runtime.spawn(async move {
             let Some(file) = rfd::AsyncFileDialog::new()
                 .add_filter("images", &["png", "jpg", "jpeg", "webp", "gif"])
@@ -530,7 +550,128 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     ui.on_send_chat(move |peer, text| {
         let _ = send_commands.try_send(Command::ChatSend(peer.to_string(), text.to_string()));
     });
+    let file_runtime = runtime.handle().clone();
+    let file_update = send_update.clone();
+    let weak = ui.as_weak();
+    ui.on_choose_files(move |peer| {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        let owner = ui.get_user_id().to_string();
+        let update = file_update.clone();
+        let peer = peer.to_string();
+        file_runtime.spawn(async move {
+            if let Some(files) = rfd::AsyncFileDialog::new().pick_files().await {
+                let paths = files
+                    .into_iter()
+                    .map(|file| file.path().to_owned())
+                    .collect();
+                update(UiEvent::PickedFiles(owner, peer, paths));
+            }
+        });
+    });
+    let file_commands = commands.clone();
+    let picked = pending_files.clone();
+    let weak = ui.as_weak();
+    ui.on_confirm_files(move |send| {
+        if let Some((owner, peer, paths)) = picked.borrow_mut().take() {
+            if send {
+                let _ = file_commands.try_send(Command::File {
+                    owner,
+                    peer,
+                    action: FileAction::Stage(paths),
+                });
+            }
+        }
+        if let Some(ui) = weak.upgrade() {
+            ui.set_modal(0);
+            ui.set_attachment_names("".into());
+        }
+    });
+    let file_commands = commands.clone();
+    let file_runtime = runtime.handle().clone();
+    let weak = ui.as_weak();
+    ui.on_file_action(move |peer, id, action| {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        let owner = ui.get_user_id().to_string();
+        let peer = peer.to_string();
+        let id = id.to_string();
+        if action == "reveal" {
+            let _ = file_commands.try_send(Command::File {
+                owner,
+                peer,
+                action: FileAction::Reveal(id),
+            });
+        } else if action == "cancel" || action == "clear" {
+            let action = if action == "cancel" {
+                FileAction::Cancel(id)
+            } else {
+                FileAction::Clear(id)
+            };
+            let _ = file_commands.try_send(Command::File {
+                owner,
+                peer,
+                action,
+            });
+        } else if action == "save" {
+            let Some(row) = ui.get_chat_lines().iter().find(|row| row.id == id) else {
+                return;
+            };
+            let name = row.text.replace(['/', '\\'], "_");
+            let commands = file_commands.clone();
+            file_runtime.spawn(async move {
+                if let Some(file) = rfd::AsyncFileDialog::new()
+                    .set_file_name(&name)
+                    .save_file()
+                    .await
+                {
+                    let _ = commands
+                        .send(Command::File {
+                            owner,
+                            peer,
+                            action: FileAction::Save(id, file.path().into()),
+                        })
+                        .await;
+                }
+            });
+        }
+    });
     let delete_commands = commands.clone();
+    let drop_update = send_update.clone();
+    let weak = ui.as_weak();
+    ui.window().on_winit_window_event(move |_, event| {
+        use slint::winit_030::{winit::event::WindowEvent, EventResult};
+        let Some(ui) = weak.upgrade() else {
+            return EventResult::Propagate;
+        };
+        match event {
+            WindowEvent::HoveredFile(_) => ui.set_file_drag(
+                ui.get_authenticated()
+                    && ui.get_active_tab() == 1
+                    && !ui.get_selected_id().is_empty()
+                    && ui.get_modal() == 0,
+            ),
+            WindowEvent::HoveredFileCancelled => ui.set_file_drag(false),
+            WindowEvent::DroppedFile(path) => {
+                ui.set_file_drag(false);
+                if ui.get_authenticated()
+                    && ui.get_active_tab() == 1
+                    && !ui.get_selected_id().is_empty()
+                    && [0, 7].contains(&ui.get_modal())
+                {
+                    drop_update(UiEvent::PickedFiles(
+                        ui.get_user_id().to_string(),
+                        ui.get_selected_id().to_string(),
+                        vec![path.clone()],
+                    ));
+                }
+            }
+            _ => {}
+        }
+        EventResult::Propagate
+    });
     ui.on_delete_chat(move |peer, id| {
         let _ = delete_commands.try_send(Command::ChatDelete(peer.to_string(), id.to_string()));
     });
@@ -662,6 +803,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_busy(false);
                 }
                 UiEvent::SignedOut => {
+                    pending_files.borrow_mut().take();
                     *latest.borrow_mut() = Bootstrap::default();
                     ui.set_authenticated(false);
                     ui.set_auth_step(0);
@@ -747,12 +889,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                             Rc::new(VecModel::from(
                                 messages
                                     .into_iter()
-                                    .map(|message| ChatLine {
-                                        id: message.id.into(),
-                                        text: message.text.into(),
-                                        mine: message.sender_id == ui.get_user_id().as_str(),
-                                        delivery: message.delivery.into(),
-                                    })
+                                    .map(|message| chat_line(message, ui.get_user_id().as_str()))
                                     .collect::<Vec<_>>(),
                             ))
                             .into(),
@@ -847,6 +984,63 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 UiEvent::NotificationResolved(kind, id, accept) => {
                     resolve_notification(&ui, &mut latest.borrow_mut(), kind, &id, accept);
                 }
+                UiEvent::PickedFiles(owner, peer, mut paths) => {
+                    if owner == ui.get_user_id().as_str()
+                        && latest
+                            .borrow()
+                            .friends
+                            .iter()
+                            .any(|friend| friend.id == peer)
+                        && !paths.is_empty()
+                    {
+                        if ui.get_modal() == 7 {
+                            if let Some((old_owner, old_peer, old_paths)) =
+                                pending_files.borrow_mut().take()
+                            {
+                                if old_owner == owner && old_peer == peer {
+                                    paths.splice(0..0, old_paths);
+                                }
+                            }
+                        }
+                        if paths.len() > 20 {
+                            if let Ok(strings) = Strings::new(ui.get_language().as_str()) {
+                                ui.set_error(strings.text("chat.file.failed").into());
+                            }
+                            continue;
+                        }
+                        ui.set_attachment_names(
+                            paths
+                                .iter()
+                                .filter_map(|path| path.file_name())
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                                .into(),
+                        );
+                        *pending_files.borrow_mut() = Some((owner, peer, paths));
+                        ui.set_modal(7);
+                    }
+                }
+                UiEvent::FileProgress(peer, id, progress) => {
+                    if ui.get_selected_id() == peer {
+                        let model = ui.get_chat_lines();
+                        if let Some((index, mut row)) =
+                            model.iter().enumerate().find(|(_, row)| row.id == id)
+                        {
+                            let percent = (progress.clamp(0.0, 1.0) * 100.0) as i32;
+                            if percent != row.progress {
+                                row.progress = percent;
+                                row.transfer = "transferring".into();
+                                model.set_row_data(index, row);
+                            }
+                        }
+                    }
+                }
+                UiEvent::ChooseDestination(peer, id) => {
+                    if ui.get_selected_id() == peer {
+                        ui.invoke_file_action(peer.into(), id.into(), "save".into());
+                    }
+                }
             }
         }
     });
@@ -863,6 +1057,26 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_authenticated(true);
                 ui.set_connected(true);
                 ui.set_show_notifications(true);
+            }
+            "files" => {
+                let mut data = notification_fixture();
+                data.friends = data.requests.clone();
+                data.friends[0].is_online = true;
+                apply_bootstrap(&ui, &data);
+                ui.set_authenticated(true);
+                ui.set_connected(true);
+                ui.set_active_tab(1);
+                ui.set_selected_id(data.friends[0].id.clone().into());
+                ui.set_selected_name(data.friends[0].display_name.clone().into());
+                ui.set_chat_lines(
+                    Rc::new(VecModel::from(
+                        file_fixture()
+                            .into_iter()
+                            .map(|message| chat_line(message, "fixture-owner"))
+                            .collect::<Vec<_>>(),
+                    ))
+                    .into(),
+                );
             }
             _ => return Err("Unsupported app preview".into()),
         }
@@ -945,6 +1159,10 @@ async fn worker(
     let mut media_events: Option<mpsc::Receiver<MediaEvent>> = None;
     let mut chat: Option<ChatEngine> = None;
     let mut chat_transport: Option<ChatTransport> = None;
+    let mut file_jobs: Option<FileJobs> = None;
+    let mut file_progress = BTreeMap::<(String, String), i32>::new();
+    let mut file_watch = tokio::time::interval(Duration::from_secs(1));
+    file_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut chat_ice = Vec::<zabor_native::media::IceServerSettings>::new();
     let mut chat_failed = false;
     let mut friends = Vec::<String>::new();
@@ -975,6 +1193,7 @@ async fn worker(
                 match initialize_chat(profile, &user.id, &friends) {
                     Ok(engine) => {
                         chat = Some(engine);
+                        file_jobs = Some(FileJobs::new(&profile.root().join("chat-files")));
                         chat_transport = ChatTransport::new(
                             user.id.clone(),
                             friends.iter().cloned(),
@@ -990,10 +1209,61 @@ async fn worker(
                 }
             }
         }
+        if let (Some(jobs), Some(engine)) = (file_jobs.as_mut(), chat.as_mut()) {
+            file_progress.retain(|(peer, id), _| engine.is_downloading(peer, id));
+            let packets = jobs.pump(engine, chat_transport.as_ref(), now_ms());
+            if let Some(hub) = &hub {
+                send_chat_packets(hub, chat_transport.as_ref(), packets).await;
+            }
+        }
+        if chat_transport.is_none() && session_ready {
+            if let Some(user) = &current_user {
+                chat_transport = ChatTransport::new(
+                    user.id.clone(),
+                    friends.iter().cloned(),
+                    chat_ice.clone(),
+                    false,
+                )
+                .ok();
+            }
+        }
+        let file_tick = chat.as_ref().is_some_and(ChatEngine::has_downloads)
+            || file_jobs.as_ref().is_some_and(FileJobs::needs_tick);
         let command = tokio::select! {
             biased;
             _ = stop.cancelled() => break,
             command = commands.recv() => { let Some(command) = command else { break; }; command },
+            _ = async { if file_tick { file_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::MaintainFiles,
+            event = async { match file_jobs.as_mut().filter(|jobs| jobs.has_jobs()) { Some(jobs) => jobs.next_event().await, None => std::future::pending().await } } => {
+                if let (Some(event), Some(engine)) = (event, chat.as_mut()) {
+                    let peer = match event {
+                        FileEvent::Staged { peer, file } => {
+                            match file {
+                                Ok(file) => match engine.send_file(&peer, file.info().clone(), now_ms()) {
+                                    Ok(packets) => { file.commit(); if let Some(hub) = &hub { send_chat_packets(hub, chat_transport.as_ref(), packets).await; } },
+                                    Err(_) => update(UiEvent::Toast("chat.file.failed")),
+                                },
+                                Err(_) => update(UiEvent::Toast("chat.file.failed")),
+                            }
+                            peer
+                        },
+                        FileEvent::Sent { peer, id, success, .. } => {
+                            if !success { if let (Some(hub), Ok(packet)) = (hub.as_ref(), engine.unavailable(&peer, &id)) { send_chat_packets(hub, chat_transport.as_ref(), vec![packet]).await; } }
+                            peer
+                        },
+                        FileEvent::Saved { peer, id, stored_name, path } => {
+                            match path { Ok(path) => { if engine.saved_file(&peer, &id, &stored_name, &path, now_ms()).is_err() { update(UiEvent::Toast("chat.storageFailed")); } }, Err(_) => update(UiEvent::Toast("chat.file.failed")) }
+                            peer
+                        },
+                        FileEvent::Revealed { peer, id, success } => {
+                            if !success { let _ = engine.forget_saved_path(&peer, &id, now_ms()); update(UiEvent::ChooseDestination(peer.clone(), id)); }
+                            peer
+                        },
+                    };
+                    if selected_chat.as_deref() == Some(&peer) { if let Ok(messages) = engine.messages(&peer, now_ms()) { update(UiEvent::ChatMessages(peer, messages, false)); } }
+                }
+                continue;
+            },
             channel = async { match pending_join.take() { Some(channel) => channel, None => std::future::pending().await } } => Command::Join(channel),
             _ = async { if let Some(deadline) = stream_drops.next_deadline() { tokio::time::sleep_until(deadline.into()).await; } else { std::future::pending::<()>().await; } } => Command::ExpireStreams,
             _ = async { if voice.as_ref().is_some_and(VoiceSession::is_sharing) { share_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::CheckShare,
@@ -1092,7 +1362,12 @@ async fn worker(
                         if event.target == "ForceLeaveVoice" || voice.as_ref().is_some_and(|voice| voice.channel.is_none() && voice.call_peer.is_none()) { voice = None; media_events = None; update(UiEvent::VoiceEnded); }
                         update(UiEvent::Hub(event));
                     },
-                    None => { events = None; hub = None; session_ready = false; if saved_credentials.is_some() { retry_at = Some(tokio::time::Instant::now() + Duration::from_secs(2)); } update(UiEvent::Disconnected); }
+                    None => {
+                        events = None; hub = None; session_ready = false; chat_transport = None;
+                        if let Some(engine) = chat.as_mut() { engine.fail_downloads(None, now_ms()); }
+                        if let Some(jobs) = file_jobs.as_mut() { for peer in &friends { jobs.disconnect(peer); } }
+                        if saved_credentials.is_some() { retry_at = Some(tokio::time::Instant::now() + Duration::from_secs(2)); } update(UiEvent::Disconnected);
+                    }
                 }
                 continue;
             },
@@ -1132,12 +1407,121 @@ async fn worker(
                                 }
                             }
                         },
-                        ChatTransportEvent::Binary(_, _) => {},
+                        ChatTransportEvent::Binary(peer, frame) => {
+                            match chat.receive_file(&peer, &frame, now_ms()) {
+                                Ok((id, progress, complete)) => {
+                                    if complete {
+                                        if let Some(jobs) = file_jobs.as_mut() { if jobs.finish_incoming(chat, &peer, &id, now_ms()).is_err() { update(UiEvent::Toast("chat.file.failed")); } }
+                                        if let Ok(messages) = chat.messages(&peer, now_ms()) { update(UiEvent::ChatMessages(peer, messages, false)); }
+                                    } else {
+                                        let percent = (progress * 100.0) as i32;
+                                        if file_progress.insert((peer.clone(), id.clone()), percent) != Some(percent) { update(UiEvent::FileProgress(peer, id, progress)); }
+                                    }
+                                },
+                                Err(ChatError::Storage) => { update(UiEvent::Toast("chat.file.failed")); if let Ok(messages) = chat.messages(&peer, now_ms()) { update(UiEvent::ChatMessages(peer, messages, false)); } },
+                                Err(_) => {},
+                            }
+                        },
+                        ChatTransportEvent::FilesReady(_) => {},
+                        ChatTransportEvent::Unavailable(peer) => {
+                            if let Some(jobs) = file_jobs.as_mut() { jobs.disconnect(&peer); }
+                            let packets = chat.fail_downloads(Some(&peer), now_ms());
+                            send_chat_packets(hub, chat_transport.as_ref(), packets).await;
+                            if let Ok(messages) = chat.messages(&peer, now_ms()) { update(UiEvent::ChatMessages(peer, messages, false)); }
+                        },
                     }
                 }
                 continue;
             },
         };
+        if matches!(command, Command::MaintainFiles) {
+            if let Some(engine) = chat.as_mut() {
+                let packets = engine.expire_downloads(now_ms());
+                if let Some(hub) = &hub {
+                    send_chat_packets(hub, chat_transport.as_ref(), packets).await;
+                }
+                if let Some(peer) = &selected_chat {
+                    if let Ok(messages) = engine.messages(peer, now_ms()) {
+                        update(UiEvent::ChatMessages(peer.clone(), messages, false));
+                    }
+                }
+            }
+            continue;
+        }
+        if let Command::File {
+            owner,
+            peer,
+            action,
+        } = command
+        {
+            if let (Some(engine), Some(jobs)) = (
+                chat.as_mut()
+                    .filter(|engine| engine.owner() == owner && engine.is_friend(&peer)),
+                file_jobs.as_mut(),
+            ) {
+                let result: Result<Vec<zabor_native::chat::OutboundPacket>, ChatError> =
+                    (|| match action {
+                        FileAction::Stage(paths) => {
+                            if !jobs.can_stage(paths.len()) {
+                                return Err(ChatError::Packet);
+                            }
+                            for path in paths {
+                                jobs.stage(peer.clone(), path)
+                                    .map_err(|_| ChatError::Storage)?;
+                            }
+                            Ok(Vec::new())
+                        }
+                        FileAction::Save(id, target) => {
+                            match engine.cached_file(&peer, &id, now_ms()) {
+                                Ok((source, info)) => {
+                                    jobs.save(peer.clone(), id, source, info, target)
+                                        .map_err(|_| ChatError::Storage)?;
+                                    Ok(Vec::new())
+                                }
+                                Err(_) => {
+                                    let packet = engine.request_file(&peer, &id, now_ms())?;
+                                    jobs.set_target(&peer, &id, target);
+                                    Ok(vec![packet])
+                                }
+                            }
+                        }
+                        FileAction::Cancel(id) => {
+                            jobs.cancel(&peer, &id);
+                            engine
+                                .cancel_file(&peer, &id, now_ms())
+                                .map(|packet| vec![packet])
+                        }
+                        FileAction::Reveal(id) => {
+                            if let Some(path) = engine.saved_path(&peer, &id, now_ms())? {
+                                jobs.reveal(peer.clone(), id, path)
+                                    .map_err(|_| ChatError::Storage)?;
+                            } else {
+                                update(UiEvent::ChooseDestination(peer.clone(), id));
+                            }
+                            Ok(Vec::new())
+                        }
+                        FileAction::Clear(id) => {
+                            jobs.cancel(&peer, &id);
+                            engine.clear_file(&peer, &id, now_ms())
+                        }
+                    })();
+                match result {
+                    Ok(packets) => {
+                        if let Some(hub) = &hub {
+                            if let Some(transport) = chat_transport.as_mut() {
+                                let _ = transport.connect(hub, &peer).await;
+                            }
+                            send_chat_packets(hub, chat_transport.as_ref(), packets).await;
+                        }
+                    }
+                    Err(_) => update(UiEvent::Toast("chat.file.failed")),
+                }
+                if let Ok(messages) = engine.messages(&peer, now_ms()) {
+                    update(UiEvent::ChatMessages(peer, messages, false));
+                }
+            }
+            continue;
+        }
         if matches!(command, Command::ExpireStreams) {
             for peer in stream_drops.take_expired(std::time::Instant::now()) {
                 if voice.as_ref().is_some_and(|voice| voice.has_peer(&peer)) {
@@ -1165,6 +1549,11 @@ async fn worker(
             }
             events = None;
             current_user = None;
+            file_jobs = None;
+            file_progress.clear();
+            if let Some(engine) = chat.as_mut() {
+                engine.fail_downloads(None, now_ms());
+            }
             chat = None;
             chat_transport = None;
             chat_failed = false;
@@ -1244,7 +1633,7 @@ async fn worker(
                     (peer, packets, true)
                 }
                 Command::ChatDelete(peer, id) => {
-                    let packets = engine.remove(&peer, &id);
+                    let packets = engine.remove(&peer, &id, now_ms());
                     (peer, packets, false)
                 }
                 _ => unreachable!(),
@@ -1365,6 +1754,11 @@ async fn worker(
                         let _ = profile.clear_session();
                     }
                     current_user = None;
+                    file_jobs = None;
+                    file_progress.clear();
+                    if let Some(engine) = chat.as_mut() {
+                        engine.fail_downloads(None, now_ms());
+                    }
                     chat = None;
                     chat_transport = None;
                     chat_failed = false;
@@ -1473,6 +1867,7 @@ async fn worker(
                 | Command::ChatSend(_, _)
                 | Command::ChatDelete(_, _)
                 | Command::PruneChat => unreachable!(),
+                Command::File { .. } | Command::MaintainFiles => unreachable!(),
                 Command::ExpireStreams => unreachable!(),
                 Command::Join(channel) => {
                     if voice
@@ -1894,6 +2289,13 @@ fn notification_fixture() -> Bootstrap {
     }
 }
 
+fn file_fixture() -> Vec<ChatMessage> {
+    ["missing", "transferring", "available", "failed", "deleted"].iter().enumerate().map(|(index, state)| ChatMessage {
+        id: format!("fixture-file-{index}"), owner_id: "fixture-owner".into(), conversation_id: "fixture-request".into(), sender_id: "fixture-request".into(), target_id: "fixture-owner".into(), kind: "file".into(), text: String::new(), created_at: 0, sequence: index as i64, delivery: "read".into(),
+        file: Some(json!({"name":format!("Документ {}.pdf", index + 1),"size":2468000,"sha256":"0".repeat(64),"storedName":if *state == "available" { Some("fixture.bin") } else { None },"savedPath":null,"transferState":state,"progress":if *state == "transferring" { 0.43 } else { 0.0 }})),
+    }).collect()
+}
+
 fn decode_image(source: &str) -> slint::Image {
     if source.len() > 4 * 1024 * 1024 {
         return slint::Image::default();
@@ -2005,6 +2407,44 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+fn chat_line(message: ChatMessage, owner: &str) -> ChatLine {
+    let file = message.file.as_ref();
+    let size = file.and_then(|file| file["size"].as_u64()).unwrap_or(0);
+    let (size_text, size_unit) = if size < 1024 {
+        (size.to_string(), "b")
+    } else if size < 1024 * 1024 {
+        (format!("{:.1}", size as f64 / 1024.0), "kb")
+    } else if size < 1024 * 1024 * 1024 {
+        (format!("{:.1}", size as f64 / 1048576.0), "mb")
+    } else {
+        (format!("{:.1}", size as f64 / 1073741824.0), "gb")
+    };
+    ChatLine {
+        id: message.id.into(),
+        text: if let Some(file) = file {
+            file["name"].as_str().unwrap_or("").into()
+        } else {
+            message.text.into()
+        },
+        mine: message.sender_id == owner,
+        delivery: message.delivery.into(),
+        file: file.is_some(),
+        size_text: size_text.into(),
+        size_unit: size_unit.into(),
+        transfer: file
+            .and_then(|file| file["transferState"].as_str())
+            .unwrap_or("")
+            .into(),
+        progress: (file
+            .and_then(|file| file["progress"].as_f64())
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0)
+            * 100.0) as i32,
+        cached: file.is_some_and(|file| file["storedName"].is_string()),
+        saved: file.is_some_and(|file| file["savedPath"].is_string()),
+    }
+}
+
 fn initialize_chat(
     profile: &Profile,
     owner: &str,
@@ -2027,6 +2467,7 @@ fn initialize_chat(
         ChatStore::open(&profile.root().join("chat.sqlite3")).map_err(|_| ChatError::Storage)?;
     let mut chat = ChatEngine::new(owner.into(), identity, store);
     chat.set_friends(friends.iter().cloned());
+    chat.set_file_root(&profile.root().join("chat-files"))?;
     chat.prune(now_ms(), &profile.root().join("chat-files"))?;
     Ok(chat)
 }

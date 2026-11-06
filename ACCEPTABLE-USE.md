@@ -1,6 +1,6 @@
 # Правила допустимого использования ZABOR / ZABOR Acceptable Use Policy
 
-> Редакция от 18 сентября 2026 года.
+> Редакция от 7 ноября 2026 года. Предыдущая редакция — от 18 сентября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -47,6 +47,8 @@
 Оператор **вправе отклонить или удалить** любой предложенный материал без объяснения причин. Предложение материала не создаёт обязанности его использовать.
 
 ### 4. Передача файлов
+
+Этот раздел распространяется также на разрабатываемый нативный Rust-клиент. Его локальная проверка размера и SHA-256 подтверждает целостность передачи, но не проверяет допустимость или безопасность содержимого. Отправка требует подтверждения, получение — действия получателя; показ сохранённого файла в проводнике не означает автоматического исполнения файла. Действующие возрастные ограничения и ответственность за содержимое сохраняются.
 
 1. Размер одного файла не ограничивается Оператором; он ограничен только свободным местом на устройствах отправителя и получателя, поскольку файлы хранятся локально у участников.
 2. Ответственность за содержимое переданного файла несёт пользователь, его отправивший.
@@ -123,6 +125,8 @@ Material proposed for inclusion in the application (including jokes) must:
 The Controller **may reject or remove** any proposed material without stating reasons. Proposing material creates no obligation to use it.
 
 ### 4. File transfer
+
+This section also applies to the native Rust client under development. Its local size/SHA-256 check verifies transfer integrity, not content permissibility or safety. Sending requires confirmation and downloading requires recipient action; revealing a saved file in Explorer does not automatically execute it. Existing age restrictions and responsibility for content continue to apply.
 
 1. The Controller sets no size limit for a single file; it is bounded only by the free space on the sender's and recipient's devices, since files are stored locally with the participants.
 2. Responsibility for the content of a transferred file rests with the user who sent it.
