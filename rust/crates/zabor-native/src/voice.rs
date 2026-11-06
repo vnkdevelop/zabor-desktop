@@ -114,12 +114,21 @@ impl VoiceSession {
     }
 
     pub async fn leave(&mut self, hub: &HubConnection) {
+        let was_call = self.call_peer.take().is_some();
+        let was_sharing = self.capture.is_some();
         self.capture = None;
         self.engine.close();
         self.peers.clear();
         self.channel = None;
+        if was_sharing {
+            let _ = hub.send("StopStream", Vec::new()).await;
+        }
         let _ = hub
-            .invoke("LeaveChannel", vec![], Duration::from_secs(5))
+            .invoke(
+                if was_call { "EndCall" } else { "LeaveChannel" },
+                vec![],
+                Duration::from_secs(5),
+            )
             .await;
     }
 

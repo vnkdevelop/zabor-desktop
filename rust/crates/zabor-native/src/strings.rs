@@ -74,6 +74,7 @@ mod tests {
                     "chat.",
                     "toasts.",
                     "titlebar.",
+                    "modals.",
                 ]
                 .iter()
                 .any(|prefix| key.starts_with(prefix))

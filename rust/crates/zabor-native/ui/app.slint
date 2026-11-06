@@ -6,6 +6,7 @@ export struct FriendItem { id: string, name: string, username: string, online: b
 export struct ChatLine { id: string, text: string, mine: bool, delivery: string }
 export struct ScreenItem { id: string, title: string }
 export struct VideoItem { id: string, title: string, frame: image }
+export struct NotificationItem { id: string, kind: int, name: string, sender: string, color: color, avatar: image }
 
 export component NativeApp inherits Window {
     preferred-width: 1100px; preferred-height: 760px;
@@ -33,6 +34,8 @@ export component NativeApp inherits Window {
     in-out property <int> active-tab;
     in property <[ChannelItem]> channels;
     in property <[FriendItem]> friends;
+    in property <[NotificationItem]> notifications;
+    in-out property <bool> show-notifications;
     in property <string> user-name;
     in property <string> user-id;
     in property <string> user-login;
@@ -43,6 +46,8 @@ export component NativeApp inherits Window {
     in-out property <string> chat-input;
     in property <[FriendItem]> voice-users;
     in-out property <string> active-channel;
+    in-out property <string> pending-channel;
+    in-out property <string> pending-channel-name;
     in-out property <bool> voice-active;
     in property <[ScreenItem]> screen-sources;
     in property <[VideoItem]> video-frames;
@@ -59,12 +64,14 @@ export component NativeApp inherits Window {
     in property <string> selected-name;
     in property <bool> reduced-motion;
     pure callback tr(string, string) -> string;
+    pure callback tr-name(string, string, string) -> string;
     pure callback limit-text(string, int) -> string;
     callback submit-auth;
     callback load-captcha;
     callback choose-avatar;
     callback submit-modal(int, string);
     callback choose-channel(string);
+    callback confirm-channel-switch;
     callback choose-friend(string);
     callback logout;
     callback window-action(string);
@@ -76,6 +83,7 @@ export component NativeApp inherits Window {
     callback delete-chat(string, string);
     callback call-friend(string);
     callback answer-call(string, bool);
+    callback respond-notification(int, string, bool);
     callback list-screens;
     callback start-share(string);
     callback stop-share;
@@ -169,6 +177,7 @@ export component NativeApp inherits Window {
     if root.authenticated : Rectangle {
         y: 36px; width: parent.width; height: parent.height - 36px; background: transparent;
         Rectangle { x: 12px; y: 12px; width: 320px; height: parent.height - 111px; background: #161618b8; border-radius: 18px; border-width: 1px; border-color: #ffffff12;
+            if !root.show-notifications : Rectangle { width: parent.width; height: parent.height; background: transparent;
             Text { x: 24px; y: 24px; height: 24px; text: root.tr(root.active-tab == 0 ? "main.voice.voiceChannels" : "main.tabs.friends", root.language); font-size: 12px; font-weight: 700; color: #949ba4; }
             IconButton { x: parent.width - 52px; y: 16px; icon: @image-url("../assets/icons/plus.svg"); label: root.tr(root.active-tab == 0 ? "modals.createChannel.title" : "modals.addFriend.title", root.language); activated => { root.modal = root.active-tab == 0 ? 1 : 2; root.modal-input = ""; root.error = ""; } }
             ScrollView { x: 16px; y: 64px; width: parent.width - 32px; height: parent.height - 132px;
@@ -198,6 +207,34 @@ export component NativeApp inherits Window {
                 FormButton { height: 44px; label: root.tr("main.tabs.channels", root.language); primary: root.active-tab == 0; activated => { root.active-tab = 0; } }
                 FormButton { height: 44px; label: root.tr("main.tabs.friends", root.language); primary: root.active-tab == 1; activated => { root.active-tab = 1; } }
             }
+            }
+            if root.show-notifications : Rectangle { width: parent.width; height: parent.height; background: #161618f0; border-radius: 18px;
+                Text { x: 16px; y: 16px; width: parent.width - 72px; height: 36px; text: root.tr("main.notifications.title", root.language); color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                IconButton { x: parent.width - 52px; y: 16px; icon: @image-url("../assets/icons/window-close.svg"); label: root.tr("common.close", root.language); activated => { root.show-notifications = false; } }
+                Rectangle { y: 64px; width: parent.width; height: 1px; background: #ffffff12; }
+                if root.error != "" : Text { x: 16px; y: 72px; width: parent.width - 32px; height: 48px; text: root.error; color: #da373c; font-size: 13px; wrap: word-wrap; }
+                ScrollView { x: 16px; y: root.error == "" ? 80px : 128px; width: parent.width - 32px; height: parent.height - self.y - 16px;
+                    VerticalLayout { spacing: 12px;
+                        for item in root.notifications : Rectangle { height: item.kind == 0 ? 138px : 130px; background: #222225b3; border-radius: 12px;
+                            if item.kind == 0 : Rectangle { x: 16px; y: 16px; width: 47px; height: 47px; background: item.color; border-radius: 24px; Image { width: parent.width; height: parent.height; source: item.avatar; image-fit: cover; } }
+                            Text { x: item.kind == 0 ? 75px : 16px; y: 16px; width: parent.width - self.x - 16px; height: 22px; text: item.name; color: white; font-size: 14px; font-weight: 600; overflow: elide; }
+                            Text { x: item.kind == 0 ? 75px : 16px; y: 40px; width: parent.width - self.x - 16px; height: 22px; text: item.kind == 0 ? root.tr("main.notifications.friendRequest", root.language) : root.tr-name("main.notifications.channelInvite", item.sender, root.language); color: #949ba4; font-size: 12px; overflow: elide; }
+                            HorizontalLayout { x: 16px; y: parent.height - 60px; width: parent.width - 32px; height: 44px; spacing: 8px;
+                                FormButton { width: (parent.width - 8px) / 2; height: 44px; border-radius: 12px; background: #23a55933; foreground: #23a559; label-size: 14px; label: root.tr(item.kind == 0 ? "main.notifications.accept" : "main.notifications.join", root.language); disabled: root.busy || !root.connected; activated => { root.respond-notification(item.kind, item.id, true); } }
+                                FormButton { width: (parent.width - 8px) / 2; height: 44px; border-radius: 12px; background: #da373c33; foreground: #da373c; label-size: 14px; label: root.tr("main.notifications.decline", root.language); disabled: root.busy || !root.connected; activated => { root.respond-notification(item.kind, item.id, false); } }
+                            }
+                        }
+                        if root.notifications.length == 0 : Rectangle { height: 180px; background: transparent;
+                            Image { x: (parent.width - 40px) / 2; y: 48px; width: 40px; height: 40px; source: @image-url("../assets/icons/mail.svg"); opacity: 0.2; }
+                            Text { y: 104px; width: parent.width; text: root.tr("main.notifications.none", root.language); color: #949ba4; font-size: 14px; horizontal-alignment: center; }
+                        }
+                    }
+                }
+            }
+        }
+        if root.notifications.length > 0 && !root.show-notifications : Rectangle { x: 252px; y: parent.height - 210px; width: 56px; height: 56px; background: #c81e70e6; border-radius: 28px; border-width: 1px; border-color: #ffffff1a;
+            IconButton { width: 56px; height: 56px; corner-radius: 28px; foreground: white; icon: @image-url("../assets/icons/mail.svg"); label: root.tr("main.notifications.title", root.language); activated => { root.show-notifications = true; root.error = ""; } }
+            Rectangle { x: 40px; width: 16px; height: 16px; border-radius: 8px; border-width: 2px; border-color: #161618; background: #da373c; }
         }
         Rectangle { x: 12px; y: parent.height - 87px; width: 320px; height: 75px; background: #09090ba0; border-radius: 18px; border-width: 1px; border-color: #ffffff12;
             Rectangle { x: 16px; y: 12px; width: 51px; height: 51px; background: root.user-color; border-radius: 26px;
@@ -272,7 +309,8 @@ export component NativeApp inherits Window {
         y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
         Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: root.modal == 5 ? 540px : 400px; height: root.modal == 5 ? 480px : root.modal == 3 ? 276px : 288px; background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
             VerticalLayout { padding: 32px; spacing: 16px;
-                Text { text: root.tr(root.modal == 1 ? "modals.createChannel.title" : root.modal == 2 ? "modals.addFriend.title" : root.modal == 4 ? "toasts.incomingCall" : root.modal == 5 ? "stream.pickerTitle" : "settings.title", root.language); font-size: 20px; color: white; font-weight: 700; }
+                Text { text: root.tr(root.modal == 1 ? "modals.createChannel.title" : root.modal == 2 ? "modals.addFriend.title" : root.modal == 4 ? "toasts.incomingCall" : root.modal == 5 ? "stream.pickerTitle" : root.modal == 6 ? "modals.switchChannel.title" : "settings.title", root.language); font-size: 20px; color: white; font-weight: 700; }
+                if root.modal == 6 : Text { text: root.tr("modals.switchChannel.desc", root.language); color: #949ba4; font-size: 14px; wrap: word-wrap; }
                 if root.modal == 5 : ScrollView { height: 310px; VerticalLayout { spacing: 8px; for source in root.screen-sources : FormButton { label: source.title; primary: root.selected-screen == source.id; activated => { root.selected-screen = source.id; } } } }
                 if root.modal == 4 : Text { text: root.incoming-call-name; color: white; font-size: 20px; horizontal-alignment: center; }
                 if root.modal < 3 : FormField { text <=> root.modal-input; label: root.tr(root.modal == 1 ? "modals.createChannel.label" : "modals.addFriend.desc", root.language); disabled: root.busy; accepted => { root.submit-modal(root.modal, root.modal-input); } }
@@ -282,8 +320,8 @@ export component NativeApp inherits Window {
                 }
                 if root.error != "" : Text { text: root.error; color: #da373c; font-size: 14px; wrap: word-wrap; }
                 HorizontalLayout { spacing: 16px;
-                    FormButton { label: root.tr(root.modal == 4 ? "main.notifications.decline" : "common.cancel", root.language); disabled: root.busy; activated => { if root.modal == 4 { root.answer-call(root.incoming-call-id, false); } root.modal = 0; } }
-                    FormButton { label: root.tr(root.modal == 5 ? "common.apply" : root.modal == 4 ? "main.notifications.accept" : root.modal == 3 ? "settings.privacy.logout" : root.modal == 1 ? "modals.createChannel.submit" : "modals.addFriend.submit", root.language); primary: true; disabled: root.busy || (root.modal == 5 && root.selected-screen == ""); activated => { if root.modal == 5 { root.start-share(root.selected-screen); } else if root.modal == 4 { root.answer-call(root.incoming-call-id, true); } else if root.modal == 3 { root.logout(); } else { root.submit-modal(root.modal, root.modal-input); } } }
+                    FormButton { label: root.tr(root.modal == 4 ? "main.notifications.decline" : root.modal == 6 ? "modals.switchChannel.stay" : "common.cancel", root.language); disabled: root.busy; activated => { if root.modal == 4 { root.answer-call(root.incoming-call-id, false); } if root.modal == 6 { root.pending-channel = ""; } root.modal = 0; } }
+                    FormButton { label: root.tr(root.modal == 6 ? "modals.switchChannel.switch" : root.modal == 5 ? "common.apply" : root.modal == 4 ? "main.notifications.accept" : root.modal == 3 ? "settings.privacy.logout" : root.modal == 1 ? "modals.createChannel.submit" : "modals.addFriend.submit", root.language); primary: true; disabled: root.busy || (root.modal == 5 && root.selected-screen == "") || (root.modal == 6 && root.pending-channel == ""); activated => { if root.modal == 6 { root.confirm-channel-switch(); } else if root.modal == 5 { root.start-share(root.selected-screen); } else if root.modal == 4 { root.answer-call(root.incoming-call-id, true); } else if root.modal == 3 { root.logout(); } else { root.submit-modal(root.modal, root.modal-input); } } }
                 }
             }
         }

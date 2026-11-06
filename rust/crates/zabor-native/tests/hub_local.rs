@@ -68,6 +68,11 @@ async fn server(throttle: bool) -> (String, tokio::task::JoinHandle<Vec<String>>
                     "GetFriends" | "GetFriendRequests" | "GetChannelInvites" => json!([]),
                     "GetAudioSettings" => json!("{\"inputVolume\":75}"),
                     "GetJokeOfTheDay" => json!("local fixture"),
+                    "AcceptFriendRequest" | "DeclineFriendRequest" | "AcceptChannelInvite" => {
+                        assert_eq!(request["arguments"], json!(["local-notification"]));
+                        Value::Null
+                    }
+                    "DeclineChannelInvite" => json!(false),
                     _ => Value::Null,
                 };
                 let response = if throttle {
@@ -140,6 +145,50 @@ async fn server_throttle_cannot_be_mistaken_for_a_missing_account() {
         ));
         hub.close();
         assert_eq!(server.await.unwrap(), vec!["CheckUserExists"]);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn notification_commands_keep_the_existing_null_success_and_false_rejection_contract() {
+    use zabor_native::roster::{respond_notification, NotificationKind};
+    timeout(Duration::from_secs(10), async {
+        let (endpoint, server) = server(false).await;
+        let (hub, _events) = HubConnection::connect(&endpoint, None).await.unwrap();
+        for (kind, accept) in [
+            (NotificationKind::Friend, true),
+            (NotificationKind::Friend, false),
+            (NotificationKind::Channel, true),
+        ] {
+            assert!(
+                respond_notification(&hub, kind, "local-notification", accept)
+                    .await
+                    .unwrap()
+            );
+        }
+        assert!(!respond_notification(
+            &hub,
+            NotificationKind::Channel,
+            "local-notification",
+            false
+        )
+        .await
+        .unwrap());
+        assert_eq!(
+            respond_notification(&hub, NotificationKind::Friend, "", true).await,
+            Err(HubError::Protocol)
+        );
+        hub.close();
+        assert_eq!(
+            server.await.unwrap(),
+            [
+                "AcceptFriendRequest",
+                "DeclineFriendRequest",
+                "AcceptChannelInvite",
+                "DeclineChannelInvite"
+            ]
+        );
     })
     .await
     .unwrap();

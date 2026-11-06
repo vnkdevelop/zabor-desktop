@@ -1,4 +1,6 @@
-use crate::{ChannelItem, ChatLine, FriendItem, NativeApp, ScreenItem, VideoItem};
+use crate::{
+    ChannelItem, ChatLine, FriendItem, NativeApp, NotificationItem, ScreenItem, VideoItem,
+};
 use base64::Engine;
 use libwebrtc::media_stream_track::MediaStreamTrack;
 use serde_json::json;
@@ -27,6 +29,7 @@ use zabor_native::chat_transport::{ChatTransport, ChatTransportEvent};
 use zabor_native::hub::{HubConnection, HubEvent};
 use zabor_native::media::{MediaError, MediaEvent};
 use zabor_native::profile::Profile;
+use zabor_native::roster::{respond_notification, NotificationKind};
 use zabor_native::screen::{ScreenCapture, ScreenSource, SourceKind};
 use zabor_native::strings::Strings;
 use zabor_native::video::{DecodedVideo, StreamDropGrace, VideoFrameLease, VideoReceiver};
@@ -60,6 +63,7 @@ enum Command {
     StopShare,
     CheckShare,
     ExpireStreams,
+    Notification(NotificationKind, String, bool),
 }
 
 enum UiEvent {
@@ -83,6 +87,7 @@ enum UiEvent {
     Screens(Vec<ScreenSource>),
     Sharing(bool),
     RemoveVideo(String),
+    NotificationResolved(NotificationKind, String, bool),
 }
 
 struct FrameUpdate {
@@ -136,8 +141,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         index += 2;
     }
     zabor_native::hub::validate_endpoint(&server)?;
-    let russian = Strings::new("ru")?;
-    let english = Strings::new("en")?;
+    let russian = Rc::new(Strings::new("ru")?);
+    let english = Rc::new(Strings::new("en")?);
     if !["ru", "en"].contains(&locale.as_str()) {
         return Err("Unsupported locale".into());
     }
@@ -166,6 +171,16 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    let names_ru = russian.clone();
+    let names_en = english.clone();
+    ui.on_tr_name(move |key, name, language| {
+        let strings = if language == "en" {
+            &names_en
+        } else {
+            &names_ru
+        };
+        strings.format(&key, &[("name", &name)]).into()
+    });
     ui.on_tr(move |key, language| {
         if language == "en" {
             english.text(&key).into()
@@ -436,6 +451,15 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     .iter()
                     .find(|channel| channel.id == id.as_str())
                 {
+                    if ui.get_voice_active() {
+                        if ui.get_active_channel() != id {
+                            ui.set_pending_channel(id);
+                            ui.set_pending_channel_name(channel.name.clone().into());
+                            ui.set_modal(6);
+                            ui.set_error("".into());
+                        }
+                        return;
+                    }
                     ui.set_selected_name(channel.name.clone().into());
                     ui.set_busy(true);
                     if channel_commands
@@ -450,6 +474,26 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let leave_commands = commands.clone();
+    let switch_commands = commands.clone();
+    let weak = ui.as_weak();
+    ui.on_confirm_channel_switch(move || {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        if ui.get_busy() || ui.get_pending_channel().is_empty() {
+            return;
+        }
+        if switch_commands
+            .try_send(Command::Join(ui.get_pending_channel().to_string()))
+            .is_ok()
+        {
+            ui.set_busy(true);
+            ui.set_active_tab(0);
+            ui.set_selected_name(ui.get_pending_channel_name());
+        } else {
+            show_error(&ui, AuthError::Network);
+        }
+    });
     ui.on_leave_voice(move || {
         let _ = leave_commands.try_send(Command::Leave);
     });
@@ -497,6 +541,40 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let answer_commands = commands.clone();
     ui.on_answer_call(move |peer, accept| {
         let _ = answer_commands.try_send(Command::AnswerCall(peer.to_string(), accept));
+    });
+    let notification_commands = commands.clone();
+    let notification_state = latest.clone();
+    let weak = ui.as_weak();
+    ui.on_respond_notification(move |kind, id, accept| {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        if ui.get_busy() || !ui.get_connected() {
+            return;
+        }
+        let data = notification_state.borrow();
+        let kind = match kind {
+            0 if data.requests.iter().any(|user| user.id == id.as_str()) => {
+                NotificationKind::Friend
+            }
+            1 if data
+                .invites
+                .iter()
+                .any(|invite| invite.channel_id == id.as_str()) =>
+            {
+                NotificationKind::Channel
+            }
+            _ => return,
+        };
+        ui.set_error("".into());
+        if notification_commands
+            .try_send(Command::Notification(kind, id.to_string(), accept))
+            .is_ok()
+        {
+            ui.set_busy(true);
+        } else {
+            show_error(&ui, AuthError::Network);
+        }
     });
     let screen_commands = commands.clone();
     ui.on_list_screens(move || {
@@ -593,6 +671,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_busy(false);
                     ui.set_channels(ModelRc::default());
                     ui.set_friends(ModelRc::default());
+                    ui.set_notifications(ModelRc::default());
+                    ui.set_show_notifications(false);
+                    ui.set_pending_channel("".into());
                     ui.set_chat_lines(ModelRc::default());
                     ui.set_selected_id("".into());
                     ui.set_user_id("".into());
@@ -623,9 +704,10 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     ui.set_voice_active(true);
-                    if ui.get_modal() == 4 {
+                    if ui.get_modal() == 4 || ui.get_modal() == 6 {
                         ui.set_modal(0);
                     }
+                    ui.set_pending_channel("".into());
                     ui.set_active_channel(channel.into());
                     ui.set_voice_users(friend_rows(&users));
                     apply_bootstrap(&ui, &latest.borrow());
@@ -762,6 +844,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         .collect::<Vec<_>>();
                     ui.set_video_frames(Rc::new(VecModel::from(rows)).into());
                 }
+                UiEvent::NotificationResolved(kind, id, accept) => {
+                    resolve_notification(&ui, &mut latest.borrow_mut(), kind, &id, accept);
+                }
             }
         }
     });
@@ -772,6 +857,12 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "setup" => ui.set_auth_step(2),
             "home" => {
                 ui.set_authenticated(true);
+            }
+            "notifications" => {
+                apply_bootstrap(&ui, &notification_fixture());
+                ui.set_authenticated(true);
+                ui.set_connected(true);
+                ui.set_show_notifications(true);
             }
             _ => return Err("Unsupported app preview".into()),
         }
@@ -867,6 +958,7 @@ async fn worker(
     let mut share_watch = tokio::time::interval(Duration::from_secs(1));
     share_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut screen_sources = Vec::<ScreenSource>::new();
+    let mut pending_join: Option<String> = None;
     loop {
         if voice.is_none()
             && (!video_jobs.is_empty()
@@ -902,6 +994,7 @@ async fn worker(
             biased;
             _ = stop.cancelled() => break,
             command = commands.recv() => { let Some(command) = command else { break; }; command },
+            channel = async { match pending_join.take() { Some(channel) => channel, None => std::future::pending().await } } => Command::Join(channel),
             _ = async { if let Some(deadline) = stream_drops.next_deadline() { tokio::time::sleep_until(deadline.into()).await; } else { std::future::pending::<()>().await; } } => Command::ExpireStreams,
             _ = async { if voice.as_ref().is_some_and(VoiceSession::is_sharing) { share_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::CheckShare,
             _ = tokio::time::sleep_until(prune_at) => { prune_at = tokio::time::Instant::now() + Duration::from_secs(3600); Command::PruneChat },
@@ -1062,6 +1155,7 @@ async fn worker(
             continue;
         }
         if matches!(command, Command::Logout) {
+            pending_join = None;
             video_generation.fetch_add(1, Ordering::AcqRel);
             video_jobs.clear();
             paused_video.clear();
@@ -1093,6 +1187,7 @@ async fn worker(
             continue;
         }
         if matches!(command, Command::Leave) {
+            pending_join = None;
             video_generation.fetch_add(1, Ordering::AcqRel);
             video_jobs.clear();
             paused_video.clear();
@@ -1340,6 +1435,18 @@ async fn worker(
                     }
                 }),
                 Command::Captcha => auth.captcha().await.map(UiEvent::Captcha),
+                Command::Notification(kind, id, accept) => {
+                    if !respond_notification(&connection, kind, &id, accept)
+                        .await
+                        .map_err(AuthError::from)?
+                    {
+                        return Err(AuthError::Network);
+                    }
+                    if kind == NotificationKind::Channel && accept && voice.is_none() {
+                        pending_join = Some(id.clone());
+                    }
+                    Ok(UiEvent::NotificationResolved(kind, id, accept))
+                }
                 Command::Modal { kind, value } => {
                     let target = if kind == 1 {
                         "CreateChannel"
@@ -1368,6 +1475,20 @@ async fn worker(
                 | Command::PruneChat => unreachable!(),
                 Command::ExpireStreams => unreachable!(),
                 Command::Join(channel) => {
+                    if voice
+                        .as_ref()
+                        .is_some_and(|voice| voice.call_peer.is_some())
+                    {
+                        if let Some(mut session) = voice.take() {
+                            session.leave(&connection).await;
+                        }
+                        media_events = None;
+                        video_generation.fetch_add(1, Ordering::AcqRel);
+                        video_jobs.clear();
+                        paused_video.clear();
+                        stream_drops.clear();
+                        update(UiEvent::VoiceEnded);
+                    }
                     let Some(user) = current_user.as_ref() else {
                         return Err(AuthError::Network);
                     };
@@ -1690,7 +1811,87 @@ fn check_roster_bindings(ui: &NativeApp) -> Result<(), &'static str> {
     {
         return Err("Departed user remained in the native voice model");
     }
+    let mut data = notification_fixture();
+    apply_bootstrap(ui, &data);
+    ui.set_show_notifications(true);
+    if ui.get_notifications().row_count() != 2 {
+        return Err("Native notification list did not include requests and invites");
+    }
+    let invite = ui
+        .get_notifications()
+        .row_data(1)
+        .ok_or("Native invite missing")?;
+    if ui
+        .invoke_tr_name(
+            "main.notifications.channelInvite".into(),
+            invite.sender,
+            ui.get_language(),
+        )
+        .contains("{{name}}")
+    {
+        return Err("Native invitation label did not resolve the sender");
+    }
+    resolve_notification(
+        ui,
+        &mut data,
+        NotificationKind::Friend,
+        "fixture-request",
+        false,
+    );
+    if ui.get_notifications().row_count() != 1 || !ui.get_show_notifications() {
+        return Err("Friend request response changed the wrong native notification");
+    }
+    resolve_notification(
+        ui,
+        &mut data,
+        NotificationKind::Channel,
+        "fixture-invite",
+        true,
+    );
+    if ui.get_notifications().row_count() != 0 || ui.get_show_notifications() {
+        return Err("Accepted invitation did not close the native notification panel");
+    }
+    if ui.get_modal() != 6 || ui.get_pending_channel() != "fixture-invite" {
+        return Err("Active voice session did not require channel switch confirmation");
+    }
+    apply_hub_event(
+        ui,
+        &mut data,
+        HubEvent {
+            target: "ChannelDeleted".into(),
+            arguments: vec![json!("fixture-invite")],
+        },
+    );
+    if ui.get_modal() != 0 || !ui.get_pending_channel().is_empty() {
+        return Err("Deleted channel remained in native switch confirmation");
+    }
     Ok(())
+}
+
+fn notification_fixture() -> Bootstrap {
+    Bootstrap {
+        user: zabor_native::auth::User {
+            id: "fixture-owner".into(),
+            username: "local.fixture".into(),
+            display_name: "Local fixture".into(),
+            avatar_color: "#c81e70".into(),
+            ..Default::default()
+        },
+        requests: vec![zabor_native::auth::User {
+            id: "fixture-request".into(),
+            username: "alex.fixture".into(),
+            display_name: "Alex".into(),
+            avatar_color: "#5875a4".into(),
+            ..Default::default()
+        }],
+        invites: vec![zabor_native::auth::ChannelInvite {
+            sender_id: "fixture-sender".into(),
+            sender_name: "Мария".into(),
+            channel_id: "fixture-invite".into(),
+            channel_name: "Общий канал".into(),
+        }],
+        ..Default::default()
+    }
 }
 
 fn decode_image(source: &str) -> slint::Image {
@@ -1758,6 +1959,34 @@ fn apply_bootstrap(ui: &NativeApp, data: &Bootstrap) {
         .into(),
     );
     ui.set_friends(friend_rows(&data.friends));
+    ui.set_notifications(
+        Rc::new(VecModel::from(
+            data.requests
+                .iter()
+                .map(|user| NotificationItem {
+                    id: user.id.clone().into(),
+                    kind: 0,
+                    name: user.display_name.clone().into(),
+                    sender: "".into(),
+                    color: color(&user.avatar_color),
+                    avatar: user
+                        .avatar_base64
+                        .as_deref()
+                        .map(decode_image)
+                        .unwrap_or_default(),
+                })
+                .chain(data.invites.iter().map(|invite| NotificationItem {
+                    id: invite.channel_id.clone().into(),
+                    kind: 1,
+                    name: invite.channel_name.clone().into(),
+                    sender: invite.sender_name.clone().into(),
+                    color: slint::Color::default(),
+                    avatar: slint::Image::default(),
+                }))
+                .collect::<Vec<_>>(),
+        ))
+        .into(),
+    );
     if ui.get_voice_active() {
         if !ui.get_active_channel().is_empty() {
             if let Some(users) = data.channel_users.get(ui.get_active_channel().as_str()) {
@@ -1852,6 +2081,15 @@ fn friend_rows(users: &[zabor_native::auth::User]) -> ModelRc<FriendItem> {
 }
 
 fn apply_hub_event(ui: &NativeApp, data: &mut Bootstrap, event: HubEvent) {
+    if event.target == "ChannelDeleted"
+        && event.arguments.first().and_then(serde_json::Value::as_str)
+            == Some(ui.get_pending_channel().as_str())
+    {
+        ui.set_pending_channel("".into());
+        if ui.get_modal() == 6 {
+            ui.set_modal(0);
+        }
+    }
     if zabor_native::roster::apply_event(data, &event) {
         if matches!(
             event.target.as_str(),
@@ -1900,6 +2138,40 @@ fn apply_hub_event(ui: &NativeApp, data: &mut Bootstrap, event: HubEvent) {
             ui.set_selected_name(friend.display_name.clone().into());
         }
     }
+}
+
+fn resolve_notification(
+    ui: &NativeApp,
+    data: &mut Bootstrap,
+    kind: NotificationKind,
+    id: &str,
+    accept: bool,
+) {
+    match kind {
+        NotificationKind::Friend => data.requests.retain(|user| user.id != id),
+        NotificationKind::Channel => {
+            let name = data
+                .invites
+                .iter()
+                .find(|invite| invite.channel_id == id)
+                .map(|invite| invite.channel_name.clone())
+                .unwrap_or_default();
+            data.invites.retain(|invite| invite.channel_id != id);
+            if accept {
+                ui.set_show_notifications(false);
+                if ui.get_voice_active() {
+                    ui.set_pending_channel(id.into());
+                    ui.set_pending_channel_name(name.into());
+                    ui.set_modal(6);
+                } else {
+                    ui.set_active_tab(0);
+                    ui.set_selected_name(name.into());
+                }
+            }
+        }
+    }
+    apply_bootstrap(ui, data);
+    ui.set_busy(false);
 }
 
 fn save_snapshot(ui: &NativeApp, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {

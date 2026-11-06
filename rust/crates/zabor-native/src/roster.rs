@@ -1,8 +1,39 @@
 use crate::auth::{Bootstrap, Channel, ChannelInvite, User};
-use crate::hub::HubEvent;
+use crate::hub::{HubConnection, HubError, HubEvent};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum NotificationKind {
+    Friend,
+    Channel,
+}
+
+pub async fn respond_notification(
+    hub: &HubConnection,
+    kind: NotificationKind,
+    id: &str,
+    accept: bool,
+) -> Result<bool, HubError> {
+    if id.is_empty() || id.len() > 128 {
+        return Err(HubError::Protocol);
+    }
+    let target = match (kind, accept) {
+        (NotificationKind::Friend, true) => "AcceptFriendRequest",
+        (NotificationKind::Friend, false) => "DeclineFriendRequest",
+        (NotificationKind::Channel, true) => "AcceptChannelInvite",
+        (NotificationKind::Channel, false) => "DeclineChannelInvite",
+    };
+    let result = hub
+        .invoke(
+            target,
+            vec![serde_json::json!(id)],
+            std::time::Duration::from_secs(20),
+        )
+        .await?;
+    Ok(result != false)
+}
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
