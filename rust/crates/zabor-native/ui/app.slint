@@ -1,0 +1,291 @@
+import { FormButton, FormField, IconButton } from "controls.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct ChannelItem { id: string, name: string, count: int }
+export struct FriendItem { id: string, name: string, username: string, online: bool, color: color, avatar: image, speaking: bool, muted: bool, deafened: bool }
+export struct ChatLine { id: string, text: string, mine: bool, delivery: string }
+export struct ScreenItem { id: string, title: string }
+export struct VideoItem { id: string, title: string, frame: image }
+
+export component NativeApp inherits Window {
+    preferred-width: 1100px; preferred-height: 760px;
+    min-width: 720px; min-height: 600px;
+    no-frame: true;
+    background: #131313;
+    default-font-family: "Segoe UI";
+    default-font-size: 16px;
+    title: root.tr("titlebar.wordmark", root.language);
+    in-out property <string> language: "ru";
+    in-out property <int> auth-step: 0;
+    in-out property <string> login;
+    in-out property <string> password;
+    in-out property <string> display-name;
+    in-out property <string> captcha-answer;
+    in-out property <bool> show-password;
+    in-out property <bool> busy;
+    in-out property <bool> captcha-busy;
+    in-out property <string> error;
+    in property <image> captcha-image;
+    in property <image> setup-avatar;
+    in property <color> avatar-color: #c81e70;
+    in-out property <bool> authenticated;
+    in-out property <bool> connected;
+    in-out property <int> active-tab;
+    in property <[ChannelItem]> channels;
+    in property <[FriendItem]> friends;
+    in property <string> user-name;
+    in property <string> user-id;
+    in property <string> user-login;
+    in property <image> user-avatar;
+    in property <color> user-color: #c81e70;
+    in property <string> joke;
+    in property <[ChatLine]> chat-lines;
+    in-out property <string> chat-input;
+    in property <[FriendItem]> voice-users;
+    in-out property <string> active-channel;
+    in-out property <bool> voice-active;
+    in property <[ScreenItem]> screen-sources;
+    in property <[VideoItem]> video-frames;
+    in-out property <bool> sharing;
+    in-out property <string> selected-screen;
+    in-out property <string> focused-video;
+    in-out property <string> incoming-call-id;
+    in property <string> incoming-call-name;
+    in-out property <bool> muted;
+    in-out property <bool> deafened;
+    in-out property <int> modal;
+    in-out property <string> modal-input;
+    in-out property <string> selected-id;
+    in property <string> selected-name;
+    in property <bool> reduced-motion;
+    pure callback tr(string, string) -> string;
+    pure callback limit-text(string, int) -> string;
+    callback submit-auth;
+    callback load-captcha;
+    callback choose-avatar;
+    callback submit-modal(int, string);
+    callback choose-channel(string);
+    callback choose-friend(string);
+    callback logout;
+    callback window-action(string);
+    callback process-updates;
+    callback leave-voice;
+    callback audio-state(bool, bool);
+    callback language-changed(string);
+    callback send-chat(string, string);
+    callback delete-chat(string, string);
+    callback call-friend(string);
+    callback answer-call(string, bool);
+    callback list-screens;
+    callback start-share(string);
+    callback stop-share;
+    callback process-video;
+    changed language => { root.language-changed(root.language); }
+
+    Rectangle {
+        x: 0px; y: 0px; width: parent.width; height: 36px; background: #191919;
+        Rectangle { y: 35px; width: parent.width; height: 1px; background: #ffffff0f; }
+        Text { x: 16px; height: 35px; text: root.tr("titlebar.wordmark", root.language); font-size: 13px; font-weight: 900; letter-spacing: 2.6px; color: #ffffff4d; vertical-alignment: center; }
+        TouchArea { width: parent.width - 144px; pointer-event(event) => { if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { root.window-action("drag"); } } double-clicked => { root.window-action("maximize"); } }
+        HorizontalLayout {
+            x: parent.width - 144px; width: 144px; height: 35px; spacing: 0px;
+            IconButton { width: 48px; height: 35px; label: root.tr("titlebar.minimize", root.language); activated => { root.window-action("minimize"); } Rectangle { x: 18px; y: 17px; width: 12px; height: 1px; background: #ffffff66; } }
+            IconButton { width: 48px; height: 35px; label: root.tr(root.maximized ? "titlebar.restore" : "titlebar.maximize", root.language); activated => { root.window-action("maximize"); } Rectangle { x: 19px; y: 12px; width: 10px; height: 10px; border-radius: 1.5px; border-width: 1px; border-color: #ffffff66; background: transparent; } }
+            IconButton { width: 48px; height: 35px; corner-radius: 0px; danger: true; label: root.tr("titlebar.close", root.language); icon: @image-url("../assets/icons/window-close.svg"); activated => { root.window-action("close"); } }
+        }
+    }
+    if !root.authenticated : Rectangle {
+        y: 36px; width: parent.width; height: parent.height - 36px; background: transparent;
+        auth-card := Rectangle {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: 400px;
+            height: root.auth-step == 0 ? 386px + (root.error == "" ? 0px : 36px) : root.auth-step == 1 ? 218px : 482px + (root.error == "" ? 0px : 36px);
+            background: #161618c7; border-width: 1px; border-color: #ffffff12; border-radius: 20px;
+            if root.auth-step == 0 : VerticalLayout {
+                padding: 41px; spacing: 0px;
+                Rectangle { height: 40px; background: transparent; Text { x: 0px; y: -4px; width: parent.width; text: root.tr("titlebar.wordmark", root.language); font-size: 36px; font-weight: 900; letter-spacing: 1.8px; color: white; horizontal-alignment: center; height: 40px; } }
+                Rectangle { height: 32px; background: transparent; }
+                Text { text: root.tr("auth.login", root.language); color: #949ba4; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; height: 16px; }
+                Rectangle { height: 8px; background: transparent; }
+                login-field := FormField { text <=> root.login; disabled: root.busy; label: root.tr("auth.login", root.language); edited(value) => { root.login = root.limit-text(value, 25); } accepted => { root.submit-auth(); } }
+                Rectangle { height: 16px; background: transparent; }
+                Text { text: root.tr("auth.password", root.language); color: #949ba4; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; height: 16px; }
+                Rectangle { height: 8px; background: transparent; }
+                Rectangle {
+                    height: 48px; background: transparent;
+                    FormField { width: parent.width; text <=> root.password; password: !root.show-password; disabled: root.busy; label: root.tr("auth.password", root.language); edited(value) => { root.password = root.limit-text(value, 25); } accepted => { root.submit-auth(); } }
+                    IconButton { x: parent.width - 36px; y: 6px; width: 30px; height: 36px; icon: root.show-password ? @image-url("../assets/icons/eye-off.svg") : @image-url("../assets/icons/eye.svg"); disabled: root.busy; label: root.tr(root.show-password ? "settings.privacy.hidePassword" : "settings.privacy.showPassword", root.language); activated => { root.show-password = !root.show-password; } }
+                }
+                Rectangle { height: 24px; background: transparent; }
+                if root.error != "" : Text { text: root.error; color: #da373c; font-size: 14px; font-weight: 500; horizontal-alignment: center; wrap: word-wrap; height: 36px; }
+                FormButton { label: root.tr(root.busy ? "auth.loading" : "auth.continue", root.language); primary: true; disabled: root.busy; reduced-motion: root.reduced-motion; activated => { root.submit-auth(); } }
+            }
+            if root.auth-step == 1 : VerticalLayout {
+                padding: 33px; spacing: 0px;
+                Text { text: root.tr("auth.accountNotFound", root.language); font-size: 24px; font-weight: 700; color: white; horizontal-alignment: center; height: 32px; }
+                Rectangle { height: 16px; background: transparent; }
+                Text { text: root.tr("auth.createNewProfile", root.language); color: #949ba4; wrap: word-wrap; horizontal-alignment: center; height: 24px; }
+                Rectangle { height: 32px; background: transparent; }
+                HorizontalLayout { spacing: 16px;
+                    FormButton { width: (parent.width - 16px) / 2; label: root.tr("auth.no", root.language); activated => { root.auth-step = 0; root.error = ""; } }
+                    FormButton { width: (parent.width - 16px) / 2; label: root.tr("auth.yes", root.language); primary: true; activated => { root.auth-step = 2; root.display-name = root.login; root.captcha-answer = ""; root.load-captcha(); } }
+                }
+            }
+            if root.auth-step == 2 : VerticalLayout {
+                padding: 33px; spacing: 0px;
+                Text { text: root.tr("auth.createProfile", root.language); font-size: 24px; font-weight: 700; color: white; horizontal-alignment: center; height: 32px; }
+                Rectangle { height: 4px; background: transparent; }
+                Text { text: root.tr("auth.howOthersSeeYou", root.language); font-size: 14px; color: #949ba4; horizontal-alignment: center; height: 20px; }
+                Rectangle { height: 20px; background: transparent; }
+                Rectangle { height: 88px; background: transparent;
+                    Rectangle { x: (parent.width - 88px) / 2; width: 88px; height: 88px; border-radius: 44px; background: root.avatar-color;
+                        Image { width: 88px; height: 88px; source: root.setup-avatar; image-fit: cover; }
+                        if root.setup-avatar.width == 0 : Image { x: 30px; y: 30px; width: 28px; height: 28px; source: @image-url("../assets/icons/camera.svg"); }
+                        TouchArea { clicked => { root.choose-avatar(); } }
+                    }
+                }
+                Rectangle { height: 20px; background: transparent; }
+                Text { text: root.tr("auth.displayName", root.language); font-size: 12px; font-weight: 700; color: #949ba4; height: 16px; }
+                Rectangle { height: 6px; background: transparent; }
+                FormField { text <=> root.display-name; placeholder: root.tr("auth.max20chars", root.language); label: root.tr("auth.displayName", root.language); disabled: root.busy; edited(value) => { root.display-name = root.limit-text(value, 20); } accepted => { root.submit-auth(); } }
+                Rectangle { height: 16px; background: transparent; }
+                Text { text: root.tr("auth.captcha", root.language); font-size: 12px; font-weight: 700; color: #949ba4; height: 16px; }
+                Rectangle { height: 6px; background: transparent; }
+                HorizontalLayout { spacing: 8px; height: 52px;
+                    FormField { height: 52px; centered: true; text-family: "Consolas"; text-weight: 700; text-spacing: 1.6px; text <=> root.captcha-answer; placeholder: root.tr("auth.captchaPlaceholder", root.language); label: root.tr("auth.captcha", root.language); disabled: root.busy; edited(value) => { root.captcha-answer = root.limit-text(value, 8); } accepted => { root.submit-auth(); } }
+                    Rectangle { width: 154px; background: #22222599; border-radius: 16px; border-width: 1px; border-color: #ffffff12;
+                        Image { x: 10px; y: 8px; width: 112px; height: 36px; source: root.captcha-image; image-fit: contain; opacity: root.captcha-busy ? 0.3 : 1; }
+                        if root.captcha-image.width == 0 : Text { x: 10px; y: 8px; width: 112px; height: 36px; text: root.tr(root.captcha-busy ? "common.loading" : "validation.connectError", root.language); font-size: 12px; color: #949ba4; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
+                        IconButton { x: 124px; y: 8px; width: 26px; icon: @image-url("../assets/icons/refresh.svg"); label: root.tr("auth.refreshCaptcha", root.language); disabled: root.busy || root.captcha-busy; activated => { root.load-captcha(); } }
+                        TouchArea { enabled: !root.busy && !root.captcha-busy; clicked => { root.load-captcha(); } }
+                    }
+                }
+                Rectangle { height: 24px; background: transparent; }
+                if root.error != "" : Text { text: root.error; color: #da373c; font-size: 14px; horizontal-alignment: center; wrap: word-wrap; height: 36px; }
+                FormButton { label: root.tr(root.busy ? "auth.creating" : "auth.create", root.language); primary: true; disabled: root.busy; activated => { root.submit-auth(); } }
+            }
+        }
+    }
+    if root.authenticated : Rectangle {
+        y: 36px; width: parent.width; height: parent.height - 36px; background: transparent;
+        Rectangle { x: 12px; y: 12px; width: 320px; height: parent.height - 111px; background: #161618b8; border-radius: 18px; border-width: 1px; border-color: #ffffff12;
+            Text { x: 24px; y: 24px; height: 24px; text: root.tr(root.active-tab == 0 ? "main.voice.voiceChannels" : "main.tabs.friends", root.language); font-size: 12px; font-weight: 700; color: #949ba4; }
+            IconButton { x: parent.width - 52px; y: 16px; icon: @image-url("../assets/icons/plus.svg"); label: root.tr(root.active-tab == 0 ? "modals.createChannel.title" : "modals.addFriend.title", root.language); activated => { root.modal = root.active-tab == 0 ? 1 : 2; root.modal-input = ""; root.error = ""; } }
+            ScrollView { x: 16px; y: 64px; width: parent.width - 32px; height: parent.height - 132px;
+                VerticalLayout { spacing: 8px;
+                    for channel in root.channels : Rectangle {
+                        visible: root.active-tab == 0;
+                        height: 48px; background: channel-touch.has-hover ? #2a2a2ecc : transparent; border-radius: 16px;
+                        Rectangle { x: 16px; y: 21px; width: 6px; height: 6px; border-radius: 3px; background: #949ba4; }
+                        Text { x: 34px; height: parent.height; width: parent.width - 76px; text: channel.name; font-size: 15px; color: white; overflow: elide; vertical-alignment: center; }
+                        Text { x: parent.width - 38px; width: 30px; height: parent.height; text: channel.count > 0 ? channel.count : ""; color: #949ba4; font-size: 12px; vertical-alignment: center; }
+                        channel-touch := TouchArea { clicked => { root.choose-channel(channel.id); } }
+                    }
+                    for friend in root.friends : Rectangle {
+                        visible: root.active-tab == 1;
+                        height: 60px; background: friend-touch.has-hover ? #2a2a2ecc : transparent; border-radius: 16px;
+                        Rectangle { x: 8px; y: 7px; width: 46px; height: 46px; border-radius: 23px; background: friend.color;
+                            Image { width: 46px; height: 46px; source: friend.avatar; image-fit: cover; }
+                            Rectangle { x: 34px; y: 34px; width: 12px; height: 12px; border-radius: 6px; background: friend.online ? #23a559 : #949ba4; border-width: 2px; border-color: #161618; }
+                        }
+                        Text { x: 66px; y: 9px; width: parent.width - 74px; height: 20px; text: friend.name; color: white; font-size: 14px; font-weight: 700; overflow: elide; }
+                        Text { x: 66px; y: 31px; width: parent.width - 74px; height: 16px; text: friend.username; color: #949ba4; font-size: 12px; overflow: elide; }
+                        friend-touch := TouchArea { clicked => { root.choose-friend(friend.id); } }
+                    }
+                }
+            }
+            HorizontalLayout { x: 16px; y: parent.height - 56px; width: parent.width - 32px; height: 44px; spacing: 4px;
+                FormButton { height: 44px; label: root.tr("main.tabs.channels", root.language); primary: root.active-tab == 0; activated => { root.active-tab = 0; } }
+                FormButton { height: 44px; label: root.tr("main.tabs.friends", root.language); primary: root.active-tab == 1; activated => { root.active-tab = 1; } }
+            }
+        }
+        Rectangle { x: 12px; y: parent.height - 87px; width: 320px; height: 75px; background: #09090ba0; border-radius: 18px; border-width: 1px; border-color: #ffffff12;
+            Rectangle { x: 16px; y: 12px; width: 51px; height: 51px; background: root.user-color; border-radius: 26px;
+                Image { width: parent.width; height: parent.height; source: root.user-avatar; image-fit: cover; }
+                Rectangle { x: 37px; y: 37px; width: 16px; height: 16px; border-radius: 8px; background: root.connected ? #23a559 : #949ba4; border-width: 3px; border-color: #09090b; }
+            }
+            Text { x: 79px; y: 20px; width: 178px; height: 20px; text: root.user-name; color: white; font-size: 14px; font-weight: 700; overflow: elide; }
+            Text { x: 79px; y: 41px; width: 178px; height: 16px; text: root.user-login; color: #949ba4; font-size: 12px; overflow: elide; }
+            IconButton { x: 268px; y: 20px; icon: @image-url("../assets/icons/gear.svg"); label: root.tr("settings.title", root.language); activated => { root.modal = 3; root.error = ""; } }
+        }
+        Text { x: 364px; y: 40px; width: parent.width - 400px; height: 120px; text: root.selected-name; font-size: 24px; font-weight: 700; color: white; wrap: word-wrap; }
+        if !root.voice-active && (root.active-tab == 0 || root.selected-id == "") : Text { x: 364px; y: 180px; width: parent.width - 400px; height: 180px; text: root.joke; color: #949ba4; wrap: word-wrap; }
+        if root.active-tab == 1 && root.selected-id != "" : FormButton { x: parent.width - 144px; y: 32px; width: 120px; height: 40px; label: root.tr("chat.call", root.language); primary: true; disabled: root.busy; activated => { root.call-friend(root.selected-id); } }
+        if root.active-tab == 1 && root.selected-id != "" : Rectangle {
+            x: 356px; y: 96px; width: parent.width - 380px; height: parent.height - (!root.voice-active ? 120px : 232px); background: transparent;
+            ScrollView { width: parent.width; height: parent.height - 72px;
+                VerticalLayout { spacing: 8px;
+                    for message in root.chat-lines : Rectangle {
+                        height: message-text.preferred-height + 44px; border-radius: 16px; background: message.mine ? #ffffff0b : transparent;
+                        message-text := Text { x: 16px; y: 12px; width: parent.width - 64px; text: message.text; font-size: 15px; color: #f2f3f5; wrap: word-wrap; }
+                        Text { x: 16px; y: parent.height - 24px; height: 16px; text: message.mine ? root.tr("chat.delivery." + message.delivery, root.language) : ""; font-size: 11px; color: #949ba4; }
+                        IconButton { x: parent.width - 36px; y: 8px; width: 28px; height: 28px; icon: @image-url("../assets/icons/window-close.svg"); label: root.tr("chat.deleteMessage", root.language); activated => { root.delete-chat(root.selected-id, message.id); } }
+                    }
+                }
+            }
+            HorizontalLayout { y: parent.height - 56px; width: parent.width; height: 48px; spacing: 12px;
+                FormField { text <=> root.chat-input; label: root.tr("chat.placeholder", root.language); placeholder: root.tr("chat.placeholder", root.language); accepted => { root.send-chat(root.selected-id, root.chat-input); } }
+                FormButton { width: 112px; label: root.tr("chat.sendFile", root.language); primary: true; activated => { root.send-chat(root.selected-id, root.chat-input); } }
+            }
+        }
+        if root.voice-active && root.active-tab == 0 : Rectangle {
+            x: 356px; y: 96px; width: parent.width - 380px; height: parent.height - 240px; background: transparent;
+            HorizontalLayout { spacing: 16px; alignment: center;
+                for user in root.voice-users : Rectangle {
+                    width: min(280px, (parent.width - 16px * (root.voice-users.length - 1)) / max(1, root.voice-users.length));
+                    height: self.width; y: (parent.height - self.height) / 2;
+                    background: #161618b8; border-radius: 24px; border-width: 1px; border-color: #ffffff12;
+                    Rectangle { x: (parent.width - 96px) / 2; y: (parent.height - 128px) / 2; width: 96px; height: 96px; background: user.color; border-radius: 48px;
+                        Image { width: 96px; height: 96px; source: user.avatar; image-fit: cover; }
+                        Rectangle { width: parent.width; height: parent.height; border-radius: 48px; border-width: user.speaking && !user.muted ? 2px : 0px; border-color: #3ba55c; background: transparent; }
+                    }
+                    if user.muted || user.deafened : Image { x: parent.width - 36px; y: 16px; width: 20px; height: 20px; source: user.deafened ? @image-url("../assets/icons/headphones.svg") : @image-url("../assets/icons/microphone.svg"); colorize: #da373c; }
+                    Text { x: 12px; y: (parent.height + 88px) / 2; width: parent.width - 24px; height: 24px; text: user.name; font-size: 16px; font-weight: 700; color: white; horizontal-alignment: center; overflow: elide; }
+                }
+            }
+        }
+        if root.voice-active && root.video-frames.length > 0 : Rectangle {
+            x: 356px; y: 96px; width: parent.width - 380px; height: parent.height - 224px; background: #09090b; border-radius: 18px;
+            HorizontalLayout { spacing: 12px;
+                for video in root.video-frames : Rectangle {
+                    visible: root.focused-video == "" || root.focused-video == video.id;
+                    background: #09090b; border-width: 1px; border-color: #ffffff12; border-radius: 18px;
+                    Image { y: 36px; width: parent.width; height: parent.height - 36px; source: video.frame; image-fit: contain; }
+                    Text { x: 16px; height: 36px; text: video.title; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
+                    TouchArea { clicked => { root.focused-video = root.focused-video == video.id ? "" : video.id; } }
+                }
+            }
+        }
+        if root.voice-active : Rectangle {
+            x: 344px + (parent.width - 344px - 412px) / 2; y: parent.height - 112px; width: 412px; height: 88px;
+            background: #161618b3; border-radius: 44px; border-width: 1px; border-color: #ffffff12;
+            HorizontalLayout { padding: 16px; spacing: 16px;
+                IconButton { width: 56px; height: 56px; icon: @image-url("../assets/icons/microphone.svg"); foreground: root.muted ? #da373c : white; label: root.tr(root.muted ? "main.voice.unmute" : "main.voice.mute", root.language); activated => { root.muted = !root.muted; root.audio-state(root.muted, root.deafened); } }
+                IconButton { width: 56px; height: 56px; icon: @image-url("../assets/icons/headphones.svg"); foreground: root.deafened ? #da373c : white; label: root.tr(root.deafened ? "main.voice.undeafen" : "main.voice.deafen", root.language); activated => { root.deafened = !root.deafened; root.audio-state(root.muted, root.deafened); } }
+                IconButton { width: 56px; height: 56px; icon: @image-url("../assets/icons/desktop.svg"); foreground: root.sharing ? #ee68a9 : white; label: root.tr(root.sharing ? "stream.stopHint" : "stream.pickerTitle", root.language); activated => { if root.sharing { root.stop-share(); } else { root.list-screens(); } } }
+                FormButton { height: 56px; label: root.tr("main.voice.endCall", root.language); primary: true; activated => { root.leave-voice(); } }
+            }
+        }
+    }
+    if root.authenticated && root.error != "" && root.modal == 0 : Rectangle { x: 356px; y: parent.height - 170px; width: parent.width - 380px; height: 44px; background: #09090be6; border-radius: 12px; Text { x: 12px; width: parent.width - 24px; height: parent.height; text: root.error; font-size: 14px; color: #da373c; wrap: word-wrap; vertical-alignment: center; } TouchArea { clicked => { root.error = ""; } } }
+    if root.modal > 0 : Rectangle {
+        y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
+        Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: root.modal == 5 ? 540px : 400px; height: root.modal == 5 ? 480px : root.modal == 3 ? 276px : 288px; background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
+            VerticalLayout { padding: 32px; spacing: 16px;
+                Text { text: root.tr(root.modal == 1 ? "modals.createChannel.title" : root.modal == 2 ? "modals.addFriend.title" : root.modal == 4 ? "toasts.incomingCall" : root.modal == 5 ? "stream.pickerTitle" : "settings.title", root.language); font-size: 20px; color: white; font-weight: 700; }
+                if root.modal == 5 : ScrollView { height: 310px; VerticalLayout { spacing: 8px; for source in root.screen-sources : FormButton { label: source.title; primary: root.selected-screen == source.id; activated => { root.selected-screen = source.id; } } } }
+                if root.modal == 4 : Text { text: root.incoming-call-name; color: white; font-size: 20px; horizontal-alignment: center; }
+                if root.modal < 3 : FormField { text <=> root.modal-input; label: root.tr(root.modal == 1 ? "modals.createChannel.label" : "modals.addFriend.desc", root.language); disabled: root.busy; accepted => { root.submit-modal(root.modal, root.modal-input); } }
+                if root.modal == 3 : HorizontalLayout { spacing: 12px;
+                    FormButton { label: root.tr("settings.general.languageRussian", root.language); primary: root.language == "ru"; activated => { root.language = "ru"; } }
+                    FormButton { label: root.tr("settings.general.languageEnglish", root.language); primary: root.language == "en"; activated => { root.language = "en"; } }
+                }
+                if root.error != "" : Text { text: root.error; color: #da373c; font-size: 14px; wrap: word-wrap; }
+                HorizontalLayout { spacing: 16px;
+                    FormButton { label: root.tr(root.modal == 4 ? "main.notifications.decline" : "common.cancel", root.language); disabled: root.busy; activated => { if root.modal == 4 { root.answer-call(root.incoming-call-id, false); } root.modal = 0; } }
+                    FormButton { label: root.tr(root.modal == 5 ? "common.apply" : root.modal == 4 ? "main.notifications.accept" : root.modal == 3 ? "settings.privacy.logout" : root.modal == 1 ? "modals.createChannel.submit" : "modals.addFriend.submit", root.language); primary: true; disabled: root.busy || (root.modal == 5 && root.selected-screen == ""); activated => { if root.modal == 5 { root.start-share(root.selected-screen); } else if root.modal == 4 { root.answer-call(root.incoming-call-id, true); } else if root.modal == 3 { root.logout(); } else { root.submit-modal(root.modal, root.modal-input); } } }
+                }
+            }
+        }
+    }
+}

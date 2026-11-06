@@ -9,7 +9,7 @@ set "CARGO=%USERPROFILE%\.cargo\bin\cargo.exe"
 if defined CARGO_HOME set "CARGO=%CARGO_HOME%\bin\cargo.exe"
 if not exist "%CARGO%" set "CARGO=cargo"
 if "%~1"=="" (
-  "%CARGO%" run --manifest-path rust\Cargo.toml --locked -p zabor-native -- --preview updater
+  "%CARGO%" run --manifest-path rust\Cargo.toml --locked -p zabor-native
 ) else (
   "%CARGO%" run --manifest-path rust\Cargo.toml --locked -p zabor-native -- %*
 )

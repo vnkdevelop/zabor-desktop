@@ -1,3 +1,3 @@
 fn main() {
-    slint_build::compile("ui/updater.slint").expect("native updater UI compilation failed");
+    slint_build::compile("ui/root.slint").expect("native UI compilation failed");
 }

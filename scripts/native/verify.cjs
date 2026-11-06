@@ -22,7 +22,7 @@ const filesIn = directory => readdirSync(directory, { withFileTypes: true }).fla
   const path = join(directory, entry.name);
   return entry.isDirectory() ? filesIn(path) : [path];
 });
-const sourceFiles = [...filesIn('rust/crates/zabor-native'), ...filesIn('scripts/native'), 'rust/Cargo.toml', 'rust/Cargo.lock', 'src/renderer/src/components/UpdaterWindow.tsx', 'src/renderer/src/index.css', 'tailwind.config.js', 'src/renderer/src/locales/ru.json', 'src/renderer/src/locales/en.json'];
+const sourceFiles = [...filesIn('rust/crates/zabor-native'), ...filesIn('scripts/native'), '.cargo/config.toml', 'rust/Cargo.toml', 'rust/Cargo.lock', 'src/renderer/src/components/UpdaterWindow.tsx', 'src/renderer/src/index.css', 'tailwind.config.js', 'src/renderer/src/locales/ru.json', 'src/renderer/src/locales/en.json'];
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const sources = Object.fromEntries(sourceFiles.map(path => [path.replace(/\\/g, '/'), digest(path)]));
 for (const command of [

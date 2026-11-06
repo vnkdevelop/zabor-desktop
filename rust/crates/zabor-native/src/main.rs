@@ -12,11 +12,20 @@ use zabor_native::release::TARGET_BETA_VERSION;
 use zabor_native::update::{Effect, Phase, UpdateModel};
 
 slint::include_modules!();
+mod shell;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if arguments.is_empty() || arguments.iter().any(|argument| argument == "--help") {
-        println!("Native UI development preview, not a released client.\n--preview updater --state downloading|installing|error --locale ru|en\n--snapshot FILE.png --at-ms 0 --scale 1|1.25|1.5|2 --reduced-motion\n--interaction-check");
+    if arguments.is_empty()
+        || arguments.iter().any(|argument| argument == "--app")
+        || arguments
+            .windows(2)
+            .any(|pair| pair[0] == "--preview" && pair[1] != "updater")
+    {
+        return shell::run(&arguments);
+    }
+    if arguments.iter().any(|argument| argument == "--help") {
+        println!("Native client under development, not a released client.\n--app --server URL --locale ru|en\n--preview login|confirm|setup|home --snapshot FILE.png --scale 1|1.25|1.5|2\n--preview updater --state downloading|installing|error --locale ru|en\n--snapshot FILE.png --at-ms 0 --scale 1|1.25|1.5|2 --reduced-motion\n--interaction-check");
         return Ok(());
     }
     let mut locale = "ru".to_string();

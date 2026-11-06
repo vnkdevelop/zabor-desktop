@@ -1,0 +1,89 @@
+export component FormButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> disabled: false;
+    in property <bool> reduced-motion: false;
+    callback activated;
+    height: 48px;
+    background: root.primary ? #c81e70e6 : touch.has-hover ? #2a2a2ecc : #222225b3;
+    border-radius: 16px;
+    opacity: root.disabled ? 0.5 : root.primary && touch.has-hover ? 0.9 : 1;
+    transform-scale-x: touch.pressed ? 0.98 : 1;
+    transform-scale-y: touch.pressed ? 0.98 : 1;
+    transform-origin: { x: root.width / 2, y: root.height / 2 };
+    animate opacity { duration: root.reduced-motion ? 0ms : 150ms; }
+    Text { text: root.label; color: white; font-size: 16px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+    forward-focus: keys;
+    keys := FocusScope {
+        enabled: !root.disabled;
+        key-pressed(event) => { if event.text == Key.Return { root.activated(); return accept; } return reject; }
+        key-released(event) => { if event.text == Key.Space { root.activated(); return accept; } return reject; }
+    }
+    touch := TouchArea { enabled: !root.disabled; clicked => { keys.focus(); root.activated(); } }
+    if keys.has-focus : Rectangle { x: -4px; y: -4px; width: parent.width + 8px; height: parent.height + 8px; background: transparent; border-width: 2px; border-radius: 20px; border-color: #ee68a9; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: !root.disabled;
+    accessible-action-default => { if !root.disabled { root.activated(); } }
+}
+
+export component FormField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> label;
+    in property <string> placeholder;
+    in property <bool> password: false;
+    in property <bool> disabled: false;
+    in property <string> text-family: "Segoe UI";
+    in property <int> text-weight: 400;
+    in property <length> text-spacing: 0px;
+    in property <bool> centered: false;
+    callback accepted;
+    callback edited(string);
+    height: 48px;
+    background: #ffffff0b;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: input.has-focus ? #c81e70 : #ffffff12;
+    border-radius: 16px;
+    opacity: root.disabled ? 0.6 : 1;
+    Text { x: 12px; y: 0px; width: parent.width - 24px; height: parent.height; visible: root.text == ""; text: root.placeholder; color: #949ba4; font-size: 16px; font-family: root.text-family; font-weight: root.text-weight; letter-spacing: root.text-spacing; horizontal-alignment: root.centered ? center : left; vertical-alignment: center; }
+    input := TextInput {
+        x: 12px; y: 12px; width: parent.width - 24px; height: 24px;
+        text <=> root.text;
+        color: white; font-size: 16px; single-line: true;
+        font-family: root.text-family; font-weight: root.text-weight; letter-spacing: root.text-spacing; horizontal-alignment: root.centered ? center : left;
+        input-type: root.password ? InputType.password : InputType.text;
+        enabled: !root.disabled;
+        accepted => { root.accepted(); }
+        edited => { root.edited(root.text); }
+        accessible-label: root.label;
+    }
+    forward-focus: input;
+    public function focus-input() { input.focus(); }
+}
+
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <color> foreground: #949ba4;
+    in property <bool> disabled: false;
+    in property <bool> danger: false;
+    in property <length> corner-radius: 12px;
+    callback activated;
+    width: 36px; height: 36px;
+    border-radius: root.corner-radius;
+    background: touch.has-hover ? (root.danger ? #c81e70e6 : #ffffff10) : transparent;
+    opacity: root.disabled ? 0.4 : 1;
+    Image { x: (parent.width - 20px) / 2; y: (parent.height - 20px) / 2; width: 20px; height: 20px; source: root.icon; colorize: touch.has-hover ? white : root.foreground; }
+    forward-focus: keys;
+    keys := FocusScope {
+        enabled: !root.disabled;
+        key-pressed(event) => { if event.text == Key.Return { root.activated(); return accept; } return reject; }
+        key-released(event) => { if event.text == Key.Space { root.activated(); return accept; } return reject; }
+    }
+    touch := TouchArea { enabled: !root.disabled; clicked => { keys.focus(); root.activated(); } }
+    if keys.has-focus : Rectangle { x: -2px; y: -2px; width: parent.width + 4px; height: parent.height + 4px; background: transparent; border-width: 2px; border-radius: 14px; border-color: #ee68a9; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: !root.disabled;
+    accessible-action-default => { if !root.disabled { root.activated(); } }
+}

@@ -16,7 +16,24 @@ of the published Electron beta installers.
 
 Direct utility dependencies serde, serde_json, semver and png use MIT OR
 Apache-2.0. System Segoe UI fonts are resolved from Windows, not redistributed.
-The copied close, warning and spinner SVG paths in
+The native client modules additionally use Tokio/tokio-util (MIT),
+tokio-tungstenite/tungstenite (MIT OR Apache-2.0), reqwest (MIT OR Apache-2.0),
+futures-util (MIT OR Apache-2.0), url (MIT OR Apache-2.0), zeroize
+(Apache-2.0 OR MIT), thiserror (MIT OR Apache-2.0), base64 (MIT OR Apache-2.0),
+image (MIT OR Apache-2.0), and rfd (MIT).
+Native persistence/cryptography uses rusqlite (MIT, bundled SQLite in the public
+domain), windows-dpapi (MIT OR Apache-2.0, user scope), fs2 (MIT OR Apache-2.0),
+and RustCrypto p256, aes-gcm, hmac, sha2 (MIT OR Apache-2.0). getrandom
+(MIT OR Apache-2.0) provides operating-system randomness. tempfile
+(MIT OR Apache-2.0) is used only by local tests.
+
+Native media uses libwebrtc 0.4.0 / webrtc-sys 0.3.53 (Apache-2.0,
+Copyright LiveKit, Inc.), <https://github.com/livekit/rust-sdks>, wrapping
+the pinned `webrtc-a545de4` upstream SDK. The SDK's own `LICENSE.md` lists
+WebRTC and bundled codec/crypto components and must accompany native packaging.
+The bindings are used directly; no LiveKit cloud service is contacted.
+Windows media capture/playback uses the platform WASAPI audio device module.
+The copied Phosphor SVG paths in
 `rust/crates/zabor-native/assets/icons/` originate from Phosphor Icons (MIT,
 Copyright (c) 2020 Phosphor Icons, <https://github.com/phosphor-icons/react>);
 the MIT text below applies. A complete platform-specific transitive licence
@@ -29,6 +46,12 @@ winit/femtovg/AccessKit и закреплённые в `rust/Cargo.lock` зав�
 SVG-иконки происходят из Phosphor Icons (MIT, Copyright (c) 2020 Phosphor Icons).
 Полный комплект лицензий транзитивных зависимостей должен войти в будущую
 нативную поставку.
+
+Нативные клиентские модули используют перечисленные выше сетевые, оконные и
+графические библиотеки, а медиаядро — libwebrtc 0.4.0 / webrtc-sys 0.3.53
+(Apache-2.0, LiveKit) с SDK `webrtc-a545de4`. SDK содержит собственный полный
+`LICENSE.md`, который должен войти в нативную поставку. Облачный сервис LiveKit
+не используется; захват и воспроизведение звука используют WASAPI Windows.
 
 ## Rust client voicing module
 

@@ -1,0 +1,5 @@
+[env]
+LK_CUSTOM_WEBRTC = { value = "rust/target/webrtc-win-x64-a545de4", relative = true }
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

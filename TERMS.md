@@ -80,6 +80,8 @@
 
 ### 7. Данные пользователей
 
+Полностью нативный Rust-клиент находится в разработке отдельно от опубликованной WASM beta. Его модули авторизации, голосового транспорта, защищённого текстового чата и локального хранения проходят локальные испытания. Native beta использует отдельный профиль `zabor-desktop-native-beta`, Windows DPAPI для сессии/ключа и SQLite для истории со сроком 14 суток. P2P text chat и screen/video интеграция экспериментальные; импорт старого профиля и файловый workflow ещё не подключены. Наличие исходников и успешная сборка не означают выпуска полноценного клиента или изменения указанных ниже обязательств Сервиса.
+
 Клиентская Rust beta меняет только указанные локальные вычисления DSP; серверы .NET/Go, маршруты и сроки хранения сохраняются. Новые установщики/update channels stable и beta разделены и по умолчанию сохраняют данные. Переход экспериментального клиента в stable выполняется после отдельного подтверждения испытаний владельцем, а не автоматически при выпуске beta.
 
 1. Сервер хранит: имя пользователя, хеш пароля, отображаемое имя, аватар, цвет аватара, текст «о себе», настройки звука, данные достижений, статус присутствия, время последнего входа и настройку его видимости.
@@ -208,6 +210,8 @@ Responsibility for content transmitted through the Service rests with the user w
 3. The Operator is not obliged to justify enforcement decisions or restore access, but will consider appeals via [GitHub Issues](https://github.com/vnkdevelop/zabor-desktop/issues).
 
 ### 7. User data
+
+The fully native Rust client is being developed separately from the published WASM beta. Its authentication, voice transport, encrypted text chat and persistence modules undergo local testing. Native beta uses a separate `zabor-desktop-native-beta` profile, Windows DPAPI for sessions/keys and SQLite history with 14-day retention. P2P text chat and screen/video integration are experimental; legacy-profile import and the file workflow are not connected yet. Available source code and a successful build do not constitute a full client release or change the Service commitments below.
 
 The client Rust beta changes only the stated local DSP calculations; .NET/Go servers, routes and retention remain unchanged. New stable/beta installers and update channels are separate and preserve data by default. Promotion of the experimental client to stable requires separate owner test approval and does not occur automatically when a beta is released.
 

@@ -60,11 +60,11 @@ Rust migration is experimental on the beta branch and its work branches. The fir
 
 ### Нативный Rust-клиент: текущая разработка
 
-В `rust/native-client` начат полный нативный перенос на Rust + Slint 1.18.1 (winit/femtovg), без браузера в нативном preview. Точка восстановления прежнего рабочего клиента — `d088795`. Сейчас реализовано только окно обновления с RU/EN, состояниями скачивания/установки/ошибки и локальной моделью событий. Сетевой updater, вход, основной интерфейс и медиасвязь в этот preview ещё не подключены. `3.8.0-rust` — целевая версия, а не готовый опубликованный нативный релиз.
+В `rust/native-client` идёт полный перенос на Rust + Slint 1.18.1 (winit/femtovg), без браузера в нативном клиенте. Точка восстановления прежнего рабочего клиента — `d088795`. Добавлены формы авторизации и основная оболочка, SignalR/WebSocket, нативный libwebrtc/WASAPI, DPAPI/SQLite и шифрованный резервный текстовый чат. Полный функциональный паритет, трансляции/neural DSP, импорт и установщик/updater ещё в работе. `3.8.0-rust` — целевая версия, а не опубликованный полноценный нативный релиз.
 
 Для разработки нужны Windows, Rust 1.92+ с MSVC toolchain и C++ Build Tools. Запуск: `cmd.exe /c native.bat`. Полная проверка окна против React: `cmd.exe /c native.bat check`; дополнительно нужны Node.js 24, установленные npm-зависимости и Python с Pillow. Она снимает 54 пары кадров, проверяет четыре DPI-масштаба, оба языка, анимации и клавиатурные действия. Команды, границы проверок и оставшиеся этапы: [native-client-status.md](docs/migration/native-client-status.md).
 
-The `rust/native-client` branch starts a fully native Rust + Slint port from checkpoint `d088795`. Only the updater UI preview and local event model exist so far; native authentication, main UI, media and network updating are not implemented. `3.8.0-rust` is a target, not a published native release. Run `native.bat` for the preview or `native.bat check` for the 54-pair React/native comparison on Windows (Rust 1.92+, MSVC, Node 24, npm dependencies, Python/Pillow). See the linked status document for remaining work and verification limits.
+The `rust/native-client` branch develops a native Rust + Slint port from checkpoint `d088795`. Authentication/shell views, SignalR/WebSocket, libwebrtc/WASAPI, DPAPI/SQLite and encrypted fallback text chat are implemented or being integrated. Full parity, video/neural DSP, import and installer/updating remain in progress. `3.8.0-rust` is a target, not a published complete native release. `native.bat` opens the native shell; `native.bat check` runs core checks and the updater comparison (Windows, Rust 1.92+, MSVC, Node 24, npm dependencies, Python/Pillow). See the linked status for limits.
 
 
 ## Команды
@@ -74,7 +74,7 @@ The `rust/native-client` branch starts a fully native Rust + Slint port from che
 | `npm run dev`      | Запуск приложения в режиме разработки  |
 | `npm run build`    | Production-сборка приложения           |
 | `npm run dist:win` | Создание Windows x64 NSIS-инсталлятора |
-| `native.bat` | Нативное preview окна обновления |
+| `native.bat` | Запуск разрабатываемого нативного клиента |
 | `native.bat check` | Проверки Rust и сравнение окна с React |
 
 ## Установка для пользователей

@@ -7,12 +7,46 @@ license.workspace = true
 publish.workspace = true
 build = "build.rs"
 
+[[bin]]
+name = "zabor-native"
+path = "src/main.rs"
+required-features = ["native-media"]
+
 [dependencies]
 slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "accessibility", "compat-1-18", "unstable-winit-030"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
 png = "0.18"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "fs"] }
+tokio-util = "0.7"
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+futures-util = { version = "0.3", features = ["sink"] }
+url = "2"
+zeroize = { version = "1", features = ["serde"] }
+thiserror = "2"
+base64 = "0.22"
+rfd = "0.15"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+hmac = "0.12"
+sha2 = "0.10"
+getrandom = "0.3"
+p256 = { version = "0.13", features = ["ecdh", "jwk"] }
+aes-gcm = "0.10"
+rusqlite = { version = "0.37", features = ["bundled"] }
+fs2 = "0.4"
+libwebrtc = { version = "=0.4.0", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-dpapi = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = ["native-media"]
+native-media = ["dep:libwebrtc"]
 
 [build-dependencies]
 slint-build = "=1.18.1"

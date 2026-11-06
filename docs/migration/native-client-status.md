@@ -16,6 +16,22 @@ Owner decisions confirmed on 2026-11-06: target Windows 10/11 x64; a native Rust
 
 ## Реализовано
 
+После checkpoint `d1a33f6` начат связанный нативный клиент. `native.bat` теперь открывает основную оболочку, а updater запускается явно через `--preview updater`.
+
+- Slint-формы входа, подтверждения регистрации и настройки профиля используют исходные RU/EN каталоги. Реальные TextInput поддерживают клавиатуру, пароль и ограничения длины; базовая форма входа сверена с React.
+- Реализованы SignalR JSON framing, HTTP negotiate, WebSocket, invocation/completion, ping/timeout/cancel, ограниченные очереди; `CheckUserExists`, `Login`, `Register`, captcha и загрузка каналов/друзей/настроек. UI обновляется по событиям, без постоянного render polling.
+- Основная оболочка связана с данными, созданием канала, запросом дружбы, выбором собеседника, текстовым чатом и экспериментальным голосовым состоянием. Добавляются личные звонки и реконнект.
+- Нативный libwebrtc 0.4.0 собран с Windows SDK `webrtc-a545de4`. Короткий путь SDK и статический MSVC CRT заданы в `.cargo/config.toml`; исправлены реальные ошибки длинных путей и MT/MD несовместимости. Локальный тест подтверждает SCTP и декодированный PCM без физического микрофона/сервера.
+- Отдельный профиль `zabor-desktop-native-beta` сохраняет сессию/ключ через current-user DPAPI, настройки в JSON и историю/TOFU в SQLite. Резервный текстовый чат реализует P-256/AES-GCM, ACK/read/sync/delete, сохранение при выходе и 14-дневную очистку. Криптоформат проверяется отдельным Node WebCrypto тестом.
+- Подпись сборки сохраняет HMAC-SHA256 контракт; ключ берётся из окружения. Настоящие серверы и пользовательские профили в автоматических проверках не используются.
+- Синхронизация roster охватывает полный снимок каналов, вход/выход/перемещение участников, создание/изменение/удаление каналов, заявки и добавление/удаление друзей, приглашения, presence, speaking и серверный mute/deafen. Запоздалый выход из старого канала не удаляет участника нового. Частые speaking/state события обновляют строки без повторного декодирования аватаров.
+- Добавлены экспериментальный data-only P2P chat transport и native screen/window capture с преобразованием BGRA/I420, ограничением размера и выводом декодированных кадров в Slint. Повторный старт видео, stale callbacks и reconnect ещё требуют доведения.
+- Есть примитивы файлов: staging, бинарный framing, проверка offset/SHA-256, очистка незавершённых файлов и передача SCTP. Picker/download/save, отмена и полная привязка к оболочке ещё не соединены; передача файлов пользователем пока не работает.
+
+Последний полностью выполненный Rust-прогон нового ядра: 30 unit tests, один WebCrypto interoperability test, два loopback SignalR tests, один native WebRTC/PCM/SCTP test и шесть сценариев roster. Это проверка отдельных нативных механизмов, а не полная приёмка приложения. Свежий auth capture `migration-artifacts/native-auth/checkpoint-roster-2026-11-06` содержит 24 пары и 8 успешных interaction runs RU/EN при 100/125/150/200% DPI, включая проверки моделей roster. Максимум средней RGB-ошибки — 0.4279/255. Просмотрены пары setup RU и confirm EN; различия сглаживания и captcha-типографики остаются. Fmt, Clippy `-D warnings` и свежая нативная сборка пройдены. Graphify обновлён: 1647 узлов/3898 связей; пять JSON-каталогов не дали структурных узлов.
+
+Ниже сохранён состав ранее проверенного updater checkpoint:
+
 - Rust + Slint 1.18.1, winit и femtovg; нативное окно 420 × 240 логических пикселей. Браузер используется только отдельным инструментом съёмки React-эталона.
 - RU/EN каталоги окна, автоматически сверяемые тестом с ключами и значениями `src/renderer/src/locales/{ru,en}.json`.
 - Три демонстрационных состояния: скачивание (42%), установка, ошибка проверки beta. Реальные SVG-path Phosphor, размеры, цвета, границы, easing, spinner и shimmer воспроизводят React-эталон.
@@ -69,16 +85,16 @@ cmd.exe /c node scripts/native/verify.cjs --output migration-artifacts/native-ui
 | Этап | Работа | Состояние |
 | --- | --- | --- |
 | N1 | Визуальная и интерактивная основа updater | Preview и автоматическая матрица реализованы; это не install/update acceptance |
-| N2 | Общая оболочка, вход/регистрация, главный экран, каналы, друзья, контекстные меню, модалки | Не реализовано в native |
-| N3 | Настройки, профили, аватары/GIF, калибровка, все интерактивные состояния/локализации | Не реализовано в native |
-| N4 | Auth/SignalR, аккаунты, reconnect, presence, HTTP-контракты | Не реализовано в native |
-| N5 | Нативные capture/playback, WebRTC/codecs, DSP, neural models, stream/SFU, remote control | Не реализовано в native; существующий WASM DSP не закрывает этот этап |
-| N6 | Чат/файлы, encryption/key storage, совместимый импорт/откат профилей | Не реализовано в native; нужны тесты на синтетических данных и синхронизация data-flow документов |
+| N2 | Общая оболочка, вход/регистрация, главный экран, каналы, друзья, контекстные меню, модалки | Формы, оболочка и основные привязки реализованы; полная UI/behavior parity в работе |
+| N3 | Настройки, профили, аватары/GIF, калибровка, все интерактивные состояния/локализации | Есть язык и выбор статического аватара; полные настройки, crop/GIF и калибровка в работе |
+| N4 | Auth/SignalR, аккаунты, reconnect, presence, HTTP-контракты | WebSocket/auth/базовый reconnect и roster реализованы; notification actions, полное покрытие событий и LongPolling ещё нужны |
+| N5 | Нативные capture/playback, WebRTC/codecs, DSP, neural models, stream/SFU, remote control | Транспорт/PCM/SCTP проверен локально; channel/call и screen/video wiring экспериментальные; neural DSP, camera/SFU/control ещё нужны |
+| N6 | Чат/файлы, encryption/key storage, совместимый импорт/откат профилей | DPAPI, SQLite, encrypted fallback и экспериментальный P2P text реализованы; файлы ещё не связаны end-to-end, import/rollback не реализованы |
 | N7 | Загрузка/проверка native updates, независимый install helper, NSIS, подписи/лицензии, bridge старых beta | Не реализовано; кнопки preview не выполняют эти операции |
 | N8 | Полная parity/regression матрица, два устройства, длительные media sessions, CPU/RAM/latency, упаковка `3.8.0-rust` | Не выполнено |
 | N9 | Переключение основной папки и release/publish батников, удаление Electron после переноса его функций | Не выполнено |
 
-Следующий кодовый этап — N2, с отдельными React/native fixtures для авторизации, основной оболочки и модальных окон. Требование пользователя — сохранить интерфейс и поведение; замена работающих модулей пустыми mock-экранами не является завершением миграции.
+Текущая работа идёт по N2–N6. Следующие обязательные части — завершение lifecycle звонков, native video/capture, полноценные настройки/neural DSP, P2P/file transport и миграция данных, затем packaging/update. Требование пользователя — сохранить интерфейс и поведение; наличие формы или транспорта отдельно не завершает перенос функции.
 
 ## Переход со старых версий
 
@@ -91,10 +107,10 @@ cmd.exe /c node scripts/native/verify.cjs --output migration-artifacts/native-ui
 
 ## English summary
 
-The original session stopped after six native updater captures without a final comparison. Work continues on `rust/native-client`, with `d088795` as the pre-native checkpoint. The current deliverable is a Rust/Slint updater preview and reproducible parity harness, not a complete native client or network updater.
+The original session stopped after six native updater captures without a final comparison. Work continues on `rust/native-client`, with `d088795` as the pre-native checkpoint and `d1a33f6` as the verified updater checkpoint. Development now includes a connected native shell, authentication, SignalR/WebSocket, native WebRTC/WASAPI integration, DPAPI/SQLite and encrypted fallback text chat. It is not yet a complete native client or network updater.
 
 Implemented: three updater fixture states, matching RU/EN catalog tests, Phosphor SVGs, animation timing/reduced motion, keyboard traversal/retry/cancel/close, native titlebar dragging, operation-scoped lifecycle guards and channel-aware SemVer policy. Windows DPI viewport rounding is checked explicitly. Temporary Electron profiles are removed after the child exits. The 54-pair matrix covers four DPI scales, five animation times at 100%, reduced motion and eight keyboard/mouse runs. Reports pin source/binary/image hashes; pixel measurements are not a claim of complete interaction or rendering equivalence.
 
 Continuation results: fmt/clippy/build, 12 native unit tests, 54 capture pairs, eight interaction runs, TypeScript checking, 176 existing desktop tests and 22 migration/updater tests passed. Whole-frame mean absolute RGB error is 1.4164–2.9074/255; 1.7292–3.9780% of pixels exceed a 16-level channel difference. Text/edge rasterization differences remain; screen-reader behavior and real multi-monitor dragging are not verified. The final reference uses offscreen Chromium/CDP and stable layout checks to avoid stale hidden-window compositor frames.
 
-Remaining: native app shell/auth/main screens/settings; backend signaling/reconnect; full native audio/WebRTC/capture/DSP/models/stream/control; chat/crypto/files/profile migration; installer/updater/legacy bridge; two-device, long-session and resource acceptance; final packaging and removal of the replaced Electron implementation. `3.8.0-rust` is a target only. Existing Electron beta validators require a `beta` prerelease prefix, so they need a new compatible bridge or explicit native installation; the previously published WASM bridge does not implement this transition. Release batch files still package the Electron/WASM client. .NET backend and Go SFU remain the compatibility targets.
+The newer core passed 30 unit tests, one independent WebCrypto test, two local SignalR tests, one native WebRTC/PCM/SCTP test and six roster scenarios. Roster synchronization now covers membership, channel/friend/request/invite updates, presence, speaking and moderation. Experimental data-only P2P text, screen/window capture and video presentation are wired; file primitives are not yet connected end-to-end. Remaining: full UI/notification/settings parity; long-poll fallback and call/reconnect/video lifecycle acceptance; neural DSP, camera/SFU/control; file workflow/profile import/rollback; installer/updater/legacy bridge; two-device, long-session and resource acceptance; final packaging. `3.8.0-rust` remains a target. Existing beta validators require a `beta` prefix and need a compatible bridge or explicit installation. .NET backend and Go SFU remain the compatibility targets.

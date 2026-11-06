@@ -20,10 +20,11 @@ def main():
     parser.add_argument('--reference', type=Path, required=True)
     parser.add_argument('--native', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--kind', choices=['updater', 'auth'], default='updater')
     args = parser.parse_args()
     if args.output.exists():
         raise SystemExit('Comparison output already exists')
-    references = sorted(args.reference.glob('react-updater-*.png'))
+    references = sorted(args.reference.glob(f'react-{args.kind}-*.png'))
     if not references:
         raise SystemExit('No captures to compare')
     for reference_path in references:
@@ -43,13 +44,13 @@ def main():
         actual = Image.open(actual_path).convert('RGB')
         if reference.size != actual.size:
             raise SystemExit('Capture dimensions differ: ' + reference_path.name)
-        scale = reference.width / 420
+        scale = reference.width / (420 if args.kind == 'updater' else 1100)
         regions = {
             'titlebar': (0, 0, 420, 37),
             'heading': (20, 55, 400, 80),
             'body': (20, 105, 400, 172),
             'actions': (200, 183, 400, 223),
-        }
+        } if args.kind == 'updater' else {'titlebar': (0, 0, 1100, 36), 'auth-card': (350, 100, 750, 660)}
         metrics = summarize(reference, actual)
         metrics['regions'] = {
             name: summarize(reference.crop(tuple(round(v * scale) for v in box)),

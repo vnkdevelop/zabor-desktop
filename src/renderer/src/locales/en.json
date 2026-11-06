@@ -15,6 +15,8 @@
       "minimizeToTrayDesc": "when you click the close button, the app will minimize instead of closing",
       "language": "app language",
       "languageDesc": "choose the primary interface language",
+      "languageRussian": "русский",
+      "languageEnglish": "english",
       "updates": "app updates",
       "currentVersion": "current version",
       "checkUpdates": "check for updates",
@@ -114,6 +116,8 @@
     "lastSeenDate": "last seen {{date}}"
   },
   "chat": {
+    "storageFailed": "could not open or save the chat",
+    "keyChanged": "the contact's encryption key has changed. messages are not accepted",
     "empty": "no messages yet",
     "connected": "connected",
     "connecting": "connecting...",
@@ -201,6 +205,10 @@
     },
     "voice": {
       "endCall": "end call",
+      "mute": "mute microphone",
+      "unmute": "unmute microphone",
+      "deafen": "mute playback",
+      "undeafen": "unmute playback",
       "ping": "ping",
       "offline": "offline",
       "voiceChannels": "voice channels",
@@ -523,7 +531,8 @@
     "authThrottled": "too many sign-in attempts. try again in {{minutes}} min.",
     "captchaRequired": "enter code from image",
     "invalidCaptcha": "invalid code from image",
-    "expiredCaptcha": "code expired, refresh image"
+    "expiredCaptcha": "code expired, refresh image",
+    "sessionSaveError": "could not update the saved session. you may need to sign in again after restarting"
   },
   "updater": {
     "title": "zabor",

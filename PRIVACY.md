@@ -81,6 +81,8 @@
 
 ### 6. Обработка данных на устройстве пользователя
 
+Разрабатываемый нативный Rust-клиент использует отдельный профиль `zabor-desktop-native-beta`. Сессия и ключ переписки защищены Windows DPAPI в области текущего пользователя; настройки находятся в `settings.json`, история — в SQLite `chat.sqlite3` с разделением по владельцу. Срок истории — 14 суток от создания: просроченные сообщения не загружаются и не импортируются повторной записью, очистка выполняется при входе и раз в час. Обычный выход очищает сессию, сохраняя историю и доверенные ключи. Текстовый чат использует экспериментальный прямой WebRTC data channel с DTLS и шифрованный резервный SignalR-маршрут; файловый workflow пока не связан end-to-end. Импорт старого профиля ещё не включён. Экспериментальный голосовой тракт использует libwebrtc/WASAPI и активируется при явном входе в голосовую сессию; захват выбранного экрана или окна запускается отдельным действием пользователя. Автоматизированные проверки используют только локальные синтетические данные. Облачный сервис LiveKit и новые внешние службы не подключаются. Правила опубликованного Electron-клиента приведены отдельно ниже.
+
 Клиентский Rust WASM-модуль voicing выполняет локальные математические вычисления внутри AudioWorklet. Он не добавляет сохранение или передачу записи микрофона, новые внешние службы или телеметрию. Новые установщики по умолчанию сохраняют локальные данные; явная очистка относится только к выбранному каналу и не удаляет соседний stable/beta-профиль.
 
 Значительная часть данных обрабатывается **локально на устройстве пользователя** и Оператору не передаётся:
@@ -226,6 +228,8 @@ Processing is carried out for the following purposes:
 The Controller does not use the data for advertising, profiling or targeting, and does not take automated decisions producing legal effects.
 
 ### 6. Processing on the user's device
+
+The native Rust client under development uses a separate `zabor-desktop-native-beta` profile. Sessions and messaging keys are protected by current-user Windows DPAPI; settings use `settings.json` and history uses owner-partitioned SQLite `chat.sqlite3`. History retention is 14 days from creation: expired messages are neither loaded nor reinserted, and cleanup runs at sign-in and hourly. Normal sign-out clears the session while retaining history and trusted keys. Text chat uses an experimental direct WebRTC data channel protected by DTLS and the encrypted SignalR fallback; the file workflow is not connected end-to-end. Legacy-profile import is not enabled. The experimental libwebrtc/WASAPI voice path is activated by explicit entry into a voice session; capturing a selected screen or window requires a separate user action. Automated checks use local synthetic data only. No LiveKit cloud or new external service is contacted. Published Electron-client rules remain documented separately below.
 
 The client Rust WASM voicing module performs local mathematical work inside the AudioWorklet. It adds no microphone recording storage/transmission, external service or telemetry. New installers preserve local data by default; explicit clearing applies only to the selected channel and does not remove the neighboring stable/beta profile.
 
