@@ -15,7 +15,7 @@ const bundled = buildSync({
 }).outputFiles[0].text;
 export const wasmModule = new WebAssembly.Module(readFileSync('src/renderer/public/rust-voicing/zabor_voicing.wasm'));
 
-export function createPipeline(rust = false) {
+export function createPipeline(rust = false, engine = null, clock = performance) {
   const messages = [];
   let Ctor;
   class Base {
@@ -26,8 +26,8 @@ export function createPipeline(rust = false) {
   runInNewContext(bundled, {
     AudioWorkletProcessor: Base, registerProcessor: (_name, value) => { Ctor = value; },
     WebAssembly, ArrayBuffer, Float32Array, Float64Array, Int32Array, Uint8Array,
-    performance, console,
-    __fixtureEngine: () => ({ label: 'fixture', supportsAttenuationLimit: false, isReady: true, stageName: 'ready', frame: 480, start: async () => {}, process: frame => frame, setAttenuationLimit: () => {}, setPostFilterBeta: () => {} })
+    performance: clock, console,
+    __fixtureEngine: () => engine ?? ({ label: 'fixture', supportsAttenuationLimit: false, isReady: true, stageName: 'ready', frame: 480, start: async () => {}, process: frame => frame, setAttenuationLimit: () => {}, setPostFilterBeta: () => {} })
   });
   const pipeline = new Ctor({ processorOptions: { rustVoicingModule: rust ? wasmModule : null } });
   return { pipeline, messages };

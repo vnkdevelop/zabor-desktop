@@ -8,9 +8,10 @@ import { RemoteControlProtocol, RC_OP_START } from '../src/renderer/src/services
 const text = readFileSync(new URL('../src/renderer/src/services/webrtc.ts', import.meta.url), 'utf8');
 const source = ts.createSourceFile('webrtc.ts', text, ts.ScriptTarget.Latest, true);
 const manager = source.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'WebRTCManager');
-const member = manager.members.find(node => node.name?.getText(source) === 'prepareMicTest');
-const compiled = ts.transpileModule(`class Engine { ${member.getText(source)} }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-const Engine = runInNewContext(`${compiled}\nEngine`, { DOMException, Error, console });
+const members = ['prepareMicTest', 'cancelIdleAudioRelease', 'idleAudioGeneration']
+  .map(name => manager.members.find(node => node.name?.getText(source) === name).getText(source)).join('\n');
+const compiled = ts.transpileModule(`class Engine { ${members} }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const Engine = runInNewContext(`${compiled}\nEngine`, { DOMException, Error, console, clearTimeout });
 
 test('mic-test warmup recovers a replaced context without a catch-scope ReferenceError', async () => {
   const engine = new Engine();

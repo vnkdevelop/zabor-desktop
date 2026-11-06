@@ -1730,17 +1730,16 @@ class SignalRService {
       : [...targetUsers, optimisticUser];
     store.removeUserFromChannelMap('', currentUser.id);
     store.commitVoiceChannel(channelId, optimisticUsers);
-    this.playSfx(channelJoinSound, 0.3);
 
     try {
       const micStarted = await webrtc.startLocalStream();
       lap('mic');
+      if (operationId !== this.voiceOperationId) return 'network';
       if (!micStarted) {
         store.clearVoiceChannel(channelId);
         report('mic-failed');
         return 'mic_failed';
       }
-      if (operationId !== this.voiceOperationId) return 'network';
       const update = await this.invokeWithTimeout<ChannelUpdate | null>(
         "JoinChannel", SignalRService.INVOKE_TIMEOUT_MS, { channelId }
       );
@@ -1752,6 +1751,7 @@ class SignalRService {
         store.commitVoiceChannel(channelId, update.users);
         store.setCallStatus('idle');
         store.setCurrentCallUser(null);
+        this.playSfx(channelJoinSound, 0.3);
         for (const u of update.users) {
           if (u.id !== currentUser.id && u.isStreaming) {
             this.clearStreamDropTimer(u.id);
@@ -1821,10 +1821,10 @@ class SignalRService {
     initialState.commitVoiceChannel(channelId, optimisticUsers);
     this.wasInChannel = null;
     this.cancelChannelRejoinRetry();
-    this.playSfx(channelJoinSound, 0.3);
     initialState.setIsJoiningChannel(true);
     try {
       const micStarted = await webrtc.startLocalStream();
+      if (operationId !== this.voiceOperationId) return 'network';
       if (!micStarted) {
         useAppStore.getState().clearVoiceChannel(channelId);
         if (sourceChannelId) useAppStore.getState().commitVoiceChannel(sourceChannelId, sourceUsers);
@@ -1862,6 +1862,7 @@ class SignalRService {
       state.commitVoiceChannel(channelId, update.users);
       state.setCallStatus('idle');
       state.setCurrentCallUser(null);
+      this.playSfx(channelJoinSound, 0.3);
       setTimeout(() => {
         if (operationId !== this.voiceOperationId || useAppStore.getState().currentChannelId !== channelId) return;
         this.connectToPeersStaggered(peerIds, operationId, channelId);
@@ -1885,6 +1886,7 @@ class SignalRService {
       this.voiceOperationId++;
       this.isJoiningChannel = false;
       useAppStore.getState().setIsJoiningChannel(false);
+      webrtc.cancelPendingMicrophoneStart();
       await pendingOperation;
     }
     const operationId = ++this.voiceOperationId;

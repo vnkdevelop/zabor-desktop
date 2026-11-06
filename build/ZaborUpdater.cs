@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -9,6 +10,16 @@ using System.Windows.Threading;
 
 namespace ZaborUpdater {
     public class Program {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr FindWindow(string className, string windowName);
+
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        public static bool ShouldCloseBetaSplash(bool installerRunning, bool replacementWindowVisible) {
+            return !installerRunning && replacementWindowVisible;
+        }
+
         [STAThread]
         public static void Main(string[] args) {
             int parentPid = 0;
@@ -16,10 +27,19 @@ namespace ZaborUpdater {
                 int.TryParse(args[0], out parentPid);
             }
             bool beta = args != null && args.Length > 1 && args[1] == "beta";
+            int installerPid = 0;
+            if (beta && args.Length > 2) {
+                int.TryParse(args[2], out installerPid);
+            }
+            Process installerProcess = null;
+            if (installerPid > 0) {
+                try { installerProcess = Process.GetProcessById(installerPid); } catch {}
+            }
+            DateTime startedAt = DateTime.UtcNow;
 
             var app = new Application();
             var window = new Window {
-                Title = beta ? "ZaborUpdaterBeta" : "ZaborUpdater",
+                Title = beta && installerPid > 0 ? "ZaborUpdaterBetaInstall" : beta ? "ZaborUpdaterBeta" : "ZaborUpdater",
                 WindowStyle = WindowStyle.None,
                 AllowsTransparency = true,
                 Background = Brushes.Transparent,
@@ -112,6 +132,35 @@ namespace ZaborUpdater {
                     return;
                 }
 
+                if (beta) {
+                    try {
+                        if (installerPid > 0 && window.IsVisible) {
+                            IntPtr previousWindow = FindWindow(null, "ZaborUpdaterBeta");
+                            if (previousWindow != IntPtr.Zero) {
+                                PostMessage(previousWindow, 0x0010, IntPtr.Zero, IntPtr.Zero);
+                            }
+                        }
+                        bool installerRunning = installerProcess != null && !installerProcess.HasExited;
+                        bool replacementWindowVisible = false;
+                        if (!installerRunning) {
+                            foreach (var zp in Process.GetProcessesByName("ZABOR-Beta")) {
+                                using (zp) {
+                                    try {
+                                        if (zp.Id != parentPid && zp.StartTime.ToUniversalTime() >= startedAt && zp.MainWindowHandle != IntPtr.Zero) {
+                                            replacementWindowVisible = true;
+                                            break;
+                                        }
+                                    } catch {}
+                                }
+                            }
+                        }
+                        if (ShouldCloseBetaSplash(installerRunning, replacementWindowVisible)) {
+                            window.Close();
+                        }
+                    } catch {}
+                    return;
+                }
+
                 // Primary closing mechanism: the installer calls taskkill when installation finishes.
                 // Fallback check: only consider closing if at least 6 seconds passed and setup is no longer running.
                 if (stopwatch.Elapsed.TotalSeconds > 6) {
@@ -163,6 +212,9 @@ namespace ZaborUpdater {
             timer.Start();
             window.Show();
             app.Run(window);
+            if (installerProcess != null) {
+                installerProcess.Dispose();
+            }
         }
     }
 }

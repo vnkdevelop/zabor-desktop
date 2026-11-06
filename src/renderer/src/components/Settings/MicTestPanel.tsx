@@ -61,6 +61,7 @@ export function MicTestPanel({ isEnabled, isActive, onHeightChange }: MicTestPan
     return () => {
       cancelAnimationFrame(outer);
       cancelAnimationFrame(inner);
+      webrtc.releaseMicTestPreparation();
     };
   }, [isVisible]);
 

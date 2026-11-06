@@ -1407,7 +1407,7 @@ export default function App() {
         }
       } catch { }
 
-      const micPromise = webrtc.prewarmLocalStream().catch(err => {
+      const micPromise = webrtc.getAudioDevices().then(() => true).catch(err => {
         console.warn('[Calibration] Mic calibration failed on startup:', err);
         return false;
       });

@@ -19,11 +19,25 @@
       ${GetParameters} $R0
       ${GetOptions} $R0 "--updated" $R1
       ${IfNot} ${Errors}
-        FindWindow $0 "" "ZaborUpdaterBeta"
+        FindWindow $0 "" "ZaborUpdaterBetaInstall"
         ${if} $0 == 0
           InitPluginsDir
           File /oname=$PLUGINSDIR\ZaborUpdaterBeta.exe "${BUILD_RESOURCES_DIR}\ZaborUpdater.exe"
-          Exec '"$PLUGINSDIR\ZaborUpdaterBeta.exe" 0 beta'
+          System::Call 'kernel32::GetCurrentProcessId() i .r2'
+          Exec '"$PLUGINSDIR\ZaborUpdaterBeta.exe" 0 beta $2'
+          StrCpy $3 0
+          ${Do}
+            FindWindow $0 "" "ZaborUpdaterBetaInstall"
+            System::Call 'user32::IsWindowVisible(p r0) i .r4'
+            ${If} $4 != 0
+              ${ExitDo}
+            ${EndIf}
+            IntOp $3 $3 + 1
+            ${If} $3 >= 100
+              ${ExitDo}
+            ${EndIf}
+            Sleep 50
+          ${Loop}
         ${endif}
       ${EndIf}
     ${endif}
@@ -71,7 +85,6 @@
   ${if} ${isUpdated}
     SetAutoClose true
     ${if} ${Silent}
-      nsExec::Exec 'taskkill /F /IM ZaborUpdaterBeta.exe /T'
       ${StdUtils.ExecShellAsUser} $0 "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "open" "--updated"
       ${if} $0 != 0
         ExecShell "open" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "--updated" SW_SHOWNORMAL

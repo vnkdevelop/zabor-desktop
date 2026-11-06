@@ -98,6 +98,7 @@ const ULTRA_OPUS_BITRATE = 96_000
 const MIC_CAPTURE_TIMEOUT_MS = 5_000
 const SILERO_MODEL_LOAD_TIMEOUT_MS = 10_000
 const VAD_WORKER_READY_TIMEOUT_MS = 15_000
+const MIC_TRANSMISSION_READY_TIMEOUT_MS = 20_000
 const CALIBRATION_PREPARE_TIMEOUT_MS = 20_000
 const CALIBRATION_CLEANUP_TIMEOUT_MS = 5_000
 const RUMBLE_GUARD_HZ = 70
@@ -818,6 +819,7 @@ export class WebRTCManager {
   private micTestOffset = 0
   private micTestStartedAt = 0
   private micTestGeneration = 0
+  private micTestPrepared = false
   private micTestEndedListener: (() => void) | null = null
   private readonly peerConnectStartedAt = new Map<string, number>()
   private inputGainNode: GainNode | null = null
@@ -826,6 +828,10 @@ export class WebRTCManager {
   private calibratedPreGainNode: GainNode | null = null
   private micNode: AudioWorkletNode | null = null
   private micNodeReady = false
+  private micTransmissionReadyNode: AudioWorkletNode | null = null
+  private micTransmissionReadyPromise: Promise<void> | null = null
+  private cancelMicTransmissionReady: (() => void) | null = null
+  private micTransmissionRequestId = 0
   private readonly micLevelSeeds = new Map<string, Record<string, number>>()
   private micEngineError: string | null = null
   private lastMicCaptureError: string | null = null
@@ -839,6 +845,8 @@ export class WebRTCManager {
     windowRms?: number
   }) => void) | null = null
   private vadWorkerInitPromise: Promise<void> | null = null
+  private vadWorkerGeneration = 0
+  private cancelVadWorkerInit: (() => void) | null = null
   private vadEpoch = 0
   private voiceProbeCollector: ((probability: number, windowRms: number) => void) | null = null
 
@@ -865,6 +873,11 @@ export class WebRTCManager {
   private echoCancellationEnabled = localStorage.getItem(ECHO_CANCELLATION_STORAGE_KEY) === 'true'
   private calibrationForcesAnalyzer = false
   private activeStartPromise: Promise<boolean> | null = null
+  private idleAudioTimer: ReturnType<typeof setTimeout> | null = null
+  private idleAudioGeneration = 0
+  private idleAudioReleasePromise: Promise<void> | null = null
+  private backgroundMicCaptures = 0
+  private backgroundMicPromise: Promise<boolean> | null = null
 
   private backgroundContext: AudioContext | null = null
   private backgroundSource: MediaStreamAudioSourceNode | null = null
@@ -1629,9 +1642,11 @@ export class WebRTCManager {
 
   private ensureVadWorker(): Promise<void> {
     if (!this.analyzerFeedsWorklet()) return Promise.resolve()
+    if (!this.micNode && !this.calibrationForcesAnalyzer) return Promise.resolve()
     if (this.vadWorker && this.vadWorkerReady) return Promise.resolve()
     if (this.vadWorkerInitPromise) return this.vadWorkerInitPromise
 
+    const generation = this.vadWorkerGeneration
     const startup = (async () => {
       const worker = new VadWorker()
       const wasmPath = new URL('./', window.location.href).href
@@ -1645,8 +1660,13 @@ export class WebRTCManager {
       const readyTimeout = window.setTimeout(() => {
         rejectReady?.(new Error('Silero VAD initialization timed out'))
       }, VAD_WORKER_READY_TIMEOUT_MS)
+      this.cancelVadWorkerInit = () => {
+        window.clearTimeout(readyTimeout)
+        rejectReady?.(new DOMException('Silero VAD session cancelled', 'AbortError'))
+      }
 
       worker.onmessage = (event) => {
+        if (this.vadWorker !== worker || this.vadWorkerGeneration !== generation) return
         const data = event.data
         if (data.type === 'probability') {
           this.vadWorkerReady = true
@@ -1676,21 +1696,29 @@ export class WebRTCManager {
         SILERO_MODEL_LOAD_TIMEOUT_MS,
         'Silero VAD model load timed out'
       )
+      if (this.vadWorker !== worker || this.vadWorkerGeneration !== generation) {
+        throw new DOMException('Silero VAD session cancelled', 'AbortError')
+      }
       worker.postMessage({ type: 'init', model, wasmPath }, [model.buffer])
       await ready
     })()
 
     this.vadWorkerInitPromise = startup.then(() => {
-      this.vadWorkerInitPromise = null
+      if (this.vadWorkerGeneration === generation) {
+        this.vadWorkerInitPromise = null
+        this.cancelVadWorkerInit = null
+      }
     }).catch(error => {
-      this.terminateVadWorker()
-      this.vadWorkerInitPromise = null
+      if (this.vadWorkerGeneration === generation) this.terminateVadWorker()
       throw error
     })
     return this.vadWorkerInitPromise
   }
 
   private terminateVadWorker() {
+    this.vadWorkerGeneration++
+    this.cancelVadWorkerInit?.()
+    this.cancelVadWorkerInit = null
     this.vadProbabilityHandler = null
     this.vadWorkerReady = false
     this.vadWorkerInitPromise = null
@@ -1701,6 +1729,7 @@ export class WebRTCManager {
   }
 
   public warmUpSmartNoiseSuppression(enabled = this.noiseSuppression): void {
+    if (!this.micNode && !this.activeStartPromise && !this.calibrationForcesAnalyzer) return
     if (this.noiseSuppression && this.thresholdMode !== 'auto') return
     const needsAnalyzer = this.analyzerFeedsWorklet()
     if (!enabled && !needsAnalyzer) return
@@ -2002,7 +2031,10 @@ export class WebRTCManager {
 
     const destination = ctx.createMediaStreamDestination()
     const localTrack = destination.stream.getAudioTracks()[0]
-    if (localTrack) localTrack.contentHint = 'speech'
+    if (localTrack) {
+      localTrack.contentHint = 'speech'
+      localTrack.enabled = false
+    }
     const moduleUrl = model === 'deepfilter' ? micPipelineDeepFilterUrl : micPipelineRnnoiseUrl
     const processorName = model === 'deepfilter' ? 'mic-pipeline-deepfilter' : 'mic-pipeline-rnnoise'
 
@@ -2035,8 +2067,10 @@ export class WebRTCManager {
     }
 
     if (this.micNode) {
+      const micNode = this.micNode
       const graphEpoch = this.vadEpoch
-      this.micNode.port.onmessage = (event) => {
+      micNode.port.onmessage = (event) => {
+        if (this.micNode !== micNode || this.processedContext !== ctx || this.vadEpoch !== graphEpoch) return
         if (event.data.type === 'dspRuntime') {
           console.info(`[WebRTC] Mic voicing runtime: ${String(event.data.runtime)}`)
         } else if (event.data.type === 'vad') {
@@ -2064,10 +2098,11 @@ export class WebRTCManager {
         } else if (event.data.type === 'fetchRequest') {
           const url = event.data.url as string
           const deliver = (buffer: ArrayBuffer | null) => {
+            if (this.micNode !== micNode || this.processedContext !== ctx || this.vadEpoch !== graphEpoch) return
             if (buffer) {
-              this.micNode?.port.postMessage({ type: 'fetchResponse', url, buffer }, [buffer])
+              micNode.port.postMessage({ type: 'fetchResponse', url, buffer }, [buffer])
             } else {
-              this.micNode?.port.postMessage({ type: 'fetchResponse', url, buffer: null })
+              micNode.port.postMessage({ type: 'fetchResponse', url, buffer: null })
             }
           }
           const localRel = url.startsWith(`${DEEPFILTER_LOCAL_BASE}/`)
@@ -2136,7 +2171,6 @@ export class WebRTCManager {
         }
       }
 
-      const micNode = this.micNode
       this.bindVadProbabilityHandler(micNode)
 
       const attachSileroVad = () => {
@@ -2233,6 +2267,10 @@ export class WebRTCManager {
       try { this.inputGainNode.disconnect() } catch { }
       this.inputGainNode = null
     }
+    if (this.calibratedPreGainNode) {
+      try { this.calibratedPreGainNode.disconnect() } catch { }
+      this.calibratedPreGainNode = null
+    }
     if (this.micNode) {
       try { this.micNode.disconnect() } catch { }
     }
@@ -2258,6 +2296,11 @@ export class WebRTCManager {
   }
 
   private async cleanupProcessedStream(): Promise<void> {
+    this.cancelMicTransmissionReady?.()
+    this.cancelMicTransmissionReady = null
+    this.micTransmissionRequestId++
+    this.micTransmissionReadyPromise = null
+    this.micTransmissionReadyNode = null
     this.cleanupProcessedStreamSourceOnly()
     if (this.micNode) {
       try { this.micNode.port.postMessage({ type: 'dispose' }) } catch { }
@@ -2672,7 +2715,11 @@ export class WebRTCManager {
   public subscribeMicLevel(listener: (db: number) => void): () => void {
     this.micLevelListeners.add(listener)
     listener(this.micLevelDb)
-    return () => this.micLevelListeners.delete(listener)
+    if (!this.localStream) void this.startBackgroundMic()
+    return () => {
+      this.micLevelListeners.delete(listener)
+      this.scheduleIdleAudioRelease()
+    }
   }
 
   private stopBackgroundMeter() {
@@ -2890,6 +2937,26 @@ export class WebRTCManager {
   }
 
   public async startBackgroundMic(deviceId?: string): Promise<boolean> {
+    await this.idleAudioReleasePromise?.catch(() => {})
+    if (this.activeStartPromise) await this.activeStartPromise.catch(() => false)
+    if (this.backgroundMicPromise) {
+      const started = await this.backgroundMicPromise
+      if (deviceId !== undefined && deviceId !== this.currentDeviceId) return this.startBackgroundMic(deviceId)
+      return started
+    }
+    const startup = this.captureBackgroundMic(deviceId)
+    this.backgroundMicPromise = startup
+    try {
+      return await startup
+    } finally {
+      if (this.backgroundMicPromise === startup) this.backgroundMicPromise = null
+      this.scheduleIdleAudioRelease()
+    }
+  }
+
+  private async captureBackgroundMic(deviceId?: string): Promise<boolean> {
+    await this.idleAudioReleasePromise?.catch(() => {})
+    this.cancelIdleAudioRelease()
     if (deviceId !== undefined) this.currentDeviceId = deviceId
     const targetDeviceId = deviceId || this.currentDeviceId || 'default'
     if (this.rawStream?.getAudioTracks().some(track => track.readyState === 'live')) {
@@ -2898,18 +2965,26 @@ export class WebRTCManager {
         this.rawStream = null
         this.activeRawDeviceId = null
       } else {
-        if (!this.localStream) this.startBackgroundMeter()
+        if (!this.localStream && this.micLevelListeners.size > 0) this.startBackgroundMeter()
+        this.scheduleIdleAudioRelease()
         return true
       }
     }
 
+    this.backgroundMicCaptures++
+    const generation = this.microphoneGeneration
     try {
-      this.rawStream = await this.captureRawMicStream()
+      const stream = await this.captureRawMicStream()
+      if (this.microphoneGeneration !== generation) {
+        stream.getTracks().forEach(track => track.stop())
+        return false
+      }
+      this.rawStream = stream
       this.rawStreamIsFallback = false
       const rawTrack = this.rawStream.getAudioTracks()[0]
       const settings = rawTrack?.getSettings()
       this.loadCalibration(settings?.deviceId || this.currentDeviceId, rawTrack?.label || '')
-      this.startBackgroundMeter()
+      if (this.micLevelListeners.size > 0) this.startBackgroundMeter()
       return true
     } catch (error) {
       console.error('[WebRTC] Failed to initialize background microphone:', error)
@@ -2919,6 +2994,9 @@ export class WebRTCManager {
         this.rawStreamIsFallback = true
       }
       return false
+    } finally {
+      this.backgroundMicCaptures--
+      this.scheduleIdleAudioRelease()
     }
   }
 
@@ -3336,6 +3414,81 @@ export class WebRTCManager {
     })
   }
 
+  private hasAudioDemand(): boolean {
+    const state = useAppStore.getState()
+    return Boolean(
+      state.currentChannelId || state.currentCallUser || (state.callStatus && state.callStatus !== 'idle') ||
+      this.peerConnections.size || this.sfuPubConnection || this.sfuSubConnections.size || this.localVideoStream ||
+      this.micTestPrepared || this.micTestRun || this.micTestPlaying || this.calibrationInProgress ||
+      this.calibrationForcesAnalyzer || this.activeStartPromise || this.backgroundMicCaptures || this.backgroundMicPromise
+    )
+  }
+
+  private cancelIdleAudioRelease(): void {
+    this.idleAudioGeneration++
+    if (this.idleAudioTimer) clearTimeout(this.idleAudioTimer)
+    this.idleAudioTimer = null
+  }
+
+  private scheduleIdleAudioRelease(): void {
+    this.cancelIdleAudioRelease()
+    if (this.idleAudioReleasePromise || this.hasAudioDemand()) return
+    const generation = this.idleAudioGeneration
+    this.idleAudioTimer = setTimeout(() => {
+      this.idleAudioTimer = null
+      if (generation !== this.idleAudioGeneration || this.hasAudioDemand()) return
+      const release = this.releaseIdleAudio()
+      this.idleAudioReleasePromise = release
+      void release.catch(error => console.warn('[WebRTC] Idle audio cleanup failed:', error)).finally(() => {
+        if (this.idleAudioReleasePromise === release) this.idleAudioReleasePromise = null
+      })
+    }, 10_000)
+  }
+
+  private async releaseIdleAudio(): Promise<void> {
+    if (this.hasAudioDemand()) return
+    this.microphoneGeneration++
+    this.stopSilenceMonitor()
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => track.stop())
+      this.localStream = null
+    }
+    this.stopBackgroundMeter()
+    if (this.micLevelListeners.size === 0 && this.rawStream) {
+      this.rawStream.getTracks().forEach(track => track.stop())
+      this.rawStream = null
+      this.activeRawDeviceId = null
+    }
+    await this.cleanupProcessedStream()
+    this.terminateVadWorker()
+    if (this.hasAudioDemand()) return
+    this.stopAudioHealthMonitoring()
+    if (this.mixAudioElement) {
+      this.mixAudioElement.pause()
+      if (this.mixAudioElement.srcObject instanceof MediaStream) {
+        this.mixAudioElement.srcObject.getTracks().forEach(track => track.stop())
+      }
+      this.mixAudioElement.srcObject = null
+      this.mixAudioElement = null
+    }
+    for (const node of [this.outputBusGain, this.outputPeakGuard]) {
+      try { node?.disconnect() } catch { }
+    }
+    this.outputBusGain = null
+    this.outputPeakGuard = null
+    const output = this.outputMixContext
+    this.outputMixContext = null
+    if (output && output.state !== 'closed') await output.close().catch(() => {})
+    if (this.micLevelListeners.size > 0 && this.rawStream?.getAudioTracks().some(track => track.readyState === 'live')) {
+      this.startBackgroundMeter()
+    }
+  }
+
+  public releaseMicTestPreparation(): void {
+    this.micTestPrepared = false
+    this.scheduleIdleAudioRelease()
+  }
+
   public async prewarmLocalStream(): Promise<boolean> {
     if (this.localStream && this.localStream.getAudioTracks().length > 0 && this.localStream.getAudioTracks().every(t => t.readyState === 'live')) {
       return true
@@ -3428,6 +3581,8 @@ export class WebRTCManager {
   }
 
   public async prepareMicTest(): Promise<void> {
+    this.micTestPrepared = true
+    this.cancelIdleAudioRelease()
     let ctx: AudioContext | null = null
     try {
       if (!await this.prewarmLocalStream()) return
@@ -3459,6 +3614,7 @@ export class WebRTCManager {
       return await this.micTestRun
     } finally {
       this.micTestRun = null
+      this.scheduleIdleAudioRelease()
     }
   }
 
@@ -3611,15 +3767,95 @@ export class WebRTCManager {
   }
 
   public disposeMicTest() {
+    this.micTestPrepared = false
     this.micTestGeneration++
     this.micTestPlaying = false
     this.micTestOffset = 0
     this.micTestBuffer = null
     this.releaseMicTestPlayback()
     this.setMonitorWhileMuted(false)
+    this.scheduleIdleAudioRelease()
+  }
+
+  private async waitForMicTransmissionReady(): Promise<void> {
+    const node = this.micNode
+    const context = this.processedContext
+    if (!node && (!this.usesSmartWorklet() || this.ultraLowLatency)) return
+    if (!node || !context || context.state === 'closed') throw new Error('MIC_DSP_NOT_AVAILABLE')
+    if (this.micTransmissionReadyNode === node) return
+    if (this.micTransmissionReadyPromise) return this.micTransmissionReadyPromise
+    const epoch = this.vadEpoch
+    const generation = this.microphoneGeneration
+    const requestId = ++this.micTransmissionRequestId
+    let abortPreparation: ((error: Error) => void) | null = null
+    const cancelled = new Promise<never>((_resolve, reject) => { abortPreparation = reject })
+    cancelled.catch(() => {})
+    this.cancelMicTransmissionReady = () => abortPreparation?.(new DOMException('Microphone preparation cancelled', 'AbortError'))
+    const prepare = async () => {
+      if (this.analyzerFeedsWorklet()) {
+        await Promise.race([this.ensureVadWorker().catch(error => {
+          console.warn('[WebRTC] Preparing voice with the existing VAD fallback:', error)
+        }), cancelled])
+      }
+      if (this.micNode !== node || this.processedContext !== context || this.vadEpoch !== epoch || this.microphoneGeneration !== generation) {
+        throw new DOMException('Microphone preparation cancelled', 'AbortError')
+      }
+      return new Promise<void>((resolve, reject) => {
+        let finished = false
+        const finish = (error?: Error) => {
+          if (finished) return
+          finished = true
+          clearTimeout(timeout)
+          node.port.removeEventListener('message', onMessage)
+          node.removeEventListener('processorerror', onProcessorError)
+          if (error) reject(error)
+          else resolve()
+        }
+        const onMessage = (event: MessageEvent) => {
+          if (finished) return
+          const data = event.data
+          if (data?.type !== 'transmissionReady' || data.requestId !== requestId) return
+          if (this.micNode !== node || this.processedContext !== context || this.vadEpoch !== epoch || this.microphoneGeneration !== generation) {
+            finish(new DOMException('Microphone preparation cancelled', 'AbortError'))
+          } else if (data.sampleRate !== 48000 || data.frameSize !== 480 ||
+            !Number.isSafeInteger(data.preparedFrames) || data.preparedFrames < 32 ||
+            !Number.isFinite(data.clockSpanMs) || !Number.isFinite(data.clockAudioMs) ||
+            data.clockAudioMs < 310 || Math.abs(data.clockSpanMs - data.clockAudioMs) > 15 + data.clockAudioMs * 0.05) {
+            finish(new Error('MIC_DSP_CLOCK_INVALID'))
+          } else {
+            this.micTransmissionReadyNode = node
+            finish()
+          }
+        }
+        const onProcessorError = () => finish(new Error('MIC_DSP_PROCESSOR_FAILED'))
+        const timeout = setTimeout(() => finish(new Error('MIC_DSP_PREPARATION_TIMEOUT')), MIC_TRANSMISSION_READY_TIMEOUT_MS)
+        this.cancelMicTransmissionReady = () => finish(new DOMException('Microphone preparation cancelled', 'AbortError'))
+        node.port.addEventListener('message', onMessage)
+        node.addEventListener('processorerror', onProcessorError)
+        node.port.start()
+        node.port.postMessage({ type: 'prepareTransmission', requestId })
+      })
+    }
+    const pending = prepare().finally(() => {
+      if (this.micTransmissionRequestId === requestId) {
+        this.micTransmissionReadyPromise = null
+        this.cancelMicTransmissionReady = null
+      }
+    })
+    this.micTransmissionReadyPromise = pending
+    return pending
+  }
+
+  public cancelPendingMicrophoneStart(): void {
+    if (!this.activeStartPromise) return
+    this.microphoneGeneration++
+    this.cancelMicTransmissionReady?.()
   }
 
   public async startLocalStream(deviceId?: string, useNS?: boolean, forceRestart = false): Promise<boolean> {
+    this.cancelIdleAudioRelease()
+    await this.idleAudioReleasePromise?.catch(() => {})
+    if (this.backgroundMicPromise) await this.backgroundMicPromise.catch(() => false)
     const generation = this.microphoneGeneration
     if (deviceId !== undefined) this.currentDeviceId = deviceId
     if (useNS !== undefined) this.noiseSuppression = useNS
@@ -3655,6 +3891,8 @@ export class WebRTCManager {
       ) {
         this.initOutputMixer()
         await safeResumeContext(this.processedContext)
+        await this.waitForMicTransmissionReady()
+        if (this.microphoneGeneration !== generation) throw new DOMException('Microphone session cancelled', 'AbortError')
         this.startSilenceMonitor()
         const me = useAppStore.getState().currentUser
         void this.updateVadBranch().catch(() => {})
@@ -3731,6 +3969,24 @@ export class WebRTCManager {
         }
 
         await safeResumeContext(this.processedContext)
+
+        const preparingNode = this.micNode
+        const preparingContext = this.processedContext
+        try {
+          await this.waitForMicTransmissionReady()
+          if (this.microphoneGeneration !== generation) throw new DOMException('Microphone session cancelled', 'AbortError')
+        } catch (error) {
+          if (this.micNode === preparingNode && this.processedContext === preparingContext) {
+            this.micEngineError = error instanceof Error ? error.message : String(error)
+            this.localStream?.getTracks().forEach(track => track.stop())
+            this.localStream = null
+            this.terminateVadWorker()
+            await this.cleanupProcessedStream()
+            return false
+          }
+          throw error
+        }
+        lap('DSP-ready')
 
         this.startSilenceMonitor()
 
@@ -3897,6 +4153,7 @@ export class WebRTCManager {
         await this.startBackgroundMic()
       }
     }
+    this.scheduleIdleAudioRelease()
   }
 
   private startSilenceMonitor() {
@@ -3979,7 +4236,9 @@ export class WebRTCManager {
       this.applyLocalSpeaking(false)
     }
     if (this.localStream) {
-      this.localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted })
+      const prepared = this.micNode === null ||
+        this.micTransmissionReadyNode !== null && this.micTransmissionReadyNode === this.micNode
+      this.localStream.getAudioTracks().forEach(t => { t.enabled = !isMuted && prepared })
     }
     if (this.ultraSendClonedTrack) { try { this.ultraSendClonedTrack.enabled = !isMuted } catch { } }
   }

@@ -8,10 +8,11 @@
   "zaborRuntime": { "rustVoicing": true },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test:migration": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/helpers/register-hooks.mjs --test --test-concurrency=1 tests/migration-p0.test.mjs",
-    "test:readiness": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/migration-p0-readiness.test.mjs",
+    "test:migration": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./tests/helpers/register-hooks.mjs --test --test-concurrency=1 tests/migration-p0.test.mjs tests/updater-splash.test.mjs",
+    "test:readiness": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/migration-p0-readiness.test.mjs tests/client-idle-lifecycle.test.mjs tests/client-silero-parity.test.mjs tests/mic-transmission-startup.test.mjs",
     "test:client-rust": "node scripts/build-rust-voicing.cjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/client-rust-dsp.test.mjs",
     "test:audio-worklet": "electron tests/client-audio-smoke.cjs",
+    "test:neural-startup": "electron tests/client-neural-startup-smoke.cjs",
     "benchmark:client-dsp": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/benchmark-client-dsp.mjs",
     "test:rust": "node scripts/check-rust.mjs",
     "migration:inventory": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/migration-inventory.mjs",

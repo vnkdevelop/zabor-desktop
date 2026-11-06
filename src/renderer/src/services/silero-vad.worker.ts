@@ -26,6 +26,7 @@ let stateInputName = 'state'
 let sampleRateInputName: string | null = 'sr'
 let probabilityOutputName = 'output'
 let stateOutputName = 'stateN'
+let modelFeeds: Record<string, Tensor> | null = null
 
 function resolveTensorNames(loaded: InferenceSession): void {
   const inputs = loaded.inputNames
@@ -76,7 +77,7 @@ function resetModelState(): void {
 }
 
 async function processFrame(message: ProcessMessage): Promise<void> {
-  if (!session || message.audioFrame.length !== FRAME_SIZE) return
+  if (!session || !modelFeeds || message.audioFrame.length !== FRAME_SIZE) return
 
   if (lastProcessedSequence >= 0 && message.sequence !== lastProcessedSequence + 1) {
     resetModelState()
@@ -89,13 +90,7 @@ async function processFrame(message: ProcessMessage): Promise<void> {
       modelInput[CONTEXT_SIZE + i] = amplifyVadSample(message.audioFrame[i])
     }
 
-    const feeds: Record<string, Tensor> = {
-      [audioInputName]: new Tensor('float32', modelInput, [1, modelInput.length]),
-      [stateInputName]: new Tensor('float32', state, [2, 1, 128])
-    }
-    if (sampleRateInputName) feeds[sampleRateInputName] = sampleRateTensor
-
-    const results = await session.run(feeds)
+    const results = await session.run(modelFeeds)
 
     const rawProb = Number(results[probabilityOutputName].data[0])
     const probability = Number.isFinite(rawProb) ? Math.max(0, Math.min(1, rawProb)) : 0
@@ -148,6 +143,11 @@ self.onmessage = (event: MessageEvent) => {
       session = createdSession
       resolveTensorNames(createdSession)
       resetModelState()
+      modelFeeds = {
+        [audioInputName]: new Tensor('float32', modelInput, [1, modelInput.length]),
+        [stateInputName]: new Tensor('float32', state, [2, 1, 128])
+      }
+      if (sampleRateInputName) modelFeeds[sampleRateInputName] = sampleRateTensor
       self.postMessage({
         type: 'ready',
         io: {

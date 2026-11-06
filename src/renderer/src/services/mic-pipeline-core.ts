@@ -35,6 +35,8 @@ declare function registerProcessor(
   processorCtor: new () => AudioWorkletProcessor
 ): void
 
+declare const sampleRate: number
+
 if (typeof globalThis.performance === 'undefined') {
   (globalThis as any).performance = {
     now: () => Date.now()
@@ -44,6 +46,14 @@ if (typeof globalThis.performance === 'undefined') {
 class MicPipelineProcessor extends AudioWorkletProcessor {
   private rustVoicing: RustVoicing | null = null
   private disposed = false
+  private transmissionRequestId: number | null = null
+  private transmissionStartFrame = 0
+  private transmissionPreparedFrames = 0
+  private transmissionOverflowCount = 0
+  private transmissionLastRenderAt = 0
+  private transmissionStableStartedAt = 0
+  private transmissionClockReset = false
+  private readonly TRANSMISSION_PREPARE_FRAMES = 32
   private inputBuffer: Float32Array
   private outputBuffer: Float32Array
   private inputReadIndex = 0
@@ -358,6 +368,14 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
         this.disposed = true
         try { this.rustVoicing?.dispose() } catch { }
         this.rustVoicing = null
+      } else if (event.data.type === 'prepareTransmission') {
+        const requestId = Number(event.data.requestId)
+        if (!Number.isSafeInteger(requestId) || requestId < 0) return
+        this.transmissionRequestId = requestId
+        this.transmissionStartFrame = this.audioFrameId
+        this.transmissionPreparedFrames = 0
+        this.transmissionOverflowCount = this.overflowCount
+        this.transmissionLastRenderAt = 0
       } else if (event.data.type === 'getDspDiagnostics') {
         this.port.postMessage({ type: 'dspDiagnostics', runtime: this.rustVoicing ? 'rust-voicing' : 'legacy', frame: this.audioFrameId, score: this.voicing, lag: this.voicingLag })
       } else if (event.data.type === 'loadWasm') {
@@ -1086,9 +1104,20 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
     const inputChannel = input[0]
     const outputChannel = output[0]
 
+    this.transmissionClockReset = false
+    if (this.transmissionRequestId !== null) {
+      const now = performance.now()
+      if (this.transmissionLastRenderAt > 0 && now - this.transmissionLastRenderAt > 50) {
+        this.transmissionPreparedFrames = 0
+        this.transmissionClockReset = true
+      }
+      this.transmissionLastRenderAt = now
+    }
+
     this.driveEngineStartup(inputChannel.length)
 
-    const measureWhileMuted = this.isMuted && (this.calibrationFramesLeft > 0 || this.monitorWhileMuted)
+    const measureWhileMuted = this.isMuted &&
+      (this.calibrationFramesLeft > 0 || this.monitorWhileMuted || this.transmissionRequestId !== null)
     if (this.isMuted && !measureWhileMuted) {
       if (this.lastVadSent) {
         this.port.postMessage({ type: 'vad', isSpeaking: false })
@@ -1639,6 +1668,22 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
       }
 
       this.outputWriteIndex = this.pushToBuffer(this.outputBuffer, this.processedFrame, this.outputWriteIndex, this.outputReadIndex)
+      if (this.transmissionRequestId !== null) {
+        const fresh = hasDelayedFrame && this.speechRingFrameIds[readIndex] >= this.transmissionStartFrame
+        const validEngine = !this.noiseSuppression ||
+          (this.engine.isReady && this.engine.frame === this.FRAME_SIZE && frameDenoised)
+        const queuedInput = (this.inputWriteIndex - this.inputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE
+        const queuedOutput = (this.outputWriteIndex - this.outputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE
+        if (!fresh || !validEngine || this.transmissionClockReset ||
+          this.overflowCount !== this.transmissionOverflowCount ||
+          queuedInput >= this.FRAME_SIZE || queuedOutput > this.FRAME_SIZE * 4) {
+          this.transmissionPreparedFrames = 0
+          this.transmissionOverflowCount = this.overflowCount
+        } else {
+          if (this.transmissionPreparedFrames === 0) this.transmissionStableStartedAt = performance.now()
+          this.transmissionPreparedFrames++
+        }
+      }
     }
 
     const availableOutput = (this.outputWriteIndex - this.outputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE
@@ -1646,6 +1691,25 @@ class MicPipelineProcessor extends AudioWorkletProcessor {
       this.outputReadIndex = this.pullFromBuffer(this.outputBuffer, outputChannel, this.outputWriteIndex, this.outputReadIndex)
     } else {
       outputChannel.fill(0)
+    }
+
+    if (this.transmissionRequestId !== null && this.transmissionPreparedFrames >= this.TRANSMISSION_PREPARE_FRAMES) {
+      const clockSpanMs = performance.now() - this.transmissionStableStartedAt
+      const clockAudioMs = (this.transmissionPreparedFrames - 1) * this.FRAME_SIZE / 48
+      if (Math.abs(clockSpanMs - clockAudioMs) > 15 + clockAudioMs * 0.05) {
+        this.transmissionPreparedFrames = 0
+      } else {
+        const requestId = this.transmissionRequestId
+        this.transmissionRequestId = null
+        this.port.postMessage({
+          type: 'transmissionReady', requestId,
+          sampleRate: typeof sampleRate === 'number' ? sampleRate : 48000,
+          frameSize: this.FRAME_SIZE, preparedFrames: this.transmissionPreparedFrames,
+          clockSpanMs, clockAudioMs,
+          inputQueued: (this.inputWriteIndex - this.inputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE,
+          outputQueued: (this.outputWriteIndex - this.outputReadIndex + this.BUFFER_SIZE) % this.BUFFER_SIZE
+        })
+      }
     }
 
     return true

@@ -36,10 +36,17 @@ Stable читает stable `/releases/latest`, beta — пагинированн
 | Управление | request/accept/revoke, вмешательство владельца, panic/reset, удерживаемые клавиши, restart стрима |
 | Чат и файлы | offline send/delete/read, duplicate/ACK, повторная загрузка из истории, cancel, крупный файл одновременно с голосом |
 | Updater | beta-0→bridge→Rust beta, beta→beta, отмена/retry, mismatch checksum, ручной предыдущий совместимый beta installer |
+| Следующий beta installer | прогресс остаётся видимым при замене файлов и холодном запуске; old helper передаёт окно bundled helper; `.1`/`.2` assets не перезаписываются |
+| Idle resources | закрыть audio settings/тест, выйти из канала/звонка, ждать 10–30 секунд; снять private working set/CPU; повторить join/leave и проверить отсутствие накопления contexts/workers |
+| Idle races | повторный вход до/во время cleanup, входящий звонок, новый receiver/SFU viewer, mic test/calibration и hotplug; не обрывать живое медиа при reconnect |
+| Cold voice admission | первые слова после join sound на обоих ПК; 48 kHz/480-sample готовность до включения track; никаких ускорений/растяжений; отмена до готовности, начальный mute и ошибки загрузки |
+| Быстрый A→B→C | то же устройство/модель/настройки; без повторных `initialized`/pre-roll и пересоздания микрофона; отдельно выйти и вернуться до 10 секунд и после idle-очистки |
 | Соседние установки | stable и beta имеют разные ярлыки/профили; install/uninstall одного не удаляет другого |
 | UI | те же иконки/цвета/границы/анимации, оба языка, модалки/меню, одинаковые window size и DPI |
 
 Для полноценной проверки SFU перехода 2→3→2 нужны три активных зрителя; двух устройств для этой строки недостаточно. Не считать успех пары устройств доказательством всех NAT/TURN/GPU/network случаев. Перед приёмкой нужны длительные прогоны и повторная проверка соответствующих gates после существенных исправлений.
+
+Исправления idle ownership и installation progress после `.2` описаны в [отчёте](client-idle-and-updater-fix-2026-11-06.md). Пока они не включены в новый опубликованный installer, не считать установленную `.2` уже исправленной. In English: post-`.2` idle-ownership and progress fixes require a new beta installer; test cold start/first speech, 10–30-second idle, repeated join/leave and concurrent receiver/reconnect cases without changing audio quality.
 
 ## Git и один батник
 
