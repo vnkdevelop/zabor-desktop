@@ -227,6 +227,10 @@ impl VoiceSession {
         self.capture.is_some()
     }
 
+    pub fn has_peer(&self, peer: &str) -> bool {
+        self.peers.contains(peer)
+    }
+
     pub async fn mute(
         &mut self,
         hub: &HubConnection,

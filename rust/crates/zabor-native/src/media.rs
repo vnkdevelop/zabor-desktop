@@ -19,7 +19,13 @@ use libwebrtc::MediaType;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
+};
 use tokio::sync::mpsc;
+
+static NEXT_OFFER_EPOCH: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MediaError {
@@ -36,24 +42,58 @@ pub enum MediaError {
 }
 
 #[derive(Clone)]
+pub struct PeerLifetime(Arc<AtomicBool>);
+
+impl PeerLifetime {
+    fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(true)))
+    }
+    pub fn is_alive(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+    fn invalidate(&self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+#[derive(Clone)]
 pub enum MediaEvent {
     Ice {
         peer: String,
         payload: String,
+        lifetime: PeerLifetime,
     },
     Connection {
         peer: String,
         state: PeerConnectionState,
+        lifetime: PeerLifetime,
     },
     Track {
         peer: String,
         track: MediaStreamTrack,
+        lifetime: PeerLifetime,
     },
     DataChannel {
         peer: String,
         channel: DataChannel,
+        lifetime: PeerLifetime,
     },
-    Renegotiate(String),
+    Renegotiate {
+        peer: String,
+        lifetime: PeerLifetime,
+    },
+}
+
+impl MediaEvent {
+    pub fn is_alive(&self) -> bool {
+        match self {
+            Self::Ice { lifetime, .. }
+            | Self::Connection { lifetime, .. }
+            | Self::Track { lifetime, .. }
+            | Self::DataChannel { lifetime, .. }
+            | Self::Renegotiate { lifetime, .. } => lifetime.is_alive(),
+        }
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -67,6 +107,7 @@ pub struct IceServerSettings {
 
 struct Peer {
     connection: PeerConnection,
+    lifetime: PeerLifetime,
     epoch: u64,
     ignored_offer: bool,
     pending_ice: VecDeque<IceCandidate>,
@@ -76,6 +117,7 @@ struct Peer {
 
 impl Drop for Peer {
     fn drop(&mut self) {
+        self.lifetime.invalidate();
         self.connection.on_ice_candidate(None);
         self.connection.on_connection_state_change(None);
         self.connection.on_track(None);
@@ -159,6 +201,10 @@ impl MediaEngine {
 
     pub fn disconnect_peer(&mut self, peer: &str) {
         self.peers.remove(peer);
+    }
+
+    pub fn peer_lifetime(&self, peer: &str) -> Option<PeerLifetime> {
+        self.peers.get(peer).map(|peer| peer.lifetime.clone())
     }
 
     pub fn start_microphone(&mut self) -> Result<(), MediaError> {
@@ -272,34 +318,53 @@ impl MediaEngine {
                 .factory
                 .create_peer_connection(self.config.clone())
                 .map_err(|_| MediaError::Backend)?;
+            let lifetime = PeerLifetime::new();
+            let live = lifetime.clone();
             let events = self.events.clone();
             let peer_id = id.to_owned();
             connection.on_ice_candidate(Some(Box::new(move |candidate| {
+                if !live.is_alive() { return; }
                 let payload = json!({"candidate":candidate.candidate(),"sdpMid":candidate.sdp_mid(),"sdpMLineIndex":candidate.sdp_mline_index()}).to_string();
-                let _ = events.try_send(MediaEvent::Ice { peer: peer_id.clone(), payload });
+                let _ = events.try_send(MediaEvent::Ice { peer: peer_id.clone(), payload, lifetime: live.clone() });
             })));
+            let live = lifetime.clone();
             let events = self.events.clone();
             let peer_id = id.to_owned();
             connection.on_connection_state_change(Some(Box::new(move |state| {
+                if !live.is_alive() {
+                    return;
+                }
                 let _ = events.try_send(MediaEvent::Connection {
                     peer: peer_id.clone(),
                     state,
+                    lifetime: live.clone(),
                 });
             })));
+            let live = lifetime.clone();
             let events = self.events.clone();
             let peer_id = id.to_owned();
             connection.on_track(Some(Box::new(move |event| {
+                if !live.is_alive() {
+                    return;
+                }
                 let _ = events.try_send(MediaEvent::Track {
                     peer: peer_id.clone(),
                     track: event.track,
+                    lifetime: live.clone(),
                 });
             })));
+            let live = lifetime.clone();
             let events = self.events.clone();
             let peer_id = id.to_owned();
             connection.on_data_channel(Some(Box::new(move |channel| {
+                if !live.is_alive() {
+                    channel.close();
+                    return;
+                }
                 let _ = events.try_send(MediaEvent::DataChannel {
                     peer: peer_id.clone(),
                     channel,
+                    lifetime: live.clone(),
                 });
             })));
             let init = RtpTransceiverInit {
@@ -334,6 +399,7 @@ impl MediaEngine {
                 id.to_owned(),
                 Peer {
                     connection,
+                    lifetime,
                     epoch: 0,
                     ignored_offer: false,
                     pending_ice: VecDeque::new(),
@@ -362,7 +428,22 @@ impl MediaEngine {
         if peer.connection.signaling_state() != SignalingState::Stable {
             return Err(MediaError::Backend);
         }
-        peer.epoch = peer.epoch.checked_add(1).ok_or(MediaError::Backend)?;
+        let mut epoch = NEXT_OFFER_EPOCH.load(Ordering::Acquire);
+        peer.epoch = loop {
+            let next = epoch
+                .checked_add(1)
+                .filter(|next| *next <= 9_007_199_254_740_991)
+                .ok_or(MediaError::Backend)?;
+            match NEXT_OFFER_EPOCH.compare_exchange_weak(
+                epoch,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break epoch,
+                Err(current) => epoch = current,
+            }
+        };
         let offer = peer
             .connection
             .create_offer(OfferOptions {
@@ -429,6 +510,14 @@ impl MediaEngine {
             .set_local_description(answer.clone())
             .await
             .map_err(|_| MediaError::Backend)?;
+        if peer.needs_offer {
+            peer.needs_offer = false;
+            let lifetime = peer.lifetime.clone();
+            let _ = self.events.try_send(MediaEvent::Renegotiate {
+                peer: id.into(),
+                lifetime,
+            });
+        }
         Ok(Some(json!({"type":"answer","sdp":answer.to_string(),"epoch":value.get("epoch"),"allowRemoteControl":false,"remoteControlProtocol":2}).to_string()))
     }
 
@@ -455,7 +544,11 @@ impl MediaEngine {
         peer.ignored_offer = false;
         if peer.needs_offer {
             peer.needs_offer = false;
-            let _ = self.events.try_send(MediaEvent::Renegotiate(id.into()));
+            let lifetime = peer.lifetime.clone();
+            let _ = self.events.try_send(MediaEvent::Renegotiate {
+                peer: id.into(),
+                lifetime,
+            });
         }
         Ok(())
     }

@@ -1,13 +1,11 @@
 use crate::{ChannelItem, ChatLine, FriendItem, NativeApp, ScreenItem, VideoItem};
 use base64::Engine;
-use futures_util::StreamExt;
 use libwebrtc::media_stream_track::MediaStreamTrack;
-use libwebrtc::video_stream::native::NativeVideoStream;
 use serde_json::json;
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -31,7 +29,7 @@ use zabor_native::media::{MediaError, MediaEvent};
 use zabor_native::profile::Profile;
 use zabor_native::screen::{ScreenCapture, ScreenSource, SourceKind};
 use zabor_native::strings::Strings;
-use zabor_native::video::{decode_frame, DecodedVideo};
+use zabor_native::video::{DecodedVideo, StreamDropGrace, VideoFrameLease, VideoReceiver};
 use zabor_native::voice::VoiceSession;
 use zeroize::Zeroizing;
 
@@ -61,6 +59,7 @@ enum Command {
     StartShare(String),
     StopShare,
     CheckShare,
+    ExpireStreams,
 }
 
 enum UiEvent {
@@ -89,20 +88,10 @@ enum UiEvent {
 struct FrameUpdate {
     peer: String,
     generation: u64,
-    alive: Arc<AtomicBool>,
+    lease: VideoFrameLease,
     frame: DecodedVideo,
 }
 type VideoSink = Arc<dyn Fn(FrameUpdate) + Send + Sync>;
-struct VideoSubscription {
-    task: tokio::task::JoinHandle<()>,
-    alive: Arc<AtomicBool>,
-}
-impl Drop for VideoSubscription {
-    fn drop(&mut self) {
-        self.alive.store(false, Ordering::Release);
-        self.task.abort();
-    }
-}
 
 pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut locale = "ru".to_owned();
@@ -213,6 +202,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let video_scheduled = scheduled.clone();
     let video_ui = ui.as_weak();
     let video_sink: VideoSink = Arc::new(move |frame| {
+        if !frame.lease.is_alive() {
+            return;
+        }
         if let Ok(mut mailbox) = video_mailbox.lock() {
             mailbox.insert(frame.peer.clone(), frame);
         }
@@ -241,7 +233,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
         for (peer, frame) in frames {
             if frame.generation != expected_video_generation.load(Ordering::Acquire)
-                || !frame.alive.load(Ordering::Acquire)
+                || !frame.lease.is_alive()
             {
                 continue;
             }
@@ -760,6 +752,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 UiEvent::RemoveVideo(peer) => {
+                    if ui.get_focused_video() == peer {
+                        ui.set_focused_video("".into());
+                    }
                     let rows = ui
                         .get_video_frames()
                         .iter()
@@ -866,14 +861,22 @@ async fn worker(
     let mut prune_at = tokio::time::Instant::now() + Duration::from_secs(3600);
     let mut incoming_call: Option<String> = None;
     let mut call_connected = false;
-    let mut video_jobs = BTreeMap::<String, VideoSubscription>::new();
+    let mut video_jobs = BTreeMap::<String, VideoReceiver>::new();
+    let mut paused_video = BTreeSet::<String>::new();
+    let mut stream_drops = StreamDropGrace::default();
     let mut share_watch = tokio::time::interval(Duration::from_secs(1));
     share_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut screen_sources = Vec::<ScreenSource>::new();
     loop {
-        if voice.is_none() && !video_jobs.is_empty() {
+        if voice.is_none()
+            && (!video_jobs.is_empty()
+                || !paused_video.is_empty()
+                || stream_drops.next_deadline().is_some())
+        {
             video_generation.fetch_add(1, Ordering::AcqRel);
             video_jobs.clear();
+            paused_video.clear();
+            stream_drops.clear();
         }
         if chat.is_none() && !chat_failed {
             if let (Some(user), Some(profile)) = (current_user.as_ref(), profile.as_ref()) {
@@ -899,6 +902,7 @@ async fn worker(
             biased;
             _ = stop.cancelled() => break,
             command = commands.recv() => { let Some(command) = command else { break; }; command },
+            _ = async { if let Some(deadline) = stream_drops.next_deadline() { tokio::time::sleep_until(deadline.into()).await; } else { std::future::pending::<()>().await; } } => Command::ExpireStreams,
             _ = async { if voice.as_ref().is_some_and(VoiceSession::is_sharing) { share_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::CheckShare,
             _ = tokio::time::sleep_until(prune_at) => { prune_at = tokio::time::Instant::now() + Duration::from_secs(3600); Command::PruneChat },
             _ = async { match retry_at { Some(deadline) => tokio::time::sleep_until(deadline).await, None => std::future::pending().await } } => { retry_at = None; Command::Reconnect },
@@ -906,8 +910,31 @@ async fn worker(
                 match event {
                     Some(event) => {
                         if let Some(user) = current_user.as_mut() { zabor_native::roster::apply_user_event(user, &event, true); }
-                        if matches!(event.target.as_str(), "UserStoppedStreaming" | "StreamDropped" | "UserLeft") {
-                            if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str) { video_jobs.remove(peer); update(UiEvent::RemoveVideo(peer.into())); }
+                        if event.target == "StreamDropped" {
+                            if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer))) { stream_drops.schedule(peer.into(), std::time::Instant::now()); }
+                        }
+                        if event.target == "UserStoppedStreaming" {
+                            if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer))) {
+                                paused_video.insert(peer.into());
+                                stream_drops.cancel(peer);
+                                if let Some(receiver) = video_jobs.get_mut(peer) { receiver.stop(); }
+                                update(UiEvent::RemoveVideo(peer.into()));
+                            }
+                        }
+                        if event.target == "UserStartedStreaming" {
+                            if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str) {
+                                paused_video.remove(peer);
+                                stream_drops.cancel(peer);
+                                if video_jobs.values().filter(|receiver| receiver.is_playing()).count() < 3 {
+                                    if let Some(receiver) = video_jobs.get_mut(peer) {
+                                        receiver.start();
+                                        if receiver.is_playing() { if let Some(hub) = &hub { let _ = hub.send("SendStreamViewState", vec![json!(peer), json!("watching")]).await; } }
+                                    }
+                                }
+                            }
+                        }
+                        if matches!(event.target.as_str(), "UserLeft" | "UserDeleted") {
+                            if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str) { video_jobs.remove(peer); paused_video.remove(peer); stream_drops.cancel(peer); update(UiEvent::RemoveVideo(peer.into())); }
                         }
                         if matches!(event.target.as_str(), "FriendAdded" | "FriendRequestAccepted") {
                             if let Some(user) = event.arguments.first().and_then(|value| serde_json::from_value::<zabor_native::auth::User>(value.clone()).ok()) { if !user.id.is_empty() && current_user.as_ref().is_none_or(|owner| owner.id != user.id) && !friends.contains(&user.id) { friends.push(user.id); } }
@@ -967,6 +994,8 @@ async fn worker(
                             }
                         }
                         if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) { let _ = voice.handle(hub, &event.target, &event.arguments).await; }
+                        video_jobs.retain(|peer, receiver| { if receiver.is_alive() { true } else { stream_drops.cancel(peer); update(UiEvent::RemoveVideo(peer.clone())); false } });
+                        paused_video.retain(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)));
                         if event.target == "ForceLeaveVoice" || voice.as_ref().is_some_and(|voice| voice.channel.is_none() && voice.call_peer.is_none()) { voice = None; media_events = None; update(UiEvent::VoiceEnded); }
                         update(UiEvent::Hub(event));
                     },
@@ -975,26 +1004,21 @@ async fn worker(
                 continue;
             },
             event = async { match media_events.as_mut() { Some(events) => events.recv().await, None => std::future::pending().await } } => {
+                if event.as_ref().is_some_and(|event| !event.is_alive()) { continue; }
                 match event {
-                    Some(MediaEvent::Ice { peer, payload }) => { if let Some(hub) = &hub { let _ = hub.send("SendIceCandidate", vec![json!(peer), json!(payload)]).await; } },
-                    Some(MediaEvent::Renegotiate(peer)) => { if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) { let _ = voice.renegotiate(hub, &peer).await; } },
-                    Some(MediaEvent::Track { peer, track: MediaStreamTrack::Video(track) }) if video_jobs.len() < 3 || video_jobs.contains_key(&peer) => {
-                            let alive = Arc::new(AtomicBool::new(true));
-                            let live = alive.clone();
+                    Some(MediaEvent::Ice { peer, payload, .. }) => { if let Some(hub) = &hub { let _ = hub.send("SendIceCandidate", vec![json!(peer), json!(payload)]).await; } },
+                    Some(MediaEvent::Renegotiate { peer, .. }) => { if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) { let _ = voice.renegotiate(hub, &peer).await; } },
+                    Some(MediaEvent::Track { peer, track: MediaStreamTrack::Video(track), lifetime }) => {
                             let sink = video_sink.clone();
                             let generation = video_generation.load(Ordering::Acquire);
                             let id = peer.clone();
-                            let task = tokio::spawn(async move {
-                                let mut stream = NativeVideoStream::new(track);
-                                while let Some(frame) = stream.next().await {
-                                    if !live.load(Ordering::Acquire) { break; }
-                                    if let Ok(frame) = decode_frame(frame) { sink(FrameUpdate { peer: id.clone(), generation, alive: live.clone(), frame }); }
-                                }
-                                stream.close();
-                                live.store(false, Ordering::Release);
-                            });
-                            video_jobs.insert(peer.clone(), VideoSubscription { task, alive });
-                            if let Some(hub) = &hub { let _ = hub.send("SendStreamViewState", vec![json!(peer), json!("watching")]).await; }
+                            let mut receiver = VideoReceiver::new(track, lifetime, Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), generation, lease: delivery.lease, frame: delivery.frame }); }));
+                            video_jobs.remove(&peer);
+                            if !paused_video.contains(&peer) && video_jobs.values().filter(|receiver| receiver.is_playing()).count() < 3 {
+                                receiver.start();
+                                if let Some(hub) = &hub { let _ = hub.send("SendStreamViewState", vec![json!(peer), json!("watching")]).await; }
+                            }
+                            video_jobs.insert(peer, receiver);
                     },
                     None => media_events = None,
                     _ => {},
@@ -1021,9 +1045,27 @@ async fn worker(
                 continue;
             },
         };
+        if matches!(command, Command::ExpireStreams) {
+            for peer in stream_drops.take_expired(std::time::Instant::now()) {
+                if voice.as_ref().is_some_and(|voice| voice.has_peer(&peer)) {
+                    paused_video.insert(peer.clone());
+                    if let Some(receiver) = video_jobs.get_mut(&peer) {
+                        receiver.stop();
+                    }
+                    update(UiEvent::RemoveVideo(peer.clone()));
+                    update(UiEvent::Hub(HubEvent {
+                        target: "UserStoppedStreaming".into(),
+                        arguments: vec![json!(peer)],
+                    }));
+                }
+            }
+            continue;
+        }
         if matches!(command, Command::Logout) {
             video_generation.fetch_add(1, Ordering::AcqRel);
             video_jobs.clear();
+            paused_video.clear();
+            stream_drops.clear();
             if let Some(connection) = hub.take() {
                 connection.close();
             }
@@ -1053,6 +1095,8 @@ async fn worker(
         if matches!(command, Command::Leave) {
             video_generation.fetch_add(1, Ordering::AcqRel);
             video_jobs.clear();
+            paused_video.clear();
+            stream_drops.clear();
             let was_call = voice
                 .as_ref()
                 .is_some_and(|session| session.call_peer.is_some());
@@ -1200,6 +1244,13 @@ async fn worker(
                     update(UiEvent::SignedIn(data));
                     if let Some(session) = voice.as_mut() {
                         if let Some(channel) = session.channel.clone() {
+                            video_generation.fetch_add(1, Ordering::AcqRel);
+                            for peer in video_jobs.keys() {
+                                update(UiEvent::RemoveVideo(peer.clone()));
+                            }
+                            video_jobs.clear();
+                            paused_video.clear();
+                            stream_drops.clear();
                             match session.rejoin(&connection).await {
                                 Ok(users) => update(UiEvent::Voice(channel, users)),
                                 Err(_) => {
@@ -1315,6 +1366,7 @@ async fn worker(
                 | Command::ChatSend(_, _)
                 | Command::ChatDelete(_, _)
                 | Command::PruneChat => unreachable!(),
+                Command::ExpireStreams => unreachable!(),
                 Command::Join(channel) => {
                     let Some(user) = current_user.as_ref() else {
                         return Err(AuthError::Network);
@@ -1360,6 +1412,8 @@ async fn worker(
                 Command::Call(peer) => {
                     video_generation.fetch_add(1, Ordering::AcqRel);
                     video_jobs.clear();
+                    paused_video.clear();
+                    stream_drops.clear();
                     if !friends.contains(&peer) {
                         return Err(AuthError::Network);
                     }
@@ -1446,6 +1500,8 @@ async fn worker(
                     }
                     video_generation.fetch_add(1, Ordering::AcqRel);
                     video_jobs.clear();
+                    paused_video.clear();
+                    stream_drops.clear();
                     if let Some(mut session) = voice.take() {
                         session.leave(&connection).await;
                     }
