@@ -1,8 +1,14 @@
-# Rust migration: состояние первого checkpoint / first checkpoint status
+# Rust migration: текущее направление и история / direction and checkpoint history
 
-Редакция / updated: 5 ноября 2026 года.
+Редакция / updated: 6 ноября 2026 года.
 
-## Исходное состояние
+## Текущее направление / current direction
+
+После опубликованных `3.7.2-beta.rust.1/.2` и checkpoint `d088795` владелец выбрал полностью нативный Rust-клиент. Работа находится в `rust/native-client`; первый Slint preview переносит окно обновления. Полный клиент, сетевой native updater и выпуск `3.8.0-rust` ещё не готовы. Актуальный перечень выполненного и оставшихся работ: [native-client-status.md](native-client-status.md).
+
+After the published `.1/.2` WASM betas and checkpoint `d088795`, the owner selected a fully native Rust client. Development is on `rust/native-client`, starting with a Slint updater preview. Native client completion, network updating and the `3.8.0-rust` release remain pending. The linked native status is current; all sections below describe the historical first checkpoint, not today's gate results.
+
+## Исторический первый checkpoint: исходное состояние
 
 Обновление направления: перепись backend на Rust отменена владельцем. Текущий этап — клиентская voicing WASM beta и безопасные release/updater workflows; .NET backend и Go SFU остаются прежними. Подготовка двух устройств описана в [client-beta-testing.md](client-beta-testing.md).
 

@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/zabor-core", "crates/zabor-dsp", "crates/zabor-dsp-wasm"]
+members = ["crates/zabor-core", "crates/zabor-dsp", "crates/zabor-dsp-wasm", "crates/zabor-native"]
+default-members = ["crates/zabor-core", "crates/zabor-dsp", "crates/zabor-dsp-wasm"]
 resolver = "2"
 
 [workspace.package]

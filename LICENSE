@@ -1,6 +1,12 @@
 ZABOR
 Copyright (C) 2026 vnkdevelop
 
+The native Rust preview is covered by this same GPL-3.0-only licence.
+Third-party components retain their licences; see THIRD-PARTY-NOTICES.md.
+Нативное Rust-preview распространяется по той же GPL-3.0-only.
+Лицензии сторонних компонентов перечислены в THIRD-PARTY-NOTICES.md.
+Notice updated / редакция уведомления: 2026-11-06.
+
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, version 3 of the License.

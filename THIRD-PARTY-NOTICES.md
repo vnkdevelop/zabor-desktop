@@ -5,6 +5,31 @@ Updated: 2026-11-06.
 ZABOR Desktop is distributed under GPL-3.0-only. It redistributes the third-party
 components listed below. Their own licence terms apply to them.
 
+## Native Rust UI development preview
+
+The `rust/crates/zabor-native` development preview uses Slint 1.18.1 and
+slint-build 1.18.1, Copyright © Slint Developers, <https://github.com/slint-ui/slint>.
+ZABOR uses their GPL-3.0-only licensing option. The preview uses the winit window
+backend, femtovg renderer and AccessKit accessibility support. Exact dependency
+versions and checksums are pinned in `rust/Cargo.lock`; this preview is not part
+of the published Electron beta installers.
+
+Direct utility dependencies serde, serde_json, semver and png use MIT OR
+Apache-2.0. System Segoe UI fonts are resolved from Windows, not redistributed.
+The copied close, warning and spinner SVG paths in
+`rust/crates/zabor-native/assets/icons/` originate from Phosphor Icons (MIT,
+Copyright (c) 2020 Phosphor Icons, <https://github.com/phosphor-icons/react>);
+the MIT text below applies. A complete platform-specific transitive licence
+bundle remains part of native installer packaging work.
+
+Нативное preview использует Slint/slint-build 1.18.1 по варианту GPL-3.0-only,
+winit/femtovg/AccessKit и закреплённые в `rust/Cargo.lock` зависимости. Оно пока
+не входит в опубликованные Electron beta-установщики. serde, serde_json, semver
+и png лицензируются MIT OR Apache-2.0; Segoe UI берётся из системы Windows.
+SVG-иконки происходят из Phosphor Icons (MIT, Copyright (c) 2020 Phosphor Icons).
+Полный комплект лицензий транзитивных зависимостей должен войти в будущую
+нативную поставку.
+
 ## Rust client voicing module
 
 - File: `src/renderer/public/rust-voicing/zabor_voicing.wasm`; size and SHA-256 are recorded in its adjacent `manifest.json`

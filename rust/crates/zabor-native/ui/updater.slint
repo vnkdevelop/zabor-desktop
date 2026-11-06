@@ -1,0 +1,185 @@
+import { AppButton } from "button.slint";
+
+export component NativeUpdater inherits Window {
+    width: 420px;
+    height: 240px;
+    no-frame: true;
+    title: root.wordmark;
+    background: #09090b;
+    default-font-family: "Segoe UI";
+    default-font-size: 12px;
+    in property <string> wordmark;
+    in property <string> heading;
+    in property <string> version-label;
+    in property <string> transferred-label;
+    in property <string> action-label;
+    in property <string> close-label;
+    in property <string> detail;
+    in property <string> footer;
+    in property <int> phase;
+    in property <int> percent: 42;
+    in property <bool> reduced-motion: false;
+    in property <float> motion-phase: 0;
+    in property <float> spinner-phase: 0;
+    in-out property <int> focused-control: 0;
+    private property <int> space-control: 0;
+    callback close-requested();
+    callback action-requested();
+    callback drag-requested();
+    function activate-control() {
+        if root.focused-control == 1 || (root.phase == 2 && root.focused-control == 2) { root.close-requested(); }
+        else if root.focused-control == (root.phase == 2 ? 3 : root.phase == 0 ? 2 : -1) { root.action-requested(); }
+    }
+    forward-focus: keys;
+    init => { keys.focus(); }
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Tab {
+                if event.modifiers.shift {
+                    root.focused-control = root.focused-control <= 1 ? (root.phase == 2 ? 3 : root.phase == 0 ? 2 : 1) : root.focused-control - 1;
+                } else {
+                    root.focused-control = root.focused-control >= (root.phase == 2 ? 3 : root.phase == 0 ? 2 : 1) ? 1 : root.focused-control + 1;
+                }
+                return accept;
+            }
+            if event.text == Key.Return {
+                root.activate-control();
+                return accept;
+            }
+            if event.text == Key.Space {
+                root.space-control = root.focused-control;
+                return accept;
+            }
+            return reject;
+        }
+        key-released(event) => {
+            if event.text == Key.Space {
+                if root.space-control > 0 && root.space-control == root.focused-control { root.activate-control(); }
+                root.space-control = 0;
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    Rectangle {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        background: transparent;
+        border-width: 1px;
+        border-color: #ffffff12;
+    }
+    Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: #ffffff24; }
+    Rectangle {
+        x: 1px; y: 1px; width: parent.width - 2px; height: 36px;
+        background: #18181a;
+        Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #ffffff0f; }
+        Text { x: 14px; y: 0px; height: 35px; text: root.wordmark; font-weight: 900; letter-spacing: 2.4px; color: #ffffff4d; vertical-alignment: center; }
+        TouchArea {
+            width: parent.width - 40px;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { root.drag-requested(); }
+            }
+        }
+        close := Rectangle {
+            x: parent.width - 40px; width: 40px; height: 35px;
+            background: close-touch.has-hover ? #c81e70e6 : transparent;
+            animate background { duration: root.reduced-motion ? 0ms : 150ms; }
+            Image {
+                x: 13px; y: 10.5px; width: 14px; height: 14px;
+                colorize: close-touch.has-hover ? white : #ffffff66;
+                source: @image-url("../assets/icons/close.svg");
+            }
+            close-touch := TouchArea { clicked => { root.close-requested(); } }
+            if root.focused-control == 1 : Rectangle { x: 2px; y: 2px; width: parent.width - 4px; height: parent.height - 4px; background: transparent; border-width: 2px; border-color: #ee68a9; }
+            accessible-role: button;
+            accessible-label: root.close-label;
+            accessible-action-default => { root.close-requested(); }
+        }
+    }
+    Text {
+        x: root.phase == 2 ? 47px : 21px; y: 57px; width: 260px; height: 20px;
+        text: root.heading; color: root.phase == 2 ? #da373c : white;
+        font-size: 14px; font-weight: 700;
+        vertical-alignment: center;
+    }
+    if root.phase == 2 : Image {
+        x: 21px; y: 58px; width: 18px; height: 18px;
+        colorize: #da373c;
+        source: @image-url("../assets/icons/warning.svg");
+    }
+    Text {
+        visible: root.phase != 2;
+        x: 264px; y: 57px; width: 135px; height: 20px;
+        text: root.version-label; color: #ee68a9;
+        font-size: 12px; font-weight: 700;
+        horizontal-alignment: right; vertical-alignment: center;
+    }
+    if root.phase == 0 : Rectangle {
+        x: 21px; y: 115px; width: parent.width - 42px; height: 36px;
+        background: transparent;
+        Text { x: 0px; y: 0px; width: parent.width - 50px; height: 20px; text: root.transferred-label; color: #949ba4; font-weight: 500; horizontal-alignment: left; vertical-alignment: center; }
+        Text { x: parent.width - 50px; y: 0px; width: 50px; height: 20px; text: root.percent + "%"; color: white; font-weight: 900; font-size: 14px; horizontal-alignment: right; vertical-alignment: center; }
+        Rectangle {
+            y: 28px; width: parent.width; height: 8px;
+            border-radius: 4px; background: #ffffff14;
+            border-width: 1px; border-color: #ffffff0f;
+            clip: true;
+            Rectangle { x: 1px; y: 1px; width: (parent.width - 2px) * root.percent / 100; height: 6px; border-radius: 3px; background: #c81e70; }
+            Rectangle {
+                x: 1px + (root.reduced-motion ? 0px : (parent.width - 2px) / 3 * (-1.2 + 4.4 * root.motion-phase));
+                y: 1px; width: (parent.width - 2px) / 3; height: parent.height - 2px;
+                background: @linear-gradient(90deg, #ffffff00 0%, #ffffff4d 50%, #ffffff00 100%);
+            }
+        }
+    }
+    if root.phase == 1 : Rectangle {
+        x: 21px; y: 121.75px; width: parent.width - 42px; height: 36px;
+        background: transparent;
+        Rectangle {
+            x: 0px; y: 0px; width: parent.width; height: 8px; background: #ffffff14;
+            border-radius: 4px; border-width: 1px; border-color: #ffffff0f; clip: true;
+            Rectangle {
+                x: 1px + (root.reduced-motion ? 0px : (parent.width - 2px) / 3 * (-1.2 + 4.4 * root.motion-phase));
+                y: 1px; width: (parent.width - 2px) / 3; height: 6px;
+                border-radius: 3px; background: #c81e70;
+            }
+        }
+        Rectangle {
+            x: (parent.width - detail-text.preferred-width - 22px) / 2;
+            y: 20px; width: detail-text.preferred-width + 22px; height: 16px; background: transparent;
+            Image {
+                x: 0px; y: 1px; width: 14px; height: 14px;
+                colorize: #c81e70;
+                transform-rotation: root.spinner-phase * 360deg;
+                transform-origin: { x: 7px, y: 7px };
+                source: @image-url("../assets/icons/spinner.svg");
+            }
+            detail-text := Text { x: 22px; y: 0px; height: 16px; text: root.detail; color: #949ba4; vertical-alignment: center; }
+        }
+    }
+    if root.phase == 2 : Rectangle {
+        x: 21px; y: 110.25px; width: parent.width - 42px; height: 45.5px;
+        background: #ffffff0b; border-radius: 16px;
+        border-width: 1px; border-color: #da373c4d;
+        Rectangle { x: 1px; y: 1px; width: parent.width - 2px; height: parent.height - 2px; background: transparent; border-width: 1px; border-color: #ffffff12; border-radius: 15px; }
+        Text { x: 13px; y: 13px; width: parent.width - 26px; height: 19.5px; text: root.detail; color: #949ba4e6; wrap: word-wrap; vertical-alignment: center; }
+    }
+    if root.phase == 1 : Text { x: 21px; y: 202.5px; width: parent.width - 42px; height: 16.5px; text: root.footer; font-size: 11px; color: #949ba499; vertical-alignment: center; }
+    if root.phase != 1 : Rectangle {
+        width: primary-button.width + (root.phase == 2 ? secondary-button.width + 10px : 0px);
+        x: parent.width - self.width - 21px; y: 189px; height: 30px; background: transparent;
+        secondary-button := AppButton {
+            visible: root.phase == 2;
+            x: 0px; y: 0px; label: root.close-label; reduced-motion: root.reduced-motion;
+            focused: root.focused-control == 2;
+            activated => { root.close-requested(); }
+        }
+        primary-button := AppButton {
+            x: root.phase == 2 ? secondary-button.width + 10px : 0px;
+            y: root.phase == 2 ? 1px : 0px;
+            label: root.action-label; primary: root.phase == 2; reduced-motion: root.reduced-motion;
+            focused: root.focused-control == (root.phase == 2 ? 3 : 2);
+            activated => { root.action-requested(); }
+        }
+    }
+}

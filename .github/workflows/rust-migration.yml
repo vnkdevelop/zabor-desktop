@@ -2,9 +2,9 @@ name: Rust migration beta checks
 
 on:
   push:
-    branches: [beta/rust-migration]
+    branches: [beta/rust-migration, rust/native-client]
   pull_request:
-    branches: [beta/rust-migration]
+    branches: [beta/rust-migration, rust/native-client]
   workflow_dispatch:
 
 permissions:

@@ -1,5 +1,7 @@
 # Политика использования знаков ZABOR / ZABOR Trademark Policy
 
+Редакция / updated: 2026-11-06.
+
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -18,6 +20,8 @@
 - оформленные брендингом изображения интерфейса в каталоге `docs/images/`;
 - идентификатор приложения: действующий — `com.zabor.desktop` (задаётся в `package.json`, секция `build`, которая является единственной действующей конфигурацией сборки); исторический — `com.zabor.app`, применявшийся в прежних конфигурациях сборки и в текущей сборке не используемый; имя исполняемого файла `ZABOR.exe`, имена ярлыков и установщика;
 - доменные имена и сетевые адреса официального сервиса ZABOR.
+
+Разрабатываемое нативное preview `zabor-native` также использует Знаки; техническое имя этой сборки не изменяет перечисленные права и ограничения. Окончательные идентификаторы нативной поставки пока не назначены.
 
 Получение копии кода по GPL-3.0 **не даёт** права выпускать продукт под Знаками.
 
@@ -81,6 +85,8 @@ The following are owned by the copyright holder (vnkdevelop) and are **outside t
 - branded interface imagery in the `docs/images/` directory;
 - the application identifier: the effective one is `com.zabor.desktop` (set in `package.json`, section `build`, which is the sole active build configuration); the historical one is `com.zabor.app`, used in earlier build configurations and not applied by the current build; the executable name `ZABOR.exe`, and shortcut and installer names;
 - domain names and network addresses of the official ZABOR service.
+
+The native `zabor-native` development preview also uses the Marks; its technical build name does not change these rights or restrictions. Final native distribution identifiers have not yet been assigned.
 
 Receiving a copy of the code under GPL-3.0 does **not** grant permission to ship a product under the Marks.
 

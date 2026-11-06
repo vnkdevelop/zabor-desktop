@@ -1,0 +1,17 @@
+{
+  "title": "zabor",
+  "version": "version",
+  "downloading": "downloading update...",
+  "installing": "installing update...",
+  "installingDesc": "the app will restart automatically",
+  "errorTitle": "failed to download update",
+  "errorUnknown": "an unexpected error occurred",
+  "betaUnverified": "the beta update could not be verified",
+  "betaManifestInvalid": "the beta release data could not be verified",
+  "checksumMissing": "the installer checksum is missing",
+  "retry": "retry",
+  "cancel": "cancel",
+  "close": "close",
+  "mb": "mb",
+  "pleaseWait": "please wait..."
+}

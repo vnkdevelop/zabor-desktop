@@ -1,0 +1,35 @@
+export component AppButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    in property <bool> focused: false;
+    in property <bool> reduced-motion: false;
+    callback activated();
+    width: caption.preferred-width + (root.primary ? 32px : 34px);
+    height: root.primary ? 28px : 30px;
+    border-radius: 16px;
+    border-width: root.primary ? 0px : 1px;
+    border-color: #ffffff12;
+    background: root.primary ? #c81e70e6 : touch.has-hover ? #2a2a2ecb : #222225b3;
+    opacity: root.primary && touch.has-hover ? 0.9 : 1;
+    transform-scale-x: touch.pressed && !root.reduced-motion ? 98% : 100%;
+    transform-scale-y: touch.pressed && !root.reduced-motion ? 98% : 100%;
+    transform-origin: { x: root.width / 2, y: root.height / 2 };
+    animate background, opacity { duration: root.reduced-motion ? 0ms : 150ms; }
+    caption := Text {
+        x: root.primary ? 16px : 17px;
+        y: root.primary ? 6px : 7px;
+        height: 16px;
+        text: root.label;
+        color: root.primary || touch.has-hover ? white : #ffffffcc;
+        font-size: 12px; font-weight: 700;
+        vertical-alignment: center;
+    }
+    if root.focused : Rectangle {
+        x: -4px; y: -4px; width: parent.width + 8px; height: parent.height + 8px;
+        background: transparent; border-radius: 20px; border-width: 2px; border-color: #ee68a9;
+    }
+    touch := TouchArea { clicked => { root.activated(); } }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.activated(); }
+}
