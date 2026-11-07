@@ -24,6 +24,7 @@ use std::sync::{
     Arc,
 };
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 static NEXT_OFFER_EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -42,17 +43,29 @@ pub enum MediaError {
 }
 
 #[derive(Clone)]
-pub struct PeerLifetime(Arc<AtomicBool>);
+pub struct PeerLifetime(Arc<PeerState>);
+
+struct PeerState {
+    alive: AtomicBool,
+    stop: CancellationToken,
+}
 
 impl PeerLifetime {
     fn new() -> Self {
-        Self(Arc::new(AtomicBool::new(true)))
+        Self(Arc::new(PeerState {
+            alive: AtomicBool::new(true),
+            stop: CancellationToken::new(),
+        }))
     }
     pub fn is_alive(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.0.alive.load(Ordering::Acquire)
+    }
+    pub async fn cancelled(&self) {
+        self.0.stop.cancelled().await;
     }
     fn invalidate(&self) {
-        self.0.store(false, Ordering::Release);
+        self.0.alive.store(false, Ordering::Release);
+        self.0.stop.cancel();
     }
 }
 
@@ -86,12 +99,16 @@ pub enum MediaEvent {
 
 impl MediaEvent {
     pub fn is_alive(&self) -> bool {
+        self.lifetime().is_alive()
+    }
+
+    pub fn lifetime(&self) -> &PeerLifetime {
         match self {
             Self::Ice { lifetime, .. }
             | Self::Connection { lifetime, .. }
             | Self::Track { lifetime, .. }
             | Self::DataChannel { lifetime, .. }
-            | Self::Renegotiate { lifetime, .. } => lifetime.is_alive(),
+            | Self::Renegotiate { lifetime, .. } => lifetime,
         }
     }
 }

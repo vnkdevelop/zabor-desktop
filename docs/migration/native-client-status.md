@@ -615,8 +615,34 @@ Actual/frozen executable SHA-256:
 leaveDuringSessionWorkChecked=true is narrow component acceptance. Main session
 waits/raw stream/ICE/OS-blocking teardown/resource/physical/full-client gates
 remain open; workerResponsivenessAccepted, audioIntegrationAccepted,
-callIntegrationAccepted and nativeClientReady stayfalse. Save milestone,
-post-save Graphify/guard and compact, then continue; no push/release/shutdown.
+callIntegrationAccepted and nativeClientReady stayfalse. Saved `a1ac1e0`;
+post-save Graphify/source/evidence/clean-tree guard passed; no push/release/shutdown.
+
+### Voice ICE/stream publications: components checked locally
+
+Original voice-ticket/window-stop guards wrap raw ICE, stream-view hints and
+voice UI/video delivery. Native peer lifetime retains its atomic alive read and
+adds revocation notification for stalled waits; queued peer UI and frame mailbox
+recheck lifetime/ticket rather than adopting a fresh owner/voice context.
+Session roster/chat/incoming-call events remain Session-scoped and all checked
+MicTest/runtime/preferences/DSP/Slint/React behavior is unchanged.
+Development fmt/Clippy and63profile/local/media tests passed;434primary+3reference
+hashes match. Actual stalled local Hub waits were canceled by Leave/Logout/peer
+replacement with no tail runs; native RTP mailbox frames were rejected by original
+voice ticket before teardown, only fresh subscription accepted. These are local
+synthetic tests, not physical endpoints or all worker waits.
+Final `native-calls/voice-publications-final-2026-11-08/` passed211default/201neural-disabled
+tests, both Clippy modes/fmt/pinned/9HTTP/freshbuild and8inert RUEN/four-DPI
+auth/roster/audio/MicTest interactions; protected neural metrics unchanged.
+Independent434primary+3reference/all24evidence/current+frozen executable+ONNX DLL
+audit found0mismatches and verified3expected source changes+2new voice modules.
+Actual/frozen executable SHA-256:
+`1e993163b6674f27a23ba561936714fc2196d7ffb15a67d28c902d98cc2cb3a2`.
+voicePublicationGuardsChecked=true is narrow component acceptance. Main session
+waits/save races/native resource timing/same-peer reconnect messages without
+epochs/physical/full-client gates remain open; workerResponsivenessAccepted,
+audioIntegrationAccepted, callIntegrationAccepted and nativeClientReady stayfalse.
+Save milestone/post-save Graphify and compact; no push/release/shutdown.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

@@ -57,8 +57,12 @@ mod mic_motion;
 mod mic_pressed;
 mod session_work;
 use session_work::SessionWork;
+mod voice_work;
+use voice_work::VoiceWork;
 #[cfg(test)]
 mod session_tests;
+#[cfg(test)]
+mod voice_tests;
 
 enum Command {
     Authenticate {
@@ -176,6 +180,7 @@ enum FileAction {
 
 enum UiEvent {
     Guarded(IntentTicket, IntentScope, Box<UiEvent>),
+    PeerGuarded(zabor_native::media::PeerLifetime, Box<UiEvent>),
     Connected,
     MissingAccount,
     SignedIn(Box<Bootstrap>),
@@ -217,6 +222,12 @@ impl UiEvent {
                     }
                     self = *inner;
                 }
+                Self::PeerGuarded(lifetime, inner) => {
+                    if !lifetime.is_alive() {
+                        return None;
+                    }
+                    self = *inner;
+                }
                 event => return Some(event),
             }
         }
@@ -225,9 +236,24 @@ impl UiEvent {
 
 struct FrameUpdate {
     peer: String,
+    ticket: IntentTicket,
     generation: u64,
     lease: VideoFrameLease,
     frame: DecodedVideo,
+}
+
+impl FrameUpdate {
+    fn is_current(
+        &self,
+        intents: &CriticalIntents,
+        generation: &AtomicU64,
+        stop: &CancellationToken,
+    ) -> bool {
+        !stop.is_cancelled()
+            && intents.is_current(self.ticket, IntentScope::Voice)
+            && self.generation == generation.load(Ordering::Acquire)
+            && self.lease.is_alive()
+    }
 }
 type VideoSink = Arc<dyn Fn(FrameUpdate) + Send + Sync>;
 
@@ -434,8 +460,11 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let video_mailbox = mailbox.clone();
     let video_scheduled = scheduled.clone();
     let video_ui = ui.as_weak();
+    let video_intents = intents.clone();
+    let video_stop = stop.clone();
+    let sink_generation = video_generation.clone();
     let video_sink: VideoSink = Arc::new(move |frame| {
-        if !frame.lease.is_alive() {
+        if !frame.is_current(&video_intents, &sink_generation, &video_stop) {
             return;
         }
         if let Ok(mut mailbox) = video_mailbox.lock() {
@@ -452,6 +481,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     });
     let weak = ui.as_weak();
     let expected_video_generation = video_generation.clone();
+    let frame_intents = intents.clone();
+    let frame_stop = stop.clone();
     ui.on_process_video(move || {
         scheduled.store(false, Ordering::Release);
         let frames = mailbox
@@ -465,9 +496,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             return;
         }
         for (peer, frame) in frames {
-            if frame.generation != expected_video_generation.load(Ordering::Acquire)
-                || !frame.lease.is_alive()
-            {
+            if !frame.is_current(&frame_intents, &expected_video_generation, &frame_stop) {
                 continue;
             }
             let Some(user) = ui.get_voice_users().iter().find(|user| user.id == peer) else {
@@ -1124,7 +1153,11 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let weak = ui.as_weak();
     let updated_preferences = audio_preferences.clone();
     let update_intents = intents.clone();
+    let update_stop = stop.clone();
     ui.on_process_updates(move || {
+        if update_stop.is_cancelled() {
+            return;
+        }
         let Some(ui) = weak.upgrade() else {
             return;
         };
@@ -1136,7 +1169,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             };
             match event {
-                UiEvent::Guarded(..) => unreachable!(),
+                UiEvent::Guarded(..) | UiEvent::PeerGuarded(..) => unreachable!(),
                 UiEvent::Connected => ui.set_connected(true),
                 UiEvent::MissingAccount => {
                     ui.set_busy(false);
@@ -1860,35 +1893,36 @@ async fn worker(
                 match event {
                     Some(event) => {
                         let event_ticket = command_ticket;
+                        let voice_work = voice_ticket.map(|ticket| VoiceWork::new(&intents, ticket, &stop, update.as_ref()));
                         if let Some(user) = current_user.as_mut() {
                             zabor_native::roster::apply_user_event(user, &event, true);
                             audio_controls.set_server_state(user.is_server_muted, user.is_server_deafened);
                         }
-                        if event.target == "StreamDropped" {
+                        if event.target == "StreamDropped" && voice_work.as_ref().is_some_and(VoiceWork::is_current) {
                             if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer))) { stream_drops.schedule(peer.into(), std::time::Instant::now()); }
                         }
                         if event.target == "UserStoppedStreaming" {
-                            if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer))) {
+                            if let (Some(work), Some(peer)) = (voice_work.as_ref().filter(|work| work.is_current()), event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)))) {
                                 paused_video.insert(peer.into());
                                 stream_drops.cancel(peer);
                                 if let Some(receiver) = video_jobs.get_mut(peer) { receiver.stop(); }
-                                update(UiEvent::RemoveVideo(peer.into()));
+                                work.publish(UiEvent::RemoveVideo(peer.into()));
                             }
                         }
                         if event.target == "UserStartedStreaming" {
-                            if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str) {
+                            if let (Some(work), Some(peer)) = (voice_work.as_ref().filter(|work| work.is_current()), event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)))) {
                                 paused_video.remove(peer);
                                 stream_drops.cancel(peer);
                                 if video_jobs.values().filter(|receiver| receiver.is_playing()).count() < 3 {
                                     if let Some(receiver) = video_jobs.get_mut(peer) {
                                         receiver.start();
-                                        if receiver.is_playing() { if let Some(hub) = &hub { let _ = hub.send("SendStreamViewState", vec![json!(peer), json!("watching")]).await; } }
+                                        if receiver.is_playing() { if let Some(hub) = &hub { let _ = work.send_peer(receiver.lifetime(), hub, "SendStreamViewState", vec![json!(peer), json!("watching")]).await; } }
                                     }
                                 }
                             }
                         }
                         if matches!(event.target.as_str(), "UserLeft" | "UserDeleted") {
-                            if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str) { video_jobs.remove(peer); paused_video.remove(peer); stream_drops.cancel(peer); update(UiEvent::RemoveVideo(peer.into())); }
+                            if let (Some(work), Some(peer)) = (voice_work.as_ref().filter(|work| work.is_current()), event.arguments.first().and_then(serde_json::Value::as_str)) { video_jobs.remove(peer); paused_video.remove(peer); stream_drops.cancel(peer); work.publish(UiEvent::RemoveVideo(peer.into())); }
                         }
                         if matches!(event.target.as_str(), "FriendAdded" | "FriendRequestAccepted") {
                             if let Some(user) = event.arguments.first().and_then(|value| serde_json::from_value::<zabor_native::auth::User>(value.clone()).ok()) { if !user.id.is_empty() && current_user.as_ref().is_none_or(|owner| owner.id != user.id) && !friends.contains(&user.id) { friends.push(user.id); } }
@@ -1908,7 +1942,7 @@ async fn worker(
                                 if let Some(call) = event.arguments.first() {
                                     if let Some(id) = call["callerId"].as_str() {
                                         incoming_call = Some(id.into());
-                                        update(UiEvent::IncomingCall(id.into(), call["callerName"].as_str().unwrap_or("").into()));
+                                        session_work.publish(UiEvent::IncomingCall(id.into(), call["callerName"].as_str().unwrap_or("").into()));
                                     }
                                 }
                             },
@@ -1930,11 +1964,15 @@ async fn worker(
                                 }
                             },
                             "CallSession" => {
-                                if let Some(session) = event.arguments.first().and_then(Value::as_str) { call_recovery.set_session(session); }
+                                if voice_work.as_ref().is_some_and(VoiceWork::is_current) {
+                                    if let Some(session) = event.arguments.first().and_then(Value::as_str) { call_recovery.set_session(session); }
+                                }
                             },
                             "CallSuspended" => {
+                                if voice_work.as_ref().is_some_and(VoiceWork::is_current) {
                                 if let (Some(session), Some(remaining)) = (event.arguments.first().and_then(Value::as_str), event.arguments.get(1).and_then(Value::as_f64).filter(|value| value.is_finite())) {
                                     call_recovery.suspended(session, remaining.clamp(0.0, 45_000.0) as u64, std::time::Instant::now());
+                                }
                                 }
                             },
                             "CallResumed" => {
@@ -1945,17 +1983,17 @@ async fn worker(
                                         let result = tokio::select! { _ = stop.cancelled() => break, result = intents.run(ticket, IntentScope::Voice, tokio::time::timeout(call_recovery.remaining(now).min(Duration::from_secs(5)), session.resume_call(hub, &user.id, chat_ice.clone()))) => result };
                                         let Some(result) = result else { continue; };
                                         if matches!(result, Ok(Ok(()))) && call_recovery.restored(id, &user.id, std::time::Instant::now()) {
-                                            video_jobs.remove(&user.id); paused_video.remove(&user.id); stream_drops.cancel(&user.id); update(UiEvent::RemoveVideo(user.id.clone()));
+                                            video_jobs.remove(&user.id); paused_video.remove(&user.id); stream_drops.cancel(&user.id); update(UiEvent::RemoveVideo(user.id.clone()).guarded(ticket, IntentScope::Voice));
                                             update(UiEvent::Voice(String::new(), vec![user]).guarded(ticket, IntentScope::Voice));
                                         } else { call_recovery.retry(std::time::Instant::now()); }
                                     }
                                 }
                             },
                             "CallEnded" | "CallDeclined" if event.target != "CallEnded" || call_recovery.accepts_end(event.arguments.first().and_then(Value::as_str)) => {
-                                if voice.as_ref().is_some_and(|session| session.call_peer.is_some()) && (event.target != "CallDeclined" || !call_connected) {
-                                    voice = None; media_events = None; call_connected = false; incoming_call = None; update(UiEvent::VoiceEnded);
+                                if voice_work.as_ref().is_some_and(VoiceWork::is_current) && voice.as_ref().is_some_and(|session| session.call_peer.is_some()) && (event.target != "CallDeclined" || !call_connected) {
+                                    voice = None; media_events = None; call_connected = false; incoming_call = None; if let Some(work) = &voice_work { work.publish(UiEvent::VoiceEnded); }
                                 }
-                                else if incoming_call.take().is_some() { update(UiEvent::IncomingDismissed); }
+                                else if incoming_call.take().is_some() { session_work.publish(UiEvent::IncomingDismissed); }
                             },
                             _ => {},
                         }
@@ -1979,9 +2017,11 @@ async fn worker(
                             let result = tokio::select! { _ = stop.cancelled() => break, result = intents.run(ticket, IntentScope::Voice, voice.handle(hub, &event.target, &event.arguments)) => result };
                             if result.is_none() { continue; }
                         }
-                        video_jobs.retain(|peer, receiver| { if receiver.is_alive() { true } else { stream_drops.cancel(peer); update(UiEvent::RemoveVideo(peer.clone())); false } });
-                        paused_video.retain(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)));
-                        if event.target == "ForceLeaveVoice" || voice.as_ref().is_some_and(|voice| voice.channel.is_none() && voice.call_peer.is_none()) { voice = None; media_events = None; update(UiEvent::VoiceEnded); }
+                        if let Some(work) = voice_work.as_ref().filter(|work| work.is_current()) {
+                            video_jobs.retain(|peer, receiver| { if receiver.is_alive() { true } else { stream_drops.cancel(peer); work.publish(UiEvent::RemoveVideo(peer.clone())); false } });
+                            paused_video.retain(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)));
+                            if event.target == "ForceLeaveVoice" || voice.as_ref().is_some_and(|voice| voice.channel.is_none() && voice.call_peer.is_none()) { voice = None; media_events = None; work.publish(UiEvent::VoiceEnded); }
+                        }
                         update(UiEvent::Hub(event).guarded(event_ticket, IntentScope::Session));
                     },
                     None => {
@@ -1996,33 +2036,37 @@ async fn worker(
                 continue;
             },
             event = async { match media_events.as_mut() { Some(events) => events.recv().await, None => std::future::pending().await } } => {
-                if event.as_ref().is_some_and(|event| !event.is_alive()) { continue; }
+                let Some(event) = event else { media_events = None; continue; };
+                let Some(ticket) = voice_ticket else { continue; };
+                let work = VoiceWork::new(&intents, ticket, &stop, update.as_ref());
+                let lifetime = event.lifetime().clone();
+                work.run_peer(&lifetime, async {
                 match event {
-                    Some(MediaEvent::Ice { peer, payload, .. }) => { if let Some(hub) = &hub { let _ = hub.send("SendIceCandidate", vec![json!(peer), json!(payload)]).await; } },
-                    Some(MediaEvent::Renegotiate { peer, .. }) => {
-                        if let (Some(voice), Some(hub), Some(ticket)) = (voice.as_mut(), hub.as_ref(), voice_ticket) {
-                            let result = tokio::select! { _ = stop.cancelled() => break, result = intents.run(ticket, IntentScope::Voice, voice.renegotiate(hub, &peer)) => result };
-                            if result.is_none() { continue; }
+                    MediaEvent::Ice { peer, payload, .. } => { if let Some(hub) = &hub { let _ = work.send_peer(&lifetime, hub, "SendIceCandidate", vec![json!(peer), json!(payload)]).await; } },
+                    MediaEvent::Renegotiate { peer, .. } => {
+                        if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) {
+                            let _ = voice.renegotiate(hub, &peer).await;
                         }
                     },
-                    Some(MediaEvent::Track { peer, track: MediaStreamTrack::Audio(track), lifetime }) => {
-                        if let Some(voice) = voice.as_mut() { if voice.receive_audio(&peer, track, lifetime).is_err() { update(UiEvent::Toast("toasts.micUnknownError")); } }
+                    MediaEvent::Track { peer, track: MediaStreamTrack::Audio(track), lifetime } => {
+                        if let Some(voice) = voice.as_mut() { if voice.receive_audio(&peer, track, lifetime.clone()).is_err() { work.publish_peer(&lifetime, UiEvent::Toast("toasts.micUnknownError")); } }
                     },
-                    Some(MediaEvent::Track { peer, track: MediaStreamTrack::Video(track), lifetime }) => {
+                    MediaEvent::Track { peer, track: MediaStreamTrack::Video(track), lifetime } => {
                             let sink = video_sink.clone();
                             let generation = video_generation.load(Ordering::Acquire);
                             let id = peer.clone();
-                            let mut receiver = VideoReceiver::new(track, lifetime, Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), generation, lease: delivery.lease, frame: delivery.frame }); }));
+                            let mut receiver = VideoReceiver::new(track, lifetime, Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), ticket, generation, lease: delivery.lease, frame: delivery.frame }); }));
                             video_jobs.remove(&peer);
                             if !paused_video.contains(&peer) && video_jobs.values().filter(|receiver| receiver.is_playing()).count() < 3 {
                                 receiver.start();
-                                if let Some(hub) = &hub { let _ = hub.send("SendStreamViewState", vec![json!(peer), json!("watching")]).await; }
+                                if let Some(hub) = &hub { let _ = work.send_peer(receiver.lifetime(), hub, "SendStreamViewState", vec![json!(peer), json!("watching")]).await; }
                             }
+                            if !work.is_current() || !receiver.is_alive() { return; }
                             video_jobs.insert(peer, receiver);
                     },
-                    None => media_events = None,
                     _ => {},
                 }
+                }).await;
                 continue;
             },
             event = async { match chat_transport.as_mut() { Some(transport) => transport.next_event().await, None => std::future::pending().await } } => {
@@ -2070,11 +2114,18 @@ async fn worker(
             },
         };
         if matches!(command, Command::CheckAudio) {
+            let Some(ticket) = voice_ticket else {
+                continue;
+            };
+            let work = VoiceWork::new(&intents, ticket, &stop, update.as_ref());
+            if !work.is_current() {
+                continue;
+            }
             if voice.as_mut().is_some_and(VoiceSession::audio_failed) {
                 if let Some(mut session) = voice.take() {
                     abandoned_call |= session.call_peer.is_some();
                     if let Some(hub) = &hub {
-                        let result = tokio::select! { _ = stop.cancelled() => break, result = intents.run(command_ticket, IntentScope::Voice, session.leave(hub)) => result };
+                        let result = work.run(session.leave(hub)).await;
                         if result.is_none() {
                             continue;
                         }
@@ -2082,14 +2133,14 @@ async fn worker(
                     }
                 }
                 media_events = None;
-                update(UiEvent::VoiceEnded);
-                update(UiEvent::Toast("toasts.micUnknownError"));
+                work.publish(UiEvent::VoiceEnded);
+                work.publish(UiEvent::Toast("toasts.micUnknownError"));
                 continue;
             }
             let state = audio_controls.user_state();
             if sent_audio_state != Some(state) {
                 if let (Some(session), Some(hub)) = (voice.as_mut(), hub.as_ref()) {
-                    let result = tokio::select! { _ = stop.cancelled() => break, result = intents.run(command_ticket, IntentScope::Voice, session.mute(hub, state.0, state.1)) => result };
+                    let result = work.run(session.mute(hub, state.0, state.1)).await;
                     let Some(result) = result else {
                         continue;
                     };
@@ -2104,7 +2155,7 @@ async fn worker(
                 local_speaking = speaking;
                 if let Some(user) = &mut current_user {
                     user.is_speaking = speaking;
-                    update(UiEvent::Hub(HubEvent {
+                    work.publish(UiEvent::Hub(HubEvent {
                         target: "UserSpeaking".into(),
                         arguments: vec![json!(user.id), json!(speaking)],
                     }));
@@ -2120,7 +2171,9 @@ async fn worker(
                 || (sent_speaking && speaking_release.is_some_and(|deadline| now < deadline));
             if target != sent_speaking {
                 if let Some(hub) = &hub {
-                    let result = tokio::select! { _ = stop.cancelled() => break, result = intents.run(command_ticket, IntentScope::Voice, hub.send("SetSpeakingState", vec![json!(target)])) => result };
+                    let result = work
+                        .run(hub.send("SetSpeakingState", vec![json!(target)]))
+                        .await;
                     let Some(result) = result else {
                         continue;
                     };
@@ -2235,14 +2288,21 @@ async fn worker(
             continue;
         }
         if matches!(command, Command::ExpireStreams) {
+            let Some(ticket) = voice_ticket else {
+                continue;
+            };
+            let work = VoiceWork::new(&intents, ticket, &stop, update.as_ref());
+            if !work.is_current() {
+                continue;
+            }
             for peer in stream_drops.take_expired(std::time::Instant::now()) {
                 if voice.as_ref().is_some_and(|voice| voice.has_peer(&peer)) {
                     paused_video.insert(peer.clone());
                     if let Some(receiver) = video_jobs.get_mut(&peer) {
                         receiver.stop();
                     }
-                    update(UiEvent::RemoveVideo(peer.clone()));
-                    update(UiEvent::Hub(HubEvent {
+                    work.publish(UiEvent::RemoveVideo(peer.clone()));
+                    work.publish(UiEvent::Hub(HubEvent {
                         target: "UserStoppedStreaming".into(),
                         arguments: vec![json!(peer)],
                     }));
@@ -2303,6 +2363,13 @@ async fn worker(
             continue;
         }
         if matches!(command, Command::ResumeCall) {
+            let Some(ticket) = voice_ticket else {
+                continue;
+            };
+            let work = VoiceWork::new(&intents, ticket, &stop, update.as_ref());
+            if !work.is_current() {
+                continue;
+            }
             match call_recovery.poll(
                 std::time::Instant::now(),
                 session_ready && hub.as_ref().is_some_and(HubConnection::is_connected),
@@ -2317,7 +2384,11 @@ async fn worker(
                     let Some(connection) = hub.as_ref() else {
                         continue;
                     };
-                    let result = tokio::select! { _ = stop.cancelled() => break, result = intents.run(command_ticket, IntentScope::Voice, zabor_native::call_recovery::resume(connection, &session, timeout)) => result };
+                    let result = work
+                        .run(zabor_native::call_recovery::resume(
+                            connection, &session, timeout,
+                        ))
+                        .await;
                     let Some(result) = result else {
                         continue;
                     };
@@ -2335,14 +2406,10 @@ async fn worker(
                                 let duration = call_recovery
                                     .remaining(std::time::Instant::now())
                                     .min(Duration::from_secs(5));
-                                let future = intents.run(
-                                    command_ticket,
-                                    IntentScope::Voice,
-                                    tokio::time::timeout(
-                                        duration,
-                                        voice.resume_call(connection, &peer, chat_ice.clone()),
-                                    ),
-                                );
+                                let future = work.run(tokio::time::timeout(
+                                    duration,
+                                    voice.resume_call(connection, &peer, chat_ice.clone()),
+                                ));
                                 let result = tokio::select! { _ = stop.cancelled() => break, result = future => result };
                                 let Some(result) = result else {
                                     continue;
@@ -2357,11 +2424,8 @@ async fn worker(
                                     video_jobs.remove(&peer);
                                     paused_video.remove(&peer);
                                     stream_drops.cancel(&peer);
-                                    update(UiEvent::RemoveVideo(peer));
-                                    update(
-                                        UiEvent::Voice(String::new(), vec![*user])
-                                            .guarded(command_ticket, IntentScope::Voice),
-                                    );
+                                    work.publish(UiEvent::RemoveVideo(peer));
+                                    work.publish(UiEvent::Voice(String::new(), vec![*user]));
                                 } else {
                                     call_recovery.retry(std::time::Instant::now());
                                 }
@@ -2579,11 +2643,15 @@ async fn worker(
                         chat.set_friends(friends.iter().cloned());
                     }
                     update(UiEvent::SignedIn(data).guarded(auth_ticket, IntentScope::Session));
+                    let restore_work = voice_ticket
+                        .map(|ticket| VoiceWork::new(&intents, ticket, &stop, update.as_ref()));
                     if let Some(session) = voice.as_mut() {
                         if let Some(channel) = session.channel.clone() {
                             video_generation.fetch_add(1, Ordering::AcqRel);
                             for peer in video_jobs.keys() {
-                                update(UiEvent::RemoveVideo(peer.clone()));
+                                if let Some(work) = &restore_work {
+                                    work.publish(UiEvent::RemoveVideo(peer.clone()));
+                                }
                             }
                             video_jobs.clear();
                             paused_video.clear();
@@ -2593,15 +2661,18 @@ async fn worker(
                                 continue;
                             };
                             match result {
-                                Ok(users) => update(
-                                    UiEvent::Voice(channel, users)
-                                        .guarded(auth_ticket, IntentScope::Voice),
-                                ),
+                                Ok(users) => {
+                                    if let Some(work) = &restore_work {
+                                        work.publish(UiEvent::Voice(channel, users));
+                                    }
+                                }
                                 Err(_) => {
                                     voice = None;
                                     media_events = None;
-                                    update(UiEvent::VoiceEnded);
-                                    update(UiEvent::Toast("toasts.channelJoinFailed"));
+                                    if let Some(work) = &restore_work {
+                                        work.publish(UiEvent::VoiceEnded);
+                                        work.publish(UiEvent::Toast("toasts.channelJoinFailed"));
+                                    }
                                 }
                             }
                         }
@@ -2755,7 +2826,7 @@ async fn worker(
                         video_jobs.clear();
                         paused_video.clear();
                         stream_drops.clear();
-                        update(UiEvent::VoiceEnded);
+                        update(UiEvent::VoiceEnded.guarded(command_ticket, IntentScope::Voice));
                     }
                     let Some(user) = current_user.as_ref() else {
                         return Err(AuthError::Network);

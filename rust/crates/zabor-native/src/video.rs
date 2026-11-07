@@ -104,6 +104,10 @@ impl VideoReceiver {
         self.lifetime.is_alive()
     }
 
+    pub fn lifetime(&self) -> &PeerLifetime {
+        &self.lifetime
+    }
+
     pub fn is_playing(&self) -> bool {
         self.subscription.as_ref().is_some_and(|subscription| {
             subscription.lease.is_alive() && !subscription.task.is_finished()
