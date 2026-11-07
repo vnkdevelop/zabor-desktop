@@ -140,6 +140,15 @@ Physical hotplug/AEC/latency,
 settings/save/microphone-test UI and full acceptance remain unfinished; in-flight
 OS COM calls are not safely interruptible and no hard-realtime guarantee is made.
 
+Device-runtime checkpoint: **`8e4b7d3`** on `rust/native-client`. Код и проверенные
+результаты сохранены; push/merge/release/shutdown не выполнялись. Следующий этап —
+settings/device/per-user volume UI и local/server save, затем mic-test и весь
+оставшийся план `docs/migration/native-client-handoff.md`.
+
+Verified device recovery is saved in `8e4b7d3`. No push, merge, release or shutdown.
+Next: settings/device/per-user volume UI and local/server saving, then microphone
+testing and all remaining handoff stages. Full audio/client acceptance stays false.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера
