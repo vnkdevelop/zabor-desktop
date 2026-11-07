@@ -388,6 +388,13 @@ Exact font/raster/spring/motion parity and local-only DSP health, physical and
 complete audio/client acceptance remain pending. This is a saved-development
 milestone, not a published/fully accepted client.
 
+Checkpoint **`005b5f1`** сохранён на `rust/native-client`: functional mic-test
+panel/local meter,144/135tests,409matching sources,56panel/64settings/24auth and
+8+8+8interactions on finaltestedbinary. All jobs completed; next local-only
+DSP-health/meter/explicit retry, then exact font/spring/motion/pixel and remaining
+audio/client stages. Не повторять проверенную panel/runtime/core wiring.
+Readinessfalse; no push/merge/release/shutdown.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера
