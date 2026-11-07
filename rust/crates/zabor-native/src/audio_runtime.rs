@@ -4,7 +4,7 @@ use crate::mic_test::{MicTest, MicTestFailure, PlaybackTicket, IDLE_RELEASE, PRE
 use crate::microphone::{MicProcessor, MicSubmission, MonitoredMicFrame};
 use futures_util::future::BoxFuture;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 use std::time::Instant;
@@ -106,9 +106,81 @@ impl AudioDemand {
 pub trait SharedAudioDevice: Send + Sync + 'static {
     fn failed(&self) -> bool;
     fn cancel(&self);
+
+    fn runtime_failed(&self) -> bool {
+        self.failed()
+    }
+
+    fn retry_processor(&self) -> Option<watch::Receiver<Option<bool>>> {
+        None
+    }
+
+    fn processor_recovering(&self) -> bool {
+        false
+    }
+}
+
+pub struct ProcessorRetry {
+    stop: CancellationToken,
+    requested: AtomicBool,
+    pending: Mutex<Option<watch::Sender<Option<bool>>>>,
+}
+
+impl ProcessorRetry {
+    pub fn new(stop: CancellationToken) -> Self {
+        Self {
+            stop,
+            requested: AtomicBool::new(false),
+            pending: Mutex::new(None),
+        }
+    }
+
+    pub fn request(&self) -> Option<watch::Receiver<Option<bool>>> {
+        let mut pending = self.pending.lock().ok()?;
+        if self.stop.is_cancelled() {
+            return None;
+        }
+        if let Some(ready) = pending.as_ref().filter(|ready| ready.borrow().is_none()) {
+            return Some(ready.subscribe());
+        }
+        let (ready, receiver) = watch::channel(None);
+        *pending = Some(ready);
+        self.requested.store(true, Ordering::Release);
+        Some(receiver)
+    }
+
+    pub fn take(&self) -> Option<watch::Sender<Option<bool>>> {
+        let pending = self.pending.lock().ok()?;
+        if self.stop.is_cancelled() || !self.requested.swap(false, Ordering::AcqRel) {
+            return None;
+        }
+        pending.clone()
+    }
+
+    pub fn recovering(&self) -> bool {
+        !self.stop.is_cancelled()
+            && self.pending.lock().is_ok_and(|pending| {
+                pending
+                    .as_ref()
+                    .is_some_and(|ready| ready.borrow().is_none())
+            })
+    }
+
+    pub fn cancel(&self) {
+        self.stop.cancel();
+        if let Ok(pending) = self.pending.lock() {
+            if let Some(ready) = &*pending {
+                ready.send_replace(Some(false));
+            }
+        }
+    }
 }
 
 type Ready<D> = Option<Result<Arc<D>, ()>>;
+type Prepared<D> = (
+    watch::Receiver<Ready<D>>,
+    Option<watch::Receiver<Option<bool>>>,
+);
 type Factory<D> = dyn Fn(
         Arc<AudioDemand>,
         Arc<MicTest>,
@@ -179,20 +251,29 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
         }
     }
 
-    fn start(self: &Arc<Self>, retry: bool) -> Result<watch::Receiver<Ready<D>>, MediaError> {
+    fn start(self: &Arc<Self>, retry: bool) -> Result<Prepared<D>, MediaError> {
         if self.stop.is_cancelled() || !self.has_demand() {
             return Err(MediaError::Microphone);
         }
         let mut state = self.state.lock().map_err(|_| MediaError::Microphone)?;
         state.idle_since = None;
-        if let Some(device) = state.device.as_ref().filter(|device| !device.failed()) {
-            return Ok(watch::channel(Some(Ok(device.clone()))).1);
+        if let Some(device) = state
+            .device
+            .as_ref()
+            .filter(|device| !device.runtime_failed())
+        {
+            let recovery = if retry && (device.failed() || device.processor_recovering()) {
+                Some(device.retry_processor().ok_or(MediaError::Microphone)?)
+            } else {
+                None
+            };
+            return Ok((watch::channel(Some(Ok(device.clone()))).1, recovery));
         }
         if let Some(pending) = &state.pending {
             if pending.stop.is_cancelled() {
                 return Err(MediaError::Microphone);
             }
-            return Ok(pending.ready.subscribe());
+            return Ok((pending.ready.subscribe(), None));
         }
         if state.failed && !retry {
             return Err(MediaError::Microphone);
@@ -259,14 +340,48 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
                 Self::retire(device);
             }
         });
-        Ok(receiver)
+        Ok((receiver, None))
     }
 
-    async fn ready(self: &Arc<Self>) -> Result<Arc<D>, MediaError> {
-        let mut receiver = self.start(true)?;
+    async fn ready(
+        self: &Arc<Self>,
+        receiver: Result<Prepared<D>, MediaError>,
+    ) -> Result<Arc<D>, MediaError> {
+        let (mut receiver, mut recovery) = receiver?;
         loop {
-            if let Some(result) = receiver.borrow_and_update().clone() {
-                return result.map_err(|_| MediaError::Microphone);
+            let result = receiver.borrow_and_update().clone();
+            if let Some(result) = result {
+                let device = result.map_err(|_| MediaError::Microphone)?;
+                if let Some(mut recovery) = recovery.take() {
+                    let wait = async {
+                        loop {
+                            let result = *recovery.borrow_and_update();
+                            if let Some(result) = result {
+                                return if result {
+                                    Ok(())
+                                } else {
+                                    Err(MediaError::Microphone)
+                                };
+                            }
+                            recovery
+                                .changed()
+                                .await
+                                .map_err(|_| MediaError::Microphone)?;
+                        }
+                    };
+                    tokio::select! {
+                        biased;
+                        _ = self.stop.cancelled() => return Err(MediaError::Microphone),
+                        result = tokio::time::timeout(PREPARATION_TIMEOUT, wait) => {
+                            result.map_err(|_| MediaError::Microphone)??;
+                        },
+                    }
+                }
+                return if !self.stop.is_cancelled() && !device.failed() {
+                    Ok(device)
+                } else {
+                    Err(MediaError::Microphone)
+                };
             }
             tokio::select! {
                 biased;
@@ -284,7 +399,7 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
             device: None,
         };
         self.changed.notify_one();
-        lease.device = Some(self.ready().await?);
+        lease.device = Some(self.ready(self.start(true)).await?);
         if !self.demand.is_reserved(generation) || self.stop.is_cancelled() {
             return Err(MediaError::Microphone);
         }
@@ -324,7 +439,11 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
             }
         } else {
             state.idle_since = None;
-            if state.device.as_ref().is_some_and(|device| device.failed()) {
+            if state
+                .device
+                .as_ref()
+                .is_some_and(|device| device.runtime_failed())
+            {
                 let device = state.device.take();
                 state.failed = true;
                 drop(state);
@@ -333,6 +452,15 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
                 }
                 if let Some(device) = device {
                     Self::retire(device);
+                }
+            } else if state
+                .device
+                .as_ref()
+                .is_some_and(|device| device.failed() && !device.processor_recovering())
+            {
+                drop(state);
+                if let Some(token) = self.mic_test.capture_token() {
+                    self.mic_test.fail(token, MicTestFailure::Processor);
                 }
             }
         }
@@ -435,15 +563,38 @@ impl<D: SharedAudioDevice> MonitorLease<D> {
         }
     }
 
-    pub async fn ready(&self) -> Result<Arc<D>, MediaError> {
-        if self.shared.monitor.load(Ordering::Acquire) != self.generation {
-            return Err(MediaError::Microphone);
-        }
-        let device = self.shared.ready().await?;
-        if self.shared.monitor.load(Ordering::Acquire) != self.generation {
-            return Err(MediaError::Microphone);
-        }
-        Ok(device)
+    pub fn failed(&self) -> bool {
+        !self.is_current()
+            || self.shared.state.lock().map_or(true, |state| {
+                state.failed || state.device.as_ref().is_some_and(|device| device.failed())
+            })
+    }
+
+    pub fn playback_available(&self) -> bool {
+        self.is_current()
+            && self.shared.state.lock().is_ok_and(|state| {
+                state
+                    .device
+                    .as_ref()
+                    .is_some_and(|device| !device.runtime_failed())
+            })
+    }
+
+    pub fn ready(&self) -> BoxFuture<'static, Result<Arc<D>, MediaError>> {
+        let receiver = if self.is_current() {
+            self.shared.start(true)
+        } else {
+            Err(MediaError::Microphone)
+        };
+        let shared = self.shared.clone();
+        let generation = self.generation;
+        Box::pin(async move {
+            let device = shared.ready(receiver).await?;
+            if shared.stop.is_cancelled() || shared.monitor.load(Ordering::Acquire) != generation {
+                return Err(MediaError::Microphone);
+            }
+            Ok(device)
+        })
     }
 }
 
@@ -482,6 +633,9 @@ impl AudioFlow {
         now: Instant,
     ) -> Result<(), MediaError> {
         if self.stop.is_cancelled() {
+            return Ok(());
+        }
+        if self.controls.processor_failed.load(Ordering::Acquire) {
             return Ok(());
         }
         let voice = self.demand.active();

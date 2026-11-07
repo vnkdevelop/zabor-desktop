@@ -275,6 +275,26 @@ impl MicProcessor {
         self.epoch
     }
 
+    pub fn rebuild(&mut self) -> Result<(), MediaError> {
+        self.controls.capture_restarting();
+        match Self::new(self.controls.clone(), self.mixer.clone()) {
+            Ok(processor) => {
+                *self = processor;
+                self.controls
+                    .processor_failed
+                    .store(false, Ordering::Release);
+                Ok(())
+            }
+            Err(error) => {
+                self.failed = true;
+                self.controls
+                    .processor_failed
+                    .store(true, Ordering::Release);
+                Err(error)
+            }
+        }
+    }
+
     fn process_inner(
         &mut self,
         samples: &[f32],

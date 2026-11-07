@@ -1,6 +1,8 @@
 use crate::audio_device::{DeviceError, DeviceStream};
 use crate::audio_mix::{AudioControls, AudioMixer};
-use crate::audio_runtime::{AudioDemand, AudioFlow, CaptureInput, SharedAudio, SharedAudioDevice};
+use crate::audio_runtime::{
+    AudioDemand, AudioFlow, CaptureInput, ProcessorRetry, SharedAudio, SharedAudioDevice,
+};
 use crate::media::MediaError;
 use crate::mic_test::MicTest;
 use crate::microphone::{audio_source, MicProcessor, MicSubmission};
@@ -10,6 +12,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::time::Instant;
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 pub struct NativeAudio {
@@ -20,6 +23,8 @@ pub struct NativeAudio {
     stop: CancellationToken,
     capture: DeviceStream,
     render: DeviceStream,
+    controls: Arc<AudioControls>,
+    processor_retry: Arc<ProcessorRetry>,
 }
 
 impl NativeAudio {
@@ -134,6 +139,8 @@ impl NativeAudio {
             )
             .map_err(|_| MediaError::Microphone)?;
             let microphone_controls = controls.clone();
+            let processor_retry = Arc::new(ProcessorRetry::new(worker_stop.clone()));
+            let capture_retry = processor_retry.clone();
             let microphone_mix = mixer.clone();
             let microphone_source = source.clone();
             let capture_flow = flow;
@@ -165,13 +172,20 @@ impl NativeAudio {
                     }
                     let submit = MicSubmission::new(
                         microphone_source,
-                        microphone_controls,
+                        microphone_controls.clone(),
                         device_stop.clone(),
                     );
                     Ok(move |samples: &[f32], channels: usize, gap: bool| {
                         if capture_stop.is_cancelled() {
                             device_stop.cancel();
                             return;
+                        }
+                        let recovery = capture_retry.take();
+                        if let Some(ready) = &recovery {
+                            if processor.rebuild().is_err() || capture_stop.is_cancelled() {
+                                ready.send_replace(Some(false));
+                                return;
+                            }
                         }
                         if capture_flow
                             .capture(
@@ -187,6 +201,15 @@ impl NativeAudio {
                             .is_err()
                         {
                             device_stop.cancel();
+                        }
+                        if let Some(ready) = recovery {
+                            ready.send_replace(Some(
+                                !capture_stop.is_cancelled()
+                                    && !device_stop.is_cancelled()
+                                    && !microphone_controls
+                                        .processor_failed
+                                        .load(Ordering::Acquire),
+                            ));
                         }
                     })
                 },
@@ -204,6 +227,8 @@ impl NativeAudio {
                 stop: worker_stop,
                 capture,
                 render,
+                controls,
+                processor_retry,
             })
         })
         .await
@@ -217,6 +242,9 @@ impl NativeAudio {
         }
     }
     pub fn failed(&self) -> bool {
+        self.runtime_failed() || self.controls.processor_failed.load(Ordering::Acquire)
+    }
+    fn runtime_failed(&self) -> bool {
         self.stop.is_cancelled() || self.capture.failed() || self.render.failed()
     }
     pub fn cancel(&self) {
@@ -224,6 +252,7 @@ impl NativeAudio {
             self.demand.revoke(generation);
         }
         self.stop.cancel();
+        self.processor_retry.cancel();
         self.capture.cancel();
         self.render.cancel();
         self.mixer.clear();
@@ -243,6 +272,22 @@ impl SharedAudioDevice for NativeAudio {
 
     fn cancel(&self) {
         NativeAudio::cancel(self);
+    }
+
+    fn runtime_failed(&self) -> bool {
+        NativeAudio::runtime_failed(self)
+    }
+
+    fn retry_processor(&self) -> Option<watch::Receiver<Option<bool>>> {
+        if self.runtime_failed() {
+            None
+        } else {
+            self.processor_retry.request()
+        }
+    }
+
+    fn processor_recovering(&self) -> bool {
+        self.processor_retry.recovering()
     }
 }
 

@@ -379,6 +379,25 @@ hide, close/disable/logout disposal и release-without-move seek checked.
 raw/Silero/outer4x/physical/full acceptance; **не переписывать panel/runtime/core**.
 Readinessfalse; no push/merge/release/shutdown.
 
+Local-only DSP-health/meter/explicit-retry changes are under final verification
+after `29eb20a`. Development checks passed13health tests including the actual30s
+deadline,13shared-runtime,13core,7UI and8microphone tests plus Clippy. In-place
+owning-thread recovery preserves the source/mixer/working output and completed
+clip; stale input revisions and canceled recovery waiters are guarded. Full
+two-feature/neural/UI/source/binary regression is running; this is not yet a
+saved/accepted health milestone or complete physical/client acceptance.
+
+Local DSP-health/explicit recovery финально проверены:
+**158default (52unit+106integration) /148no-neural (52unit+96integration)**,
+410matching sources,9HTTP/pinned artifacts/fmt/Clippy/build.56panel/64settings/
+24auth and8+8+8interactions use one final tested/current binary; all images and
+neural metrics unchanged,0hash mismatches. Processor-only failure resets meter
+and preserves completed clip/working output; stale input tokens, owning-thread
+single-flight recovery, actual30s deadline and reset/cancel/late results checked.
+No auto retry or second capture runtime. Next confirmed font-family fallback
+correction and exact font/spring/motion/pixel acceptance, then remaining audio/
+physical/client stages. Native/audio/micTestUi readinessfalse; no release/shutdown.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final

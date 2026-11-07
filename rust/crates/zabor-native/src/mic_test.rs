@@ -33,7 +33,7 @@ pub enum MicTestFailure {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CaptureToken(u64);
+pub struct CaptureToken(u64, u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlaybackTicket {
@@ -90,6 +90,7 @@ struct Capture {
 #[derive(Default)]
 struct State {
     generation: u64,
+    input_revision: u64,
     enabled: bool,
     visible: bool,
     stage: MicTestStage,
@@ -227,7 +228,7 @@ impl MicTest {
                 peak: 0.0,
             });
         }
-        Some(CaptureToken(state.generation))
+        Some(CaptureToken(state.generation, state.input_revision))
     }
 
     pub fn prepared(&self, token: CaptureToken, now: Instant) -> bool {
@@ -235,7 +236,7 @@ impl MicTest {
             return false;
         };
         state.advance(now);
-        if token.0 != state.generation || !state.enabled {
+        if token.0 != state.generation || token.1 != state.input_revision || !state.enabled {
             return false;
         }
         let Some(capture) = &mut state.capture else {
@@ -255,7 +256,7 @@ impl MicTest {
                     .capture
                     .as_ref()
                     .is_some_and(|run| run.attached.is_some())))
-        .then_some(CaptureToken(state.generation))
+        .then_some(CaptureToken(state.generation, state.input_revision))
     }
 
     pub fn capture(&self, token: CaptureToken, pcm: &[f32; 480], db: f32, now: Instant) -> bool {
@@ -263,7 +264,7 @@ impl MicTest {
             return false;
         };
         state.advance(now);
-        if token.0 != state.generation || !state.enabled {
+        if token.0 != state.generation || token.1 != state.input_revision || !state.enabled {
             return false;
         }
         if pcm.iter().any(|sample| !sample.is_finite()) || !db.is_finite() {
@@ -272,6 +273,13 @@ impl MicTest {
         }
         if state.visible {
             state.meter_db = db.clamp(-100.0, 0.0);
+        }
+        if state.capture.is_none() && state.failure == Some(MicTestFailure::Processor) {
+            state.failure = None;
+            state.issue = state
+                .peak_db
+                .filter(|db| *db <= -70)
+                .map(|_| MicTestIssue::Silent);
         }
         let Some(capture) = &mut state.capture else {
             return true;
@@ -305,8 +313,17 @@ impl MicTest {
 
     pub fn fail(&self, token: CaptureToken, reason: MicTestFailure) {
         if let Ok(mut state) = self.state.lock() {
-            if state.generation == token.0 && state.capture.is_some() {
-                state.fail(reason);
+            if state.enabled && state.generation == token.0 && state.input_revision == token.1 {
+                if state.capture.is_some() {
+                    state.fail(reason);
+                } else if reason == MicTestFailure::Processor {
+                    if state.failure != Some(reason) {
+                        state.input_revision = state.input_revision.wrapping_add(1);
+                    }
+                    state.meter_db = -100.0;
+                    state.issue = Some(MicTestIssue::Failed);
+                    state.failure = Some(reason);
+                }
             }
         }
     }

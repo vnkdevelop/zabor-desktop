@@ -115,9 +115,12 @@ impl<D: SharedAudioDevice> MicTestUi<D> {
         };
         self.failed = false;
         let (send, result) = oneshot::channel();
+        let ready = {
+            let _entered = runtime.enter();
+            lease.ready()
+        };
         let task = runtime.spawn(async move {
-            let ready = lease
-                .ready()
+            let ready = ready
                 .await
                 .map(|device| Arc::downgrade(&device))
                 .map_err(|_| ());
@@ -130,14 +133,14 @@ impl<D: SharedAudioDevice> MicTestUi<D> {
         if !self.visible || !self.lease.as_ref().is_some_and(|lease| lease.is_current()) {
             return false;
         }
-        let stage = self.shared.mic_test.snapshot(now).stage;
+        let stage = self.snapshot(now).stage;
         if matches!(stage, MicTestStage::Arming | MicTestStage::Recording) {
             return false;
         }
+        self.prepare(runtime);
         if self.shared.mic_test.begin(now).is_none() {
             return false;
         }
-        self.prepare(runtime);
         true
     }
 
@@ -149,7 +152,12 @@ impl<D: SharedAudioDevice> MicTestUi<D> {
             self.shared.mic_test.pause();
             true
         } else {
-            !self.failed && self.shared.mic_test.play(None)
+            (!self.failed
+                || self
+                    .lease
+                    .as_ref()
+                    .is_some_and(|lease| lease.playback_available()))
+                && self.shared.mic_test.play(None)
         }
     }
 
@@ -185,11 +193,20 @@ impl<D: SharedAudioDevice> MicTestUi<D> {
                 Err(oneshot::error::TryRecvError::Empty) => {}
             }
         }
-        if self.device.upgrade().is_some_and(|device| device.failed()) {
-            self.failed = true;
+        if self.preparation.is_none() {
+            if self.device.upgrade().is_some_and(|device| !device.failed()) {
+                self.failed = false;
+            }
+            self.failed |= self.lease.as_ref().is_some_and(|lease| lease.failed());
         }
         if self.failed {
-            self.shared.mic_test.pause();
+            if !self
+                .lease
+                .as_ref()
+                .is_some_and(|lease| lease.playback_available())
+            {
+                self.shared.mic_test.pause();
+            }
             if let Some(token) = self.shared.mic_test.capture_token() {
                 self.shared.mic_test.fail(token, MicTestFailure::Processor);
             }
@@ -197,9 +214,8 @@ impl<D: SharedAudioDevice> MicTestUi<D> {
         let mut snapshot = self.shared.mic_test.snapshot(now);
         if self.failed {
             snapshot.meter_db = -100.0;
-            if snapshot.issue.is_none() {
-                snapshot.issue = Some(MicTestIssue::Failed);
-            }
+            snapshot.issue = Some(MicTestIssue::Failed);
+            snapshot.failure = Some(MicTestFailure::Processor);
         }
         snapshot
     }
