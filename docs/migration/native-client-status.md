@@ -219,6 +219,17 @@ UI/audio/client acceptance remains false. Next: microphone testing/standalone
 meter, then raw/Silero/outer4x and every remaining handoff stage. No push, merge,
 release or shutdown was performed.
 
+Checkpoint **`b1666ac`** сохраняет verified settings saving/device/per-user audio UI
+на `rust/native-client`. All code/capture hashes passed; all verification jobs
+completed. Далее — mic-test/standalone meter (план в handoff), затем raw/Silero/
+outer4x/full UI и весь remaining migration plan. Полная readiness=false;
+push/merge/release/shutdown не выполнялись.
+
+Verified audio-preferences saving and UI functionality are saved in `b1666ac`.
+Next: memory-only microphone recording/playback and standalone meter, preserving
+network mute restrictions and owning DSP threads, then every remaining handoff
+stage. This checkpoint is not full client/audio acceptance or a published beta.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера
