@@ -32,7 +32,9 @@ Copyright LiveKit, Inc.), <https://github.com/livekit/rust-sdks>, wrapping
 the pinned `webrtc-a545de4` upstream SDK. The SDK's own `LICENSE.md` lists
 WebRTC and bundled codec/crypto components and must accompany native packaging.
 The bindings are used directly; no LiveKit cloud service is contacted.
-Windows media capture/playback uses the platform WASAPI audio device module.
+Windows voice capture/playback now uses explicit WASAPI device threads instead
+of acquiring libwebrtc's platform audio device module; libwebrtc retains its
+synthetic pumping for remote decoded audio.
 The native audio work-in-progress also uses wasapi 0.26.0 (MIT),
 <https://github.com/HEnquist/wasapi-rs>; deep_filter 0.5.7-pre at
 `d375b2d8309e0935d165700c91da9de862a99c31` (MIT OR Apache-2.0);
@@ -55,8 +57,9 @@ Build-time preparation downloads the pinned public RNNoise archive from
 the content-addressed tarballs.nixos.org cache, with media.xiph.org as a fallback,
 and Microsoft's runtime package from NuGet, not user audio. Both RNNoise sources
 must match the same pinned SHA-256 and length before compilation.
-These local inference adapters and device-thread/mixer primitives are not yet
-connected to the application's microphone path and are not in published installers.
+These local inference adapters and device threads/mixer are now connected to
+native voice sessions. Physical AEC, hotplug, settings/microphone-test UI and
+complete acceptance remain unfinished; they are not in published installers.
 Native binding generation uses libclang 18.1.1 from the pinned Windows x64
 PyPI wheel (Apache-2.0 with LLVM exceptions), with its licence retained in the
 local build cache. It is a build-only tool, not an application runtime service
@@ -97,8 +100,10 @@ tarballs.nixos.org (резервный источник — media.xiph.org) и N
 публичные закреплённые артефакты; звук пользователя не отправляется. Оба источника
 RNNoise проверяются по одному закреплённому SHA-256 и размеру до компиляции.
 Лицензии Microsoft должны войти в будущий установщик. Эти адаптеры, потоки
-устройств и микшер пока не подключены к микрофонному тракту приложения
-и не входят в опубликованные установщики.
+устройств и микшер подключены к нативной голосовой сессии без platform ADM:
+WASAPI работает на выделенных потоках, libwebrtc сохраняет synthetic pumping
+для декодированного звука. Физическая приёмка AEC/hotplug, settings/mic-test UI
+и полная совместимость ещё не завершены; опубликованные установщики не меняются.
 Для генерации нативных bindings используется libclang 18.1.1 из закреплённого
 Windows x64 PyPI wheel (Apache-2.0 с LLVM exceptions); его лицензия сохраняется
 в локальном кэше сборки. Это инструмент сборки, а не служба приложения или

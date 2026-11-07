@@ -226,6 +226,8 @@ impl MediaEngine {
             return Err(MediaError::Backend);
         }
         self.microphone = Some(self.factory.create_audio_track("zabor-microphone", source));
+        self.factory.set_adm_recording_enabled(false);
+        self.factory.set_adm_playout_enabled(false);
         Ok(())
     }
 
@@ -268,7 +270,9 @@ impl MediaEngine {
         }
     }
     pub fn set_deafened(&self, deafened: bool) {
-        self.factory.set_adm_playout_enabled(!deafened);
+        if self.platform_audio {
+            self.factory.set_adm_playout_enabled(!deafened);
+        }
     }
 
     pub fn recording_devices(&self) -> Vec<(String, String)> {

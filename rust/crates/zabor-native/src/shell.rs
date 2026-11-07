@@ -19,6 +19,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use zabor_native::attestation::Attestation;
+use zabor_native::audio_mix::AudioControls;
+use zabor_native::audio_settings::AudioSettings;
 use zabor_native::auth::{
     AuthClient, AuthError, Bootstrap, Captcha, Credentials, LoginOutcome, Registration,
 };
@@ -50,7 +52,8 @@ enum Command {
     Logout,
     Join(String),
     Leave,
-    Audio(bool, bool),
+    Audio,
+    CheckAudio,
     Reconnect,
     Language(String),
     ChatOpen(String),
@@ -115,6 +118,12 @@ struct FrameUpdate {
     frame: DecodedVideo,
 }
 type VideoSink = Arc<dyn Fn(FrameUpdate) + Send + Sync>;
+
+struct WorkerMedia {
+    video_sink: VideoSink,
+    video_generation: Arc<AtomicU64>,
+    audio_controls: Arc<AudioControls>,
+}
 
 pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut locale = "ru".to_owned();
@@ -224,6 +233,13 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
     let (commands, receiver) = mpsc::channel(16);
+    let local_settings = profile
+        .as_ref()
+        .and_then(|profile| profile.read_settings().ok())
+        .unwrap_or_else(|| json!({}));
+    let audio_controls = Arc::new(AudioControls::new(AudioSettings::from_json(
+        &local_settings,
+    )));
     let stop = CancellationToken::new();
     let captcha_id = Rc::new(RefCell::new(String::new()));
     let setup_avatar = Rc::new(RefCell::new(None::<String>));
@@ -322,8 +338,11 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         send_update.clone(),
         stop.clone(),
         profile,
-        video_sink,
-        video_generation,
+        WorkerMedia {
+            video_sink,
+            video_generation,
+            audio_controls: audio_controls.clone(),
+        },
     ));
     let weak = ui.as_weak();
     let auth_commands = commands.clone();
@@ -519,15 +538,13 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     });
     let audio_commands = commands.clone();
     let audio_state = latest.clone();
+    let immediate_audio = audio_controls.clone();
     ui.on_audio_state(move |muted, deafened| {
-        if audio_commands
-            .try_send(Command::Audio(muted, deafened))
-            .is_ok()
-        {
-            let mut state = audio_state.borrow_mut();
-            state.user.is_muted = muted;
-            state.user.is_deafened = deafened;
-        }
+        immediate_audio.set_user_state(muted, deafened);
+        let mut state = audio_state.borrow_mut();
+        state.user.is_muted = muted;
+        state.user.is_deafened = deafened;
+        let _ = audio_commands.try_send(Command::Audio);
     });
     let weak = ui.as_weak();
     let friend_state = latest.clone();
@@ -1130,9 +1147,13 @@ async fn worker(
     update: Arc<dyn Fn(UiEvent) + Send + Sync>,
     stop: CancellationToken,
     profile: Option<Arc<Profile>>,
-    video_sink: VideoSink,
-    video_generation: Arc<AtomicU64>,
+    media: WorkerMedia,
 ) {
+    let WorkerMedia {
+        video_sink,
+        video_generation,
+        audio_controls,
+    } = media;
     let signing = match Attestation::from_environment(zabor_native::release::TARGET_BETA_VERSION) {
         Ok(signing) => signing,
         Err(_) => {
@@ -1177,7 +1198,20 @@ async fn worker(
     share_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut screen_sources = Vec::<ScreenSource>::new();
     let mut pending_join: Option<String> = None;
+    let mut audio_watch = tokio::time::interval(Duration::from_millis(50));
+    audio_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut sent_audio_state = None;
+    let mut sent_speaking = false;
+    let mut speaking_release = None;
+    let mut local_speaking = false;
     loop {
+        if voice.is_none() {
+            sent_audio_state = None;
+            sent_speaking = false;
+            speaking_release = None;
+            local_speaking = false;
+            audio_controls.speaking.store(false, Ordering::Release);
+        }
         if voice.is_none()
             && (!video_jobs.is_empty()
                 || !paused_video.is_empty()
@@ -1233,6 +1267,7 @@ async fn worker(
             biased;
             _ = stop.cancelled() => break,
             command = commands.recv() => { let Some(command) = command else { break; }; command },
+            _ = async { if voice.is_some() { audio_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::CheckAudio,
             _ = async { if file_tick { file_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::MaintainFiles,
             event = async { match file_jobs.as_mut().filter(|jobs| jobs.has_jobs()) { Some(jobs) => jobs.next_event().await, None => std::future::pending().await } } => {
                 if let (Some(event), Some(engine)) = (event, chat.as_mut()) {
@@ -1272,7 +1307,10 @@ async fn worker(
             event = async { match events.as_mut() { Some(events) => events.recv().await, None => std::future::pending().await } } => {
                 match event {
                     Some(event) => {
-                        if let Some(user) = current_user.as_mut() { zabor_native::roster::apply_user_event(user, &event, true); }
+                        if let Some(user) = current_user.as_mut() {
+                            zabor_native::roster::apply_user_event(user, &event, true);
+                            audio_controls.set_server_state(user.is_server_muted, user.is_server_deafened);
+                        }
                         if event.target == "StreamDropped" {
                             if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer))) { stream_drops.schedule(peer.into(), std::time::Instant::now()); }
                         }
@@ -1376,6 +1414,9 @@ async fn worker(
                 match event {
                     Some(MediaEvent::Ice { peer, payload, .. }) => { if let Some(hub) = &hub { let _ = hub.send("SendIceCandidate", vec![json!(peer), json!(payload)]).await; } },
                     Some(MediaEvent::Renegotiate { peer, .. }) => { if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) { let _ = voice.renegotiate(hub, &peer).await; } },
+                    Some(MediaEvent::Track { peer, track: MediaStreamTrack::Audio(track), lifetime }) => {
+                        if let Some(voice) = voice.as_mut() { if voice.receive_audio(&peer, track, lifetime).is_err() { update(UiEvent::Toast("toasts.micUnknownError")); } }
+                    },
                     Some(MediaEvent::Track { peer, track: MediaStreamTrack::Video(track), lifetime }) => {
                             let sink = video_sink.clone();
                             let generation = video_generation.load(Ordering::Acquire);
@@ -1434,6 +1475,59 @@ async fn worker(
                 continue;
             },
         };
+        if matches!(command, Command::CheckAudio) {
+            if voice.as_mut().is_some_and(VoiceSession::audio_failed) {
+                if let Some(mut session) = voice.take() {
+                    if let Some(hub) = &hub {
+                        session.leave(hub).await;
+                    }
+                }
+                media_events = None;
+                update(UiEvent::VoiceEnded);
+                update(UiEvent::Toast("toasts.micUnknownError"));
+                continue;
+            }
+            let state = audio_controls.user_state();
+            if sent_audio_state != Some(state) {
+                if let (Some(session), Some(hub)) = (voice.as_mut(), hub.as_ref()) {
+                    if session.mute(hub, state.0, state.1).await.is_ok() {
+                        sent_audio_state = Some(state);
+                    }
+                }
+            }
+            let speaking = audio_controls.speaking.load(Ordering::Acquire)
+                && !audio_controls.effectively_muted();
+            if local_speaking != speaking {
+                local_speaking = speaking;
+                if let Some(user) = &mut current_user {
+                    user.is_speaking = speaking;
+                    update(UiEvent::Hub(HubEvent {
+                        target: "UserSpeaking".into(),
+                        arguments: vec![json!(user.id), json!(speaking)],
+                    }));
+                }
+            }
+            let now = tokio::time::Instant::now();
+            if speaking {
+                speaking_release = None;
+            } else if sent_speaking && speaking_release.is_none() {
+                speaking_release = Some(now + Duration::from_millis(350));
+            }
+            let target = speaking
+                || (sent_speaking && speaking_release.is_some_and(|deadline| now < deadline));
+            if target != sent_speaking {
+                if let Some(hub) = &hub {
+                    if hub
+                        .send("SetSpeakingState", vec![json!(target)])
+                        .await
+                        .is_ok()
+                    {
+                        sent_speaking = target;
+                    }
+                }
+            }
+            continue;
+        }
         if matches!(command, Command::MaintainFiles) {
             if let Some(engine) = chat.as_mut() {
                 let packets = engine.expire_downloads(now_ms());
@@ -1708,6 +1802,10 @@ async fn worker(
             let outcome = tokio::select! { _ = stop.cancelled() => break, result = auth.login(saved_credentials.as_ref().unwrap()) => result };
             match outcome {
                 Ok(LoginOutcome::SignedIn(data)) => {
+                    restore_audio(&audio_controls, profile.as_deref(), &data);
+                    sent_audio_state = None;
+                    sent_speaking = false;
+                    speaking_release = None;
                     session_ready = true;
                     retry_attempt = 0;
                     retry_at = None;
@@ -1803,6 +1901,10 @@ async fn worker(
                 .map(|outcome| match outcome {
                     LoginOutcome::NeedsRegistration => UiEvent::MissingAccount,
                     LoginOutcome::SignedIn(data) => {
+                        restore_audio(&audio_controls, profile.as_deref(), &data);
+                        sent_audio_state = None;
+                        sent_speaking = false;
+                        speaking_release = None;
                         current_user = Some(data.user.clone());
                         chat_ice = data
                             .ice_config
@@ -1888,12 +1990,16 @@ async fn worker(
                         return Err(AuthError::Network);
                     };
                     if voice.is_none() {
-                        let (session, receiver) = VoiceSession::new(&connection, user, false)
-                            .await
-                            .map_err(|_| AuthError::Network)?;
+                        let (session, receiver) =
+                            VoiceSession::new(&connection, user, false, audio_controls.clone())
+                                .await
+                                .map_err(|_| AuthError::Network)?;
                         voice = Some(session);
                         media_events = Some(receiver);
                     }
+                    sent_audio_state = None;
+                    sent_speaking = false;
+                    speaking_release = None;
                     match voice.as_mut().unwrap().join(&connection, &channel).await {
                         Ok(users) => {
                             video_jobs.retain(|peer, _| users.iter().any(|user| &user.id == peer));
@@ -1912,7 +2018,8 @@ async fn worker(
                         }
                     }
                 }
-                Command::Audio(muted, deafened) => {
+                Command::Audio => {
+                    let (muted, deafened) = audio_controls.user_state();
                     if let Some(user) = current_user.as_mut() {
                         user.is_muted = muted;
                         user.is_deafened = deafened;
@@ -1922,6 +2029,7 @@ async fn worker(
                             .mute(&connection, muted, deafened)
                             .await
                             .map_err(|_| AuthError::Network)?;
+                        sent_audio_state = Some((muted, deafened));
                     }
                     Ok(UiEvent::Connected)
                 }
@@ -1942,12 +2050,17 @@ async fn worker(
                     }
                     media_events = None;
                     call_connected = false;
+                    sent_speaking = false;
+                    speaking_release = None;
+                    sent_audio_state = None;
                     let user = current_user.as_ref().ok_or(AuthError::Network)?;
-                    let (mut session, receiver) = VoiceSession::new(&connection, user, false)
-                        .await
-                        .map_err(|_| AuthError::Network)?;
+                    let (mut session, receiver) =
+                        VoiceSession::new(&connection, user, false, audio_controls.clone())
+                            .await
+                            .map_err(|_| AuthError::Network)?;
                     session
                         .prepare_call(&peer)
+                        .await
                         .map_err(|_| AuthError::Network)?;
                     let accepted = connection
                         .invoke("StartCall", vec![json!(peer)], Duration::from_secs(20))
@@ -2021,12 +2134,17 @@ async fn worker(
                     if let Some(mut session) = voice.take() {
                         session.leave(&connection).await;
                     }
+                    sent_speaking = false;
+                    speaking_release = None;
+                    sent_audio_state = None;
                     let user = current_user.as_ref().ok_or(AuthError::Network)?;
-                    let (mut session, receiver) = VoiceSession::new(&connection, user, false)
-                        .await
-                        .map_err(|_| AuthError::Network)?;
+                    let (mut session, receiver) =
+                        VoiceSession::new(&connection, user, false, audio_controls.clone())
+                            .await
+                            .map_err(|_| AuthError::Network)?;
                     session
                         .prepare_call(&peer)
+                        .await
                         .map_err(|_| AuthError::Network)?;
                     connection
                         .invoke("AcceptCall", vec![json!(peer)], Duration::from_secs(20))
@@ -2037,6 +2155,7 @@ async fn worker(
                     call_connected = true;
                     Ok(UiEvent::Calling(peer))
                 }
+                Command::CheckAudio => Ok(UiEvent::Connected),
             }
         };
         let result = tokio::select! { _ = stop.cancelled() => break, result = operation => result };
@@ -2047,6 +2166,15 @@ async fn worker(
     }
     video_generation.fetch_add(1, Ordering::AcqRel);
     video_jobs.clear();
+}
+
+fn restore_audio(controls: &AudioControls, profile: Option<&Profile>, data: &Bootstrap) {
+    let local = profile
+        .and_then(|profile| profile.read_settings().ok())
+        .unwrap_or_else(|| json!({}));
+    controls.apply_settings(AudioSettings::restore(&local, data.audio_settings.as_ref()));
+    controls.set_user_state(data.user.is_muted, data.user.is_deafened);
+    controls.set_server_state(data.user.is_server_muted, data.user.is_server_deafened);
 }
 
 fn show_error(ui: &NativeApp, error: AuthError) {

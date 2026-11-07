@@ -7,10 +7,14 @@ pub trait NoiseProcessor {
     fn process(&mut self, input: &[f32; 480], output: &mut [f32; 480]) -> bool;
     fn configure(&mut self, strength: f32, post_filter: f32);
     fn attenuation_limited(&self) -> bool;
+    fn reset(&mut self) -> bool {
+        true
+    }
 }
 
 pub trait VoiceProbability {
     fn probability(&mut self, input: &[f32; 512], sequence: u64) -> Option<f32>;
+    fn reset(&mut self) {}
 }
 
 #[derive(Clone, Copy, Default)]
@@ -184,6 +188,21 @@ impl SmartGate {
         if let Some(noise) = &mut self.noise {
             noise.configure(self.settings.suppression_strength, beta);
         }
+    }
+
+    pub fn reset(&mut self) -> bool {
+        if self.noise.as_mut().is_some_and(|noise| !noise.reset()) {
+            return false;
+        }
+        if let Some(analyzer) = &mut self.analyzer {
+            analyzer.reset();
+        }
+        *self = Self::new(
+            self.settings.clone(),
+            self.noise.take(),
+            self.analyzer.take(),
+        );
+        true
     }
 
     fn clear_gate(&mut self) {

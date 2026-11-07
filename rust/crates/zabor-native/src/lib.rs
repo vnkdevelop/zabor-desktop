@@ -5,6 +5,8 @@ pub mod attestation;
 pub mod audio_device;
 #[cfg(feature = "native-media")]
 pub mod audio_mix;
+#[cfg(feature = "native-media")]
+pub mod audio_playback;
 pub mod audio_settings;
 pub mod auth;
 pub mod chat;
@@ -20,7 +22,11 @@ pub mod localization;
 pub mod manual_gate;
 #[cfg(feature = "native-media")]
 pub mod media;
+#[cfg(feature = "native-media")]
+pub mod microphone;
 pub mod motion;
+#[cfg(all(windows, feature = "native-media"))]
+pub mod native_audio;
 #[cfg(feature = "neural-dsp")]
 pub mod neural;
 pub mod profile;

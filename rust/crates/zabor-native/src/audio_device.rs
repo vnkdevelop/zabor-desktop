@@ -155,7 +155,7 @@ impl DeviceStream {
                             queue.drain(..old);
                             gap = true;
                         }
-                        if queue.len() > bytes * 20 {
+                        if queue.len() > bytes * 4 {
                             queue.clear();
                             gap = true;
                         }
@@ -188,6 +188,18 @@ impl DeviceStream {
     where
         F: FnMut(&mut [f32]) + Send + 'static,
     {
+        Self::render_with_feedback(id, move |samples| render(samples), |_, _| {})
+    }
+
+    pub fn render_with_feedback<F, P>(
+        id: String,
+        mut render: F,
+        mut played: P,
+    ) -> Result<Self, DeviceError>
+    where
+        F: FnMut(&mut [f32]) + Send + 'static,
+        P: FnMut(&[f32], u32) + Send + 'static,
+    {
         Self::spawn("zabor-playback", move |stop, ready| {
             let _com = Com::initialize()?;
             let device = select(&id, &Direction::Render)?;
@@ -218,6 +230,9 @@ impl DeviceStream {
                     if count > capacity {
                         return Err(DeviceError);
                     }
+                    if count == 0 {
+                        continue;
+                    }
                     samples[..count * 2].fill(0.0);
                     render(&mut samples[..count * 2]);
                     for (sample, bytes) in samples[..count * 2]
@@ -234,6 +249,7 @@ impl DeviceStream {
                     output
                         .write_to_device(count, &bytes[..count * 8], None)
                         .map_err(|_| DeviceError)?;
+                    played(&samples[..count * 2], capacity.div_ceil(48) as u32);
                 }
                 Ok(())
             })();

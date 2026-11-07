@@ -125,3 +125,39 @@ async fn playback_and_aec_reverse_queues_are_bounded() {
     assert!(stereo.iter().all(|sample| *sample == 0.0));
     assert_eq!(mixer.reverse.lock().unwrap().len(), 4800);
 }
+
+#[tokio::test]
+async fn short_deafen_toggles_and_old_subscription_cleanup_cannot_replay_or_remove_new_audio() {
+    let (_engine, lifetime) = peer().await;
+    let controls = Arc::new(AudioControls::new(AudioSettings::default()));
+    let mixer = AudioMixer::new(controls.clone());
+    let old = mixer
+        .add(
+            "voice".into(),
+            "peer/with/separator",
+            lifetime.clone(),
+            false,
+        )
+        .unwrap();
+    old.push(&[16384; 480]);
+    controls.set_user_state(false, true);
+    controls.set_user_state(false, false);
+    let mut output = [1.0; 960];
+    mixer.render_pcm(&mut output);
+    assert_eq!(output, [0.0; 960]);
+    old.push(&[16384; 480]);
+    controls.set_server_state(false, true);
+    controls.set_server_state(false, false);
+    mixer.render_pcm(&mut output);
+    assert_eq!(output, [0.0; 960]);
+    let current = mixer
+        .add("voice".into(), "peer/with/separator", lifetime, false)
+        .unwrap();
+    mixer.remove_lane("voice", &old);
+    current.push(&[16384; 480]);
+    mixer.render_pcm(&mut output);
+    assert_eq!(output, [0.5; 960]);
+    assert!(mixer.reverse.lock().unwrap().is_empty());
+    mixer.played(&output);
+    assert_eq!(mixer.reverse.lock().unwrap().len(), 480);
+}

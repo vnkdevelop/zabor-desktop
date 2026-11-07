@@ -1,12 +1,20 @@
+use crate::audio_mix::AudioControls;
+use crate::audio_playback::AudioPlayback;
 use crate::auth::User;
 use crate::hub::HubConnection;
+use crate::media::PeerLifetime;
 use crate::media::{IceServerSettings, MediaEngine, MediaError, MediaEvent};
+#[cfg(windows)]
+use crate::native_audio::NativeAudio;
 use crate::screen::{ScreenCapture, ScreenSource};
+use libwebrtc::audio_track::RtcAudioTrack;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+use std::sync::{atomic::Ordering, Arc};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize)]
 pub struct ChannelMembership {
@@ -19,12 +27,13 @@ pub struct VoiceSession {
     peers: BTreeSet<String>,
     pub channel: Option<String>,
     pub call_peer: Option<String>,
-    muted: bool,
-    deafened: bool,
-    server_muted: bool,
-    server_deafened: bool,
     relay_only: bool,
     capture: Option<ScreenCapture>,
+    controls: Arc<AudioControls>,
+    audio_stop: CancellationToken,
+    #[cfg(windows)]
+    audio: Option<NativeAudio>,
+    playback: Option<AudioPlayback>,
 }
 
 impl VoiceSession {
@@ -32,6 +41,7 @@ impl VoiceSession {
         hub: &HubConnection,
         user: &User,
         relay_only: bool,
+        controls: Arc<AudioControls>,
     ) -> Result<(Self, mpsc::Receiver<MediaEvent>), MediaError> {
         let local_id = user.id.clone();
         let (mut engine, events) = MediaEngine::new(local_id.clone());
@@ -60,12 +70,13 @@ impl VoiceSession {
                 peers: BTreeSet::new(),
                 channel: None,
                 call_peer: None,
-                muted: user.is_muted,
-                deafened: user.is_deafened,
-                server_muted: user.is_server_muted,
-                server_deafened: user.is_server_deafened,
                 relay_only,
                 capture: None,
+                controls,
+                audio_stop: CancellationToken::new(),
+                #[cfg(windows)]
+                audio: None,
+                playback: None,
             },
             events,
         ))
@@ -76,11 +87,10 @@ impl VoiceSession {
         hub: &HubConnection,
         channel: &str,
     ) -> Result<Vec<User>, MediaError> {
-        self.engine.start_microphone()?;
+        self.start_audio().await?;
+        self.engine.set_muted(self.controls.effectively_muted());
         self.engine
-            .set_muted(self.muted || self.deafened || self.server_muted || self.server_deafened);
-        self.engine
-            .set_deafened(self.deafened || self.server_deafened);
+            .set_deafened(self.controls.effectively_deafened());
         let value = hub
             .invoke(
                 "JoinChannel",
@@ -104,6 +114,10 @@ impl VoiceSession {
             .map(|user| user.id.clone())
             .collect();
         self.engine.authorize_peers(self.peers.iter().cloned());
+        #[cfg(windows)]
+        if let Some(audio) = &self.audio {
+            audio.activate();
+        }
         for id in self.peers.iter().filter(|id| !previous.contains(*id)) {
             let offer = self.engine.offer(id, false).await?;
             hub.send("SendWebRTCOffer", vec![json!(id), json!(offer)])
@@ -117,6 +131,7 @@ impl VoiceSession {
         let was_call = self.call_peer.take().is_some();
         let was_sharing = self.capture.is_some();
         self.capture = None;
+        self.stop_audio();
         self.engine.close();
         self.peers.clear();
         self.channel = None;
@@ -146,16 +161,19 @@ impl VoiceSession {
         self.join(hub, &channel).await
     }
 
-    pub fn prepare_call(&mut self, peer: &str) -> Result<(), MediaError> {
-        self.engine.start_microphone()?;
+    pub async fn prepare_call(&mut self, peer: &str) -> Result<(), MediaError> {
+        self.start_audio().await?;
+        self.engine.set_muted(self.controls.effectively_muted());
         self.engine
-            .set_muted(self.muted || self.deafened || self.server_muted || self.server_deafened);
-        self.engine
-            .set_deafened(self.deafened || self.server_deafened);
+            .set_deafened(self.controls.effectively_deafened());
         self.channel = None;
         self.call_peer = Some(peer.into());
         self.peers = [peer.to_owned()].into_iter().collect();
         self.engine.authorize_peers(self.peers.iter().cloned());
+        #[cfg(windows)]
+        if let Some(audio) = &self.audio {
+            audio.activate();
+        }
         Ok(())
     }
 
@@ -240,17 +258,70 @@ impl VoiceSession {
         self.peers.contains(peer)
     }
 
+    async fn start_audio(&mut self) -> Result<(), MediaError> {
+        #[cfg(windows)]
+        {
+            if self.audio.is_some() {
+                return Ok(());
+            }
+            let audio =
+                NativeAudio::start(self.controls.clone(), self.audio_stop.child_token()).await?;
+            self.engine.attach_audio_source(audio.source.clone())?;
+            self.playback = Some(AudioPlayback::new(audio.mixer.clone()));
+            self.audio = Some(audio);
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        Err(MediaError::Microphone)
+    }
+
+    fn stop_audio(&mut self) {
+        self.audio_stop.cancel();
+        self.controls.speaking.store(false, Ordering::Release);
+        self.controls
+            .mic_db
+            .store((-100.0_f32).to_bits(), Ordering::Release);
+        self.playback = None;
+        #[cfg(windows)]
+        {
+            self.audio = None;
+        }
+    }
+
+    pub fn receive_audio(
+        &mut self,
+        peer: &str,
+        track: RtcAudioTrack,
+        lifetime: PeerLifetime,
+    ) -> Result<(), MediaError> {
+        if !self.peers.contains(peer) {
+            return Err(MediaError::UnauthorizedPeer);
+        }
+        self.playback
+            .as_mut()
+            .ok_or(MediaError::Backend)?
+            .attach(peer, track, lifetime, false)
+    }
+
+    pub fn audio_failed(&mut self) -> bool {
+        if let Some(playback) = &mut self.playback {
+            playback.retain_alive();
+        }
+        let failed = self.controls.processor_failed.load(Ordering::Acquire);
+        #[cfg(windows)]
+        let failed = failed || self.audio.as_ref().is_some_and(NativeAudio::failed);
+        failed
+    }
+
     pub async fn mute(
         &mut self,
         hub: &HubConnection,
         muted: bool,
         deafened: bool,
     ) -> Result<(), MediaError> {
-        self.muted = muted;
-        self.deafened = deafened;
+        self.engine.set_muted(self.controls.effectively_muted());
         self.engine
-            .set_muted(muted || deafened || self.server_muted || self.server_deafened);
-        self.engine.set_deafened(deafened || self.server_deafened);
+            .set_deafened(self.controls.effectively_deafened());
         hub.send(
             "UpdateUserState",
             vec![json!({"userId":self.local_id,"isMuted":muted,"isDeafened":deafened})],
@@ -276,31 +347,25 @@ impl VoiceSession {
                         .or_else(|| user["id"].as_str())
                         == Some(self.local_id.as_str())
                     {
-                        if let Some(value) = user["isServerMuted"]
+                        let server_muted = user["isServerMuted"]
                             .as_bool()
                             .or_else(|| user["IsServerMuted"].as_bool())
-                        {
-                            self.server_muted = value;
-                        }
-                        if let Some(value) = user["isServerDeafened"]
+                            .unwrap_or_else(|| self.controls.server_state().0);
+                        let server_deafened = user["isServerDeafened"]
                             .as_bool()
                             .or_else(|| user["IsServerDeafened"].as_bool())
-                        {
-                            self.server_deafened = value;
-                        }
-                        self.engine.set_muted(
-                            self.muted
-                                || self.deafened
-                                || self.server_muted
-                                || self.server_deafened,
-                        );
+                            .unwrap_or_else(|| self.controls.server_state().1);
+                        self.controls
+                            .set_server_state(server_muted, server_deafened);
+                        self.engine.set_muted(self.controls.effectively_muted());
                         self.engine
-                            .set_deafened(self.deafened || self.server_deafened);
+                            .set_deafened(self.controls.effectively_deafened());
                     }
                 }
             }
             "ChannelDeleted" if self.channel.is_some() && peer == self.channel.as_deref() => {
                 self.capture = None;
+                self.stop_audio();
                 self.engine.close();
                 self.peers.clear();
                 self.channel = None;
@@ -377,5 +442,11 @@ impl VoiceSession {
             _ => {}
         }
         Ok(())
+    }
+}
+
+impl Drop for VoiceSession {
+    fn drop(&mut self) {
+        self.stop_audio();
     }
 }

@@ -151,6 +151,35 @@ fn native_silero_resets_context_on_sequence_gaps_and_invalid_input() {
 }
 
 #[test]
+fn denoiser_reset_restores_initial_runtime_state_without_recompiling_the_model() {
+    for model in [NoiseModel::Rnnoise, NoiseModel::Deepfilter] {
+        let mut current = Denoiser::new(model, 15.0, 0.03).unwrap();
+        let input: [f32; 480] = std::array::from_fn(|index| (index as f32 * 0.07).sin() * 0.2);
+        let mut output = [0.0; 480];
+        for _ in 0..16 {
+            current.process(&input, &mut output).unwrap();
+        }
+        current.set_strength(30.0, 0.05);
+        let start = std::time::Instant::now();
+        current.reset().unwrap();
+        eprintln!(
+            "{model:?} runtime reset microseconds={}",
+            start.elapsed().as_micros()
+        );
+        let mut fresh = Denoiser::new(model, 30.0, 0.05).unwrap();
+        let mut expected = [0.0; 480];
+        for _ in 0..16 {
+            current.process(&input, &mut output).unwrap();
+            fresh.process(&input, &mut expected).unwrap();
+            assert!(output
+                .iter()
+                .zip(expected)
+                .all(|(actual, expected)| (*actual - expected).abs() < 1e-6));
+        }
+    }
+}
+
+#[test]
 fn native_silero_matches_the_existing_worker_across_resets_and_sequence_gaps() {
     let frames: Vec<[f32; 512]> = (0..96)
         .map(|block| {

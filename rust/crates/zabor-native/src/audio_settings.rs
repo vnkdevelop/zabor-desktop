@@ -64,6 +64,17 @@ impl Default for AudioSettings {
 }
 
 impl AudioSettings {
+    pub fn restore(local: &Value, server: Option<&Value>) -> Self {
+        let mut merged = local.as_object().cloned().unwrap_or_default();
+        if let Some(server) = server.and_then(Value::as_object) {
+            for (key, value) in server {
+                if key != "language" {
+                    merged.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        Self::from_json(&Value::Object(merged))
+    }
     pub fn from_json(value: &Value) -> Self {
         let mut settings = Self::default();
         let Some(raw) = value.as_object() else {
@@ -203,5 +214,17 @@ mod tests {
         assert!((settings.input_gain() - 2.55).abs() < 1e-6);
         assert_eq!(settings.peer_gain("alice"), 4.0);
         assert!((settings.post_filter_beta() - 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn server_audio_restore_preserves_local_language_and_unknown_fields() {
+        let settings = AudioSettings::restore(
+            &json!({"language":"en","inputVolume":25,"futureLocal":true}),
+            Some(&json!({"language":"ru","inputVolume":175,"futureServer":{"active":true}})),
+        );
+        assert_eq!(settings.language, "en");
+        assert_eq!(settings.input_volume, 175.0);
+        assert_eq!(settings.extra["futureLocal"], true);
+        assert_eq!(settings.extra["futureServer"]["active"], true);
     }
 }

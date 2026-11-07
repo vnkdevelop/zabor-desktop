@@ -22,7 +22,10 @@ pub enum NeuralError {
 
 enum Engine {
     Rnnoise(rnnoise2::Denoiser),
-    Deepfilter(Box<DfTract>),
+    Deepfilter {
+        model: Box<DfTract>,
+        initial: Box<DfTract>,
+    },
 }
 
 pub struct Denoiser {
@@ -53,7 +56,10 @@ impl Denoiser {
                 if model.sr != 48000 || model.hop_size != 480 || model.ch != 1 {
                     return Err(NeuralError::Processing);
                 }
-                Engine::Deepfilter(Box::new(model))
+                Engine::Deepfilter {
+                    initial: Box::new(model.clone()),
+                    model: Box::new(model),
+                }
             }
         };
         Ok(Self {
@@ -66,10 +72,25 @@ impl Denoiser {
         if !strength.is_finite() || !post_filter.is_finite() {
             return;
         }
-        if let Engine::Deepfilter(model) = &mut self.engine {
+        if let Engine::Deepfilter { model, initial } = &mut self.engine {
             model.set_atten_lim(strength.clamp(5.0, 30.0));
             model.set_pf_beta(post_filter.clamp(0.02, 0.05));
+            initial.set_atten_lim(strength.clamp(5.0, 30.0));
+            initial.set_pf_beta(post_filter.clamp(0.02, 0.05));
         }
+    }
+
+    pub fn reset(&mut self) -> Result<(), NeuralError> {
+        match &mut self.engine {
+            Engine::Rnnoise(model) => {
+                *model = rnnoise2::Denoiser::new(None).ok_or(NeuralError::Processing)?;
+            }
+            Engine::Deepfilter { model, initial } => {
+                model.clone_from(initial);
+            }
+        }
+        self.input.fill(0.0);
+        Ok(())
     }
 
     pub fn process(
@@ -92,7 +113,7 @@ impl Denoiser {
                 }
                 Some(probability.clamp(0.0, 1.0))
             }
-            Engine::Deepfilter(model) => {
+            Engine::Deepfilter { model, .. } => {
                 let input =
                     ArrayView2::from_shape((1, 480), input).map_err(|_| NeuralError::Processing)?;
                 let output = ArrayViewMut2::from_shape((1, 480), output.as_mut_slice())
@@ -228,12 +249,18 @@ impl crate::smart_gate::NoiseProcessor for Denoiser {
         self.set_strength(strength, post_filter);
     }
     fn attenuation_limited(&self) -> bool {
-        matches!(self.engine, Engine::Deepfilter(_))
+        matches!(self.engine, Engine::Deepfilter { .. })
+    }
+    fn reset(&mut self) -> bool {
+        Denoiser::reset(self).is_ok()
     }
 }
 
 impl crate::smart_gate::VoiceProbability for Silero {
     fn probability(&mut self, input: &[f32; 512], sequence: u64) -> Option<f32> {
         self.process(input, sequence).ok()
+    }
+    fn reset(&mut self) {
+        Silero::reset(self);
     }
 }

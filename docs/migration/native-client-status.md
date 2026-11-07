@@ -45,8 +45,54 @@ Lifecycle checkpoint: `fda236c`. После него подключена нат
 Добавлены нормализованные совместимые настройки, TonalSuppressor/VoiceShaper,
 ручной gate, SmartGate, RNNoise/DeepFilterNet3/Silero adapters, WASAPI device threads
 и AudioMixer с atomic mute/deafen/moderation, ограниченными очередями и отзывом
-устаревших peer-lifetimes. Эти части пока не соединены с `VoiceSession` и `shell.rs`:
-приложение ещё использует прежний platform ADM, а не новый DSP-тракт.
+устаревших peer-lifetimes. После neural checkpoint эти части соединены с
+`VoiceSession` и `shell.rs` через `microphone.rs`, `native_audio.rs` и
+`audio_playback.rs`; platform ADM не приобретается. Кодовая интеграция проходит
+новый local-only прогон и ещё не является полной audio/client приёмкой.
+
+UI mute/deafen меняет когерентный atomic state до сетевой очереди. Capture/playback
+epochs отбрасывают старый PCM при коротком on/off; final submission повторно
+проверяет restriction/failure/cancel/epoch. Owning-thread DSP использует 48k/480,
+NativeAudioSource без capture queue; WASAPI backlog — максимум 4×10 ms.
+Received tracks имеют bounded sink и peer-lifetime mixer lanes; старый Drop не
+удаляет replacement lane. AEC reverse добавляется после успешного WASAPI write,
+с оценкой device delay; физическая эффективность ещё не подтверждена.
+
+Manual threshold сохраняет smart branch; ultra-low-latency обходит smart/gain/peak.
+DFN3 reset клонирует pristine runtime state/compiled plans на owning thread,
+не компилируя модель повторно. Settings bootstrap сохраняет unknown fields и
+локальный язык. Settings/device/per-user volume UI, mic-test, hotplug/recovery,
+raw/Silero и 4x outer WebAudio parity ещё требуют завершения. Новый прогон
+`migration-artifacts/native-audio/wiring-final-2026-11-07` прошёл: 36 unit +
+45 integration tests, 9 HTTP tests, pinned artifacts, fmt/Clippy/build/source
+freeze. Neural metrics сохранились. RNNoise runtime reset занял 155 μs,
+DFN3 — 3343 μs в этом прогоне, без recompilation. После него исправлены
+cancel-after-model-init и settings/lane insertion race; neural-disabled
+compatibility прошла 74 теста и Clippy `-D warnings`. Финальный default-feature
+прогон с этими правками также **прошёл**: 36 unit + 45 integration tests,
+9 HTTP tests, pinned artifacts, fmt/Clippy/build/source freeze. Отчёт:
+`migration-artifacts/native-audio/wiring-verified-2026-11-07/verification.json`.
+Повторно сверены 392 source hashes и бинарный SHA-256 — differences=0.
+Neural PCM metrics не изменились; runtime reset RNNoise 108 μs / DFN3 3723 μs.
+Graphify: 5131 nodes / 12101 edges / 240 communities; семь metadata zero-node
+warnings, HTML выше лимита 5000 пропущен. Это не full audio acceptance.
+
+Code-level microphone/playback integration now connects owning-thread WASAPI,
+DSP, unbuffered NativeAudioSource and bounded peer playback to VoiceSession/shell
+without acquiring the platform ADM. Shared packed states/epochs enforce immediate
+mute/deafen and invalidate stale frames; AEC reverse follows successful device
+writes, not an assumed hardware AEC. Neural reset retains compiled DFN3 plans.
+The local-only run passed 36 unit and 45 integration tests, nine HTTP tests,
+pinned artifacts, fmt/Clippy/build and source freeze. Two subsequent cancellation/
+gain-race fixes also passed the final source-frozen run: 36 unit + 45 integration
+tests, nine HTTP tests, pinned artifacts, fmt/Clippy/build; 392 source hashes and
+the fresh binary hash match. The report is under `wiring-verified-2026-11-07`.
+Neural metrics are unchanged; reset measured 108 μs for RNNoise and 3723 μs for
+DFN3. Neural-disabled compatibility passed 74 tests and Clippy with `-D warnings`.
+The graph has 5131 nodes/12101 edges; metadata/HTML limitations remain recorded.
+Physical AEC, devices/hotplug/recovery,
+settings/microphone-test UI, raw/Silero and outer WebAudio 4x parity remain unfinished;
+this is not full audio/client acceptance or a release.
 
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
@@ -208,7 +254,7 @@ cmd.exe /c node scripts/native/verify.cjs --output migration-artifacts/native-ui
 | N2 | Общая оболочка, вход/регистрация, главный экран, каналы, друзья, контекстные меню, модалки | Формы, оболочка и основные привязки реализованы; полная UI/behavior parity в работе |
 | N3 | Настройки, профили, аватары/GIF, калибровка, все интерактивные состояния/локализации | Есть язык и выбор статического аватара; полные настройки, crop/GIF и калибровка в работе |
 | N4 | Auth/SignalR, аккаунты, reconnect, presence, HTTP-контракты | WebSocket/auth/базовый reconnect, roster и friend/channel notification actions реализованы; полное покрытие событий и LongPolling ещё нужны |
-| N5 | Нативные capture/playback, WebRTC/codecs, DSP, neural models, stream/SFU, remote control | Транспорт/PCM/SCTP и neural/DSP fixtures проверены локально; новый mic/playback DSP ещё не подключён; channel/call и screen/video экспериментальные, camera/SFU/control ещё нужны |
+| N5 | Нативные capture/playback, WebRTC/codecs, DSP, neural models, stream/SFU, remote control | Mic/playback DSP подключён и проверен локально: 81 default-feature / 74 neural-disabled tests; settings/mic-test/hotplug/physical AEC и full audio acceptance ещё нужны; camera/SFU/control не завершены |
 | N6 | Чат/файлы, encryption/key storage, совместимый импорт/откат профилей | DPAPI, SQLite, encrypted fallback/P2P text и файловый обмен соединены; расширенные delivery-retry/sync, import/rollback ещё в работе |
 | N7 | Загрузка/проверка native updates, независимый install helper, NSIS, подписи/лицензии, bridge старых beta | Не реализовано; кнопки preview не выполняют эти операции |
 | N8 | Полная parity/regression матрица, два устройства, длительные media sessions, CPU/RAM/latency, упаковка `3.8.0-rust` | Не выполнено |
@@ -235,4 +281,4 @@ Continuation results: fmt/clippy/build, 12 native unit tests, 54 capture pairs, 
 
 The core passed 33 unit tests and 17 integration tests. File handling is now connected end-to-end: picker/drop, confirmation, background staging, metadata/request, DTLS/SCTP chunks, progress/cancel/retry, SHA-256, atomic saving and Explorer reveal. A local test transfers and saves 2 MiB over real SCTP; cancellation, corrupt/stalled transfers, friend revocation, deletion replay, interrupted recovery and preservation of read receipts/source files are covered. Roster, notification actions and peer/video lifetime checks remain covered. Remaining: full UI/settings/secondary-event parity; long-poll fallback, robust message retry/sync and full call/stream/reconnect acceptance; neural DSP, camera/system audio/SFU/control; profile import/rollback; installer/updater/legacy bridge; two-device, long-session and resource acceptance; final packaging. `3.8.0-rust` remains a target. Existing beta validators require a `beta` prefix and need a compatible bridge or explicit installation. .NET backend and Go SFU remain the compatibility targets.
 
-Neural continuation: the exact 22270507-byte RNNoise archive was verified from the NixOS content-addressed cache, retaining Xiph as a hash-checked fallback. A static default-feature build linked, but RNNoise PCM failed because the binding crate's later C output-layer architecture differs from the existing WASM revision. A verified local crate now selects two unchanged source files from the actual WASM submodule `2e3c812c62c32b3ac486c3cd4f4894e6f57d45fd`. All six neural tests passed without relaxed tolerances: RNNoise PCM mean 0.00018198545129978868/max 0.001667805; DFN3 mean 1.8255001080535624e-9/max 3.4691766e-8; source/model hashes and the Tract regression passed. Both Silero tests passed, including 96 frames through the unchanged TypeScript/WASM worker (maximum probability error 0.000001013279, resets and sequence gaps covered). Final default-feature verification passed: 35 unit + 35 integration tests, nine HTTP tests, pinned artifacts, fmt, native Clippy with `-D warnings`, fresh build and source-freeze gate. Eight logs, 387 source hashes, actual metrics and the verified binary hash are preserved in `migration-artifacts/native-audio/neural-2026-11-07/verification.json`; readiness flags remain false. Tract retains 90 upstream warnings (91 diagnostic lines including its Cargo summary). The microphone/playback integration remains unfinished. The updated code graph has 5049 nodes and 11869 edges; seven metadata files produced no AST nodes, legal-document semantics were not extracted, and HTML generation was skipped above its 5000-node limit.
+Neural checkpoint history: the exact 22270507-byte RNNoise archive was verified from the NixOS content-addressed cache, retaining Xiph as a hash-checked fallback. A static default-feature build linked, but RNNoise PCM failed because the binding crate's later C output-layer architecture differs from the existing WASM revision. A verified local crate selects two unchanged source files from the actual WASM submodule `2e3c812c62c32b3ac486c3cd4f4894e6f57d45fd`. Neural tests passed without relaxed tolerances: RNNoise PCM mean 0.00018198545129978868/max 0.001667805; DFN3 mean 1.8255001080535624e-9/max 3.4691766e-8; source/model hashes and the Tract regression passed. Silero matched the unchanged TypeScript/WASM worker (maximum probability error 0.000001013279, resets and sequence gaps covered). The initial neural checkpoint passed 35 unit + 35 integration tests; eight logs and 387 hashes are preserved under `neural-2026-11-07`. The subsequent microphone/playback wiring passed 36 unit + 45 integration tests, nine HTTP tests, pinned artifacts, fmt/Clippy/build and source freeze under `wiring-verified-2026-11-07`, with 392 source hashes and the matching binary hash. Neural-disabled compatibility passed 74 tests. Code wiring is complete, but full audio/client acceptance is not; readiness flags remain false. Tract retains 90 upstream warnings (91 diagnostic lines including its Cargo summary). The current graph has 5131 nodes/12101 edges; seven metadata files produced no AST nodes, legal-document semantics were not extracted, and HTML generation was skipped above its 5000-node limit.
