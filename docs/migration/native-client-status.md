@@ -420,6 +420,26 @@ canceled audio-child health on `rust/native-client`;159/149tests,410sources,
 Do not repeat verified font-family/DSP-health/panel/runtime/core wiring. No push,
 merge, release or shutdown; complete client/audio/UI acceptance still unfinished.
 
+Reference thumb spring implementation is under final verification after67d378c:
+1280ms press/1880ms pop with current-scale interruption and reduced-motion/
+hide/retake cancellation.3162pure millisecond samples match installedAnime4.5.0;
+native323frame timing and unchangedReact liveCDP/RAF development checks passed.
+Snapshot-free timing is separate from PNGreplays to avoid capture-induced stalls.
+The final two-feature/fullUI/motion matrix is running; this is not a saved final
+spring/UI/client acceptance checkpoint. All readiness flags remain false.
+
+Reference solver/native thumb lifecycle финально проверены локально:
+**162default (56unit+106integration) /152no-neural (56unit+96integration)**,
+412matching sources,9HTTP/pinned artifacts/fmt/Clippy/freshbuild.56panel/64settings/
+24auth +8+8+8interactions, staticimages/reference/neural unchanged,0hash mismatch.
+Finalcode/current.exe/allUI/auth/motion binary1959b537… is verified. Actual1280ms
+press/1880ms pop with current-scale interruption and reduced/hide/retake guards;
+all3162solver samples match installedAnime4.5.0.8native13phase/2550timingframes and
+8explicitlywarmedReact5phase/2324frames, separately241native+40referencePNGs,
+at4DPI/RUEN passed. Warm-up scope is explicit; coldReact200%≈194msgap retained
+unaccepted. Next baseline/raster/layout/focus, synchronized/cold/card/pulse/dot
+and remaining audio/physical/client work. Allreadinessfalse; no release/shutdown.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final

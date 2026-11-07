@@ -53,6 +53,12 @@ export component MicTestPanel inherits Rectangle {
     in property <float> pulse;
     in property <float> dot-pulse;
     pure callback tr(string) -> string;
+    pure callback spring(float, bool) -> float;
+    out property <float> thumb-scale: root.thumb-running ? root.thumb-from + (root.thumb-target - root.thumb-from) * root.spring(clamp((animation-tick() - root.thumb-started) / root.thumb-duration, 0, 1), root.thumb-pop) : root.thumb-target;
+    out property <bool> thumb-animating: root.thumb-running;
+    callback thumb-updated(float, bool);
+    changed thumb-scale => { root.thumb-updated(root.thumb-scale, root.thumb-running); }
+    changed thumb-running => { root.thumb-updated(root.thumb-scale, root.thumb-running); }
     callback record;
     callback toggle-playback;
     callback seek(float);
@@ -62,8 +68,34 @@ export component MicTestPanel inherits Rectangle {
     private property <bool> scrubbing;
     private property <float> scrub-position;
     private property <float> shown-position: root.scrubbing ? root.scrub-position : root.test.position;
-    changed active => { if !root.active { root.scrubbing = false; } }
-    changed test => { if root.test.stage != "ready" { root.scrubbing = false; } }
+    private property <bool> ready: root.test.stage == "ready";
+    private property <float> thumb-from: 1;
+    private property <float> thumb-target: 1;
+    private property <bool> thumb-pop;
+    private property <bool> thumb-running;
+    private property <duration> thumb-started;
+    private property <duration> thumb-duration: root.thumb-pop ? 1880ms : 1280ms;
+    function move-thumb(from: float, to: float, pop: bool) {
+        root.thumb-running = false;
+        root.thumb-from = from;
+        root.thumb-target = to;
+        root.thumb-pop = pop;
+        root.thumb-started = animation-tick();
+        root.thumb-running = !root.reduced-motion;
+    }
+    init => { if root.active && root.ready { root.move-thumb(0, 1, true); } }
+    changed active => {
+        if root.active && root.ready { root.move-thumb(0, 1, true); }
+        if !root.active { root.scrubbing = false; root.thumb-running = false; root.thumb-target = 1; }
+    }
+    changed ready => {
+        if root.ready && root.active { root.move-thumb(0, 1, true); }
+        if !root.ready { root.scrubbing = false; root.thumb-running = false; root.thumb-target = 1; }
+    }
+    changed reduced-motion => { if root.reduced-motion { root.thumb-running = false; } }
+    Timer { interval: 16ms; running: root.thumb-running;
+        triggered => { if animation-tick() - root.thumb-started >= root.thumb-duration { root.thumb-running = false; } }
+    }
     public function seek-to(seconds: float) { if root.active && root.test.duration > 0 { root.seek(clamp(seconds, 0, root.test.duration)); } }
     if root.test.stage == "ready" : Rectangle {
         x: 0px; y: 0px; width: root.width; height: 36px; border-radius: 16px; border-width: 1px; border-color: #ffffff12; background: #161618bf; clip: true;
@@ -85,10 +117,9 @@ export component MicTestPanel inherits Rectangle {
         track := Rectangle { x: 39px; y: 16px; width: parent.width - 52px; height: 4px; border-radius: 2px; background: #ffffff1f;
             Rectangle { x: 0px; y: 0px; width: parent.width * clamp(root.shown-position / max(root.test.duration, 0.001), 0, 1); height: parent.height; border-radius: 2px; background: #de217c; }
             Rectangle { x: parent.width * clamp(root.shown-position / max(root.test.duration, 0.001), 0, 1) - 5px; y: -3px; width: 10px; height: 10px; border-radius: 5px; background: white;
-                transform-scale-x: root.scrubbing ? 1.5 : 1;
-                transform-scale-y: root.scrubbing ? 1.5 : 1;
+                transform-scale-x: root.thumb-scale;
+                transform-scale-y: root.thumb-scale;
                 transform-origin: { x: 5px, y: 5px };
-                animate transform-scale-x, transform-scale-y { duration: root.reduced-motion ? 0ms : 150ms; easing: ease-out; }
             }
         }
         seek-keys := FocusScope { enabled: root.active;
@@ -101,11 +132,13 @@ export component MicTestPanel inherits Rectangle {
         seek-touch := TouchArea { x: 37px; width: parent.width - 38px; height: 36px; enabled: root.active;
             pointer-event(event) => {
                 if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    root.move-thumb(root.thumb-scale, 1.5, false);
                     seek-keys.focus(); root.scrubbing = true;
                     root.scrub-position = clamp((self.mouse-x - 2px) / track.width, 0, 1) * root.test.duration;
                 }
                 if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) || event.kind == PointerEventKind.cancel {
                     if root.scrubbing {
+                        root.move-thumb(root.thumb-scale, 1, false);
                         if event.kind == PointerEventKind.up { root.scrub-position = clamp((self.mouse-x - 2px) / track.width, 0, 1) * root.test.duration; }
                         root.scrubbing = false; root.seek-to(root.scrub-position);
                     }

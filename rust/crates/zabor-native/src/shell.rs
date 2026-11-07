@@ -44,6 +44,8 @@ use zabor_native::video::{DecodedVideo, StreamDropGrace, VideoFrameLease, VideoR
 use zabor_native::voice::VoiceSession;
 use zeroize::Zeroizing;
 
+mod mic_motion;
+
 enum Command {
     Authenticate {
         credentials: Credentials,
@@ -233,6 +235,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .into()
     });
     ui.set_language(locale.into());
+    ui.on_mic_thumb_spring(|progress, pop| {
+        zabor_native::motion::mic_thumb_spring(f64::from(progress), pop) as f32
+    });
     ui.set_reduced_motion(reduced_motion);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -1289,6 +1294,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         reconcile_volume_modal(&ui);
     });
     let mut preview_scroll = false;
+    let motion_preview = matches!(preview.as_deref(), Some("mic-motion" | "mic-motion-frames"));
+    let motion_capture = preview.as_deref() == Some("mic-motion-frames");
     if let Some(preview) = preview {
         match preview.as_str() {
             "login" => {}
@@ -1299,7 +1306,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
             "audio" | "audio-manual" | "audio-raw" | "audio-ultra" | "audio-deepfilter"
             | "audio-general" | "audio-privacy" | "audio-volume" | "mic-idle" | "mic-arming"
-            | "mic-recording" | "mic-playing" | "mic-paused" | "mic-silent" | "mic-failed" => {
+            | "mic-recording" | "mic-playing" | "mic-paused" | "mic-silent" | "mic-failed"
+            | "mic-motion" | "mic-motion-frames" => {
                 apply_bootstrap(&ui, &notification_fixture());
                 ui.set_authenticated(true);
                 ui.set_connected(true);
@@ -1410,7 +1418,20 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let capture_error = Rc::new(RefCell::new(None));
-    if interaction_check {
+    if motion_preview {
+        if reduced_motion || interaction_check {
+            return Err(
+                "Motion preview requires non-reduced motion and no interaction-check".into(),
+            );
+        }
+        mic_motion::start(
+            &ui,
+            &capture,
+            snapshot.ok_or("Motion evidence directory is required")?,
+            capture_error.clone(),
+            motion_capture,
+        )?;
+    } else if interaction_check {
         let weak = ui.as_weak();
         let error = capture_error.clone();
         capture.start(
