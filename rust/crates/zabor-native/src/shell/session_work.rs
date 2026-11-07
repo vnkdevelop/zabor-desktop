@@ -36,6 +36,14 @@ impl<'a> SessionWork<'a> {
         }
     }
 
+    pub(super) fn commit<T>(&self, commit: impl FnOnce() -> T) -> Option<T> {
+        self.intents
+            .commit(self.ticket, IntentScope::Session, || {
+                (!self.stop.is_cancelled()).then(commit)
+            })
+            .flatten()
+    }
+
     pub(super) async fn run<T>(&self, future: impl Future<Output = T>) -> Option<T> {
         tokio::select! {
             biased;

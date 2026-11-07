@@ -642,7 +642,35 @@ voicePublicationGuardsChecked=true is narrow component acceptance. Main session
 waits/save races/native resource timing/same-peer reconnect messages without
 epochs/physical/full-client gates remain open; workerResponsivenessAccepted,
 audioIntegrationAccepted, callIntegrationAccepted and nativeClientReady stayfalse.
-Save milestone/post-save Graphify and compact; no push/release/shutdown.
+Saved `3d69683`; post-save Graphify/source/evidence/clean-tree guard passed;
+no push/release/shutdown.
+
+### Main session waits and guarded owner commits: components checked locally
+
+Pure Session computation frees VoiceLeave while auth/modal/notification waits
+remain pinned. Connection/relogin keep owner work; final command scope checks
+reject old voice commands. Synchronous commit gates serialize with Logout;
+DPAPI staged preparation runs outside that gate and abandoned output cleans itself.
+Development fmt/Clippy/78tests passed;436primary+3reference hashes match.
+13actual stalled protocol Leave/Logout matrix and staged/in-flight DPAPI cleanup
+passed. Compatible late resume selector
+now uses original voice ticket after CheckUserExists, avoiding post-Leave resume
+while preserving the same auth future. Initial failure was an invalid32hex test
+session ID, production validation retained.
+Final `native-calls/main-session-final-2026-11-08/` passed225default/215neural-disabled
+fulltests, both Clippy modes/fmt/pinned/9HTTP/neural/freshbuild and8inert RUEN/DPI
+auth/roster/audio/MicTest interactions; protected neural metrics unchanged.
+Independent436primary+3reference/all24evidence/current+frozen executable+ONNX DLL
+audit found0mismatches, verified5expected source changes+2new main modules and
+13protocol/late-resume/profile-owner/temporary-cleanup proofs in both modes.
+Actual/frozen executable SHA-256:
+`11306b6ed4a73cb800dce4d72b66101c129734b32070b0ede40d35fd2a7bb8f2`.
+mainSessionWorkChecked/guardedSessionCommitChecked=true are narrow component
+acceptance. Final filesystem/critical-lock commit bounds, chat/file final-save
+races, native OS resource timing and full worker/audio/call/client gates remain
+unaccepted. workerResponsivenessAccepted/audioIntegrationAccepted/
+callIntegrationAccepted/nativeClientReady stayfalse. Save milestone/post-save
+Graphify/guard and compact; no push/release/shutdown.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

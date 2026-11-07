@@ -29,6 +29,11 @@ pub struct SavedSession {
     pub password: Zeroizing<String>,
 }
 
+pub struct PreparedSession {
+    root: PathBuf,
+    temporary: tempfile::TempPath,
+}
+
 impl Profile {
     pub fn default_path() -> Result<PathBuf, ProfileError> {
         std::env::var_os("APPDATA")
@@ -67,6 +72,63 @@ impl Profile {
         };
         let data = Zeroizing::new(serde_json::to_vec(&session).map_err(|_| ProfileError::Secret)?);
         self.write_secret("session.enc", &data)
+    }
+
+    #[cfg(windows)]
+    pub fn prepare_session(
+        &self,
+        user_id: &str,
+        credentials: &Credentials,
+    ) -> Result<PreparedSession, ProfileError> {
+        let session = SavedSession {
+            user_id: user_id.into(),
+            username: credentials.username.clone(),
+            password: credentials.password.clone(),
+        };
+        let data = Zeroizing::new(serde_json::to_vec(&session).map_err(|_| ProfileError::Secret)?);
+        if data.len() > 1024 * 1024 {
+            return Err(ProfileError::Secret);
+        }
+        let encrypted = windows_dpapi::encrypt_data(
+            &data,
+            windows_dpapi::Scope::User,
+            Some(b"zabor-native-v1"),
+        )
+        .map_err(|_| ProfileError::Secret)?;
+        let mut file = tempfile::Builder::new()
+            .prefix(".session.enc.")
+            .suffix(".tmp")
+            .tempfile_in(&self.root)
+            .map_err(|_| ProfileError::Storage)?;
+        file.write_all(b"ZNS1").map_err(|_| ProfileError::Storage)?;
+        file.write_all(&encrypted)
+            .map_err(|_| ProfileError::Storage)?;
+        file.as_file()
+            .sync_all()
+            .map_err(|_| ProfileError::Storage)?;
+        Ok(PreparedSession {
+            root: self.root.clone(),
+            temporary: file.into_temp_path(),
+        })
+    }
+
+    #[cfg(not(windows))]
+    pub fn prepare_session(
+        &self,
+        _user_id: &str,
+        _credentials: &Credentials,
+    ) -> Result<PreparedSession, ProfileError> {
+        Err(ProfileError::Secret)
+    }
+
+    pub fn commit_session(&self, prepared: PreparedSession) -> Result<(), ProfileError> {
+        if prepared.root != self.root {
+            return Err(ProfileError::Storage);
+        }
+        prepared
+            .temporary
+            .persist(self.root.join("session.enc"))
+            .map_err(|_| ProfileError::Storage)
     }
 
     pub fn load_session(&self) -> Result<Option<SavedSession>, ProfileError> {
@@ -179,6 +241,78 @@ impl Profile {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_session_preserves_dpapi_format_and_only_replaces_destination_at_commit() {
+        let root = tempfile::tempdir().unwrap();
+        let profile = Profile::open(root.path()).unwrap();
+        let credentials = Credentials {
+            username: "fixture".into(),
+            password: Zeroizing::new("fixture-only".into()),
+        };
+        profile
+            .save_session("original-owner", &credentials)
+            .unwrap();
+        let original = std::fs::read(root.path().join("session.enc")).unwrap();
+        let prepared = profile
+            .prepare_session("prepared-owner", &credentials)
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join("session.enc")).unwrap(),
+            original
+        );
+        let bytes = std::fs::read(&prepared.temporary).unwrap();
+        assert!(bytes.starts_with(b"ZNS1"));
+        assert!(!bytes
+            .windows(credentials.password.len())
+            .any(|window| window == credentials.password.as_bytes()));
+        profile.commit_session(prepared).unwrap();
+        let session = profile.load_session().unwrap().unwrap();
+        assert_eq!(session.user_id, "prepared-owner");
+        assert_eq!(session.password.as_str(), credentials.password.as_str());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn dropped_or_wrong_profile_session_preparation_cleans_only_its_own_temporary_file() {
+        let root = tempfile::tempdir().unwrap();
+        let other_root = tempfile::tempdir().unwrap();
+        let profile = Profile::open(root.path()).unwrap();
+        let other = Profile::open(other_root.path()).unwrap();
+        let credentials = Credentials {
+            username: "fixture".into(),
+            password: Zeroizing::new("fixture-only".into()),
+        };
+        profile
+            .save_session("original-owner", &credentials)
+            .unwrap();
+        other.save_session("other-owner", &credentials).unwrap();
+        profile
+            .write_settings(&serde_json::json!({"language":"ru"}))
+            .unwrap();
+        let prepared = profile
+            .prepare_session("prepared-owner", &credentials)
+            .unwrap();
+        let path = prepared.temporary.to_path_buf();
+        assert!(path.exists());
+        drop(prepared);
+        assert!(!path.exists());
+        let prepared = profile
+            .prepare_session("prepared-owner", &credentials)
+            .unwrap();
+        let path = prepared.temporary.to_path_buf();
+        assert!(other.commit_session(prepared).is_err());
+        assert!(!path.exists());
+        assert_eq!(
+            profile.load_session().unwrap().unwrap().user_id,
+            "original-owner"
+        );
+        assert_eq!(
+            other.load_session().unwrap().unwrap().user_id,
+            "other-owner"
+        );
+        assert_eq!(profile.read_settings().unwrap()["language"], "ru");
+    }
 
     #[test]
     fn windows_profile_protects_secrets_and_logout_retains_other_data() {

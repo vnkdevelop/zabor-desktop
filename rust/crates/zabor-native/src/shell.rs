@@ -52,9 +52,13 @@ mod leave_work;
 use leave_work::VoiceLeave;
 #[cfg(test)]
 mod leave_tests;
+mod main_session;
 mod mic_focus;
 mod mic_motion;
 mod mic_pressed;
+use main_session::MainResult;
+#[cfg(test)]
+mod main_session_tests;
 mod session_work;
 use session_work::SessionWork;
 mod voice_work;
@@ -2526,16 +2530,8 @@ async fn worker(
                     break;
                 }
             };
-            let connection_scope = if voice.is_some() {
-                IntentScope::Voice
-            } else {
-                command.scope()
-            };
-            let connection_ticket = if command.scope() == IntentScope::Session {
-                intents.voice_context(command_ticket)
-            } else {
-                command_ticket
-            };
+            let connection_work =
+                SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
             let resume_budget = call_recovery
                 .session_for_login(std::time::Instant::now())
                 .map(|_| call_recovery.remaining(std::time::Instant::now()));
@@ -2549,29 +2545,35 @@ async fn worker(
                     None => future.await,
                 }
             };
-            let connection = tokio::select! { _ = stop.cancelled() => break, result = intents.run(connection_ticket, connection_scope, connecting) => result };
+            let connection = run_session!(connection_work, connecting);
             let Some(connection) = connection else {
-                if saved_credentials.is_some() {
-                    retry_at = Some(tokio::time::Instant::now() + Duration::from_secs(2));
-                }
                 continue;
             };
             match connection {
                 Ok((connection, receiver)) => {
-                    hub = Some(connection);
-                    events = Some(receiver);
-                    update(UiEvent::Connected.guarded(connection_ticket, IntentScope::Session));
+                    if connection_work
+                        .commit(|| {
+                            hub = Some(connection);
+                            events = Some(receiver);
+                        })
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    connection_work.publish(UiEvent::Connected);
                 }
                 Err(error) => {
                     let error = AuthError::from(error);
-                    if saved_credentials.is_some() && error != AuthError::ClientRejected {
-                        retry_attempt = retry_attempt.saturating_add(1);
-                        retry_at = Some(
-                            tokio::time::Instant::now()
-                                + Duration::from_secs((2_u64 << retry_attempt.min(4)).min(30)),
-                        );
-                    }
-                    update(UiEvent::Error(error));
+                    connection_work.commit(|| {
+                        if saved_credentials.is_some() && error != AuthError::ClientRejected {
+                            retry_attempt = retry_attempt.saturating_add(1);
+                            retry_at = Some(
+                                tokio::time::Instant::now()
+                                    + Duration::from_secs((2_u64 << retry_attempt.min(4)).min(30)),
+                            );
+                        }
+                    });
+                    connection_work.publish(UiEvent::Error(error));
                     continue;
                 }
             }
@@ -2585,24 +2587,18 @@ async fn worker(
             let resume_session = call_recovery
                 .session_for_login(std::time::Instant::now())
                 .map(str::to_owned);
-            let auth_scope = if voice.is_some() {
-                IntentScope::Voice
-            } else {
-                command.scope()
-            };
-            let auth_ticket = if command.scope() == IntentScope::Session {
-                intents.voice_context(command_ticket)
-            } else {
-                command_ticket
-            };
+            let auth_work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            let credentials = saved_credentials.as_ref().unwrap().clone();
             let resume_budget = resume_session
                 .as_ref()
                 .map(|_| call_recovery.remaining(std::time::Instant::now()));
+            let resume_work =
+                voice_ticket.map(|ticket| VoiceWork::new(&intents, ticket, &stop, update.as_ref()));
             let authenticating = async {
-                let future = auth.login_with_resume(
-                    saved_credentials.as_ref().unwrap(),
-                    resume_session.as_deref(),
-                );
+                let future =
+                    auth.login_with_resume_if(&credentials, resume_session.as_deref(), || {
+                        resume_work.as_ref().is_some_and(VoiceWork::is_current)
+                    });
                 match resume_budget {
                     Some(budget) => tokio::time::timeout(budget, future)
                         .await
@@ -2610,43 +2606,54 @@ async fn worker(
                     None => future.await,
                 }
             };
-            let outcome = tokio::select! { _ = stop.cancelled() => break, result = intents.run(auth_ticket, auth_scope, authenticating) => result };
+            let outcome = run_session!(auth_work, authenticating);
             let Some(outcome) = outcome else {
-                if saved_credentials.is_some() {
-                    retry_at = Some(tokio::time::Instant::now() + Duration::from_secs(2));
-                }
                 continue;
             };
             match outcome {
                 Ok(LoginOutcome::SignedIn(data)) => {
-                    if !restore_audio(&audio_preferences, &connection, &data) {
-                        update(UiEvent::Toast("validation.sessionSaveError"));
+                    let Some(restored) = auth_work.commit(|| {
+                        let restored = restore_audio(&audio_preferences, &connection, &data);
+                        sent_audio_state = None;
+                        sent_speaking = false;
+                        speaking_release = None;
+                        session_ready = true;
+                        retry_attempt = 0;
+                        retry_at = None;
+                        current_user = Some(data.user.clone());
+                        chat_ice = data
+                            .ice_config
+                            .as_ref()
+                            .and_then(|value| {
+                                serde_json::from_value(value["iceServers"].clone()).ok()
+                            })
+                            .unwrap_or_default();
+                        friends = data
+                            .friends
+                            .iter()
+                            .map(|friend| friend.id.clone())
+                            .collect();
+                        if let Some(chat) = chat.as_mut() {
+                            chat.set_friends(friends.iter().cloned());
+                        }
+                        restored
+                    }) else {
+                        continue;
+                    };
+                    if !restored {
+                        auth_work.publish(UiEvent::Toast("validation.sessionSaveError"));
                     }
-                    sent_audio_state = None;
-                    sent_speaking = false;
-                    speaking_release = None;
-                    session_ready = true;
-                    retry_attempt = 0;
-                    retry_at = None;
-                    current_user = Some(data.user.clone());
-                    chat_ice = data
-                        .ice_config
-                        .as_ref()
-                        .and_then(|value| serde_json::from_value(value["iceServers"].clone()).ok())
-                        .unwrap_or_default();
-                    friends = data
-                        .friends
-                        .iter()
-                        .map(|friend| friend.id.clone())
-                        .collect();
-                    if let Some(chat) = chat.as_mut() {
-                        chat.set_friends(friends.iter().cloned());
-                    }
-                    update(UiEvent::SignedIn(data).guarded(auth_ticket, IntentScope::Session));
+                    auth_work.publish(UiEvent::SignedIn(data));
                     let restore_work = voice_ticket
                         .map(|ticket| VoiceWork::new(&intents, ticket, &stop, update.as_ref()));
                     if let Some(session) = voice.as_mut() {
                         if let Some(channel) = session.channel.clone() {
+                            let Some(work) = &restore_work else {
+                                continue;
+                            };
+                            if !work.is_current() {
+                                continue;
+                            }
                             video_generation.fetch_add(1, Ordering::AcqRel);
                             for peer in video_jobs.keys() {
                                 if let Some(work) = &restore_work {
@@ -2656,7 +2663,7 @@ async fn worker(
                             video_jobs.clear();
                             paused_video.clear();
                             stream_drops.clear();
-                            let result = tokio::select! { _ = stop.cancelled() => break, result = intents.run(auth_ticket, IntentScope::Voice, session.rejoin(&connection)) => result };
+                            let result = work.run(session.rejoin(&connection)).await;
                             let Some(result) = result else {
                                 continue;
                             };
@@ -2680,40 +2687,50 @@ async fn worker(
                 }
                 Ok(LoginOutcome::NeedsRegistration)
                 | Err(AuthError::InvalidPassword | AuthError::ClientRejected) => {
-                    audio_preferences.logout();
-                    audio_runtime.reset();
-                    saved_credentials = None;
-                    if let Some(profile) = &profile {
-                        let _ = profile.clear_session();
-                    }
-                    current_user = None;
-                    file_jobs = None;
-                    file_progress.clear();
-                    if let Some(engine) = chat.as_mut() {
+                    let Some(disposed) = auth_work.commit(|| {
+                        audio_preferences.logout();
+                        audio_runtime.reset();
+                        saved_credentials = None;
+                        current_user = None;
+                        file_progress.clear();
+                        chat_failed = false;
+                        friends.clear();
+                        selected_chat = None;
+                        (
+                            file_jobs.take(),
+                            chat.take(),
+                            chat_transport.take(),
+                            voice.take(),
+                            media_events.take(),
+                        )
+                    }) else {
+                        continue;
+                    };
+                    if let Some(mut engine) = disposed.1 {
                         engine.fail_downloads(None, now_ms());
                     }
-                    chat = None;
-                    chat_transport = None;
-                    chat_failed = false;
-                    friends.clear();
-                    selected_chat = None;
-                    voice = None;
-                    media_events = None;
-                    update(UiEvent::VoiceEnded);
-                    update(UiEvent::SignedOut);
+                    drop((disposed.0, disposed.2, disposed.3, disposed.4));
+                    if let Some(profile) = &profile {
+                        auth_work.commit(|| profile.clear_session());
+                    }
+                    auth_work.publish(UiEvent::VoiceEnded);
+                    auth_work.publish(UiEvent::SignedOut);
                     continue;
                 }
                 Err(error) => {
-                    let delay = match error {
-                        AuthError::Throttled(minutes) => minutes.saturating_mul(60),
-                        _ => {
-                            retry_attempt = retry_attempt.saturating_add(1);
-                            (2_u64 << retry_attempt.min(4)).min(30)
-                        }
-                    };
-                    retry_at =
-                        Some(tokio::time::Instant::now() + Duration::from_secs(delay.min(86400)));
-                    update(UiEvent::Error(error));
+                    auth_work.commit(|| {
+                        let delay = match error {
+                            AuthError::Throttled(minutes) => minutes.saturating_mul(60),
+                            _ => {
+                                retry_attempt = retry_attempt.saturating_add(1);
+                                (2_u64 << retry_attempt.min(4)).min(30)
+                            }
+                        };
+                        retry_at = Some(
+                            tokio::time::Instant::now() + Duration::from_secs(delay.min(86400)),
+                        );
+                    });
+                    auth_work.publish(UiEvent::Error(error));
                     continue;
                 }
             }
@@ -2721,26 +2738,48 @@ async fn worker(
         if matches!(command, Command::Reconnect) {
             continue;
         }
-        let operation_scope = command.scope();
-        let starting_call = matches!(command, Command::Call(_) | Command::AnswerCall(_, true));
-        let operation = async {
-            match command {
-                Command::Authenticate {
-                    credentials,
-                    registration,
-                } => match registration {
-                    Some(registration) => auth
-                        .register(&credentials, registration)
-                        .await
-                        .map(|data| LoginOutcome::SignedIn(Box::new(data))),
-                    None => auth.login(&credentials).await,
+        if !intents.is_current(command_ticket, command.scope()) {
+            continue;
+        }
+        if main_session::is_session_command(&command) {
+            let work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            let result = run_session!(
+                work,
+                main_session::compute(command, &auth, &connection, current_user.clone())
+            );
+            let Some(result) = result else {
+                continue;
+            };
+            match result {
+                Ok(MainResult::Authentication(LoginOutcome::NeedsRegistration, _)) => {
+                    work.publish(UiEvent::MissingAccount)
                 }
-                .map(|outcome| match outcome {
-                    LoginOutcome::NeedsRegistration => UiEvent::MissingAccount,
-                    LoginOutcome::SignedIn(data) => {
-                        if !restore_audio(&audio_preferences, &connection, &data) {
-                            update(UiEvent::Toast("validation.sessionSaveError"));
+                Ok(MainResult::Authentication(LoginOutcome::SignedIn(data), credentials)) => {
+                    if let Some(profile) = &profile {
+                        let preparing_profile = profile.clone();
+                        let preparing_credentials = credentials.clone();
+                        let owner = data.user.id.clone();
+                        let prepared = run_session!(
+                            work,
+                            tokio::task::spawn_blocking(move || preparing_profile
+                                .prepare_session(&owner, &preparing_credentials))
+                        );
+                        match prepared {
+                            Some(Ok(Ok(prepared))) => {
+                                match work.commit(|| profile.commit_session(prepared)) {
+                                    Some(Ok(())) => {}
+                                    Some(Err(_)) => {
+                                        work.publish(UiEvent::Toast("validation.sessionSaveError"))
+                                    }
+                                    None => continue,
+                                }
+                            }
+                            Some(_) => work.publish(UiEvent::Toast("validation.sessionSaveError")),
+                            None => continue,
                         }
+                    }
+                    let Some(restored) = work.commit(|| {
+                        let restored = restore_audio(&audio_preferences, &connection, &data);
                         sent_audio_state = None;
                         sent_speaking = false;
                         speaking_release = None;
@@ -2757,19 +2796,67 @@ async fn worker(
                             .iter()
                             .map(|friend| friend.id.clone())
                             .collect();
-                        if let Some(profile) = &profile {
-                            if profile.save_session(&data.user.id, &credentials).is_err() {
-                                update(UiEvent::Toast("validation.sessionSaveError"));
-                            }
-                        }
                         saved_credentials = Some(credentials);
                         session_ready = true;
                         retry_attempt = 0;
                         retry_at = None;
-                        UiEvent::SignedIn(data)
+                        restored
+                    }) else {
+                        continue;
+                    };
+                    if !restored {
+                        work.publish(UiEvent::Toast("validation.sessionSaveError"));
                     }
-                }),
-                Command::Captcha => auth.captcha().await.map(UiEvent::Captcha),
+                    work.publish(UiEvent::SignedIn(data));
+                }
+                Ok(MainResult::Event(event)) => work.publish(event),
+                Err(error) => work.publish(UiEvent::Error(error)),
+            }
+            continue;
+        }
+        if matches!(command, Command::Audio) {
+            let work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            let (muted, deafened) = audio_controls.user_state();
+            if work
+                .commit(|| {
+                    if let Some(user) = current_user.as_mut() {
+                        user.is_muted = muted;
+                        user.is_deafened = deafened;
+                    }
+                })
+                .is_none()
+            {
+                continue;
+            }
+            if let (Some(session), Some(ticket)) = (voice.as_mut(), voice_ticket) {
+                let voice_work = VoiceWork::new(&intents, ticket, &stop, update.as_ref());
+                match voice_work
+                    .run(session.mute(&connection, muted, deafened))
+                    .await
+                {
+                    Some(Ok(())) => {
+                        if voice_work.is_current() {
+                            sent_audio_state = Some((muted, deafened));
+                        }
+                    }
+                    Some(Err(_)) => {
+                        work.publish(UiEvent::Error(AuthError::Network));
+                        continue;
+                    }
+                    None => {}
+                }
+            }
+            work.publish(UiEvent::Connected);
+            continue;
+        }
+        let operation_scope = command.scope();
+        let starting_call = matches!(command, Command::Call(_) | Command::AnswerCall(_, true));
+        let operation = async {
+            match command {
+                Command::Authenticate { .. }
+                | Command::Captcha
+                | Command::Modal { .. }
+                | Command::Audio => unreachable!(),
                 Command::Notification(kind, id, accept) => {
                     if !respond_notification(&connection, kind, &id, accept)
                         .await
@@ -2781,24 +2868,6 @@ async fn worker(
                         pending_join = Some(id.clone());
                     }
                     Ok(UiEvent::NotificationResolved(kind, id, accept))
-                }
-                Command::Modal { kind, value } => {
-                    let target = if kind == 1 {
-                        "CreateChannel"
-                    } else {
-                        "SendFriendRequest"
-                    };
-                    if value.trim().is_empty() || value.encode_utf16().count() > 25 {
-                        return Err(AuthError::Validation("validation.maxChars"));
-                    }
-                    connection
-                        .invoke(target, vec![json!(value.trim())], Duration::from_secs(20))
-                        .await
-                        .map_err(AuthError::from)?;
-                    let user = current_user.clone().ok_or(AuthError::Network)?;
-                    auth.load(user)
-                        .await
-                        .map(|data| UiEvent::Data(Box::new(data)))
                 }
                 Command::Logout
                 | Command::Reconnect
@@ -2865,21 +2934,6 @@ async fn worker(
                             }))
                         }
                     }
-                }
-                Command::Audio => {
-                    let (muted, deafened) = audio_controls.user_state();
-                    if let Some(user) = current_user.as_mut() {
-                        user.is_muted = muted;
-                        user.is_deafened = deafened;
-                    }
-                    if let Some(session) = voice.as_mut() {
-                        session
-                            .mute(&connection, muted, deafened)
-                            .await
-                            .map_err(|_| AuthError::Network)?;
-                        sent_audio_state = Some((muted, deafened));
-                    }
-                    Ok(UiEvent::Connected)
                 }
                 Command::Call(peer) => {
                     video_generation.fetch_add(1, Ordering::AcqRel);

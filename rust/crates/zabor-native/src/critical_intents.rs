@@ -106,6 +106,26 @@ impl CriticalIntents {
                     && state.pending.is_none()))
     }
 
+    pub fn commit<T>(
+        &self,
+        ticket: IntentTicket,
+        scope: IntentScope,
+        commit: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let state = self.state();
+        if state.owner == u64::MAX
+            || ticket.owner != state.owner
+            || state.pending == Some(CriticalAction::Logout)
+            || (scope == IntentScope::Voice
+                && (state.voice == u64::MAX
+                    || ticket.voice != state.voice
+                    || state.pending.is_some()))
+        {
+            return None;
+        }
+        Some(commit())
+    }
+
     pub async fn next(&self) -> CriticalAction {
         loop {
             let changed = {
@@ -191,6 +211,72 @@ impl CriticalIntents {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guarded_commits_preserve_session_on_leave_and_reject_revoked_and_saturated_owners() {
+        let intents = CriticalIntents::default();
+        let ticket = intents.ticket();
+        assert_eq!(
+            intents.commit(ticket, IntentScope::Session, || 42),
+            Some(42)
+        );
+        intents.request(CriticalAction::Leave);
+        assert_eq!(
+            intents.commit(ticket, IntentScope::Session, || 43),
+            Some(43)
+        );
+        assert!(intents
+            .commit(ticket, IntentScope::Voice, || panic!(
+                "Revoked voice commit ran"
+            ))
+            .is_none());
+        intents.request(CriticalAction::Logout);
+        assert!(intents
+            .commit(ticket, IntentScope::Session, || panic!(
+                "Revoked owner commit ran"
+            ))
+            .is_none());
+        intents.state().owner = u64::MAX;
+        assert!(intents
+            .commit(intents.ticket(), IntentScope::Session, || panic!(
+                "Saturated owner commit ran"
+            ))
+            .is_none());
+    }
+
+    #[test]
+    fn guarded_commit_linearizes_with_concurrent_logout_before_new_owner_can_commit() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Barrier;
+        let intents = CriticalIntents::default();
+        let ticket = intents.ticket();
+        let started = Barrier::new(2);
+        let request_started = Barrier::new(2);
+        let committed = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            let request = scope.spawn(|| {
+                started.wait();
+                request_started.wait();
+                intents.request(CriticalAction::Logout);
+                assert!(committed.load(Ordering::Acquire));
+            });
+            assert_eq!(
+                intents.commit(ticket, IntentScope::Session, || {
+                    started.wait();
+                    request_started.wait();
+                    committed.store(true, Ordering::Release);
+                    42
+                }),
+                Some(42)
+            );
+            request.join().unwrap();
+        });
+        assert!(intents
+            .commit(ticket, IntentScope::Session, || panic!(
+                "Old owner committed after Logout"
+            ))
+            .is_none());
+    }
 
     #[tokio::test]
     async fn leave_invalidates_voice_but_preserves_session_and_fresh_user_intent() {

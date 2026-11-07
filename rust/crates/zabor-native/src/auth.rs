@@ -181,6 +181,16 @@ impl AuthClient {
         credentials: &Credentials,
         session: Option<&str>,
     ) -> Result<LoginOutcome, AuthError> {
+        self.login_with_resume_if(credentials, session, || true)
+            .await
+    }
+
+    pub async fn login_with_resume_if(
+        &self,
+        credentials: &Credentials,
+        session: Option<&str>,
+        resume_is_current: impl Fn() -> bool,
+    ) -> Result<LoginOutcome, AuthError> {
         validate_credentials(credentials)?;
         if session.is_some_and(|session| !crate::call_recovery::valid_session(session)) {
             return Err(AuthError::Network);
@@ -198,6 +208,7 @@ impl AuthClient {
             Value::Bool(true) => {}
             _ => return Err(AuthError::Network),
         }
+        let session = session.filter(|_| resume_is_current());
         let mut arguments = vec![
             json!(credentials.username),
             json!(credentials.password.as_str()),
