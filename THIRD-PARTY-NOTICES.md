@@ -43,12 +43,18 @@ licences are preserved. RNNoise is bound through rnnoise2/rnnoise2-sys 0.1.2
 (MIT), <https://github.com/wiiznokes/rnnoise-rs>, with upstream BSD-3-Clause
 RNNoise code and the pinned model archive SHA-256
 `4ac81c5c0884ec4bd5907026aaae16209b7b76cd9d7f71af582094a2f98f4b43`.
+The local rnnoise2-sys copy selects untouched `denoise.c` and `rnn.c` from
+RNNoise revision `2e3c812c62c32b3ac486c3cd4f4894e6f57d45fd`, matching the existing
+WASM package's submodule and model architecture. Original sources and licences
+remain present; source selection/provenance is recorded in its `ZABOR-PATCH.md`.
 Silero reuses the existing MIT-licensed local model through ort/ort-sys
 2.0.0-rc.15 (MIT OR Apache-2.0) and Microsoft ONNX Runtime 1.31.1 (MIT).
 The verified runtime cache retains Microsoft's LICENSE and ThirdPartyNotices;
 these must accompany the future native installer. ONNX telemetry is disabled.
 Build-time preparation downloads the pinned public RNNoise archive from
-media.xiph.org and Microsoft's runtime package from NuGet, not user audio.
+the content-addressed tarballs.nixos.org cache, with media.xiph.org as a fallback,
+and Microsoft's runtime package from NuGet, not user audio. Both RNNoise sources
+must match the same pinned SHA-256 and length before compilation.
 These local inference adapters and device-thread/mixer primitives are not yet
 connected to the application's microphone path and are not in published installers.
 Native binding generation uses libclang 18.1.1 from the pinned Windows x64
@@ -82,8 +88,14 @@ rnnoise2/rnnoise2-sys 0.1.2 (MIT) с RNNoise BSD-3-Clause и закреплён�
 (MIT OR Apache-2.0) и Microsoft ONNX Runtime 1.31.1 (MIT).
 Локальная копия Tract содержит только исправление коллизии имён констант;
 его описание и исходные лицензии сохранены в `rust/vendor/tract-core-0.21.4`.
-Телеметрия ONNX отключена. На этапе сборки с media.xiph.org и NuGet
-загружаются публичные закреплённые артефакты; звук пользователя не отправляется.
+Локальная копия rnnoise2-sys выбирает неизменённые `denoise.c` и `rnn.c` из
+RNNoise `2e3c812c62c32b3ac486c3cd4f4894e6f57d45fd`, соответствующие submodule
+существующего WASM-пакета и архитектуре его весов. Исходные файлы и лицензии
+сохранены; выбор и проверенные хеши описаны в `ZABOR-PATCH.md` этой копии.
+Телеметрия ONNX отключена. На этапе сборки из content-addressed кэша
+tarballs.nixos.org (резервный источник — media.xiph.org) и NuGet загружаются
+публичные закреплённые артефакты; звук пользователя не отправляется. Оба источника
+RNNoise проверяются по одному закреплённому SHA-256 и размеру до компиляции.
 Лицензии Microsoft должны войти в будущий установщик. Эти адаптеры, потоки
 устройств и микшер пока не подключены к микрофонному тракту приложения
 и не входят в опубликованные установщики.

@@ -4,9 +4,13 @@ Copyright (C) 2026 vnkdevelop
 The native Rust client under development, including its file-handling and audio DSP code,
 is covered by this same GPL-3.0-only licence.
 Third-party components retain their licences; see THIRD-PARTY-NOTICES.md.
+The native RNNoise reference-source selection retains upstream BSD-3-Clause
+and rnnoise2/rnnoise2-sys MIT notices; it does not change the product licence.
 Разрабатываемый нативный Rust-клиент, включая обработку файлов и аудио DSP,
 распространяется по той же GPL-3.0-only.
 Лицензии сторонних компонентов перечислены в THIRD-PARTY-NOTICES.md.
+Выбор эталонных исходников RNNoise сохраняет BSD-3-Clause и MIT-уведомления
+rnnoise2/rnnoise2-sys и не меняет лицензию продукта.
 Notice updated / редакция уведомления: 2026-11-07.
 
 This program is free software: you can redistribute it and/or modify

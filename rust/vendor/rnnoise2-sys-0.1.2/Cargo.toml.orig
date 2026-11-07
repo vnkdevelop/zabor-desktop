@@ -1,0 +1,30 @@
+[package]
+name = "rnnoise2-sys"
+version = "0.1.2"
+categories = ["api-bindings"]
+description = "low level bindings for the rnnoise library"
+readme = "../README.md"
+links = "rnnoise"
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[features]
+runtime-model = []
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.72"
+cc = "1"
+flate2 = "1"
+reqwest = {version = "0.13", features = ["blocking"] }
+tar = "0.4"
+anyhow = "1"
+
+[dev-dependencies]
+
+[package.metadata.docs.rs]
+features = ["runtime-model"]

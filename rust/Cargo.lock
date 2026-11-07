@@ -5116,8 +5116,6 @@ dependencies = [
 [[package]]
 name = "rnnoise2-sys"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d79d98cd6d8a69636f767af2c573b46049108a931816626df86acc6cfe0ab2c"
 dependencies = [
  "anyhow",
  "bindgen",

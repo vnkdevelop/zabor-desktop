@@ -118,6 +118,8 @@
 2. **Хостинг.** Данные размещаются у поставщика серверной инфраструктуры, обеспечивающего работу Сервиса.
 3. **Требования закона.** Передача производится при поступлении законного требования уполномоченного государственного органа. Порядок рассмотрения таких требований описан в [docs/legal-requests.md](docs/legal-requests.md).
 
+Отдельно, при подготовке нативной сборки публичные артефакты запрашиваются у tarballs.nixos.org (кэш RNNoise, резервный источник — media.xiph.org), NuGet и PyPI. Источникам технически доступен сетевой адрес среды сборки. Эти запросы проверяют закреплённые контрольные суммы и не содержат звук, сообщения, файлы или данные аккаунтов пользователей. Это подготовка сборки, а не новый маршрут пользовательской связи; приложение выполняет вычисления моделей локально.
+
 ### 8. Трансграничная передача
 
 При использовании внешних служб установления соединений, размещённых за пределами Российской Федерации, возможна трансграничная передача данных ограниченного состава (сетевые адреса участников).
@@ -269,6 +271,8 @@ Disclosure is limited to the following cases:
 1. **Establishing connections.** External STUN services are used to determine network routes, and TURN services for relaying. Such services technically have access to participants' network addresses. The choice of services is determined by the application and server configuration.
 2. **Hosting.** Data is hosted with a server infrastructure provider operating the Service.
 3. **Legal requirements.** Disclosure occurs upon a lawful request from a competent state authority. The procedure is described in [docs/legal-requests.md](docs/legal-requests.md).
+
+Separately, native build preparation requests public artifacts from tarballs.nixos.org (the RNNoise cache, with media.xiph.org as a fallback), NuGet and PyPI. Those sources technically see the build environment's network address. The requests check pinned hashes and contain no user audio, messages, files or account data. This is build preparation, not a new user-communication route; the application runs model computation locally.
 
 ### 8. Cross-border transfer
 

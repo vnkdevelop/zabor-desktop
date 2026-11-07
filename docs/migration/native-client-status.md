@@ -106,6 +106,42 @@ ACCEPTABLE-USE.md и docs/chat-data-flow.md. Лицензия package.json ос�
 GPL-3.0-only; Electron-функциональность не менялась. Нативного установщика,
 публикации `3.8.0-rust`, push/merge или завершения Windows не было.
 
+После compact exact RNNoise archive получен из content-addressed NixOS cache:
+22270507 bytes, исходный SHA-256 подтверждён. Загрузчик сохраняет Xiph fallback
+и одинаковые hash/length проверки; девять HTTP tests повторно прошли. Первый
+static default-feature run слинковался, но RNNoise PCM выявил несовместимость
+более позднего C algorithm в rnnoise2-sys с правильными старыми весами (mean
+0.04653851915744112/max 0.13982199). Допуски не менялись. `build.rs` локальной
+проверенной копии rnnoise2-sys выбирает неизменённые `denoise.c` и `rnn.c` из
+RNNoise `2e3c812c62c32b3ac486c3cd4f4894e6f57d45fd` — фактического submodule
+существующего WASM-пакета. Исходники/лицензии сохранены, provenance и хеши
+записаны в `rust/vendor/rnnoise2-sys-0.1.2/ZABOR-PATCH.md`. Прогон с этими
+sources прошёл 6/6 neural tests без изменения допусков: RNNoise PCM mean
+`0.00018198545129978868`, max `0.001667805`; DFN3 mean
+`1.8255001080535624e-9`, max `3.4691766e-8`. Подтверждены source/model hashes,
+Tract regression и Silero tests. Это не full audio/client acceptance.
+
+Финальный default-feature прогон всех native tests, fmt/Clippy/fresh build
+**прошёл** через `scripts/native/verify-audio.cjs`: 35 unit + 35 integration tests,
+девять HTTP downloader tests и verification pinned artifacts. Логи восьми шагов,
+387 source hashes и actual neural metrics сохранены в
+`migration-artifacts/native-audio/neural-2026-11-07/verification.json`.
+Source-freeze gate и дополнительная сверка бинарного SHA-256 прошли. Tract
+сохраняет 90 upstream warnings; harness считает 91 diagnostic line вместе
+с итоговой cargo summary. Native Clippy с `-D warnings` прошёл, vendor cleanup
+не выполнялась. Это device-free/local verification, без production services
+и визуальной матрицы; `nativeClientReady=false` / `audioIntegrationAccepted=false`.
+
+Новая сверка Silero исполняет исходный TypeScript worker через существующий
+onnxruntime-web WASM на 96 frames, включая reset и sequence gap; оба Silero
+теста прошли, max probability difference `0.000001013279`. Это не замена
+подключению mic/playback, настройкам или полному client acceptance.
+
+После новых vendor/test sources code graph обновлён до 5049 nodes / 11869 edges
+/ 247 communities. Семь JSON/metadata файлов не дали AST-узлов. HTML generation
+пропущена из-за лимита 5000 nodes; прежний HTML не соответствует новой topology.
+Semantic extraction юридических документов этим прогоном не выполнялась.
+
 ### Ранее проверенный updater checkpoint
 
 - Rust + Slint 1.18.1, winit и femtovg; нативное окно 420 × 240 логических пикселей. Браузер используется только отдельным инструментом съёмки React-эталона.
@@ -164,7 +200,7 @@ cmd.exe /c node scripts/native/verify.cjs --output migration-artifacts/native-ui
 | N2 | Общая оболочка, вход/регистрация, главный экран, каналы, друзья, контекстные меню, модалки | Формы, оболочка и основные привязки реализованы; полная UI/behavior parity в работе |
 | N3 | Настройки, профили, аватары/GIF, калибровка, все интерактивные состояния/локализации | Есть язык и выбор статического аватара; полные настройки, crop/GIF и калибровка в работе |
 | N4 | Auth/SignalR, аккаунты, reconnect, presence, HTTP-контракты | WebSocket/auth/базовый reconnect, roster и friend/channel notification actions реализованы; полное покрытие событий и LongPolling ещё нужны |
-| N5 | Нативные capture/playback, WebRTC/codecs, DSP, neural models, stream/SFU, remote control | Транспорт/PCM/SCTP проверен локально; channel/call и screen/video wiring экспериментальные; neural DSP, camera/SFU/control ещё нужны |
+| N5 | Нативные capture/playback, WebRTC/codecs, DSP, neural models, stream/SFU, remote control | Транспорт/PCM/SCTP и neural/DSP fixtures проверены локально; новый mic/playback DSP ещё не подключён; channel/call и screen/video экспериментальные, camera/SFU/control ещё нужны |
 | N6 | Чат/файлы, encryption/key storage, совместимый импорт/откат профилей | DPAPI, SQLite, encrypted fallback/P2P text и файловый обмен соединены; расширенные delivery-retry/sync, import/rollback ещё в работе |
 | N7 | Загрузка/проверка native updates, независимый install helper, NSIS, подписи/лицензии, bridge старых beta | Не реализовано; кнопки preview не выполняют эти операции |
 | N8 | Полная parity/regression матрица, два устройства, длительные media sessions, CPU/RAM/latency, упаковка `3.8.0-rust` | Не выполнено |
@@ -190,3 +226,5 @@ Implemented: three updater fixture states, matching RU/EN catalog tests, Phospho
 Continuation results: fmt/clippy/build, 12 native unit tests, 54 capture pairs, eight interaction runs, TypeScript checking, 176 existing desktop tests and 22 migration/updater tests passed. Whole-frame mean absolute RGB error is 1.4164–2.9074/255; 1.7292–3.9780% of pixels exceed a 16-level channel difference. Text/edge rasterization differences remain; screen-reader behavior and real multi-monitor dragging are not verified. The final reference uses offscreen Chromium/CDP and stable layout checks to avoid stale hidden-window compositor frames.
 
 The core passed 33 unit tests and 17 integration tests. File handling is now connected end-to-end: picker/drop, confirmation, background staging, metadata/request, DTLS/SCTP chunks, progress/cancel/retry, SHA-256, atomic saving and Explorer reveal. A local test transfers and saves 2 MiB over real SCTP; cancellation, corrupt/stalled transfers, friend revocation, deletion replay, interrupted recovery and preservation of read receipts/source files are covered. Roster, notification actions and peer/video lifetime checks remain covered. Remaining: full UI/settings/secondary-event parity; long-poll fallback, robust message retry/sync and full call/stream/reconnect acceptance; neural DSP, camera/system audio/SFU/control; profile import/rollback; installer/updater/legacy bridge; two-device, long-session and resource acceptance; final packaging. `3.8.0-rust` remains a target. Existing beta validators require a `beta` prefix and need a compatible bridge or explicit installation. .NET backend and Go SFU remain the compatibility targets.
+
+Neural continuation: the exact 22270507-byte RNNoise archive was verified from the NixOS content-addressed cache, retaining Xiph as a hash-checked fallback. A static default-feature build linked, but RNNoise PCM failed because the binding crate's later C output-layer architecture differs from the existing WASM revision. A verified local crate now selects two unchanged source files from the actual WASM submodule `2e3c812c62c32b3ac486c3cd4f4894e6f57d45fd`. All six neural tests passed without relaxed tolerances: RNNoise PCM mean 0.00018198545129978868/max 0.001667805; DFN3 mean 1.8255001080535624e-9/max 3.4691766e-8; source/model hashes and the Tract regression passed. Both Silero tests passed, including 96 frames through the unchanged TypeScript/WASM worker (maximum probability error 0.000001013279, resets and sequence gaps covered). Final default-feature verification passed: 35 unit + 35 integration tests, nine HTTP tests, pinned artifacts, fmt, native Clippy with `-D warnings`, fresh build and source-freeze gate. Eight logs, 387 source hashes, actual metrics and the verified binary hash are preserved in `migration-artifacts/native-audio/neural-2026-11-07/verification.json`; readiness flags remain false. Tract retains 90 upstream warnings (91 diagnostic lines including its Cargo summary). The microphone/playback integration remains unfinished. The updated code graph has 5049 nodes and 11869 edges; seven metadata files produced no AST nodes, legal-document semantics were not extracted, and HTML generation was skipped above its 5000-node limit.

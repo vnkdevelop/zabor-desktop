@@ -17,9 +17,22 @@ async function main() {
   }
   mkdirSync(directory, { recursive: true });
   const temporary = mkdtempSync(join(directory, '.download-'));
-  const archive = join(temporary, 'model.tar.gz');
   try {
-    await downloadVerified({ url: `https://media.xiph.org/rnnoise/models/rnnoise_data-${expected}.tar.gz`, path: archive, sha256: expected, length: 22270507, chunkSize: 8192, retries: 32, requestTimeout: 45000, timeout: 1800000 });
+    const sources = [
+      `https://tarballs.nixos.org/sha256/${expected}`,
+      `https://media.xiph.org/rnnoise/models/rnnoise_data-${expected}.tar.gz`,
+    ];
+    let archive;
+    const failures = [];
+    for (const [index, url] of sources.entries()) {
+      const candidate = join(temporary, `model-${index}.tar.gz`);
+      try {
+        await downloadVerified({ url, path: candidate, sha256: expected, length: 22270507, chunkSize: 524288, retries: 4, requestTimeout: 20000, timeout: 240000 });
+        archive = candidate;
+        break;
+      } catch (error) { failures.push(error.message); }
+    }
+    if (!archive) throw new Error(`RNNoise sources failed verification: ${failures.join('; ')}`);
     try { linkSync(archive, target); }
     catch (error) {
       if (error.code !== 'EEXIST' || createHash('sha256').update(readFileSync(target)).digest('hex') !== expected) throw error;

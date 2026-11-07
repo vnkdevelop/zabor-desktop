@@ -23,7 +23,7 @@
 
 Разрабатываемое нативное preview `zabor-native` также использует Знаки; техническое имя этой сборки не изменяет перечисленные права и ограничения. Окончательные идентификаторы нативной поставки пока не назначены.
 
-Добавление нативных DSP-библиотек, моделей и локального исправления Tract не меняет наименование продукта, лицензию GPL-3.0-only или права на Знаки. Лицензии сторонних компонентов отдельно перечислены в [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Добавление нативных DSP-библиотек, моделей, локального исправления Tract и выбора эталонной ревизии исходников RNNoise не меняет наименование продукта, лицензию GPL-3.0-only или права на Знаки. Лицензии сторонних компонентов отдельно перечислены в [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 Получение копии кода по GPL-3.0 **не даёт** права выпускать продукт под Знаками.
 
@@ -90,7 +90,7 @@ The following are owned by the copyright holder (vnkdevelop) and are **outside t
 
 The native `zabor-native` development preview also uses the Marks; its technical build name does not change these rights or restrictions. Final native distribution identifiers have not yet been assigned.
 
-Adding native DSP libraries, models and a local Tract compatibility patch does not change the product name, GPL-3.0-only licence or rights to the Marks. Third-party component licences are listed separately in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Adding native DSP libraries, models, a local Tract compatibility patch and reference-revision RNNoise source selection does not change the product name, GPL-3.0-only licence or rights to the Marks. Third-party component licences are listed separately in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 Receiving a copy of the code under GPL-3.0 does **not** grant permission to ship a product under the Marks.
 

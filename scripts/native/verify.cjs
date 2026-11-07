@@ -24,6 +24,7 @@ const filesIn = directory => readdirSync(directory, { withFileTypes: true }).fla
 });
 const sourceFiles = [...filesIn('rust/crates/zabor-native'), ...filesIn('rust/vendor/tract-core-0.21.4'), ...filesIn('scripts/native'), '.cargo/config.toml', 'rust/Cargo.toml', 'rust/Cargo.lock', 'src/renderer/src/components/UpdaterWindow.tsx', 'src/renderer/src/services/mic-pipeline-core.ts', 'src/renderer/src/services/manual-gate-processor.ts', 'src/renderer/src/services/voice-shaping.ts', 'src/renderer/src/services/webrtc-vad.ts', 'src/renderer/src/services/fvad-binary.ts', 'src/renderer/public/silero_vad.onnx', 'src/renderer/public/deepfilternet3/models/DeepFilterNet3_onnx.tar.gz', 'src/renderer/public/deepfilternet3/pkg/df_bg.wasm', 'src/renderer/src/index.css', 'tailwind.config.js', 'src/renderer/src/locales/ru.json', 'src/renderer/src/locales/en.json'];
 sourceFiles.push(...filesIn('rust/vendor/webrtc-vad-0.4.0'));
+sourceFiles.push(...filesIn('rust/vendor/rnnoise2-sys-0.1.2'), 'src/renderer/src/services/silero-vad.worker.ts');
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const sources = Object.fromEntries(sourceFiles.map(path => [path.replace(/\\/g, '/'), digest(path)]));
 run(process.execPath, ['scripts/native/prepare-onnx.cjs'], 300000);
