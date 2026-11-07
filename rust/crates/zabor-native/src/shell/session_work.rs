@@ -1,4 +1,5 @@
 use super::UiEvent;
+use super::{leave_work::VoiceLeave, HubConnection};
 use std::future::Future;
 use tokio_util::sync::CancellationToken;
 use zabor_native::critical_intents::{CriticalIntents, IntentScope, IntentTicket};
@@ -40,6 +41,32 @@ impl<'a> SessionWork<'a> {
             biased;
             _ = self.stop.cancelled() => None,
             result = self.intents.run(self.ticket, IntentScope::Session, future) => result.filter(|_| self.is_current()),
+        }
+    }
+
+    pub(super) async fn run_with_leave<T>(
+        &self,
+        future: impl Future<Output = T>,
+        leave: &mut VoiceLeave<'_>,
+        hub: Option<&HubConnection>,
+    ) -> Option<T> {
+        let future = self.run(future);
+        tokio::pin!(future);
+        loop {
+            tokio::select! {
+                biased;
+                _ = self.stop.cancelled() => return None,
+                ticket = self.intents.next_leave(self.ticket) => {
+                    let ticket = ticket?;
+                    leave.leave(self.intents, ticket, self.stop, hub, self.update).await;
+                },
+                result = &mut future => {
+                    if let Some(ticket) = self.intents.take_leave(self.ticket) {
+                        leave.leave(self.intents, ticket, self.stop, hub, self.update).await;
+                    }
+                    return result.filter(|_| self.is_current());
+                },
+            }
         }
     }
 }

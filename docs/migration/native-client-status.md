@@ -587,8 +587,36 @@ modules added. Final executable SHA-256:
 chatFileOwnerWorkChecked=true is narrow component acceptance; remaining Leave
 dequeue/teardown/stream hints/blocking-I/O commit/resource/UI/physical/full-client
 gates remain open. Worker/audio/call/full-client acceptance staysfalse;
-no push/merge/release/shutdown. Save milestone, post-save Graphify and compact,
-then continue remaining functional/media/UI/profile/import/packaging work.
+Saved `49fb39b`; post-save Graphify/source/evidence/clean-tree guard passed.
+No push/merge/release/shutdown; continue remaining functional/media/UI/profile/import/packaging work.
+
+### Leave during pinned session waits: components checked locally
+
+The current typed driver keeps chat/file futures pinned and services same-owner
+Leave separately: voice/media ownership, video/recovery/join/speaking state and
+voice audio demand are released without resetting MicTest/runtime/preferences.
+Direct Leave uses the same helper. Cleanup hints have250ms StopStream and750ms
+EndCall/LeaveChannel budgets, retain unsuccessful hints and are revoked by newer
+voice/owner intents. There are no additional cleanup tasks or restarted futures.
+Compile-only Clippy passed after removing an async callback lifetime failure.
+Development fmt/Clippy and54profile/local tests passed (7intent/3transport/1filejob/
+6queueUI/6historicalsession/6leave/25local);432primary+3reference hashes match.
+The real local Hub/inert native VoiceSession fixture kept one invocation stalled
+through16filled FIFO slots and3repeated priority Leave; first cleanup measured1ms,
+independent monitor/240000MicTest samples survived. Blocked StopStream250ms budget
+measured258ms and still attempted EndCall. These do not prove physical timing.
+Final `native-calls/leave-session-final-2026-11-08/` passed205default/195neural-disabled
+tests, both Clippy modes/fmt/pinned/9HTTP/freshbuild and8inert RUEN/four-DPI
+auth/roster/audio/MicTest interactions; protected neural metrics unchanged.
+Independent432primary+3reference/all24evidence/current+frozen executable+ONNX DLL
+audit found0mismatches and verified3expected changed sources+2new leave modules.
+Actual/frozen executable SHA-256:
+`6c81d59b7a7862a7d667ed7b11f16485f9ac54112b88b452e3db8bb191fd756d`.
+leaveDuringSessionWorkChecked=true is narrow component acceptance. Main session
+waits/raw stream/ICE/OS-blocking teardown/resource/physical/full-client gates
+remain open; workerResponsivenessAccepted, audioIntegrationAccepted,
+callIntegrationAccepted and nativeClientReady stayfalse. Save milestone,
+post-save Graphify/guard and compact, then continue; no push/release/shutdown.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

@@ -119,6 +119,44 @@ impl CriticalIntents {
         }
     }
 
+    pub fn take_leave(&self, ticket: IntentTicket) -> Option<IntentTicket> {
+        let mut state = self.state();
+        if state.owner == u64::MAX
+            || ticket.owner != state.owner
+            || state.pending != Some(CriticalAction::Leave)
+        {
+            return None;
+        }
+        state.pending = None;
+        Some(IntentTicket {
+            owner: state.owner,
+            voice: state.voice,
+        })
+    }
+
+    pub async fn next_leave(&self, ticket: IntentTicket) -> Option<IntentTicket> {
+        loop {
+            let changed = {
+                let mut state = self.state();
+                if state.owner == u64::MAX
+                    || ticket.owner != state.owner
+                    || state.pending == Some(CriticalAction::Logout)
+                {
+                    return None;
+                }
+                if state.pending == Some(CriticalAction::Leave) {
+                    state.pending = None;
+                    return Some(IntentTicket {
+                        owner: state.owner,
+                        voice: state.voice,
+                    });
+                }
+                state.changed.clone()
+            };
+            changed.cancelled().await;
+        }
+    }
+
     pub async fn run<T>(
         &self,
         ticket: IntentTicket,
@@ -227,5 +265,34 @@ mod tests {
         assert_eq!(intents.next().await, CriticalAction::Logout);
         assert!(intents.session_token(old).is_cancelled());
         assert!(!intents.session_token(intents.ticket()).is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn session_leave_dequeue_keeps_owner_work_and_returns_current_voice_generation() {
+        let intents = CriticalIntents::default();
+        let old = intents.ticket();
+        intents.request(CriticalAction::Leave);
+        let fresh = intents.next_leave(old).await.unwrap();
+        assert!(intents.is_current(old, IntentScope::Session));
+        assert!(!intents.is_current(old, IntentScope::Voice));
+        assert!(intents.is_current(fresh, IntentScope::Voice));
+        assert_eq!(intents.take_leave(old), None);
+        intents.request(CriticalAction::Leave);
+        assert_eq!(intents.take_leave(old), Some(intents.ticket()));
+    }
+
+    #[tokio::test]
+    async fn session_leave_waiter_does_not_consume_logout_or_another_owners_leave() {
+        let intents = CriticalIntents::default();
+        let old = intents.ticket();
+        intents.request(CriticalAction::Leave);
+        intents.request(CriticalAction::Logout);
+        assert_eq!(intents.next_leave(old).await, None);
+        assert_eq!(intents.take_leave(old), None);
+        assert_eq!(intents.next().await, CriticalAction::Logout);
+        intents.request(CriticalAction::Leave);
+        assert_eq!(intents.next_leave(old).await, None);
+        assert_eq!(intents.take_leave(old), None);
+        assert_eq!(intents.next().await, CriticalAction::Leave);
     }
 }
