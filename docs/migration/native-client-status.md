@@ -487,6 +487,25 @@ synchronized/cold/card/pulse/dot acceptance, then remaining migration plan.
 Checked focus/caption/font/solver/runtime/DSP fixes must not be repeated.
 All jobs complete; full-client readinessfalse. No push/merge/release/shutdown.
 
+### Pause contour checked locally
+
+Latest evidence: `migration-artifacts/native-ui/mic-pause-final-2026-11-07/`
+(root verification; audio-default/audio-no-neural/panel/icon-review/baseline/
+settings/auth/motion/focus/focus-review). **162default/152no-neural tests**,
+419matching sources,9HTTP/pinned/fmt/Clippy/fresh build;56panel/64settings/24auth
++8+8+8interactions,48captionrows,800focuspairs/0differences and448annulus checks
+within1physicalpx. Native2549frames/warmedReact2326frames;241+40separatePNGs.
+Actual binary **3fb998b289334e6abddeb1ff852a1f9477ca3f11fbbf98061b64220a4cd014bc**
+matches all reports,0post-result source/binary/evidence mismatches.
+Only production change: pause SVG contour matches unchanged React, fixing bar
+widths.16pause measurements improve strictly; all40nonpause panel images,
+8play images/asset, settings/auth/reference/neural/captions remain unchanged.
+DirectPath and play-contour experiments failed pixel gates and were rejected.
+`playContourAccepted=false`; exact pause/full raster, pressed keyboard/modal/
+cold/physical/full-client acceptance remains pending. Next primary keyboard
+press/outline and retake active-scale evidence, then remaining migration plan.
+No release/shutdown; all readinessfalse and no pending test jobs.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final

@@ -169,6 +169,7 @@ app.whenReady().then(async () => {
           fontAscent:measured.fontBoundingBoxAscent, fontDescent:measured.fontBoundingBoxDescent, inkAscent:measured.actualBoundingBoxAscent, inkDescent:measured.actualBoundingBoxDescent };
       });
     })()`);
+    if (layout) metrics.icon = await window.webContents.executeJavaScript(`(()=>{const panel=document.querySelector('#root>div>div'),icon=panel.querySelector('button svg');if(!icon)return null;const origin=panel.getBoundingClientRect(),r=icon.getBoundingClientRect();return {x:r.x-origin.x,y:r.y-origin.y,width:r.width,height:r.height,viewBox:icon.getAttribute('viewBox'),fill:getComputedStyle(icon).fill,paths:[...icon.querySelectorAll('path')].map(path=>path.getAttribute('d'))};})()`);
     await window.webContents.debugger.sendCommand('DOM.enable');
     await window.webContents.debugger.sendCommand('CSS.enable');
     const document = await window.webContents.debugger.sendCommand('DOM.getDocument', { depth: 0 });
