@@ -567,6 +567,29 @@ Leave must preserve unrelated session work without restarting/dropping its futur
 Worker/audio/call/full-client acceptance staysfalse; no push/merge/release/shutdown.
 Owner requests compact after each saved/verified stage and unattended continuation.
 
+### Chat/file owner cancellation: components checked locally
+
+After saved critical-intent checkpoint `da86276`, owner-token/session-guard
+work preserves chat/file futures across Leave and cancels them on Logout or window
+stop. Per-packet and queued UI guards retain the original owner ticket; native file
+jobs and transport callbacks use independent child owner tokens. Original SCTP
+labels/crypto/retention/Hub deadlines/audio/MicTest/Slint/React code is preserved.
+Development fmt/Clippy,5intent/3transport/1filejob/6queueUI/6session/25local tests
+passed, including complete existing SCTP file transfer/save and actual stalled
+local Hub cancellation/Leave preservation.430primary+3reference hashes match.
+Final `native-calls/chat-owner-final-2026-11-08/` passed197default/187neural-disabled
+tests, both Clippy modes/fmt/pinned/9HTTP/freshbuild and8inert RUEN/four-DPI auth,
+roster, audio and MicTest interactions. Protected neural metrics are unchanged.
+Independent430primary+3reference/all24evidence/current+frozen executable+ONNX DLL
+checks found0mismatches; exactly4expected existing sources changed and2session
+modules added. Final executable SHA-256:
+`c74e57e1924fc8d9b01ea7113de64212327e33526286ef0c65d23a98112a0ed0`.
+chatFileOwnerWorkChecked=true is narrow component acceptance; remaining Leave
+dequeue/teardown/stream hints/blocking-I/O commit/resource/UI/physical/full-client
+gates remain open. Worker/audio/call/full-client acceptance staysfalse;
+no push/merge/release/shutdown. Save milestone, post-save Graphify and compact,
+then continue remaining functional/media/UI/profile/import/packaging work.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final

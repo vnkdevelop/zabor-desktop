@@ -10,6 +10,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 pub enum ChatTransportEvent {
     Text(String, String),
@@ -58,6 +59,7 @@ pub struct ChatTransport {
     control: BTreeMap<String, ChannelBinding>,
     files: BTreeMap<String, ChannelBinding>,
     connecting: BTreeMap<String, Instant>,
+    stop: CancellationToken,
 }
 
 impl ChatTransport {
@@ -67,6 +69,19 @@ impl ChatTransport {
         ice: Vec<IceServerSettings>,
         relay: bool,
     ) -> Result<Self, MediaError> {
+        Self::with_stop(owner, friends, ice, relay, CancellationToken::new())
+    }
+
+    pub fn with_stop(
+        owner: String,
+        friends: impl IntoIterator<Item = String>,
+        ice: Vec<IceServerSettings>,
+        relay: bool,
+        stop: CancellationToken,
+    ) -> Result<Self, MediaError> {
+        if stop.is_cancelled() {
+            return Err(MediaError::Backend);
+        }
         let (mut engine, media) = MediaEngine::new_data_only(owner);
         engine.authorize_peers(friends);
         engine.configure_ice(ice, relay)?;
@@ -79,10 +94,14 @@ impl ChatTransport {
             control: BTreeMap::new(),
             files: BTreeMap::new(),
             connecting: BTreeMap::new(),
+            stop,
         })
     }
 
     pub async fn connect(&mut self, hub: &HubConnection, peer: &str) -> Result<(), MediaError> {
+        if self.stop.is_cancelled() {
+            return Err(MediaError::Backend);
+        }
         if self.control.get(peer).is_some_and(ChannelBinding::is_open)
             || self
                 .connecting
@@ -130,6 +149,9 @@ impl ChatTransport {
         peer: &str,
         payload: &str,
     ) -> Result<(), MediaError> {
+        if self.stop.is_cancelled() {
+            return Err(MediaError::Backend);
+        }
         let payload = payload
             .strip_prefix("zabor-chat:")
             .ok_or(MediaError::InvalidSignal)?;
@@ -152,24 +174,28 @@ impl ChatTransport {
     }
 
     pub fn send_control(&self, packet: &OutboundPacket) -> bool {
-        self.control.get(&packet.peer).is_some_and(|binding| {
-            binding.is_open()
-                && binding.channel.buffered_amount() < 1024 * 1024
-                && binding
-                    .channel
-                    .send(
-                        packet
-                            .direct
-                            .as_deref()
-                            .unwrap_or(&packet.payload)
-                            .as_bytes(),
-                        false,
-                    )
-                    .is_ok()
-        })
+        !self.stop.is_cancelled()
+            && self.control.get(&packet.peer).is_some_and(|binding| {
+                binding.is_open()
+                    && binding.channel.buffered_amount() < 1024 * 1024
+                    && binding
+                        .channel
+                        .send(
+                            packet
+                                .direct
+                                .as_deref()
+                                .unwrap_or(&packet.payload)
+                                .as_bytes(),
+                            false,
+                        )
+                        .is_ok()
+            })
     }
 
     pub fn file_channel(&self, peer: &str) -> Option<DataChannel> {
+        if self.stop.is_cancelled() {
+            return None;
+        }
         self.files
             .get(peer)
             .filter(|binding| binding.is_open())
@@ -193,6 +219,9 @@ impl ChatTransport {
 
     pub async fn next_event(&mut self) -> Option<ChatTransportEvent> {
         loop {
+            if self.stop.is_cancelled() {
+                return None;
+            }
             let failed = self
                 .control
                 .iter()
@@ -204,14 +233,15 @@ impl ChatTransport {
                 return Some(ChatTransportEvent::Unavailable(peer));
             }
             tokio::select! {
+                _ = self.stop.cancelled() => return None,
                 event = self.events.recv() => {
                     let event = event?;
-                    if event.lifetime.is_alive() && event.active.load(Ordering::Acquire) {
+                    if !self.stop.is_cancelled() && event.lifetime.is_alive() && event.active.load(Ordering::Acquire) {
                         if let ChatTransportEvent::Unavailable(peer) = &event.event { self.disconnect_peer(peer); }
                         return Some(event.event);
                     }
                 },
-                event = self.media.recv() => { let event = event?; if !event.is_alive() { continue; } match event {
+                event = self.media.recv() => { let event = event?; if self.stop.is_cancelled() || !event.is_alive() { continue; } match event {
                     MediaEvent::Ice { peer, payload, .. } => return Some(ChatTransportEvent::Ice(peer, format!("zabor-chat:{payload}"))),
                     MediaEvent::DataChannel { peer, channel, lifetime } => self.attach(peer, channel, lifetime),
                     MediaEvent::Connection { peer, state, .. } => {
@@ -224,6 +254,10 @@ impl ChatTransport {
     }
 
     fn attach(&mut self, peer: String, channel: DataChannel, lifetime: PeerLifetime) {
+        if self.stop.is_cancelled() {
+            channel.close();
+            return;
+        }
         let file = channel.label() == "zabor-chat-files-v1";
         if !file && channel.label() != "zabor-chat-v1" {
             channel.close();
@@ -236,8 +270,10 @@ impl ChatTransport {
         let callback_failed = failed.clone();
         let live = lifetime.clone();
         let callback_active = active.clone();
+        let stop = self.stop.clone();
         channel.on_message(Some(Box::new(move |buffer| {
-            if !live.is_alive()
+            if stop.is_cancelled()
+                || !live.is_alive()
                 || !callback_active.load(Ordering::Acquire)
                 || buffer.data.len() > 256 * 1024
                 || buffer.binary != file
@@ -268,8 +304,9 @@ impl ChatTransport {
         let live = lifetime.clone();
         let callback_active = active.clone();
         let callback_failed = failed.clone();
+        let stop = self.stop.clone();
         channel.on_state_change(Some(Box::new(move |state| {
-            if !live.is_alive() || !callback_active.load(Ordering::Acquire) {
+            if stop.is_cancelled() || !live.is_alive() || !callback_active.load(Ordering::Acquire) {
                 return;
             }
             let event = match state {
@@ -330,6 +367,57 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tokio::time::timeout;
+
+    #[tokio::test]
+    async fn revoked_owner_blocks_queued_transport_events_and_drop_closes_peer_lifetimes() {
+        use crate::critical_intents::{CriticalAction, CriticalIntents};
+
+        let intents = CriticalIntents::default();
+        let stop = intents.session_token(intents.ticket());
+        let mut transport =
+            ChatTransport::with_stop("alice".into(), ["bob".into()], vec![], false, stop.clone())
+                .unwrap();
+        for label in ["zabor-chat-v1", "zabor-chat-files-v1"] {
+            let channel = transport
+                .engine
+                .create_data_channel("bob", label, DataChannelInit::default())
+                .unwrap();
+            transport.attach(
+                "bob".into(),
+                channel,
+                transport.engine.peer_lifetime("bob").unwrap(),
+            );
+        }
+        let binding = transport.control.get("bob").unwrap();
+        let lifetime = binding.lifetime.clone();
+        let active = binding.active.clone();
+        transport
+            .sender
+            .try_send(TransportMessage {
+                event: ChatTransportEvent::Text("bob".into(), "old-owner".into()),
+                lifetime: lifetime.clone(),
+                active: active.clone(),
+            })
+            .unwrap_or_else(|_| panic!("Fixture queue failed"));
+        intents.request(CriticalAction::Leave);
+        assert!(!stop.is_cancelled());
+        assert!(lifetime.is_alive());
+        intents.request(CriticalAction::Logout);
+        assert!(stop.is_cancelled());
+        assert!(timeout(Duration::from_secs(2), transport.next_event())
+            .await
+            .unwrap()
+            .is_none());
+        assert!(!transport.send_control(&OutboundPacket {
+            peer: "bob".into(),
+            payload: "old-owner".into(),
+            direct: None
+        }));
+        assert!(transport.file_channel("bob").is_none());
+        drop(transport);
+        assert!(!active.load(Ordering::Acquire));
+        assert!(!lifetime.is_alive());
+    }
 
     #[tokio::test]
     async fn direct_chat_delivers_and_discards_queued_packets_after_friend_revocation() {

@@ -26,6 +26,7 @@ struct State {
     voice: u64,
     pending: Option<CriticalAction>,
     changed: CancellationToken,
+    owner_stop: CancellationToken,
 }
 
 #[derive(Default)]
@@ -47,18 +48,44 @@ impl CriticalIntents {
     }
 
     pub fn request(&self, action: CriticalAction) {
-        let changed = {
+        let (changed, owner_stop) = {
             let mut state = self.state();
             state.voice = state.voice.saturating_add(1);
-            if action == CriticalAction::Logout {
+            let owner_stop = if action == CriticalAction::Logout {
                 state.owner = state.owner.saturating_add(1);
-            }
+                Some(std::mem::replace(
+                    &mut state.owner_stop,
+                    CancellationToken::new(),
+                ))
+            } else {
+                None
+            };
             if state.pending != Some(CriticalAction::Logout) {
                 state.pending = Some(action);
             }
-            std::mem::replace(&mut state.changed, CancellationToken::new())
+            (
+                std::mem::replace(&mut state.changed, CancellationToken::new()),
+                owner_stop,
+            )
         };
+        if let Some(owner_stop) = owner_stop {
+            owner_stop.cancel();
+        }
         changed.cancel();
+    }
+
+    pub fn session_token(&self, ticket: IntentTicket) -> CancellationToken {
+        let state = self.state();
+        if state.owner == u64::MAX
+            || ticket.owner != state.owner
+            || state.pending == Some(CriticalAction::Logout)
+        {
+            let stop = CancellationToken::new();
+            stop.cancel();
+            stop
+        } else {
+            state.owner_stop.child_token()
+        }
     }
 
     pub fn voice_context(&self, ticket: IntentTicket) -> IntentTicket {
@@ -180,5 +207,25 @@ mod tests {
         assert_eq!(intents.next().await, CriticalAction::Logout);
         assert!(!intents.is_current(old, IntentScope::Session));
         assert!(!intents.is_current(intents.ticket(), IntentScope::Session));
+    }
+
+    #[tokio::test]
+    async fn owner_tokens_cancel_on_logout_only_and_children_do_not_revoke_the_owner() {
+        let intents = CriticalIntents::default();
+        let old = intents.ticket();
+        let child = intents.session_token(old);
+        child.cancel();
+        let live = intents.session_token(old);
+        assert!(!live.is_cancelled());
+        intents.request(CriticalAction::Leave);
+        assert!(!live.is_cancelled());
+        assert_eq!(intents.next().await, CriticalAction::Leave);
+        intents.request(CriticalAction::Logout);
+        assert!(live.is_cancelled());
+        assert!(intents.session_token(old).is_cancelled());
+        assert!(intents.session_token(intents.ticket()).is_cancelled());
+        assert_eq!(intents.next().await, CriticalAction::Logout);
+        assert!(intents.session_token(old).is_cancelled());
+        assert!(!intents.session_token(intents.ticket()).is_cancelled());
     }
 }

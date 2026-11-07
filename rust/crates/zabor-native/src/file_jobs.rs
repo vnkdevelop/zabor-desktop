@@ -45,9 +45,13 @@ pub struct FileJobs {
 
 impl FileJobs {
     pub fn new(root: &Path) -> Self {
+        Self::with_stop(root, CancellationToken::new())
+    }
+
+    pub fn with_stop(root: &Path, stop: CancellationToken) -> Self {
         Self {
             root: root.into(),
-            stop: CancellationToken::new(),
+            stop,
             jobs: JoinSet::new(),
             sending: BTreeMap::new(),
             pending: BTreeMap::new(),
@@ -57,7 +61,7 @@ impl FileJobs {
     }
 
     pub fn stage(&mut self, peer: String, source: PathBuf) -> Result<(), FileError> {
-        if self.jobs.len() >= MAX_FILE_JOBS {
+        if self.stop.is_cancelled() || self.jobs.len() >= MAX_FILE_JOBS {
             return Err(FileError);
         }
         let root = self.root.clone();
@@ -71,11 +75,14 @@ impl FileJobs {
     }
 
     pub fn can_stage(&self, count: usize) -> bool {
-        count > 0 && count <= 20 && self.jobs.len().saturating_add(count) <= MAX_FILE_JOBS
+        !self.stop.is_cancelled()
+            && count > 0
+            && count <= 20
+            && self.jobs.len().saturating_add(count) <= MAX_FILE_JOBS
     }
 
     pub fn reveal(&mut self, peer: String, id: String, path: PathBuf) -> Result<(), FileError> {
-        if self.jobs.len() >= MAX_FILE_JOBS {
+        if self.stop.is_cancelled() || self.jobs.len() >= MAX_FILE_JOBS {
             return Err(FileError);
         }
         let stop = self.stop.child_token();
@@ -95,7 +102,7 @@ impl FileJobs {
         info: FileInfo,
         target: PathBuf,
     ) -> Result<(), FileError> {
-        if self.jobs.len() >= MAX_FILE_JOBS {
+        if self.stop.is_cancelled() || self.jobs.len() >= MAX_FILE_JOBS {
             return Err(FileError);
         }
         let stop = self.stop.child_token();
@@ -109,7 +116,9 @@ impl FileJobs {
     }
 
     pub fn set_target(&mut self, peer: &str, id: &str, target: PathBuf) {
-        self.targets.insert((peer.into(), id.into()), target);
+        if !self.stop.is_cancelled() {
+            self.targets.insert((peer.into(), id.into()), target);
+        }
     }
 
     pub fn finish_incoming(
@@ -119,6 +128,9 @@ impl FileJobs {
         id: &str,
         now: i64,
     ) -> Result<(), FileError> {
+        if self.stop.is_cancelled() {
+            return Err(FileError);
+        }
         if let Some(target) = self.targets.remove(&(peer.into(), id.into())) {
             let (source, info) = engine.cached_file(peer, id, now).map_err(|_| FileError)?;
             self.save(peer.into(), id.into(), source, info, target)?;
@@ -155,6 +167,9 @@ impl FileJobs {
         now: i64,
     ) -> Vec<OutboundPacket> {
         let mut packets = Vec::new();
+        if self.stop.is_cancelled() {
+            return packets;
+        }
         for (peer, id) in engine.take_file_cancels() {
             self.cancel(&peer, &id);
         }
@@ -251,7 +266,16 @@ impl FileJobs {
     }
 
     pub async fn next_event(&mut self) -> Option<FileEvent> {
-        while let Some(event) = self.jobs.join_next().await {
+        loop {
+            let event = tokio::select! {
+                biased;
+                _ = self.stop.cancelled() => { self.jobs.abort_all(); return None; },
+                event = self.jobs.join_next() => event?,
+            };
+            if self.stop.is_cancelled() {
+                self.jobs.abort_all();
+                return None;
+            }
             let Ok(event) = event else {
                 continue;
             };
@@ -268,7 +292,6 @@ impl FileJobs {
             }
             return Some(event);
         }
-        None
     }
 }
 
@@ -276,5 +299,52 @@ impl Drop for FileJobs {
     fn drop(&mut self) {
         self.stop.cancel();
         self.jobs.abort_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::critical_intents::{CriticalAction, CriticalIntents};
+    use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn logout_wakes_stalled_file_event_wait_and_drops_uncommitted_staging() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let root = tempfile::tempdir().unwrap();
+            let source = root.path().join("original.bin");
+            let cache = root.path().join("cache");
+            std::fs::write(&source, b"original data").unwrap();
+            let staged = FileBroker::new(&cache)
+                .unwrap()
+                .stage_cancellable(&source, &CancellationToken::new())
+                .unwrap();
+            let intents = CriticalIntents::default();
+            let mut jobs = FileJobs::with_stop(&cache, intents.session_token(intents.ticket()));
+            let started = std::sync::Arc::new(Notify::new());
+            let started_job = started.clone();
+            jobs.jobs.spawn(async move {
+                let file = staged;
+                started_job.notify_one();
+                std::future::pending::<()>().await;
+                FileEvent::Staged {
+                    peer: "peer".into(),
+                    file: Ok(file),
+                }
+            });
+            started.notified().await;
+            intents.request(CriticalAction::Leave);
+            assert!(!jobs.stop.is_cancelled());
+            intents.request(CriticalAction::Logout);
+            assert!(jobs.stop.is_cancelled());
+            assert!(jobs.next_event().await.is_none());
+            jobs.jobs.shutdown().await;
+            assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 0);
+            assert_eq!(std::fs::read(&source).unwrap(), b"original data");
+            assert!(!jobs.can_stage(1));
+            assert!(jobs.stage("peer".into(), source).is_err());
+        })
+        .await
+        .unwrap();
     }
 }

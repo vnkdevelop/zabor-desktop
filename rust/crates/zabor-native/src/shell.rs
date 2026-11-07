@@ -51,6 +51,10 @@ mod critical_tests;
 mod mic_focus;
 mod mic_motion;
 mod mic_pressed;
+mod session_work;
+use session_work::SessionWork;
+#[cfg(test)]
+mod session_tests;
 
 enum Command {
     Authenticate {
@@ -1698,6 +1702,11 @@ async fn worker(
     let mut speaking_release = None;
     let mut local_speaking = false;
     loop {
+        if stop.is_cancelled() {
+            break;
+        }
+        let iteration_ticket = intents.ticket();
+        let session_work = SessionWork::new(&intents, iteration_ticket, &stop, update.as_ref());
         if voice.is_none() {
             voice_ticket = None;
             call_recovery.clear();
@@ -1717,48 +1726,58 @@ async fn worker(
             paused_video.clear();
             stream_drops.clear();
         }
-        if chat.is_none() && !chat_failed {
+        if session_work.is_current() && chat.is_none() && !chat_failed {
             if let (Some(user), Some(profile)) = (current_user.as_ref(), profile.as_ref()) {
                 match initialize_chat(profile, &user.id, &friends) {
                     Ok(engine) => {
                         chat = Some(engine);
-                        file_jobs = Some(FileJobs::new(&profile.root().join("chat-files")));
-                        chat_transport = ChatTransport::new(
+                        file_jobs = Some(FileJobs::with_stop(
+                            &profile.root().join("chat-files"),
+                            intents.session_token(iteration_ticket),
+                        ));
+                        chat_transport = ChatTransport::with_stop(
                             user.id.clone(),
                             friends.iter().cloned(),
                             chat_ice.clone(),
                             audio_preferences.relay_only(),
+                            intents.session_token(iteration_ticket),
                         )
                         .ok();
                     }
                     Err(_) => {
                         chat_failed = true;
-                        update(UiEvent::Toast("chat.storageFailed"));
+                        session_work.publish(UiEvent::Toast("chat.storageFailed"));
                     }
                 }
             }
         }
-        if let (Some(jobs), Some(engine)) = (file_jobs.as_mut(), chat.as_mut()) {
-            file_progress.retain(|(peer, id), _| engine.is_downloading(peer, id));
-            let packets = jobs.pump(engine, chat_transport.as_ref(), now_ms());
-            if let Some(hub) = &hub {
-                send_chat_packets(hub, chat_transport.as_ref(), packets).await;
-            }
-        }
-        if chat_transport.is_none() && session_ready {
+        session_work
+            .run(async {
+                if let (Some(jobs), Some(engine)) = (file_jobs.as_mut(), chat.as_mut()) {
+                    file_progress.retain(|(peer, id), _| engine.is_downloading(peer, id));
+                    let packets = jobs.pump(engine, chat_transport.as_ref(), now_ms());
+                    if let Some(hub) = &hub {
+                        send_chat_packets(&session_work, hub, chat_transport.as_ref(), packets)
+                            .await;
+                    }
+                }
+            })
+            .await;
+        if session_work.is_current() && chat_transport.is_none() && session_ready {
             if let Some(user) = &current_user {
-                chat_transport = ChatTransport::new(
+                chat_transport = ChatTransport::with_stop(
                     user.id.clone(),
                     friends.iter().cloned(),
                     chat_ice.clone(),
                     audio_preferences.relay_only(),
+                    intents.session_token(iteration_ticket),
                 )
                 .ok();
             }
         }
         let file_tick = chat.as_ref().is_some_and(ChatEngine::has_downloads)
             || file_jobs.as_ref().is_some_and(FileJobs::needs_tick);
-        let mut command_ticket = intents.ticket();
+        let mut command_ticket = iteration_ticket;
         let mut command = tokio::select! {
             biased;
             _ = stop.cancelled() => break,
@@ -1767,12 +1786,14 @@ async fn worker(
             _ = async { if voice.is_some() { audio_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::CheckAudio,
             _ = async { if file_tick { file_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::MaintainFiles,
             event = async { match file_jobs.as_mut().filter(|jobs| jobs.has_jobs()) { Some(jobs) => jobs.next_event().await, None => std::future::pending().await } } => {
+                session_work.run(async {
+                let update = |event| session_work.publish(event);
                 if let (Some(event), Some(engine)) = (event, chat.as_mut()) {
                     let peer = match event {
                         FileEvent::Staged { peer, file } => {
                             match file {
                                 Ok(file) => match engine.send_file(&peer, file.info().clone(), now_ms()) {
-                                    Ok(packets) => { file.commit(); if let Some(hub) = &hub { send_chat_packets(hub, chat_transport.as_ref(), packets).await; } },
+                                    Ok(packets) => { file.commit(); if let Some(hub) = &hub { send_chat_packets(&session_work, hub, chat_transport.as_ref(), packets).await; } },
                                     Err(_) => update(UiEvent::Toast("chat.file.failed")),
                                 },
                                 Err(_) => update(UiEvent::Toast("chat.file.failed")),
@@ -1780,7 +1801,7 @@ async fn worker(
                             peer
                         },
                         FileEvent::Sent { peer, id, success, .. } => {
-                            if !success { if let (Some(hub), Ok(packet)) = (hub.as_ref(), engine.unavailable(&peer, &id)) { send_chat_packets(hub, chat_transport.as_ref(), vec![packet]).await; } }
+                            if !success { if let (Some(hub), Ok(packet)) = (hub.as_ref(), engine.unavailable(&peer, &id)) { send_chat_packets(&session_work, hub, chat_transport.as_ref(), vec![packet]).await; } }
                             peer
                         },
                         FileEvent::Saved { peer, id, stored_name, path } => {
@@ -1794,6 +1815,7 @@ async fn worker(
                     };
                     if selected_chat.as_deref() == Some(&peer) { if let Ok(messages) = engine.messages(&peer, now_ms()) { update(UiEvent::ChatMessages(peer, messages, false)); } }
                 }
+                }).await;
                 continue;
             },
             channel = async { match pending_join.take() { Some(channel) => channel, None => std::future::pending().await } } => Command::Join(channel),
@@ -1847,7 +1869,7 @@ async fn worker(
                             if let Some(transport) = chat_transport.as_mut() { transport.set_friends(&friends); }
                         }
                         if let (Some(transport), Some(hub), Some(peer), Some(payload)) = (chat_transport.as_mut(), hub.as_ref(), event.arguments.first().and_then(serde_json::Value::as_str), event.arguments.get(1).and_then(serde_json::Value::as_str)) {
-                            if payload.starts_with("zabor-chat:") { let _ = transport.handle_signal(hub, &event.target, peer, payload).await; }
+                            if payload.starts_with("zabor-chat:") && session_work.run(transport.handle_signal(hub, &event.target, peer, payload)).await.is_none() { continue; }
                         }
                         match event.target.as_str() {
                             "IncomingCall" => {
@@ -1905,13 +1927,14 @@ async fn worker(
                             },
                             _ => {},
                         }
-                        if event.target == "ReceiveChatRelay" {
+                        if event.target == "ReceiveChatRelay" && session_work.run(async {
+                            let update = |event| session_work.publish(event);
                             if let (Some(engine), Some(hub), Some(peer), Some(payload)) = (chat.as_mut(), hub.as_ref(), event.arguments.first().and_then(serde_json::Value::as_str), event.arguments.get(1).and_then(serde_json::Value::as_str)) {
                                 match engine.receive(peer, payload, now_ms()) {
                                     Ok(packets) => {
-                                        send_chat_packets(hub, chat_transport.as_ref(), packets).await;
+                                        send_chat_packets(&session_work, hub, chat_transport.as_ref(), packets).await;
                                         if selected_chat.as_deref() == Some(peer) {
-                                            if let Ok(packets) = engine.mark_read(peer, now_ms()) { send_chat_packets(hub, chat_transport.as_ref(), packets).await; }
+                                            if let Ok(packets) = engine.mark_read(peer, now_ms()) { send_chat_packets(&session_work, hub, chat_transport.as_ref(), packets).await; }
                                             if let Ok(messages) = engine.messages(peer, now_ms()) { update(UiEvent::ChatMessages(peer.into(), messages, false)); }
                                         }
                                     },
@@ -1919,7 +1942,7 @@ async fn worker(
                                     Err(_) => {},
                                 }
                             }
-                        }
+                            }).await.is_none() { continue; }
                         if let (Some(voice), Some(hub), Some(ticket)) = (voice.as_mut(), hub.as_ref(), voice_ticket) {
                             let result = tokio::select! { _ = stop.cancelled() => break, result = intents.run(ticket, IntentScope::Voice, voice.handle(hub, &event.target, &event.arguments)) => result };
                             if result.is_none() { continue; }
@@ -1971,15 +1994,17 @@ async fn worker(
                 continue;
             },
             event = async { match chat_transport.as_mut() { Some(transport) => transport.next_event().await, None => std::future::pending().await } } => {
+                session_work.run(async {
+                let update = |event| session_work.publish(event);
                 if let (Some(event), Some(hub), Some(chat)) = (event, hub.as_ref(), chat.as_mut()) {
                     match event {
                         ChatTransportEvent::Ice(peer, payload) => { let _ = hub.send("SendIceCandidate", vec![json!(peer), json!(payload)]).await; },
-                        ChatTransportEvent::Ready(peer) => { if let Ok(packet) = chat.open(&peer) { send_chat_packets(hub, chat_transport.as_ref(), vec![packet]).await; } },
+                        ChatTransportEvent::Ready(peer) => { if let Ok(packet) = chat.open(&peer) { send_chat_packets(&session_work, hub, chat_transport.as_ref(), vec![packet]).await; } },
                         ChatTransportEvent::Text(peer, payload) => {
                             if let Ok(packets) = chat.receive_direct(&peer, &payload, now_ms()) {
-                                send_chat_packets(hub, chat_transport.as_ref(), packets).await;
+                                send_chat_packets(&session_work, hub, chat_transport.as_ref(), packets).await;
                                 if selected_chat.as_deref() == Some(peer.as_str()) {
-                                    if let Ok(packets) = chat.mark_read(&peer, now_ms()) { send_chat_packets(hub, chat_transport.as_ref(), packets).await; }
+                                    if let Ok(packets) = chat.mark_read(&peer, now_ms()) { send_chat_packets(&session_work, hub, chat_transport.as_ref(), packets).await; }
                                     if let Ok(messages) = chat.messages(&peer, now_ms()) { update(UiEvent::ChatMessages(peer, messages, false)); }
                                 }
                             }
@@ -2003,11 +2028,12 @@ async fn worker(
                         ChatTransportEvent::Unavailable(peer) => {
                             if let Some(jobs) = file_jobs.as_mut() { jobs.disconnect(&peer); }
                             let packets = chat.fail_downloads(Some(&peer), now_ms());
-                            send_chat_packets(hub, chat_transport.as_ref(), packets).await;
+                            send_chat_packets(&session_work, hub, chat_transport.as_ref(), packets).await;
                             if let Ok(messages) = chat.messages(&peer, now_ms()) { update(UiEvent::ChatMessages(peer, messages, false)); }
                         },
                     }
                 }
+                }).await;
                 continue;
             },
         };
@@ -2074,17 +2100,24 @@ async fn worker(
             continue;
         }
         if matches!(command, Command::MaintainFiles) {
-            if let Some(engine) = chat.as_mut() {
-                let packets = engine.expire_downloads(now_ms());
-                if let Some(hub) = &hub {
-                    send_chat_packets(hub, chat_transport.as_ref(), packets).await;
-                }
-                if let Some(peer) = &selected_chat {
-                    if let Ok(messages) = engine.messages(peer, now_ms()) {
-                        update(UiEvent::ChatMessages(peer.clone(), messages, false));
+            let session_work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            session_work
+                .run(async {
+                    let update = |event| session_work.publish(event);
+                    if let Some(engine) = chat.as_mut() {
+                        let packets = engine.expire_downloads(now_ms());
+                        if let Some(hub) = &hub {
+                            send_chat_packets(&session_work, hub, chat_transport.as_ref(), packets)
+                                .await;
+                        }
+                        if let Some(peer) = &selected_chat {
+                            if let Ok(messages) = engine.messages(peer, now_ms()) {
+                                update(UiEvent::ChatMessages(peer.clone(), messages, false));
+                            }
+                        }
                     }
-                }
-            }
+                })
+                .await;
             continue;
         }
         if let Command::File {
@@ -2093,72 +2126,85 @@ async fn worker(
             action,
         } = command
         {
-            if let (Some(engine), Some(jobs)) = (
-                chat.as_mut()
-                    .filter(|engine| engine.owner() == owner && engine.is_friend(&peer)),
-                file_jobs.as_mut(),
-            ) {
-                let result: Result<Vec<zabor_native::chat::OutboundPacket>, ChatError> =
-                    (|| match action {
-                        FileAction::Stage(paths) => {
-                            if !jobs.can_stage(paths.len()) {
-                                return Err(ChatError::Packet);
-                            }
-                            for path in paths {
-                                jobs.stage(peer.clone(), path)
-                                    .map_err(|_| ChatError::Storage)?;
-                            }
-                            Ok(Vec::new())
-                        }
-                        FileAction::Save(id, target) => {
-                            match engine.cached_file(&peer, &id, now_ms()) {
-                                Ok((source, info)) => {
-                                    jobs.save(peer.clone(), id, source, info, target)
-                                        .map_err(|_| ChatError::Storage)?;
+            let session_work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            session_work
+                .run(async {
+                    let update = |event| session_work.publish(event);
+                    if let (Some(engine), Some(jobs)) = (
+                        chat.as_mut()
+                            .filter(|engine| engine.owner() == owner && engine.is_friend(&peer)),
+                        file_jobs.as_mut(),
+                    ) {
+                        let result: Result<Vec<zabor_native::chat::OutboundPacket>, ChatError> =
+                            (|| match action {
+                                FileAction::Stage(paths) => {
+                                    if !jobs.can_stage(paths.len()) {
+                                        return Err(ChatError::Packet);
+                                    }
+                                    for path in paths {
+                                        jobs.stage(peer.clone(), path)
+                                            .map_err(|_| ChatError::Storage)?;
+                                    }
                                     Ok(Vec::new())
                                 }
-                                Err(_) => {
-                                    let packet = engine.request_file(&peer, &id, now_ms())?;
-                                    jobs.set_target(&peer, &id, target);
-                                    Ok(vec![packet])
+                                FileAction::Save(id, target) => {
+                                    match engine.cached_file(&peer, &id, now_ms()) {
+                                        Ok((source, info)) => {
+                                            jobs.save(peer.clone(), id, source, info, target)
+                                                .map_err(|_| ChatError::Storage)?;
+                                            Ok(Vec::new())
+                                        }
+                                        Err(_) => {
+                                            let packet =
+                                                engine.request_file(&peer, &id, now_ms())?;
+                                            jobs.set_target(&peer, &id, target);
+                                            Ok(vec![packet])
+                                        }
+                                    }
+                                }
+                                FileAction::Cancel(id) => {
+                                    jobs.cancel(&peer, &id);
+                                    engine
+                                        .cancel_file(&peer, &id, now_ms())
+                                        .map(|packet| vec![packet])
+                                }
+                                FileAction::Reveal(id) => {
+                                    if let Some(path) = engine.saved_path(&peer, &id, now_ms())? {
+                                        jobs.reveal(peer.clone(), id, path)
+                                            .map_err(|_| ChatError::Storage)?;
+                                    } else {
+                                        update(UiEvent::ChooseDestination(peer.clone(), id));
+                                    }
+                                    Ok(Vec::new())
+                                }
+                                FileAction::Clear(id) => {
+                                    jobs.cancel(&peer, &id);
+                                    engine.clear_file(&peer, &id, now_ms())
+                                }
+                            })();
+                        match result {
+                            Ok(packets) => {
+                                if let Some(hub) = &hub {
+                                    if let Some(transport) = chat_transport.as_mut() {
+                                        let _ = transport.connect(hub, &peer).await;
+                                    }
+                                    send_chat_packets(
+                                        &session_work,
+                                        hub,
+                                        chat_transport.as_ref(),
+                                        packets,
+                                    )
+                                    .await;
                                 }
                             }
+                            Err(_) => update(UiEvent::Toast("chat.file.failed")),
                         }
-                        FileAction::Cancel(id) => {
-                            jobs.cancel(&peer, &id);
-                            engine
-                                .cancel_file(&peer, &id, now_ms())
-                                .map(|packet| vec![packet])
-                        }
-                        FileAction::Reveal(id) => {
-                            if let Some(path) = engine.saved_path(&peer, &id, now_ms())? {
-                                jobs.reveal(peer.clone(), id, path)
-                                    .map_err(|_| ChatError::Storage)?;
-                            } else {
-                                update(UiEvent::ChooseDestination(peer.clone(), id));
-                            }
-                            Ok(Vec::new())
-                        }
-                        FileAction::Clear(id) => {
-                            jobs.cancel(&peer, &id);
-                            engine.clear_file(&peer, &id, now_ms())
-                        }
-                    })();
-                match result {
-                    Ok(packets) => {
-                        if let Some(hub) = &hub {
-                            if let Some(transport) = chat_transport.as_mut() {
-                                let _ = transport.connect(hub, &peer).await;
-                            }
-                            send_chat_packets(hub, chat_transport.as_ref(), packets).await;
+                        if let Ok(messages) = engine.messages(&peer, now_ms()) {
+                            update(UiEvent::ChatMessages(peer, messages, false));
                         }
                     }
-                    Err(_) => update(UiEvent::Toast("chat.file.failed")),
-                }
-                if let Ok(messages) = engine.messages(&peer, now_ms()) {
-                    update(UiEvent::ChatMessages(peer, messages, false));
-                }
-            }
+                })
+                .await;
             continue;
         }
         if matches!(command, Command::ExpireStreams) {
@@ -2345,56 +2391,74 @@ async fn worker(
             command,
             Command::ChatOpen(_) | Command::ChatSend(_, _) | Command::ChatDelete(_, _)
         ) {
-            let Some(engine) = chat.as_mut() else {
-                update(UiEvent::Toast("chat.storageFailed"));
-                continue;
-            };
-            let (peer, result, clear) = match command {
-                Command::ChatOpen(peer) => {
-                    selected_chat = Some(peer.clone());
-                    let packets = engine.open(&peer).map(|packet| vec![packet]);
-                    (peer, packets, false)
-                }
-                Command::ChatSend(peer, text) => {
-                    let packets = engine.send_text(&peer, &text, now_ms());
-                    (peer, packets, true)
-                }
-                Command::ChatDelete(peer, id) => {
-                    let packets = engine.remove(&peer, &id, now_ms());
-                    (peer, packets, false)
-                }
-                _ => unreachable!(),
-            };
-            match result {
-                Ok(packets) => {
-                    if let Some(hub) = hub.as_ref().filter(|hub| hub.is_connected()) {
-                        send_chat_packets(hub, chat_transport.as_ref(), packets).await;
-                        if let Some(transport) = chat_transport.as_mut() {
-                            let _ = transport.connect(hub, &peer).await;
+            let session_work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            session_work
+                .run(async {
+                    let update = |event| session_work.publish(event);
+                    let Some(engine) = chat.as_mut() else {
+                        update(UiEvent::Toast("chat.storageFailed"));
+                        return;
+                    };
+                    let (peer, result, clear) = match command {
+                        Command::ChatOpen(peer) => {
+                            selected_chat = Some(peer.clone());
+                            let packets = engine.open(&peer).map(|packet| vec![packet]);
+                            (peer, packets, false)
                         }
+                        Command::ChatSend(peer, text) => {
+                            let packets = engine.send_text(&peer, &text, now_ms());
+                            (peer, packets, true)
+                        }
+                        Command::ChatDelete(peer, id) => {
+                            let packets = engine.remove(&peer, &id, now_ms());
+                            (peer, packets, false)
+                        }
+                        _ => unreachable!(),
+                    };
+                    match result {
+                        Ok(packets) => {
+                            if let Some(hub) = hub.as_ref().filter(|hub| hub.is_connected()) {
+                                send_chat_packets(
+                                    &session_work,
+                                    hub,
+                                    chat_transport.as_ref(),
+                                    packets,
+                                )
+                                .await;
+                                if let Some(transport) = chat_transport.as_mut() {
+                                    let _ = transport.connect(hub, &peer).await;
+                                }
+                            }
+                            if let Ok(messages) = engine.messages(&peer, now_ms()) {
+                                update(UiEvent::ChatMessages(peer, messages, clear));
+                            }
+                        }
+                        Err(_) => update(UiEvent::Toast("chat.storageFailed")),
                     }
-                    if let Ok(messages) = engine.messages(&peer, now_ms()) {
-                        update(UiEvent::ChatMessages(peer, messages, clear));
-                    }
-                }
-                Err(_) => update(UiEvent::Toast("chat.storageFailed")),
-            }
+                })
+                .await;
             continue;
         }
         if matches!(command, Command::PruneChat) {
-            if let (Some(engine), Some(profile)) = (chat.as_mut(), profile.as_ref()) {
-                if engine
-                    .prune(now_ms(), &profile.root().join("chat-files"))
-                    .is_err()
-                {
-                    update(UiEvent::Toast("chat.storageFailed"));
-                }
-                if let Some(peer) = &selected_chat {
-                    if let Ok(messages) = engine.messages(peer, now_ms()) {
-                        update(UiEvent::ChatMessages(peer.clone(), messages, false));
+            let session_work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            session_work
+                .run(async {
+                    let update = |event| session_work.publish(event);
+                    if let (Some(engine), Some(profile)) = (chat.as_mut(), profile.as_ref()) {
+                        if engine
+                            .prune(now_ms(), &profile.root().join("chat-files"))
+                            .is_err()
+                        {
+                            update(UiEvent::Toast("chat.storageFailed"));
+                        }
+                        if let Some(peer) = &selected_chat {
+                            if let Ok(messages) = engine.messages(peer, now_ms()) {
+                                update(UiEvent::ChatMessages(peer.clone(), messages, false));
+                            }
+                        }
                     }
-                }
-            }
+                })
+                .await;
             continue;
         }
         if hub.as_ref().is_none_or(|hub| !hub.is_connected()) {
@@ -3780,22 +3844,26 @@ fn initialize_chat(
 }
 
 async fn send_chat_packets(
+    work: &SessionWork<'_>,
     hub: &HubConnection,
     transport: Option<&ChatTransport>,
     packets: Vec<zabor_native::chat::OutboundPacket>,
 ) {
     for packet in packets {
+        if !work.is_current() {
+            break;
+        }
         if transport.is_some_and(|transport| transport.send_control(&packet)) {
             continue;
         }
-        if hub
-            .send(
+        if !matches!(
+            work.run(hub.send(
                 "SendChatRelay",
                 vec![json!(packet.peer), json!(packet.payload)],
-            )
-            .await
-            .is_err()
-        {
+            ))
+            .await,
+            Some(Ok(()))
+        ) {
             break;
         }
     }
