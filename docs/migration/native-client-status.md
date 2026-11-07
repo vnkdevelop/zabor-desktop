@@ -440,6 +440,13 @@ at4DPI/RUEN passed. Warm-up scope is explicit; coldReact200%≈194msgap retained
 unaccepted. Next baseline/raster/layout/focus, synchronized/cold/card/pulse/dot
 and remaining audio/physical/client work. Allreadinessfalse; no release/shutdown.
 
+Verified solver/native spring-lifecycle milestone saved as **`c270cc6`** on
+`rust/native-client`.162/152tests,412sources, allstaticimages/neural unchanged,
+8native/8explicitlywarmedReact timing runs and separatePNG evidence passed.
+This does not certify cold/synchronized/pixel/focus/card/pulse/dot/fullclient
+acceptance. Next baseline/raster/focus and remainingmotion/audio/client work;
+do not redo checked solver/font/health/runtime/core. No release or shutdown.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final
