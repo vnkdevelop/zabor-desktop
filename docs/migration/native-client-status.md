@@ -132,6 +132,14 @@ Source-freeze gate и дополнительная сверка бинарног
 не выполнялась. Это device-free/local verification, без production services
 и визуальной матрицы; `nativeClientReady=false` / `audioIntegrationAccepted=false`.
 
+Проверенный neural checkpoint: `ea46136`, ветка `rust/native-client`; не pushed
+или merged, релиз/выключение не выполнялись. Следующий этап — подключение
+нового owning-thread mic DSP и bounded playback к voice/media/shell.
+
+Verified neural checkpoint: `ea46136` on `rust/native-client`; no push, merge,
+release or shutdown. Next: connect owning-thread microphone DSP and bounded
+playback to voice/media/shell.
+
 Новая сверка Silero исполняет исходный TypeScript worker через существующий
 onnxruntime-web WASM на 96 frames, включая reset и sequence gap; оба Silero
 теста прошли, max probability difference `0.000001013279`. Это не замена

@@ -32,6 +32,7 @@
 - `bcf1371`: friend/channel notifications.
 - `076f116`: полный файловый workflow. Это последний commit перед текущими аудио-правками; actual HEAD проверять через Git.
 - `3385ace`: проверенные audio foundations, vendor compatibility и постоянный handoff. Новые устройства/DSP ещё не подключены; это не готовый клиент.
+- `ea46136`: завершённый neural checkpoint — exact RNNoise weights + reference C selection, Silero worker comparison, 35 unit + 35 integration tests, fmt/Clippy/fresh build. Отчёт `migration-artifacts/native-audio/neural-2026-11-07/verification.json`; не pushed/merged/released. Следующий этап — mic/playback integration.
 - Не считать preview, транспорт или отдельный пройденный тест завершением полного клиента.
 
 ## Уже сохранённая функциональность
