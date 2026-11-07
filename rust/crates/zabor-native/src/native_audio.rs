@@ -245,7 +245,11 @@ impl NativeAudio {
         self.runtime_failed() || self.controls.processor_failed.load(Ordering::Acquire)
     }
     fn runtime_failed(&self) -> bool {
-        self.stop.is_cancelled() || self.capture.failed() || self.render.failed()
+        self.stop.is_cancelled()
+            || self.capture.failed()
+            || self.capture.is_cancelled()
+            || self.render.failed()
+            || self.render.is_cancelled()
     }
     pub fn cancel(&self) {
         if let Some(generation) = self.legacy_generation {

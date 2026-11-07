@@ -30,7 +30,7 @@ component TestButton inherits Rectangle {
                 transform-origin: { x: 4px, y: 4px };
             }
         }
-            Text { text: root.label; color: root.primary ? (root.disabled ? #ee68a9 : white) : touch.has-hover ? white : #949ba4; font-size: root.primary ? 12px : 10px; font-family: root.primary ? "Segoe UI" : "Segoe UI Semibold"; font-weight: root.primary ? 700 : 600; vertical-alignment: center; horizontal-alignment: center; }
+            Text { text: root.label; color: root.primary ? (root.disabled ? #ee68a9 : white) : touch.has-hover ? white : #949ba4; font-size: root.primary ? 12px : 10px; font-family: "Segoe UI"; font-weight: root.primary ? 700 : 600; vertical-alignment: center; horizontal-alignment: center; }
         }
     }
     forward-focus: keys;
@@ -132,7 +132,7 @@ export component MicTestPanel inherits Rectangle {
     }
     if root.test.stage == "ready" : TestButton { x: (root.width - self.width) / 2; y: 42px; width: min(root.width, retake.preferred-width + 18px); height: 21px; reduced-motion: root.reduced-motion; disabled: !root.active;
         label: root.tr("settings.audio.micTestRetake"); activated => { root.record(); }
-        retake := Text { visible: false; text: root.tr("settings.audio.micTestRetake"); font-size: 10px; font-family: "Segoe UI Semibold"; font-weight: 600; }
+        retake := Text { visible: false; text: root.tr("settings.audio.micTestRetake"); font-size: 10px; font-family: "Segoe UI"; font-weight: 600; }
     }
-    if root.test.issue != "" : Text { y: root.test.stage == "ready" ? 69px : 42px; height: 13.75px; width: root.width; text: root.tr(root.test.issue == "silent" ? "settings.audio.micTestSilent" : "settings.audio.micTestFailed"); color: #ee68a9; font-size: 10px; font-family: "Segoe UI Semibold"; font-weight: 600; horizontal-alignment: center; }
+    if root.test.issue != "" : Text { y: root.test.stage == "ready" ? 69px : 42px; height: 13.75px; width: root.width; text: root.tr(root.test.issue == "silent" ? "settings.audio.micTestSilent" : "settings.audio.micTestFailed"); color: #ee68a9; font-size: 10px; font-family: "Segoe UI"; font-weight: 600; horizontal-alignment: center; }
 }

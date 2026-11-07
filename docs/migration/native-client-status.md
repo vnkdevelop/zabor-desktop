@@ -402,6 +402,17 @@ Verified DSP-health milestone saved as **`7607a04`** on `rust/native-client`.
 Next: actual native family selection correction and reference font/spring/motion
 evidence. The full client remains unfinished; no push, merge, release or shutdown.
 
+Actual panel font-family/capture-child health проверены:
+**159default (53unit+106integration) /149no-neural (53unit+96integration)**,
+410equal sources,9HTTP/pinned artifacts/fmt/Clippy/build;56panel/64settings/24auth/
+8+8+8interactions on one final tested/current binary.32expectedretake/issue font
+images changed; idle/arming/recording/settings/auth/reference/neural unchanged,
+0source/image/binary mismatches. Native actual Segoe UI600 selection checked;
+canceled capture/source children cannot be mistaken for recoverable DSP-only
+failure. Residual baseline/raster/layout/font-pixel and actual1280ms press/1880ms
+pop motion/focus acceptance remain pending, alongside physical/full-client work.
+No push/merge/release/shutdown; native/audio/micTestUi readinessfalse.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final

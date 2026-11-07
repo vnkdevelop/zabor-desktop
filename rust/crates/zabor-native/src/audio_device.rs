@@ -597,6 +597,9 @@ impl DeviceStream {
                 .is_some_and(|thread| thread.is_finished())
                 && !self.stop.is_cancelled())
     }
+    pub fn is_cancelled(&self) -> bool {
+        self.stop.is_cancelled()
+    }
     pub fn cancel(&self) {
         self.stop.cancel();
     }
@@ -615,6 +618,22 @@ impl Drop for DeviceStream {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn owning_processing_stop_is_visible_even_without_os_failure_or_parent_cancellation() {
+        let parent = CancellationToken::new();
+        let child = parent.child_token();
+        let mut stream = DeviceStream::spawn("zabor-stop-fixture", child, |stop, ready| {
+            ready.send(Ok(())).map_err(|_| DeviceError)?;
+            stop.cancel();
+            Ok(())
+        })
+        .unwrap();
+        stream.thread.take().unwrap().join().unwrap();
+        assert!(!parent.is_cancelled());
+        assert!(!stream.failed());
+        assert!(stream.is_cancelled());
+    }
 
     fn fake_route(selected: Arc<Mutex<String>>) -> ManagedRoute {
         let mut route = ManagedRoute::new(
