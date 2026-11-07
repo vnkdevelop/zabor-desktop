@@ -94,6 +94,14 @@ Physical AEC, devices/hotplug/recovery,
 settings/microphone-test UI, raw/Silero and outer WebAudio 4x parity remain unfinished;
 this is not full audio/client acceptance or a release.
 
+Mic/playback checkpoint: `6db8897` on `rust/native-client`. Проверенная кодовая
+интеграция сохранена; push, merge, release и shutdown не выполнялись. Далее —
+audio settings/device/mic-test UI и recovery/parity, затем остальные этапы handoff.
+
+Verified code wiring is saved in `6db8897`; no push, merge, release or shutdown.
+Next: audio settings/device/microphone-test UI and recovery/parity, followed by
+all remaining handoff stages.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера

@@ -33,6 +33,7 @@
 - `076f116`: полный файловый workflow. Это последний commit перед текущими аудио-правками; actual HEAD проверять через Git.
 - `3385ace`: проверенные audio foundations, vendor compatibility и постоянный handoff. Новые устройства/DSP ещё не подключены; это не готовый клиент.
 - `ea46136`: завершённый neural checkpoint — exact RNNoise weights + reference C selection, Silero worker comparison, 35 unit + 35 integration tests, fmt/Clippy/fresh build. Отчёт `migration-artifacts/native-audio/neural-2026-11-07/verification.json`; не pushed/merged/released. Следующий этап — mic/playback integration.
+- `6db8897`: проверенная кодовая mic/playback-интеграция — owning-thread WASAPI/DSP, unbuffered source, bounded peer playback, immediate shared controls/epochs, AEC reverse, retained-plan neural reset. 36 unit + 45 integration tests; 74 neural-disabled tests; fmt/Clippy/build/source hashes. Отчёт `migration-artifacts/native-audio/wiring-verified-2026-11-07/verification.json`; не pushed/merged/released. Следующий этап — audio settings/mic-test/devices/hotplug и full audio parity, затем весь оставшийся план ниже.
 - Не считать preview, транспорт или отдельный пройденный тест завершением полного клиента.
 
 ## Уже сохранённая функциональность
