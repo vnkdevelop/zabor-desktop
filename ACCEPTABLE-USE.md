@@ -57,6 +57,8 @@
 
 ### 5. Голосовое общение и запись
 
+Нативные фильтры, gate, локальные модели шумоподавления и VAD не проверяют допустимость речи и не заменяют модерацию. Эти модули находятся на этапе локальных испытаний; их добавление не изменяет действующие ограничения на общение, запись и возраст пользователей.
+
 1. Запрещается умышленно создавать помехи связи, заглушать участников, использовать звуковые средства для срыва общения.
 2. Запись разговора допускается только при наличии согласия всех записываемых участников, когда такое согласие требуется законом. Ответственность за соблюдение этого требования несёт записывающий.
 3. Оператор не ведёт запись голосовых каналов и звонков.
@@ -134,6 +136,8 @@ This section also applies to the native Rust client under development. Its local
 4. Recipients are advised to scan received files with their operating system's security tools.
 
 ### 5. Voice communication and recording
+
+Native filters, gates, local noise-suppression and VAD models do not assess speech permissibility or replace moderation. These modules are undergoing local testing; adding them does not change the existing restrictions on communication, recording or user age.
 
 1. You must not deliberately disrupt communication, mute participants, or use audio means to break up conversations.
 2. Recording a conversation is permitted only with the consent of all recorded participants where such consent is required by law. Responsibility for compliance rests with the person recording.

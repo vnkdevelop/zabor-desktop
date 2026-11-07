@@ -1,6 +1,11 @@
 #![forbid(unsafe_code)]
 
 pub mod attestation;
+#[cfg(windows)]
+pub mod audio_device;
+#[cfg(feature = "native-media")]
+pub mod audio_mix;
+pub mod audio_settings;
 pub mod auth;
 pub mod chat;
 pub mod chat_crypto;
@@ -12,18 +17,24 @@ pub mod file_jobs;
 pub mod files;
 pub mod hub;
 pub mod localization;
+pub mod manual_gate;
 #[cfg(feature = "native-media")]
 pub mod media;
 pub mod motion;
+#[cfg(feature = "neural-dsp")]
+pub mod neural;
 pub mod profile;
 pub mod protocol;
 pub mod release;
 pub mod roster;
 #[cfg(feature = "native-media")]
 pub mod screen;
+pub mod smart_gate;
 pub mod strings;
 pub mod update;
 #[cfg(feature = "native-media")]
 pub mod video;
 #[cfg(feature = "native-media")]
 pub mod voice;
+pub mod voice_activity;
+pub mod voice_filters;

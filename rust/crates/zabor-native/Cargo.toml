@@ -38,13 +38,30 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 fs2 = "0.4"
 tempfile = "3"
 libwebrtc = { version = "=0.4.0", optional = true }
+zabor-dsp = { path = "../zabor-dsp" }
+webrtc-vad = "=0.4.0"
+df = { package = "deep_filter", git = "https://github.com/Rikorose/DeepFilterNet", rev = "d375b2d8309e0935d165700c91da9de862a99c31", default-features = false, features = ["tract"], optional = true }
+ndarray = { version = "0.15", optional = true }
+rnnoise2 = { version = "=0.1.2", optional = true }
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "copy-dylibs", "api-31"], optional = true }
+tract-core = { version = "=0.21.4", optional = true }
+tract-data = { version = "=0.21.4", optional = true }
+tract-hir = { version = "=0.21.4", optional = true }
+tract-linalg = { version = "=0.21.4", optional = true }
+tract-nnef = { version = "=0.21.4", optional = true }
+tract-onnx = { version = "=0.21.4", optional = true }
+tract-onnx-opl = { version = "=0.21.4", optional = true }
+tract-pulse = { version = "=0.21.4", optional = true }
+tract-pulse-opl = { version = "=0.21.4", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-dpapi = "0.2"
+wasapi = "=0.26.0"
 
 [features]
-default = ["native-media"]
+default = ["native-media", "neural-dsp"]
 native-media = ["dep:libwebrtc"]
+neural-dsp = ["dep:df", "dep:ndarray", "dep:rnnoise2", "dep:ort", "dep:tract-core", "dep:tract-data", "dep:tract-hir", "dep:tract-linalg", "dep:tract-nnef", "dep:tract-onnx", "dep:tract-onnx-opl", "dep:tract-pulse", "dep:tract-pulse-opl"]
 
 [build-dependencies]
 slint-build = "=1.18.1"

@@ -8,6 +8,10 @@
 
 Owner decisions confirmed on 2026-11-06: target Windows 10/11 x64; a native Rust application without Electron/WebView, with native C/C++ media libraries allowed. Preserve the React client's UI and behavior. Use a separate beta profile with copy-based import that preserves the source. Unattended integration checks are local only. Checkpoint commits on `rust/native-client` are authorized; push and the `3.8.0-rust` GitHub beta release follow completion of the full client. Automatic merging to main is not authorized. The backend remains .NET and SFU remains Go.
 
+Контекст для compact и последующего продолжения: [native-client-handoff.md](native-client-handoff.md). Он сохраняет текущие ограничения, checkpoints, блокеры и весь оставшийся план; compact не означает завершения переноса.
+
+Compaction/continuation context: [native-client-handoff.md](native-client-handoff.md). It preserves constraints, checkpoints, blockers and the complete remaining plan; compaction does not imply migration completion.
+
 ## Где остановилась исходная сессия
 
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
@@ -36,7 +40,73 @@ Lifecycle checkpoint: `fda236c`. После него подключена нат
 
 Последний полностью выполненный Rust-прогон ядра: **33 unit tests и 17 integration tests**, fmt/Clippy `-D warnings` и свежая сборка пройдены. Добавлены полный local SCTP file workflow и четыре сценария файлов: cancel/retry/read receipts, повреждение/timeout/revocation, deletion-before-metadata/restart и отменённый staging. Медиапроверки включают PCM/SCTP, замену peer с устаревшими callbacks/SDP answer и трёхкратное возобновление видео на существующем RTP receiver. Это проверка отдельных механизмов, а не полная приёмка приложения. Файловый UI снят на RU/100% и EN/200% в `migration-artifacts/native-ui/files-2026-11-06`; финальный EN-кадр просмотрен, исправлены позиция progress/подписей и clipping списка. Ранее проверенный auth capture `migration-artifacts/native-auth/checkpoint-roster-2026-11-06` содержит 24 пары и 8 interaction runs RU/EN при четырёх DPI; максимум средней RGB-ошибки — 0.4279/255. Полная визуальная матрица основной оболочки ещё требуется. Graphify обновлён до 1758 узлов/4230 связей; пять JSON-каталогов не дают структурных узлов.
 
-Ниже сохранён состав ранее проверенного updater checkpoint:
+### Аудио/DSP: локальное продолжение 2026-11-07
+
+Добавлены нормализованные совместимые настройки, TonalSuppressor/VoiceShaper,
+ручной gate, SmartGate, RNNoise/DeepFilterNet3/Silero adapters, WASAPI device threads
+и AudioMixer с atomic mute/deafen/moderation, ограниченными очередями и отзывом
+устаревших peer-lifetimes. Эти части пока не соединены с `VoiceSession` и `shell.rs`:
+приложение ещё использует прежний platform ADM, а не новый DSP-тракт.
+
+Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
+manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
+и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера
+проверили per-user/global volume, deafen/focus без повтора backlog, замену/отзыв
+peer и ограничения PCM/AEC reverse queues. Последний полный прогон без neural
+features: **35 unit tests и 29 integration tests**, включая прежний file/media/crypto/roster workflow.
+
+Дополнительно прошли два device-free теста SmartGate: invalid PCM/model output
+и очистка очередей при mute. Нативный WebRTC VAD mode 2 / hangover 150 мс
+совпал с существующим WASM, включая сбросы. Совместная линковка с libwebrtc
+выявила общие C-символы; проверенный `webrtc-vad` 0.4.0 сохранён в
+`rust/vendor/webrtc-vad-0.4.0` с изолированными `ZaborFvad_` символами.
+Алгоритм и публичный `fvad_*` API не менялись; загрузка Git submodule не нужна.
+Повторный полный прогон подтвердил совместную линковку VAD и libwebrtc,
+WASM-сверку VAD и сохранность всех прежних локальных тестов.
+
+DeepFilterNet на исходной ревизии требует Tract 0.21.4; 0.21.6 уже меняет symbol API,
+а более новые версии также меняют ndarray. В `rust/vendor/tract-core-0.21.4`
+сохранён проверенный upstream archive с одним исправлением коллизии имён
+различных констант. Проверки графа не отключены, веса и вычисления не изменены.
+Отдельный временный native harness загрузил исходный DFN3 и прошёл PCM-сверку:
+mean `1.8255001080535624e-9`, max `3.4691766e-8`; harness и его файлы удалены.
+
+Silero ранее прошёл reset/gap/invalid-input проверку на Microsoft ONNX Runtime
+1.31.1 через ort 2.0.0-rc.15, с telemetry=false. Публичный NuGet runtime проверяется
+по SHA-512, а DLL/lib/license cache — по закреплённым SHA-256; differing DLL
+заменяются рядом с native executable/test binaries. Подготовка RNNoise переведена
+на bounded Range/resume с полной SHA-256-проверкой и очисткой partial files;
+девять локальных HTTP-тестов загрузчика прошли, включая ETag смену, неверную длину,
+encoded ranges, простой и сохранность существующего файла. Большие ответы Xiph обрываются;
+одна 8 KiB-докачка исчерпала лимит после 466944 из 22270507 байт, partial file
+удалён. В следующем ограниченном проходе используется IPv4-first, новые HTTP
+соединения и backoff. Полный default-feature build и waveform проверка RNNoise
+пока не подтверждены. Стандартные nnnoiseless-веса
+не заменяют веса существующего клиента.
+
+Дополнительная проверка компиляции с `rnnoise2/runtime-model` (только диагностика,
+не замена статических весов и не waveform-приёмка RNNoise) выявила отсутствующий
+libclang для bindgen. `prepare-libclang.cjs` подготовил libclang 18.1.1 из
+проверенного Windows x64 wheel в `rust/target/libclang-win-x64-18.1.1`;
+DLL и лицензия закреплены SHA-256, системная установка LLVM не выполнялась.
+После подготовки libclang diagnostic `cargo check` прошёл. Targeted DFN3 test
+в этом diagnostic runtime-model режиме не запустился: RNNoise runtime-model
+linking требует отсутствующий `init_rnnoise`. Это не результат DFN3 waveform
+и не подтверждение готовности RNNoise; полная статическая сборка по-прежнему
+требует исходный archive. Отдельная ранее выполненная DFN3 PCM-сверка остаётся
+действительной. Проверка исходных vendor archives подтвердила ровно две
+локализованные правки: `tract-core/src/model/typed.rs` и `webrtc-vad/build.rs`.
+Граф кода обновлён: 4627 узлов и 10976 связей; шесть JSON/metadata файлов
+не дали AST-узлов. Семантическое содержимое юридических документов этим
+code-only прогоном не извлекалось.
+
+Состав зависимостей и статус незавершённой аудио-интеграции синхронизированы
+в LICENSE, THIRD-PARTY-NOTICES.md, TRADEMARK.md, PRIVACY.md, TERMS.md,
+ACCEPTABLE-USE.md и docs/chat-data-flow.md. Лицензия package.json остаётся
+GPL-3.0-only; Electron-функциональность не менялась. Нативного установщика,
+публикации `3.8.0-rust`, push/merge или завершения Windows не было.
+
+### Ранее проверенный updater checkpoint
 
 - Rust + Slint 1.18.1, winit и femtovg; нативное окно 420 × 240 логических пикселей. Браузер используется только отдельным инструментом съёмки React-эталона.
 - RU/EN каталоги окна, автоматически сверяемые тестом с ключами и значениями `src/renderer/src/locales/{ru,en}.json`.

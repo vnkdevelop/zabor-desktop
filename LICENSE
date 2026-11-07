@@ -1,10 +1,10 @@
 ZABOR
 Copyright (C) 2026 vnkdevelop
 
-The native Rust client under development, including its file-handling code,
+The native Rust client under development, including its file-handling and audio DSP code,
 is covered by this same GPL-3.0-only licence.
 Third-party components retain their licences; see THIRD-PARTY-NOTICES.md.
-Разрабатываемый нативный Rust-клиент, включая обработку файлов,
+Разрабатываемый нативный Rust-клиент, включая обработку файлов и аудио DSP,
 распространяется по той же GPL-3.0-only.
 Лицензии сторонних компонентов перечислены в THIRD-PARTY-NOTICES.md.
 Notice updated / редакция уведомления: 2026-11-07.

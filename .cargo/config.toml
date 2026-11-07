@@ -1,5 +1,9 @@
 [env]
 LK_CUSTOM_WEBRTC = { value = "rust/target/webrtc-win-x64-a545de4", relative = true }
+ORT_LIB_LOCATION = { value = "rust/target/onnxruntime-win-x64-1.31.1/native", relative = true }
+ORT_PREFER_DYNAMIC_LINK = "1"
+LIBCLANG_PATH = { value = "rust/target/libclang-win-x64-18.1.1/native", relative = true }
+RNNOISE_MODEL_PATH = { value = "rust/target/rnnoise-4ac81c5c/rnnoise-modeltar.gz", relative = true }
 
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]

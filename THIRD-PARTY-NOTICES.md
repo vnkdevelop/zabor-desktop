@@ -33,6 +33,28 @@ the pinned `webrtc-a545de4` upstream SDK. The SDK's own `LICENSE.md` lists
 WebRTC and bundled codec/crypto components and must accompany native packaging.
 The bindings are used directly; no LiveKit cloud service is contacted.
 Windows media capture/playback uses the platform WASAPI audio device module.
+The native audio work-in-progress also uses wasapi 0.26.0 (MIT),
+<https://github.com/HEnquist/wasapi-rs>; deep_filter 0.5.7-pre at
+`d375b2d8309e0935d165700c91da9de862a99c31` (MIT OR Apache-2.0);
+ndarray 0.15 and the Tract family 0.21.4 (MIT OR Apache-2.0).
+`rust/vendor/tract-core-0.21.4` contains the verified upstream source and a
+local constant-name collision fix, documented in `ZABOR-PATCH.md`; upstream
+licences are preserved. RNNoise is bound through rnnoise2/rnnoise2-sys 0.1.2
+(MIT), <https://github.com/wiiznokes/rnnoise-rs>, with upstream BSD-3-Clause
+RNNoise code and the pinned model archive SHA-256
+`4ac81c5c0884ec4bd5907026aaae16209b7b76cd9d7f71af582094a2f98f4b43`.
+Silero reuses the existing MIT-licensed local model through ort/ort-sys
+2.0.0-rc.15 (MIT OR Apache-2.0) and Microsoft ONNX Runtime 1.31.1 (MIT).
+The verified runtime cache retains Microsoft's LICENSE and ThirdPartyNotices;
+these must accompany the future native installer. ONNX telemetry is disabled.
+Build-time preparation downloads the pinned public RNNoise archive from
+media.xiph.org and Microsoft's runtime package from NuGet, not user audio.
+These local inference adapters and device-thread/mixer primitives are not yet
+connected to the application's microphone path and are not in published installers.
+Native binding generation uses libclang 18.1.1 from the pinned Windows x64
+PyPI wheel (Apache-2.0 with LLVM exceptions), with its licence retained in the
+local build cache. It is a build-only tool, not an application runtime service
+or a component added to the published Electron installers.
 The copied Phosphor SVG paths in
 `rust/crates/zabor-native/assets/icons/` originate from Phosphor Icons (MIT,
 Copyright (c) 2020 Phosphor Icons, <https://github.com/phosphor-icons/react>);
@@ -52,6 +74,23 @@ SVG-иконки происходят из Phosphor Icons (MIT, Copyright (c) 20
 (Apache-2.0, LiveKit) с SDK `webrtc-a545de4`. SDK содержит собственный полный
 `LICENSE.md`, который должен войти в нативную поставку. Облачный сервис LiveKit
 не используется; захват и воспроизведение звука используют WASAPI Windows.
+
+Разрабатываемый нативный DSP использует wasapi 0.26.0 (MIT), DeepFilterNet
+на указанной ревизии, ndarray 0.15 и Tract 0.21.4 (MIT OR Apache-2.0),
+rnnoise2/rnnoise2-sys 0.1.2 (MIT) с RNNoise BSD-3-Clause и закреплёнными
+весами, существующую модель Silero (MIT), ort/ort-sys 2.0.0-rc.15
+(MIT OR Apache-2.0) и Microsoft ONNX Runtime 1.31.1 (MIT).
+Локальная копия Tract содержит только исправление коллизии имён констант;
+его описание и исходные лицензии сохранены в `rust/vendor/tract-core-0.21.4`.
+Телеметрия ONNX отключена. На этапе сборки с media.xiph.org и NuGet
+загружаются публичные закреплённые артефакты; звук пользователя не отправляется.
+Лицензии Microsoft должны войти в будущий установщик. Эти адаптеры, потоки
+устройств и микшер пока не подключены к микрофонному тракту приложения
+и не входят в опубликованные установщики.
+Для генерации нативных bindings используется libclang 18.1.1 из закреплённого
+Windows x64 PyPI wheel (Apache-2.0 с LLVM exceptions); его лицензия сохраняется
+в локальном кэше сборки. Это инструмент сборки, а не служба приложения или
+компонент опубликованных Electron-установщиков.
 
 Для атомарного сохранения полученных файлов и локальных тестов используется tempfile
 (MIT OR Apache-2.0). Это локальная библиотека, не внешний получатель данных.
@@ -125,6 +164,20 @@ refuses to build if the bytes change.
 - Upstream: <https://github.com/microsoft/onnxruntime>
 
 ## WebRTC VAD (fvad-wasm)
+
+The native work-in-progress uses webrtc-vad 0.4.0 (MIT),
+<https://github.com/kaegi/webrtc-vad>, binding bundled libfvad/WebRTC VAD
+(BSD-3-Clause). Its mode-2 decisions and 150 ms hangover are tested against
+the existing WASM detector; this is a local activity detector, not content moderation.
+The verified source is vendored in `rust/vendor/webrtc-vad-0.4.0`; its local
+build patch namespaces internal C symbols to coexist with libwebrtc and avoids
+a Git submodule download. Signal processing is unchanged; licences are preserved.
+Нативный модуль использует webrtc-vad 0.4.0 (MIT) с libfvad/WebRTC VAD
+(BSD-3-Clause); решения mode 2 и удержание 150 мс проверяются по WASM-эталону.
+Это локальный детектор активности, а не модерация содержимого.
+Проверенный upstream source сохранён в `rust/vendor/webrtc-vad-0.4.0`;
+локальная правка сборки изолирует C-символы от libwebrtc и исключает загрузку
+Git submodule, не меняя алгоритм и сохраняя исходные лицензии.
 
 - Bundled through the npm package `@echogarden/fvad-wasm` (BSD-3-Clause),
   <https://github.com/echogarden-project/fvad-wasm>
