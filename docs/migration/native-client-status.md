@@ -230,6 +230,56 @@ Next: memory-only microphone recording/playback and standalone meter, preserving
 network mute restrictions and owning DSP threads, then every remaining handoff
 stage. This checkpoint is not full client/audio acceptance or a published beta.
 
+### Mic-test core WIP после `ce84086`
+
+Добавлены memory-only5s Float32 clip/state machine и opt-in local processed tap,
+отдельный от network PCM. Generation/route/write guards,120ms settle/280ms flush,
+rounded-peak silence, hidden pause/blocked auto-play и memory cleanup реализованы
+в ядре. Новый local test suite проверяет сроки/буфер/seek/playback/restrictions и
+RNNoise/DFN3 matching PCM; развитие проверок ещё идёт. NativeAudio/VoiceSession/UI
+пока **не** подключены: это не готовые mic-test/standalone meter и не full audio
+acceptance. Следующая интеграция — shared voice/monitor runtime, selected local
+output/combined AEC reverse, затем Slint panel. Текущие jobs/точный план — handoff.
+
+A memory-only five-second Float32 clip/state machine and opt-in processed local
+tap, separate from network PCM, are implemented as a core. Tests cover timing,
+buffer bounds, generation/route/write guards, pause/seek, restrictions and neural
+PCM comparisons; verification is in progress. NativeAudio/VoiceSession/UI are
+not yet wired. Shared voice/monitor runtime, selected local output/AEC feedback,
+Slint panel and full microphone/standalone-meter acceptance remain pending.
+
+Mic-test core development checks passed:14local integration tests/defaultClippy,
+including RNNoise/DFN3 local-vs-existing PCM and retained network restrictions.
+Self-review then added2unit tests and corrected successful-write ACK contention
+and the default meter state. Full default/no-neural/source-frozen/UI regression
+is now in progress; these are still core checks, not shared-runtime/Slint wiring
+or complete microphone/physical/client acceptance. Следующий этап — runtime/UI;
+pending jobs и результаты — handoff. No release/shutdown.
+
+### Mic-test core/tap проверен / verified
+
+Финальный прогон: **120 default-feature tests (49unit+71integration)**,
+**112 neural-disabled (49unit+63integration)**,9HTTP/pinned artifacts/fmt/Clippy/
+build и **400 matching source hashes**.14core/local-tap integration tests и2unit
+tests прошли; networkmute/deafen/epoch guards и exact RNNoise/DFN3 localPCM
+сохранены. Neural metrics unchanged.64settings и24auth regression images с8+8
+interaction runs побайтово совпали с previous checkpoint и используют finaltested
+binary;0source/capture/hash mismatches. Reports под migration-artifacts/native-
+audio/mic-test-core-verified-2026-11-07, mic-test-core-no-neural-2026-11-07 и
+native-ui/native-auth/mic-test-core-regression-2026-11-07. Это **ядро без runtime/
+UI wiring**, не готовая кнопка mic-test/standalone meter или fullaudio/client.
+Далее sharedvoice/monitorruntime иSlint panel, затем весьremaining handoff plan.
+Readinessnative/audio/micTestUi=false; no push/merge/release/shutdown.
+
+The memory-only microphone-test core and opt-in local tap passed120 default-
+feature and112 neural-disabled tests, nine HTTP/pinned-artifact checks, fmt,
+Clippy, build and400 matching source hashes. Neural metrics and all64settings/
+24auth regression images are unchanged; tests and captures use the same final
+binary. Shared-runtime/VoiceSession/Slint wiring is not yet implemented, so this
+does not constitute microphone-test UI, standalone-meter or fullclient readiness.
+Next: sharedvoice/monitor audio ownership, local playback/AEC wiring andSlint
+panel, preserving every remaining handoff stage and release/shutdown condition.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера

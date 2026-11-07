@@ -25,6 +25,7 @@ pub mod localization;
 pub mod manual_gate;
 #[cfg(feature = "native-media")]
 pub mod media;
+pub mod mic_test;
 #[cfg(feature = "native-media")]
 pub mod microphone;
 pub mod motion;

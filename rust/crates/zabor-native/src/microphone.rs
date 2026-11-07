@@ -77,6 +77,13 @@ pub struct MicProcessor {
     failed: bool,
 }
 
+pub struct MonitoredMicFrame {
+    pub pcm: [i16; 480],
+    pub local: Option<[f32; 480]>,
+    pub local_metrics: MicMetrics,
+    pub epoch: u64,
+}
+
 impl MicProcessor {
     pub fn new(controls: Arc<AudioControls>, mixer: Arc<AudioMixer>) -> Result<Self, MediaError> {
         let (settings, revision) = {
@@ -168,11 +175,40 @@ impl MicProcessor {
     }
 
     pub fn process(&mut self, samples: &[f32], channels: usize, gap: bool) -> [i16; 480] {
-        let mut pcm = [0; 480];
-        let result = self.process_inner(samples, channels, gap, &mut pcm);
+        self.process_frame(samples, channels, gap, false).pcm
+    }
+
+    pub fn process_monitored(
+        &mut self,
+        samples: &[f32],
+        channels: usize,
+        gap: bool,
+    ) -> MonitoredMicFrame {
+        self.process_frame(samples, channels, gap, true)
+    }
+
+    fn process_frame(
+        &mut self,
+        samples: &[f32],
+        channels: usize,
+        gap: bool,
+        monitoring: bool,
+    ) -> MonitoredMicFrame {
+        let mut frame = MonitoredMicFrame {
+            pcm: [0; 480],
+            local: None,
+            local_metrics: MicMetrics {
+                db: -100.0,
+                ..MicMetrics::default()
+            },
+            epoch: self.epoch,
+        };
+        let result = self.process_inner(samples, channels, gap, monitoring, &mut frame);
+        frame.epoch = self.epoch;
         if result.is_err() {
             self.failed = true;
-            pcm.fill(0);
+            frame.pcm.fill(0);
+            frame.local = None;
             self.controls.speaking.store(false, Ordering::Release);
             self.controls
                 .mic_db
@@ -181,7 +217,7 @@ impl MicProcessor {
         self.controls
             .processor_failed
             .store(self.failed, Ordering::Release);
-        pcm
+        frame
     }
 
     pub fn epoch(&self) -> u64 {
@@ -193,7 +229,8 @@ impl MicProcessor {
         samples: &[f32],
         channels: usize,
         gap: bool,
-        pcm: &mut [i16; 480],
+        monitoring: bool,
+        frame: &mut MonitoredMicFrame,
     ) -> Result<(), MediaError> {
         if !(1..=2).contains(&channels)
             || samples.len() != 480 * channels
@@ -205,7 +242,7 @@ impl MicProcessor {
         if self.failed {
             return Err(MediaError::Microphone);
         }
-        let muted = self.controls.effectively_muted();
+        let muted = self.controls.effectively_muted() && !monitoring;
         let mut input = [0.0_f32; 480];
         if !muted {
             for (frame, sample) in samples.chunks_exact(channels).zip(&mut input) {
@@ -225,16 +262,16 @@ impl MicProcessor {
                         .map_err(|_| MediaError::Microphone)?;
                 }
             }
-            for (sample, target) in input.iter().zip(pcm.iter_mut()) {
+            for (sample, target) in input.iter().zip(frame.pcm.iter_mut()) {
                 *target = to_pcm(*sample);
             }
             apm.set_stream_delay_ms(
                 (self.controls.render_delay_ms.load(Ordering::Acquire) + 10).min(500) as i32,
             )
             .map_err(|_| MediaError::Microphone)?;
-            apm.process_stream(pcm, 48000, 1)
+            apm.process_stream(&mut frame.pcm, 48000, 1)
                 .map_err(|_| MediaError::Microphone)?;
-            for (sample, source) in input.iter_mut().zip(pcm.iter()) {
+            for (sample, source) in input.iter_mut().zip(frame.pcm.iter()) {
                 *sample = f32::from(*source) / 32768.0;
             }
         } else if let Ok(mut reverse) = self.mixer.reverse.try_lock() {
@@ -266,17 +303,27 @@ impl MicProcessor {
         if metrics.model_failed || output.iter().any(|sample| !sample.is_finite()) {
             return Err(MediaError::Microphone);
         }
-        for (target, sample) in pcm.iter_mut().zip(output) {
-            *target = if self.settings.ultra_low_latency {
-                to_pcm(sample)
+        let mut local = [0.0; 480];
+        for ((target, local), sample) in frame.pcm.iter_mut().zip(&mut local).zip(output) {
+            *local = if self.settings.ultra_low_latency {
+                sample
             } else {
-                to_pcm(peak_guard(sample * self.settings.input_gain()))
+                peak_guard(sample * self.settings.input_gain())
             };
+            *target = to_pcm(*local);
         }
-        let muted = self.controls.effectively_muted()
-            || self.controls.capture_epoch.load(Ordering::Acquire) != self.epoch;
+        let current_epoch = self.controls.capture_epoch.load(Ordering::Acquire) == self.epoch;
+        if monitoring
+            && current_epoch
+            && self.controls.input_device_epoch.load(Ordering::Acquire)
+                == self.controls.input_route_epoch.load(Ordering::Acquire)
+        {
+            frame.local = Some(local);
+            frame.local_metrics = metrics;
+        }
+        let muted = self.controls.effectively_muted() || !current_epoch;
         if muted {
-            pcm.fill(0);
+            frame.pcm.fill(0);
         }
         self.controls.mic_db.store(
             if muted { -100.0_f32 } else { metrics.db }.to_bits(),
