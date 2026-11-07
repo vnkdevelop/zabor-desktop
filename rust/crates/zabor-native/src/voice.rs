@@ -211,6 +211,36 @@ impl VoiceSession {
         Ok(())
     }
 
+    pub async fn resume_call(
+        &mut self,
+        hub: &HubConnection,
+        peer: &str,
+        servers: Vec<IceServerSettings>,
+    ) -> Result<(), MediaError> {
+        if self.call_peer.as_deref() != Some(peer) || !self.peers.contains(peer) {
+            return Err(MediaError::UnauthorizedPeer);
+        }
+        if self.relay_only
+            && !servers.iter().any(|server| {
+                server
+                    .urls
+                    .iter()
+                    .any(|url| url.starts_with("turn:") || url.starts_with("turns:"))
+            })
+        {
+            return Err(MediaError::Backend);
+        }
+        self.engine.configure_ice(servers, self.relay_only)?;
+        self.engine.disconnect_peer(peer);
+        if let Some(playback) = self.playback.as_mut() {
+            playback.retain_alive();
+        }
+        let offer = self.engine.offer(peer, true).await?;
+        hub.send("SendWebRTCOffer", vec![json!(peer), json!(offer)])
+            .await
+            .map_err(|_| MediaError::Backend)
+    }
+
     pub async fn start_share(
         &mut self,
         hub: &HubConnection,

@@ -14,6 +14,7 @@ pub mod audio_route;
 pub mod audio_runtime;
 pub mod audio_settings;
 pub mod auth;
+pub mod call_recovery;
 pub mod chat;
 pub mod chat_crypto;
 pub mod chat_store;

@@ -173,7 +173,18 @@ impl AuthClient {
     }
 
     pub async fn login(&self, credentials: &Credentials) -> Result<LoginOutcome, AuthError> {
+        self.login_with_resume(credentials, None).await
+    }
+
+    pub async fn login_with_resume(
+        &self,
+        credentials: &Credentials,
+        session: Option<&str>,
+    ) -> Result<LoginOutcome, AuthError> {
         validate_credentials(credentials)?;
+        if session.is_some_and(|session| !crate::call_recovery::valid_session(session)) {
+            return Err(AuthError::Network);
+        }
         let exists = self
             .hub
             .invoke(
@@ -187,14 +198,22 @@ impl AuthClient {
             Value::Bool(true) => {}
             _ => return Err(AuthError::Network),
         }
+        let mut arguments = vec![
+            json!(credentials.username),
+            json!(credentials.password.as_str()),
+        ];
+        if let Some(session) = session {
+            arguments.push(json!(session));
+        }
         let value = self
             .hub
             .invoke(
-                "Login",
-                vec![
-                    json!(credentials.username),
-                    json!(credentials.password.as_str()),
-                ],
+                if session.is_some() {
+                    "LoginAndResume"
+                } else {
+                    "Login"
+                },
+                arguments,
                 Duration::from_secs(45),
             )
             .await?;
@@ -202,6 +221,10 @@ impl AuthClient {
             return Err(AuthError::InvalidPassword);
         }
         let user: User = serde_json::from_value(value).map_err(|_| AuthError::Network)?;
+        let _ = self
+            .hub
+            .invoke("EnableCallResume", vec![], Duration::from_secs(3))
+            .await;
         Ok(LoginOutcome::SignedIn(Box::new(self.load(user).await?)))
     }
 

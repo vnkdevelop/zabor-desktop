@@ -1,6 +1,6 @@
 # Нативный клиент Rust / native Rust client
 
-Редакция / updated: 2026-11-07.
+Редакция / updated: 2026-11-08.
 
 ## Решения владельца для полного переноса
 
@@ -527,6 +527,22 @@ were hidden or weakened. This is saved WIP, not a verified pressed milestone.
 Per owner direction, continue functional call/reconnect/media/profile/packaging
 blocks; keep outstanding visual/physical/full-client acceptance separate.
 No pending GUI jobs, publication, merge or shutdown.
+
+### Call-resume protocol checked locally
+
+After saved mic WIP `a6c861b`, native call recovery now implements session-scoped
+CallSession/Suspended/Resumed/Ended, optional EnableCallResume, LoginAndResume
+and ResumeCall with bounded retries/stale-response guards. RTC peer replacement
+retains the existing audio source/runtime lease; UI/DSP/runtime/media/core sources
+are unchanged. Eight controller tests and three actual loopback Hub contract
+tests were added. Full173default/163neural-disabled tests, Clippy/fmt/pinned/9HTTP
+and fresh build passed;425sources and all final evidence/current+frozen binary
+hashes match with0mismatches, neural metrics unchanged. Binarye2c28d73… and reports
+are retained under `native-calls/recovery-final-2026-11-07/` (finished Nov08).
+This verifies call recovery protocol, not full call/client acceptance. Immediate Leave/
+Logout cancellation, total reconnect/resource timing, stream restoration, full
+call UI and physical/two-device checks still require completion. All prior media/
+profile/import/packaging/visual/full-client blockers remain in the handoff.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

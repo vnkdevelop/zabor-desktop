@@ -4,7 +4,7 @@ use crate::{
 };
 use base64::Engine;
 use libwebrtc::media_stream_track::MediaStreamTrack;
-use serde_json::json;
+use serde_json::{json, Value};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
@@ -26,6 +26,7 @@ use zabor_native::audio_settings::AudioSettings;
 use zabor_native::auth::{
     AuthClient, AuthError, Bootstrap, Captcha, Credentials, LoginOutcome, Registration,
 };
+use zabor_native::call_recovery::{CallRecovery, RecoveryAction, ResumeResult};
 use zabor_native::chat::{ChatEngine, ChatError};
 use zabor_native::chat_crypto::ChatIdentity;
 use zabor_native::chat_store::{ChatMessage, ChatStore};
@@ -64,6 +65,7 @@ enum Command {
     Audio,
     CheckAudio,
     Reconnect,
+    ResumeCall,
     ChatOpen(String),
     ChatSend(String, String),
     ChatDelete(String, String),
@@ -1563,6 +1565,7 @@ async fn worker(
     let mut prune_at = tokio::time::Instant::now() + Duration::from_secs(3600);
     let mut incoming_call: Option<String> = None;
     let mut call_connected = false;
+    let mut call_recovery = CallRecovery::default();
     let mut video_jobs = BTreeMap::<String, VideoReceiver>::new();
     let mut paused_video = BTreeSet::<String>::new();
     let mut stream_drops = StreamDropGrace::default();
@@ -1578,6 +1581,7 @@ async fn worker(
     let mut local_speaking = false;
     loop {
         if voice.is_none() {
+            call_recovery.clear();
             sent_audio_state = None;
             sent_speaking = false;
             speaking_release = None;
@@ -1635,7 +1639,7 @@ async fn worker(
         }
         let file_tick = chat.as_ref().is_some_and(ChatEngine::has_downloads)
             || file_jobs.as_ref().is_some_and(FileJobs::needs_tick);
-        let command = tokio::select! {
+        let mut command = tokio::select! {
             biased;
             _ = stop.cancelled() => break,
             command = commands.recv() => { let Some(command) = command else { break; }; command },
@@ -1675,6 +1679,7 @@ async fn worker(
             _ = async { if let Some(deadline) = stream_drops.next_deadline() { tokio::time::sleep_until(deadline.into()).await; } else { std::future::pending::<()>().await; } } => Command::ExpireStreams,
             _ = async { if voice.as_ref().is_some_and(VoiceSession::is_sharing) { share_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::CheckShare,
             _ = tokio::time::sleep_until(prune_at) => { prune_at = tokio::time::Instant::now() + Duration::from_secs(3600); Command::PruneChat },
+            _ = async { if let Some(deadline) = call_recovery.next_deadline() { tokio::time::sleep_until(deadline.into()).await; } else { std::future::pending::<()>().await; } } => Command::ResumeCall,
             _ = async { match retry_at { Some(deadline) => tokio::time::sleep_until(deadline).await, None => std::future::pending().await } } => { retry_at = None; Command::Reconnect },
             event = async { match events.as_mut() { Some(events) => events.recv().await, None => std::future::pending().await } } => {
                 match event {
@@ -1736,6 +1741,7 @@ async fn worker(
                                     if let Ok(user) = serde_json::from_value::<zabor_native::auth::User>(value.clone()) {
                                         if session.call_peer.as_deref() == Some(user.id.as_str()) {
                                             call_connected = true;
+                                            call_recovery.connected(&user.id);
                                             incoming_call = None;
                                             if event.target == "CallAccepted" { let _ = session.connect_call(hub, &user.id).await; }
                                             update(UiEvent::Voice(String::new(), vec![user]));
@@ -1743,7 +1749,27 @@ async fn worker(
                                     }
                                 }
                             },
-                            "CallEnded" | "CallDeclined" => {
+                            "CallSession" => {
+                                if let Some(session) = event.arguments.first().and_then(Value::as_str) { call_recovery.set_session(session); }
+                            },
+                            "CallSuspended" => {
+                                if let (Some(session), Some(remaining)) = (event.arguments.first().and_then(Value::as_str), event.arguments.get(1).and_then(Value::as_f64).filter(|value| value.is_finite())) {
+                                    call_recovery.suspended(session, remaining.clamp(0.0, 45_000.0) as u64, std::time::Instant::now());
+                                }
+                            },
+                            "CallResumed" => {
+                                if let (Some(session), Some(hub), Some(user), Some(id)) = (voice.as_mut(), hub.as_ref(), event.arguments.first().and_then(|value| serde_json::from_value::<zabor_native::auth::User>(value.clone()).ok()), event.arguments.get(1).and_then(Value::as_str)) {
+                                    let now = std::time::Instant::now();
+                                    if call_recovery.can_restore(id, &user.id, now) {
+                                        let result = tokio::time::timeout(call_recovery.remaining(now).min(Duration::from_secs(5)), session.resume_call(hub, &user.id, chat_ice.clone())).await;
+                                        if matches!(result, Ok(Ok(()))) && call_recovery.restored(id, &user.id, std::time::Instant::now()) {
+                                            video_jobs.remove(&user.id); paused_video.remove(&user.id); stream_drops.cancel(&user.id); update(UiEvent::RemoveVideo(user.id.clone()));
+                                            update(UiEvent::Voice(String::new(), vec![user]));
+                                        } else { call_recovery.retry(std::time::Instant::now()); }
+                                    }
+                                }
+                            },
+                            "CallEnded" | "CallDeclined" if event.target != "CallEnded" || call_recovery.accepts_end(event.arguments.first().and_then(Value::as_str)) => {
                                 if voice.as_ref().is_some_and(|session| session.call_peer.is_some()) && (event.target != "CallDeclined" || !call_connected) {
                                     voice = None; media_events = None; call_connected = false; incoming_call = None; update(UiEvent::VoiceEnded);
                                 }
@@ -1773,6 +1799,7 @@ async fn worker(
                         update(UiEvent::Hub(event));
                     },
                     None => {
+                        call_recovery.disconnected(std::time::Instant::now());
                         audio_preferences.disconnect();
                         events = None; hub = None; session_ready = false; chat_transport = None;
                         if let Some(engine) = chat.as_mut() { engine.fail_downloads(None, now_ms()); }
@@ -2044,7 +2071,69 @@ async fn worker(
             update(UiEvent::SignedOut);
             continue;
         }
+        if matches!(command, Command::ResumeCall) {
+            match call_recovery.poll(
+                std::time::Instant::now(),
+                session_ready && hub.as_ref().is_some_and(HubConnection::is_connected),
+            ) {
+                RecoveryAction::Wait => continue,
+                RecoveryAction::End => command = Command::Leave,
+                RecoveryAction::Resume {
+                    session,
+                    peer,
+                    timeout,
+                } => {
+                    let Some(connection) = hub.as_ref() else {
+                        continue;
+                    };
+                    let result = tokio::select! { _ = stop.cancelled() => break, result = zabor_native::call_recovery::resume(connection, &session, timeout) => result };
+                    match result {
+                        Ok(ResumeResult::Ended) => command = Command::Leave,
+                        Ok(ResumeResult::Resumed { peer: user })
+                            if user.id == peer
+                                && call_recovery.can_restore(
+                                    &session,
+                                    &peer,
+                                    std::time::Instant::now(),
+                                ) =>
+                        {
+                            if let Some(voice) = voice.as_mut() {
+                                let duration = call_recovery
+                                    .remaining(std::time::Instant::now())
+                                    .min(Duration::from_secs(5));
+                                let result = tokio::time::timeout(
+                                    duration,
+                                    voice.resume_call(connection, &peer, chat_ice.clone()),
+                                )
+                                .await;
+                                if matches!(result, Ok(Ok(())))
+                                    && call_recovery.restored(
+                                        &session,
+                                        &peer,
+                                        std::time::Instant::now(),
+                                    )
+                                {
+                                    video_jobs.remove(&peer);
+                                    paused_video.remove(&peer);
+                                    stream_drops.cancel(&peer);
+                                    update(UiEvent::RemoveVideo(peer));
+                                    update(UiEvent::Voice(String::new(), vec![*user]));
+                                } else {
+                                    call_recovery.retry(std::time::Instant::now());
+                                }
+                            }
+                            continue;
+                        }
+                        _ => {
+                            call_recovery.retry(std::time::Instant::now());
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
         if matches!(command, Command::Leave) {
+            call_recovery.clear();
             pending_join = None;
             video_generation.fetch_add(1, Ordering::AcqRel);
             video_jobs.clear();
@@ -2162,7 +2251,10 @@ async fn worker(
             && saved_credentials.is_some()
             && !matches!(command, Command::Authenticate { .. } | Command::Captcha)
         {
-            let outcome = tokio::select! { _ = stop.cancelled() => break, result = auth.login(saved_credentials.as_ref().unwrap()) => result };
+            let resume_session = call_recovery
+                .session_for_login(std::time::Instant::now())
+                .map(str::to_owned);
+            let outcome = tokio::select! { _ = stop.cancelled() => break, result = auth.login_with_resume(saved_credentials.as_ref().unwrap(), resume_session.as_deref()) => result };
             match outcome {
                 Ok(LoginOutcome::SignedIn(data)) => {
                     if !restore_audio(&audio_preferences, &connection, &data) {
@@ -2332,6 +2424,7 @@ async fn worker(
                 }
                 Command::Logout
                 | Command::Reconnect
+                | Command::ResumeCall
                 | Command::Leave
                 | Command::ChatOpen(_)
                 | Command::ChatSend(_, _)
@@ -2344,6 +2437,7 @@ async fn worker(
                         .as_ref()
                         .is_some_and(|voice| voice.call_peer.is_some())
                     {
+                        call_recovery.clear();
                         if let Some(mut session) = voice.take() {
                             session.leave(&connection).await;
                         }
@@ -2447,6 +2541,7 @@ async fn worker(
                     if accepted != true {
                         return Ok(UiEvent::VoiceEnded);
                     }
+                    call_recovery.begin(&peer);
                     voice = Some(session);
                     media_events = Some(receiver);
                     Ok(UiEvent::Calling(peer))
@@ -2529,10 +2624,15 @@ async fn worker(
                         .prepare_call(&peer)
                         .await
                         .map_err(|_| AuthError::Network)?;
-                    connection
+                    let accepted = connection
                         .invoke("AcceptCall", vec![json!(peer)], Duration::from_secs(20))
                         .await
                         .map_err(AuthError::from)?;
+                    if accepted == false {
+                        return Ok(UiEvent::VoiceEnded);
+                    }
+                    call_recovery.begin(&peer);
+                    call_recovery.connected(&peer);
                     voice = Some(session);
                     media_events = Some(receiver);
                     call_connected = true;
