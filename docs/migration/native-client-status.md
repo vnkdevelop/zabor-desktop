@@ -338,6 +338,13 @@ and neural metrics are unchanged on the finaltestedbinary. Next: Slint microphon
 test panel and standalone local meter on the existing runtime; full UI, physical
 and client/audio acceptance remain unfinished. No publication or shutdown.
 
+Verified shared runtime checkpoint **`8826de6`** is saved on `rust/native-client`.
+All verification jobs completed; next is **Slint microphone-test panel and
+standalone local meter**, preserving the settings-modal monitor lease across tab
+switches and disposing it on close/disable/logout. No second capture/DSP runtime
+or rewrite of checked core/preferences/device recovery is needed. Full client/
+audio/micTestUi readiness remainsfalse; no push, merge, release or shutdown.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера
