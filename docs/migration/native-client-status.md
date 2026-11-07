@@ -480,6 +480,13 @@ This doesn't establish exact focus raster/pressed keyboard/full-modal/hiddenDOM/
 programmatic/window/accessibility/cold/physical/full-client acceptance. All
 readinessflags remainfalse; remaining migration plan unchanged. No release/shutdown.
 
+Visible-panel focus/Space checkpoint saved as **`5530cc7`** on `rust/native-client`.
+Current417sources/binary6cb78662… match `mic-focus-final-2026-11-07` reports.
+Next remaining exact raster/pressed-keyboard/focus-lifetime/full-modal and
+synchronized/cold/card/pulse/dot acceptance, then remaining migration plan.
+Checked focus/caption/font/solver/runtime/DSP fixes must not be repeated.
+All jobs complete; full-client readinessfalse. No push/merge/release/shutdown.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final
