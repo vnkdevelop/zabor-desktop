@@ -398,6 +398,10 @@ No auto retry or second capture runtime. Next confirmed font-family fallback
 correction and exact font/spring/motion/pixel acceptance, then remaining audio/
 physical/client stages. Native/audio/micTestUi readinessfalse; no release/shutdown.
 
+Verified DSP-health milestone saved as **`7607a04`** on `rust/native-client`.
+Next: actual native family selection correction and reference font/spring/motion
+evidence. The full client remains unfinished; no push, merge, release or shutdown.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final
