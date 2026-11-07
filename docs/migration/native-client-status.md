@@ -413,6 +413,13 @@ failure. Residual baseline/raster/layout/font-pixel and actual1280ms press/1880m
 pop motion/focus acceptance remain pending, alongside physical/full-client work.
 No push/merge/release/shutdown; native/audio/micTestUi readinessfalse.
 
+Latest checked milestone **`87513e2`** saves actual font-family selection and
+canceled audio-child health on `rust/native-client`;159/149tests,410sources,
+56panel/64settings/24auth and8+8+8interactions passed. Next exact baseline/raster,
+1280ms press/1880ms pop/continuous motion/focus, then remaining audio/client work.
+Do not repeat verified font-family/DSP-health/panel/runtime/core wiring. No push,
+merge, release or shutdown; complete client/audio/UI acceptance still unfinished.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final
