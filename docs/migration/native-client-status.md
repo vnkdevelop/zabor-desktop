@@ -506,6 +506,13 @@ cold/physical/full-client acceptance remains pending. Next primary keyboard
 press/outline and retake active-scale evidence, then remaining migration plan.
 No release/shutdown; all readinessfalse and no pending test jobs.
 
+Pause-only checkpoint saved as **`579da60`** on `rust/native-client`.
+Current419sources/binary3fb998b2… match `mic-pause-final-2026-11-07` reports.
+Next isolated primary keyboard-press/transform/outline and retake no-active-scale
+evidence; remaining play/raster/modal/cold/physical/full migration stays pending.
+Do not redo checked pause/font/caption/focus/Space/spring/DSP/runtime work.
+All jobs complete; no push/merge/release/shutdown, readinessfalse.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final
