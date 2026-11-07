@@ -24,6 +24,9 @@ const tailwind = require('tailwindcss');
 const args = process.argv.slice(2);
 const motion = args.includes('--motion');
 if (motion) args.splice(args.indexOf('--motion'), 1);
+const layout = args.includes('--layout');
+if (layout) args.splice(args.indexOf('--layout'), 1);
+if (motion && layout) throw new Error('Motion and layout evidence must be captured separately');
 const value = key => args[args.indexOf(key) + 1];
 if (args.length !== 4 || !args.includes('--output') || !args.includes('--scale')) throw new Error('Usage: node scripts/native/capture-mic-test.cjs --output DIRECTORY --scale 1|1.25|1.5|2');
 const output = resolve(value('--output'));
@@ -125,6 +128,34 @@ app.whenReady().then(async () => {
       await window.webContents.executeJavaScript(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
     }
     const metrics = await window.webContents.executeJavaScript(`(()=>{const panel=document.querySelector('#root>div>div');const rect=panel.getBoundingClientRect();return {width:rect.width,height:rect.height,x:rect.x,y:rect.y,scale:devicePixelRatio,buttons:[...panel.querySelectorAll('button')].map(button=>{const r=button.getBoundingClientRect(),s=getComputedStyle(button);return {label:button.getAttribute('aria-label')||button.textContent,disabled:button.disabled,x:r.x-rect.x,y:r.y-rect.y,width:r.width,height:r.height,fontFamily:s.fontFamily,fontWeight:s.fontWeight};}),slider:panel.querySelector('[role=slider]')?.getAttribute('aria-valuenow'),text:panel.textContent};})()`);
+    if (layout) metrics.layout = await window.webContents.executeJavaScript(`(() => {
+      const panel = document.querySelector('#root>div>div');
+      const origin = panel.getBoundingClientRect();
+      const rect = element => { const r = element.getBoundingClientRect(); return { x:r.x-origin.x, y:r.y-origin.y, width:r.width, height:r.height }; };
+      const elements = [...panel.querySelectorAll('button,p')].filter(element => element.textContent.trim());
+      return elements.map(element => {
+        const textElement = element.querySelector('span:not([style])') || element;
+        const node = [...textElement.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+        if (!node) throw Error('Reference text node is missing');
+        const style = getComputedStyle(textElement);
+        const range = document.createRange(); range.selectNode(node);
+        const before = rect(element), textRect = rect(range);
+        const marker = document.createElement('span');
+        marker.style.cssText = 'all:initial;display:inline-block;width:0;height:0;vertical-align:baseline;';
+        textElement.appendChild(marker);
+        const baseline = rect(marker).y;
+        marker.remove();
+        const after = rect(element);
+        if (JSON.stringify(before) !== JSON.stringify(after)) throw Error('Baseline probe changed reference layout');
+        const canvas = document.createElement('canvas').getContext('2d');
+        canvas.font = style.font;
+        const measured = canvas.measureText(node.textContent);
+        return { kind:element.tagName==='P'?'issue':panel.querySelector('[role=slider]')?'retake':'primary',
+          text:node.textContent, box:before, textBox:textRect, baseline, font:style.font, fontFamily:style.fontFamily, fontWeight:style.fontWeight,
+          fontSize:style.fontSize, lineHeight:style.lineHeight, paddingTop:getComputedStyle(element).paddingTop, paddingBottom:getComputedStyle(element).paddingBottom,
+          fontAscent:measured.fontBoundingBoxAscent, fontDescent:measured.fontBoundingBoxDescent, inkAscent:measured.actualBoundingBoxAscent, inkDescent:measured.actualBoundingBoxDescent };
+      });
+    })()`);
     await window.webContents.debugger.sendCommand('DOM.enable');
     await window.webContents.debugger.sendCommand('CSS.enable');
     const document = await window.webContents.debugger.sendCommand('DOM.getDocument', { depth: 0 });

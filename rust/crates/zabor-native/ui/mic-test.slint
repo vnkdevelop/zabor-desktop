@@ -10,6 +10,7 @@ component TestButton inherits Rectangle {
     in property <bool> recording;
     in property <float> pulse;
     in property <float> dot-pulse;
+    in property <length> label-top;
     callback activated;
     height: 36px;
     background: transparent;
@@ -30,7 +31,10 @@ component TestButton inherits Rectangle {
                 transform-origin: { x: 4px, y: 4px };
             }
         }
-            Text { text: root.label; color: root.primary ? (root.disabled ? #ee68a9 : white) : touch.has-hover ? white : #949ba4; font-size: root.primary ? 12px : 10px; font-family: "Segoe UI"; font-weight: root.primary ? 700 : 600; vertical-alignment: center; horizontal-alignment: center; }
+            if root.primary : Text { text: root.label; color: root.disabled ? #ee68a9 : white; font-size: 12px; font-family: "Segoe UI"; font-weight: 700; vertical-alignment: center; horizontal-alignment: center; }
+            if !root.primary : Rectangle { background: transparent; preferred-width: label.preferred-width;
+                label := Text { y: root.label-top; height: self.preferred-height; width: parent.width; text: root.label; color: touch.has-hover ? white : #949ba4; font-size: 10px; font-family: "Segoe UI"; font-weight: 600; horizontal-alignment: center; }
+            }
         }
     }
     forward-focus: keys;
@@ -52,6 +56,11 @@ export component MicTestPanel inherits Rectangle {
     in property <bool> reduced-motion;
     in property <float> pulse;
     in property <float> dot-pulse;
+    in property <float> text-scale: 1;
+    in property <length> screen-y;
+    pure function text-top(baseline: length, ascent: length) -> length {
+        return (round(round(baseline / 1px * root.text-scale) - ascent / 1px * root.text-scale) + round(root.screen-y / 1px * root.text-scale)) / root.text-scale * 1px - root.screen-y;
+    }
     pure callback tr(string) -> string;
     pure callback spring(float, bool) -> float;
     out property <float> thumb-scale: root.thumb-running ? root.thumb-from + (root.thumb-target - root.thumb-from) * root.spring(clamp((animation-tick() - root.thumb-started) / root.thumb-duration, 0, 1), root.thumb-pop) : root.thumb-target;
@@ -164,8 +173,9 @@ export component MicTestPanel inherits Rectangle {
         activated => { root.record(); }
     }
     if root.test.stage == "ready" : TestButton { x: (root.width - self.width) / 2; y: 42px; width: min(root.width, retake.preferred-width + 18px); height: 21px; reduced-motion: root.reduced-motion; disabled: !root.active;
+        label-top: root.text-top(56px, retake.font-metrics.ascent) - 42px;
         label: root.tr("settings.audio.micTestRetake"); activated => { root.record(); }
         retake := Text { visible: false; text: root.tr("settings.audio.micTestRetake"); font-size: 10px; font-family: "Segoe UI"; font-weight: 600; }
     }
-    if root.test.issue != "" : Text { y: root.test.stage == "ready" ? 69px : 42px; height: 13.75px; width: root.width; text: root.tr(root.test.issue == "silent" ? "settings.audio.micTestSilent" : "settings.audio.micTestFailed"); color: #ee68a9; font-size: 10px; font-family: "Segoe UI"; font-weight: 600; horizontal-alignment: center; }
+    if root.test.issue != "" : Text { y: root.text-top((root.test.stage == "ready" ? 69px : 42px) + 10px, self.font-metrics.ascent); height: 13.75px; width: root.width; text: root.tr(root.test.issue == "silent" ? "settings.audio.micTestSilent" : "settings.audio.micTestFailed"); color: #ee68a9; font-size: 10px; font-family: "Segoe UI"; font-weight: 600; horizontal-alignment: center; }
 }

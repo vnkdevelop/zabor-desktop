@@ -619,6 +619,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut motion_stage = slint::SharedString::default();
     meter_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
         if let Some(ui) = weak.upgrade() {
+            ui.set_mic_test_text_scale(ui.window().scale_factor());
             if !preview_mode {
                 synchronize_mic_test(&ui, &mut meter_test.borrow_mut(), &meter_runtime);
             }
@@ -883,6 +884,11 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             return EventResult::Propagate;
         };
         match event {
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if std::env::var("SLINT_SCALE_FACTOR").is_err() {
+                    ui.set_mic_test_text_scale(*scale_factor as f32);
+                }
+            }
             WindowEvent::HoveredFile(_) => ui.set_file_drag(
                 ui.get_authenticated()
                     && ui.get_active_tab() == 1
@@ -1454,6 +1460,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             Duration::from_millis(500),
             move || {
                 if let Some(ui) = weak.upgrade() {
+                    println!("{}", json!({"nativeMicTextLayout": {"scale": ui.get_mic_test_text_scale(), "windowScale": ui.window().scale_factor()}}));
                     println!("{}", json!({"nativeMicTestCapture": {"stage":ui.get_mic_test().stage.as_str(),"issue":ui.get_mic_test().issue.as_str(),"playing":ui.get_mic_test().playing,"duration":ui.get_mic_test().duration,"position":ui.get_mic_test().position,"panelX":(ui.window().size().width as f32 / ui.window().scale_factor() - 156.0) / 2.0,"panelY":ui.get_mic_test_panel_y(),"panelWidth":156,"panelHeight":36.0 + if ui.get_mic_test().stage == "ready" {27.0} else {0.0} + if ui.get_mic_test().issue.is_empty() {0.0} else {19.75},"physicalDevices":false}}));
                     if let Err(failure) = save_snapshot(&ui, &path) {
                         *error.borrow_mut() = Some(failure.to_string());

@@ -36,7 +36,7 @@ const run = (name, executable, parameters) => {
 };
 try {
   for (const scale of ['1', '1.25', '1.5', '2']) {
-    run(`reference-${scale}`, process.execPath, ['scripts/native/capture-mic-test.cjs', '--output', join(output, 'react'), '--scale', scale]);
+    run(`reference-${scale}`, process.execPath, ['scripts/native/capture-mic-test.cjs', '--output', join(output, 'react'), '--scale', scale, '--layout']);
     const reference = JSON.parse(readFileSync(join(output, 'react', `mic-reference-${scale}.json`)));
     for (const locale of ['ru', 'en']) {
       const text = run(`interaction-${locale}-${scale}`, binary, ['--app', '--interaction-check', '--locale', locale, '--scale', scale, '--reduced-motion']);
@@ -47,8 +47,15 @@ try {
         const file = `native-mic-${state}-${locale}-${scale}.png`;
         const text = run(`capture-${state}-${locale}-${scale}`, binary, ['--app', '--preview', `mic-${state}`, '--locale', locale, '--scale', scale, '--reduced-motion', '--snapshot', join(output, file)]);
         const metrics = text.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)).find(item => item.nativeMicTestCapture)?.nativeMicTestCapture;
+        const textLayout = text.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)).find(item => item.nativeMicTextLayout)?.nativeMicTextLayout;
+        if (textLayout?.scale !== Number(scale) || textLayout?.windowScale !== Number(scale)) throw new Error('Native text placement DPI differs from the window');
         const expected = ['playing', 'paused', 'silent'].includes(state) ? 'ready' : state === 'failed' ? 'idle' : state;
         const referenceCapture = reference.captures.find(item => item.locale === locale && item.state === state);
+        if (!referenceCapture || !Array.isArray(referenceCapture.metrics.layout) || !referenceCapture.metrics.layout.length) throw new Error('Reference baseline evidence missing');
+        for (const label of referenceCapture.metrics.layout) {
+          const offset = label.kind === 'retake' ? 14 : label.kind === 'issue' ? 10 : 23;
+          if (Math.abs(label.baseline - label.box.y - offset) > 1 / 64) throw new Error(`Reference text baseline changed: ${label.kind} ${locale} ${scale}`);
+        }
         if (!metrics || metrics.stage !== expected || metrics.physicalDevices !== false || metrics.panelWidth !== 156) throw new Error('Native panel state/geometry guard failed');
         const heightDifference = metrics.panelHeight - referenceCapture.metrics.height;
         if (Math.abs(heightDifference) > 1) throw new Error(`Native/reference panel height differs: ${state} ${locale} ${heightDifference}`);

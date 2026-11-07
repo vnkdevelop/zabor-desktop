@@ -447,6 +447,17 @@ This does not certify cold/synchronized/pixel/focus/card/pulse/dot/fullclient
 acceptance. Next baseline/raster/focus and remainingmotion/audio/client work;
 do not redo checked solver/font/health/runtime/core. No release or shutdown.
 
+Caption baseline placement checked locally: **162default /152no-neural tests**,
+413matching sources,9HTTP/pinned artifacts/fmt/Clippy/fresh build;56panel/64settings/
+24auth +8+8+8interactions. At4DPI/RUEN,48glyph-row measurements passed: maximum
+retake/issue centroid errors0.01123/0.03740px (0.1px gate); primary pixels unchanged.
+Only30expected caption snapshots changed, settings/auth/reference/neural unchanged.
+Current binary **1b01d96bfd486e143d5c88616a34a48c06c21af805ca8440256717a2417fd8cb**
+matches audio/UI/auth/motion/review reports `mic-baseline-local-2026-11-07`.
+8native/2544timingframes and8explicitlywarmedReact/2325frames with241+40separate
+PNGs passed. This is not exact raster/focus/fullUI/cold/physical/client acceptance;
+remaining plan and allfalse readiness flags persist. No publication or shutdown.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final
