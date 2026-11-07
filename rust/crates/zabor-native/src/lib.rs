@@ -20,6 +20,7 @@ pub mod chat_crypto;
 pub mod chat_store;
 #[cfg(feature = "native-media")]
 pub mod chat_transport;
+pub mod critical_intents;
 #[cfg(feature = "native-media")]
 pub mod file_jobs;
 pub mod files;

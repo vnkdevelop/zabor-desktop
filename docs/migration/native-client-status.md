@@ -544,6 +544,29 @@ Logout cancellation, total reconnect/resource timing, stream restoration, full
 call UI and physical/two-device checks still require completion. All prior media/
 profile/import/packaging/visual/full-client blockers remain in the handoff.
 
+### Priority Leave/Logout: components checked locally
+
+After verified call protocol `1a89638`, cancellation work adds separate owner/voice
+epochs, critical actions outside the16-slot queue, preserved async file-dialog
+backpressure, guarded UI delivery and scoped pinned-future cancellation. Leave
+immediately revokes only existing AudioDemand voice generation; independent
+MicTest/runtime/preferences survive. Existing DSP/Slint/React/media sources are
+unchanged. Interrupted call starts/teardown retain the bounded EndCall hint.
+
+Final `native-calls/critical-final-2026-11-08/` passed188default/178neural-disabled
+tests, both Clippy modes/fmt/pinned/9HTTP/fresh build and8inert RUEN/four-DPI
+auth/roster/audio/MicTest interaction runs. Neural metrics are unchanged.
+Independent428primary+3reference source/all24evidence/current+frozen binary checks
+found0mismatches. Final executable SHA-256:
+`5ca812849fe0be28649112cd04e945cbfc67ca064d95de2065f121da8893e73f`.
+Earlier development failures remain retained. This verifies intent/queue/UI
+dispatch/resource/actual local-Hub cancellation components, not all worker waits,
+full-modal/window/continuous-input/endpoint/thread/physical/two-device behavior.
+Direct chat/file owner cancellation and publication/lifetime handling are next;
+Leave must preserve unrelated session work without restarting/dropping its future.
+Worker/audio/call/full-client acceptance staysfalse; no push/merge/release/shutdown.
+Owner requests compact after each saved/verified stage and unattended continuation.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final
