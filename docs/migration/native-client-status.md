@@ -102,11 +102,49 @@ Verified code wiring is saved in `6db8897`; no push, merge, release or shutdown.
 Next: audio settings/device/microphone-test UI and recovery/parity, followed by
 all remaining handoff stages.
 
+Device-runtime код после `498fb9e` проверен: managed WASAPI wrappers сохраняют owning
+DSP thread, source/mixer/RTC subscriptions при endpoint switch. Explicit selection
+и default/hotplug inventory, safe default fallback без переписывания выбранного ID,
+bounded retry 250–2000 ms/30 s и old-route PCM/AEC guards реализованы в коде.
+Первый frozen-source прогон прошёл: **43 unit + 51 integration tests**, fmt,
+Clippy/build и source freeze, neural metrics unchanged, в
+`migration-artifacts/native-audio/device-runtime-2026-11-07`. После него добавлены
+backlog switch guard, 2 PCM tests и local RTC continuity при трёх output/capture
+resets. Neural-disabled прошла **45 unit + 44 integration tests** и Clippy.
+Детерминированный deafen guard в RTC test проверен финальным combined job:
+`device-runtime-no-neural-final-2026-11-07` → `device-runtime-verified-2026-11-07`.
+Финальный default-feature результат: **45 unit + 51 integration tests**, 9 HTTP
+tests, pinned artifacts, fmt/Clippy/build/source freeze. Без neural features —
+**45 unit + 44 integration tests**, Clippy/source freeze. Все **394 source hashes**
+совпали между modes и files, binary hash matched; neural PCM metrics unchanged.
+RNNoise reset44 μs / DFN3 2489 μs. Физическая приёмка
+hotplug/AEC/latency, settings/save/mic-test UI и full audio acceptance не завершены.
+Непрерываемые OS COM calls не дают hard-realtime гарантии; deadline проверяется
+между operations. Backlog switch guard и final regression passed; отчёты — в handoff.
+Graphify device-runtime: 5179 nodes / 12269 edges / 237 communities; семь
+metadata zero-node warnings, HTML выше лимита5000 пропущен.
+
+Verified device-runtime code retains owning DSP threads and source/mixer/RTC subscriptions
+across endpoint switches, with system-default fallback preserving selected IDs,
+250–2000 ms retries, a 30-second recovery window and stale-route PCM/AEC guards.
+The first frozen-source run passed 43 unit + 51 integration tests and fmt/Clippy/
+build, with unchanged neural metrics. A later backlog guard and RTC continuity
+checks passed 45 unit + 44 integration tests with neural features disabled. A
+test-only deterministic deafen guard also passed the final sequential run:
+45 unit + 51 integration tests with default features, nine HTTP tests, pinned
+artifacts and fmt/Clippy/build/source freeze; 45 unit + 44 integration tests and
+Clippy/source freeze without neural features. All 394 source hashes match across
+modes and current files; the fresh default binary hash matches. Neural metrics
+are unchanged; reset measured44 μs for RNNoise and2489 μs for DFN3.
+Physical hotplug/AEC/latency,
+settings/save/microphone-test UI and full acceptance remain unfinished; in-flight
+OS COM calls are not safely interruptible and no hard-realtime guarantee is made.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера
 проверили per-user/global volume, deafen/focus без повтора backlog, замену/отзыв
-peer и ограничения PCM/AEC reverse queues. Последний полный прогон без neural
+peer и ограничения PCM/AEC reverse queues. Ранний foundation checkpoint без neural
 features: **35 unit tests и 29 integration tests**, включая прежний file/media/crypto/roster workflow.
 
 Дополнительно прошли два device-free теста SmartGate: invalid PCM/model output

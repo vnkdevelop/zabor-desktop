@@ -84,6 +84,30 @@ async fn processed_microphone_reaches_bounded_playback_over_real_local_webrtc_an
                 }
             }
         }
+        let track_id = track.id();
+        for _ in 0..3 {
+            output_controls.set_user_state(false, true);
+            controls.capture_restarting();
+            mixer.restart_output();
+            assert!(lifetime.is_alive());
+            assert_eq!(track.id(), track_id);
+            assert_eq!(playback.subscription_count(), 1);
+            let mut stale = [1.0; 960];
+            mixer.render_pcm(&mut stale);
+            assert_eq!(stale, [0.0; 960]);
+            output_controls.set_user_state(false, false);
+            loop {
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        let mut pcm = [0.0; 960];
+                        mixer.render_pcm(&mut pcm);
+                        if pcm.iter().any(|sample| sample.abs() > 0.01) { break; }
+                    },
+                    event = alice_events.recv() => { if let Some(MediaEvent::Ice { payload, .. }) = event { bob.receive_ice("alice", &payload).await.unwrap(); } },
+                    event = bob_events.recv() => { if let Some(MediaEvent::Ice { payload, .. }) = event { alice.receive_ice("bob", &payload).await.unwrap(); } },
+                }
+            }
+        }
         output_controls.set_user_state(false, true);
         let mut pcm = [1.0; 960];
         mixer.render_pcm(&mut pcm);

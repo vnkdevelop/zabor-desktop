@@ -7,6 +7,7 @@ pub mod audio_device;
 pub mod audio_mix;
 #[cfg(feature = "native-media")]
 pub mod audio_playback;
+pub mod audio_route;
 pub mod audio_settings;
 pub mod auth;
 pub mod chat;

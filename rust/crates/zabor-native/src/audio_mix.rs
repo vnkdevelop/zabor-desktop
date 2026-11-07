@@ -16,6 +16,10 @@ pub struct AudioControls {
     pub capture_epoch: AtomicU64,
     pub playback_epoch: AtomicU64,
     pub render_delay_ms: AtomicU32,
+    pub input_device_epoch: AtomicU64,
+    pub input_route_epoch: AtomicU64,
+    pub output_device_epoch: AtomicU64,
+    pub output_route_epoch: AtomicU64,
 }
 
 impl AudioControls {
@@ -30,6 +34,10 @@ impl AudioControls {
             capture_epoch: AtomicU64::new(0),
             playback_epoch: AtomicU64::new(0),
             render_delay_ms: AtomicU32::new(0),
+            input_device_epoch: AtomicU64::new(0),
+            input_route_epoch: AtomicU64::new(0),
+            output_device_epoch: AtomicU64::new(0),
+            output_route_epoch: AtomicU64::new(0),
         }
     }
     pub fn effectively_muted(&self) -> bool {
@@ -79,6 +87,14 @@ impl AudioControls {
     pub fn apply_settings(&self, settings: AudioSettings) -> bool {
         if let Ok(mut current) = self.settings.lock() {
             if *current != settings {
+                if current.selected_input != settings.selected_input {
+                    self.input_device_epoch.fetch_add(1, Ordering::AcqRel);
+                    self.capture_restarting();
+                }
+                if current.selected_output != settings.selected_output {
+                    self.output_device_epoch.fetch_add(1, Ordering::AcqRel);
+                    self.playback_epoch.fetch_add(1, Ordering::AcqRel);
+                }
                 *current = settings;
                 self.settings_revision.fetch_add(1, Ordering::Release);
             }
@@ -86,6 +102,11 @@ impl AudioControls {
         } else {
             false
         }
+    }
+    pub fn capture_restarting(&self) {
+        self.capture_epoch.fetch_add(1, Ordering::AcqRel);
+        self.speaking.store(false, Ordering::Release);
+        self.mic_db.store((-100.0_f32).to_bits(), Ordering::Release);
     }
 }
 
@@ -293,6 +314,14 @@ impl AudioMixer {
                     .iter()
                     .map(|frame| ((frame[0] + frame[1]) * 0.5 * 32767.0) as i16),
             );
+        }
+    }
+    pub fn restart_output(&self) {
+        self.controls.playback_epoch.fetch_add(1, Ordering::AcqRel);
+        self.controls.capture_restarting();
+        self.controls.render_delay_ms.store(0, Ordering::Release);
+        if let Ok(mut reverse) = self.reverse.lock() {
+            reverse.clear();
         }
     }
     pub fn clear(&self) {

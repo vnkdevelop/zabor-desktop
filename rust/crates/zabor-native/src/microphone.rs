@@ -333,6 +333,8 @@ impl MicSubmission {
         if self.controls.effectively_muted()
             || self.controls.processor_failed.load(Ordering::Acquire)
             || self.controls.capture_epoch.load(Ordering::Acquire) != epoch
+            || self.controls.input_device_epoch.load(Ordering::Acquire)
+                != self.controls.input_route_epoch.load(Ordering::Acquire)
         {
             pcm.fill(0);
         }

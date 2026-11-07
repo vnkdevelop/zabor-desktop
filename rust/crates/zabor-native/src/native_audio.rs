@@ -29,11 +29,6 @@ impl NativeAudio {
             if worker_stop.is_cancelled() {
                 return Err(MediaError::Microphone);
             }
-            let settings = controls
-                .settings
-                .lock()
-                .map_err(|_| MediaError::Microphone)?
-                .clone();
             controls.processor_failed.store(false, Ordering::Release);
             let source = audio_source();
             let mixer = Arc::new(AudioMixer::new(controls.clone()));
@@ -44,9 +39,27 @@ impl NativeAudio {
             let render_controls = controls.clone();
             let feedback_controls = controls.clone();
             let render_stop = worker_stop.clone();
+            let output_selection = controls.clone();
+            let output_restarting = controls.clone();
+            let output_mix = mixer.clone();
             let mut render_revision = controls.settings_revision.load(Ordering::Acquire);
-            let render = DeviceStream::render_with_feedback(
-                settings.selected_output,
+            let render = DeviceStream::render_managed(
+                move || {
+                    output_selection
+                        .settings
+                        .lock()
+                        .map(|settings| settings.selected_output.clone())
+                        .map_err(|_| DeviceError)
+                },
+                move || {
+                    output_mix.restart_output();
+                    output_restarting.output_route_epoch.store(
+                        output_restarting
+                            .output_device_epoch
+                            .load(Ordering::Acquire),
+                        Ordering::Release,
+                    );
+                },
                 move |samples| {
                     let revision = render_controls.settings_revision.load(Ordering::Acquire);
                     if revision != render_revision {
@@ -59,6 +72,8 @@ impl NativeAudio {
                     if !active.load(Ordering::Acquire)
                         || render_stop.is_cancelled()
                         || render_controls.effectively_deafened()
+                        || render_controls.output_device_epoch.load(Ordering::Acquire)
+                            != render_controls.output_route_epoch.load(Ordering::Acquire)
                     {
                         samples.fill(0.0);
                     }
@@ -69,6 +84,7 @@ impl NativeAudio {
                         .render_delay_ms
                         .store(delay, Ordering::Release);
                 },
+                worker_stop.child_token(),
             )
             .map_err(|_| MediaError::Microphone)?;
             let microphone_controls = controls.clone();
@@ -76,8 +92,24 @@ impl NativeAudio {
             let microphone_source = source.clone();
             let active = enabled.clone();
             let capture_stop = worker_stop.clone();
-            let capture =
-                DeviceStream::capture(settings.selected_input, false, move |device_stop| {
+            let input_selection = controls.clone();
+            let input_restarting = controls.clone();
+            let capture = DeviceStream::capture_managed(
+                move || {
+                    input_selection
+                        .settings
+                        .lock()
+                        .map(|settings| settings.selected_input.clone())
+                        .map_err(|_| DeviceError)
+                },
+                move || {
+                    input_restarting.capture_restarting();
+                    input_restarting.input_route_epoch.store(
+                        input_restarting.input_device_epoch.load(Ordering::Acquire),
+                        Ordering::Release,
+                    );
+                },
+                move |device_stop| {
                     let mut processor =
                         MicProcessor::new(microphone_controls.clone(), microphone_mix)
                             .map_err(|_| DeviceError)?;
@@ -88,7 +120,7 @@ impl NativeAudio {
                     let submit = MicSubmission::new(
                         microphone_source,
                         microphone_controls,
-                        capture_stop.clone(),
+                        device_stop.clone(),
                     );
                     Ok(move |samples: &[f32], channels: usize, gap: bool| {
                         if capture_stop.is_cancelled() {
@@ -103,8 +135,10 @@ impl NativeAudio {
                             device_stop.cancel();
                         }
                     })
-                })
-                .map_err(|_| MediaError::Microphone)?;
+                },
+                worker_stop.child_token(),
+            )
+            .map_err(|_| MediaError::Microphone)?;
             if worker_stop.is_cancelled() {
                 return Err(MediaError::Microphone);
             }

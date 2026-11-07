@@ -161,3 +161,33 @@ async fn short_deafen_toggles_and_old_subscription_cleanup_cannot_replay_or_remo
     mixer.played(&output);
     assert_eq!(mixer.reverse.lock().unwrap().len(), 480);
 }
+
+#[tokio::test]
+async fn output_restart_preserves_peer_lanes_but_clears_stale_pcm_and_aec_feedback() {
+    let (_engine, lifetime) = peer().await;
+    let controls = Arc::new(AudioControls::new(AudioSettings::default()));
+    let mixer = AudioMixer::new(controls.clone());
+    let lane = mixer
+        .add("voice".into(), "peer/with/separator", lifetime, false)
+        .unwrap();
+    lane.push(&[16384; 480]);
+    mixer.played(&[0.5; 960]);
+    let epoch = controls
+        .capture_epoch
+        .load(std::sync::atomic::Ordering::Acquire);
+    mixer.restart_output();
+    assert!(lane.is_active());
+    assert!(mixer.reverse.lock().unwrap().is_empty());
+    assert_ne!(
+        controls
+            .capture_epoch
+            .load(std::sync::atomic::Ordering::Acquire),
+        epoch
+    );
+    let mut output = [1.0; 960];
+    mixer.render_pcm(&mut output);
+    assert_eq!(output, [0.0; 960]);
+    lane.push(&[16384; 480]);
+    mixer.render_pcm(&mut output);
+    assert_eq!(output, [0.5; 960]);
+}

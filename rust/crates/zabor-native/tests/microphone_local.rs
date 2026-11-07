@@ -145,6 +145,51 @@ async fn final_submission_rechecks_mute_epochs_and_cancellation_without_a_device
     output.close();
 }
 
+#[tokio::test]
+async fn device_switch_rejects_old_device_pcm_even_after_the_processor_observes_new_settings() {
+    let (controls, _, mut mic) = processor(AudioSettings {
+        noise_suppression: false,
+        ..AudioSettings::default()
+    });
+    let source = audio_source();
+    let factory = PeerConnectionFactory::default();
+    let track = factory.create_audio_track("switch-fixture", source.clone());
+    let mut output = NativeAudioStream::new(track, 48000, 1);
+    let submit = MicSubmission::new(source, controls.clone(), CancellationToken::new());
+    let settings = AudioSettings {
+        noise_suppression: false,
+        selected_input: "new-input".into(),
+        ..AudioSettings::default()
+    };
+    controls.apply_settings(settings);
+    let mut pcm = mic.process(&[0.1; 480], 1, false);
+    assert!(pcm.iter().any(|sample| *sample != 0));
+    submit.submit(&mut pcm, mic.epoch()).unwrap();
+    assert_eq!(pcm, [0; 480]);
+    assert!(tokio::time::timeout(Duration::from_secs(1), output.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .data
+        .iter()
+        .all(|sample| *sample == 0));
+    controls.input_route_epoch.store(
+        controls.input_device_epoch.load(Ordering::Acquire),
+        Ordering::Release,
+    );
+    controls.capture_restarting();
+    let mut pcm = mic.process(&[0.1; 480], 1, false);
+    submit.submit(&mut pcm, mic.epoch()).unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(1), output.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .data
+        .iter()
+        .any(|sample| *sample != 0));
+    output.close();
+}
+
 #[test]
 fn aec_consumes_only_committed_bounded_reverse_frames_and_never_emits_nonfinite_pcm() {
     let (controls, mixer, mut mic) = processor(AudioSettings {

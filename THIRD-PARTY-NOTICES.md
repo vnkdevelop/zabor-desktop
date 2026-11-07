@@ -60,6 +60,9 @@ must match the same pinned SHA-256 and length before compilation.
 These local inference adapters and device threads/mixer are now connected to
 native voice sessions. Physical AEC, hotplug, settings/microphone-test UI and
 complete acceptance remain unfinished; they are not in published installers.
+WASAPI route recovery retains the owning DSP thread and existing RTC tracks;
+default fallback, bounded retries and stale-PCM guards are tested synthetically,
+not accepted against physical devices. No new library or external service is added.
 Native binding generation uses libclang 18.1.1 from the pinned Windows x64
 PyPI wheel (Apache-2.0 with LLVM exceptions), with its licence retained in the
 local build cache. It is a build-only tool, not an application runtime service
@@ -104,6 +107,9 @@ RNNoise проверяются по одному закреплённому SHA-
 WASAPI работает на выделенных потоках, libwebrtc сохраняет synthetic pumping
 для декодированного звука. Физическая приёмка AEC/hotplug, settings/mic-test UI
 и полная совместимость ещё не завершены; опубликованные установщики не меняются.
+Восстановление WASAPI-маршрута сохраняет owning DSP thread и RTC-треки;
+default fallback, bounded retries и отзыв старого PCM проверяются синтетически,
+не на физических устройствах. Новые библиотеки и внешние службы не добавляются.
 Для генерации нативных bindings используется libclang 18.1.1 из закреплённого
 Windows x64 PyPI wheel (Apache-2.0 с LLVM exceptions); его лицензия сохраняется
 в локальном кэше сборки. Это инструмент сборки, а не служба приложения или

@@ -82,6 +82,8 @@
 
 Нативные аудио/DSP-адаптеры и ограниченный микшер подключены к голосовым сессиям разрабатываемого клиента и проходят локальные испытания; физическая приёмка, hotplug и полная совместимость ещё не завершены. Они не являются модерацией содержимого, не добавляют запись голоса на сервер или диск и не изменяют права пользователей, возрастные ограничения либо лицензию продукта. Их наличие не означает готовности или публикации native beta.
 
+Смена и восстановление WASAPI-маршрута реализованы в коде с сохранением DSP/RTC-треков, системным default fallback без изменения выбранного ID и ограниченными повторами. Этот синтетически проверяемый механизм не означает физическую приёмку hotplug/AEC или готовность интерфейса настроек и mic-test.
+
 Полностью нативный Rust-клиент находится в разработке отдельно от опубликованной WASM beta. Его модули авторизации, медиасвязи, чата, файлов и локального хранения проходят локальные испытания. Native beta использует отдельный профиль `zabor-desktop-native-beta`, Windows DPAPI для сессии/ключа и SQLite для истории со сроком 14 суток. Файловый workflow включает подтверждение отправки, копирование исходного файла, получение по запросу, проверку размера/SHA-256, отмену, повтор и сохранение в выбранное место. К файлам применяются раздел 5 и ACCEPTABLE-USE.md; проверка целостности не является модерацией или антивирусной проверкой. Импорт старого профиля ещё не подключён. Наличие исходников и успешная сборка не означают выпуска полноценного клиента или изменения указанных ниже обязательств Сервиса.
 
 Клиентская Rust beta меняет только указанные локальные вычисления DSP; серверы .NET/Go, маршруты и сроки хранения сохраняются. Новые установщики/update channels stable и beta разделены и по умолчанию сохраняют данные. Переход экспериментального клиента в stable выполняется после отдельного подтверждения испытаний владельцем, а не автоматически при выпуске beta.
@@ -214,6 +216,8 @@ Responsibility for content transmitted through the Service rests with the user w
 ### 7. User data
 
 Native audio/DSP adapters and the bounded mixer are connected to voice sessions in the client under development and undergo local testing; physical acceptance, hotplug and complete compatibility remain unfinished. They do not moderate content, add voice recording on the server or disk, or change user rights, age restrictions or the product licence. Their presence does not constitute native beta readiness or publication.
+
+WASAPI route switching/recovery is implemented in code, retaining DSP/RTC tracks, using system-default fallback without changing the selected ID, and limiting retries. This synthetically tested mechanism does not constitute physical hotplug/AEC acceptance or readiness of the settings/microphone-test interface.
 
 The fully native Rust client is being developed separately from the published WASM beta. Its authentication, media, chat, file and persistence modules undergo local testing. Native beta uses a separate `zabor-desktop-native-beta` profile, current-user Windows DPAPI for sessions/keys and SQLite history with 14-day retention. File handling includes send confirmation, source copying, requested downloads, size/SHA-256 verification, cancellation, retry and saving to a chosen location. Section 5 and ACCEPTABLE-USE.md apply to files; integrity checking is neither moderation nor antivirus scanning. Legacy-profile import is not connected yet. Available source and a successful build do not constitute a full client release or change the Service commitments below.
 
