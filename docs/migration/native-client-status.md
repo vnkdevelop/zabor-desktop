@@ -458,6 +458,12 @@ matches audio/UI/auth/motion/review reports `mic-baseline-local-2026-11-07`.
 PNGs passed. This is not exact raster/focus/fullUI/cold/physical/client acceptance;
 remaining plan and allfalse readiness flags persist. No publication or shutdown.
 
+Caption baseline checkpoint saved as **`96aeb73`** on `rust/native-client`.
+Current413sources/binary1b01d96b… match complete local regression reports.
+Next remaining raster/layout/focus and synchronized/cold/card/pulse/dot acceptance;
+checked baseline/font/solver/runtime/DSP work must not be repeated. Full client
+readiness remainsfalse. No push/merge/release/shutdown.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final
