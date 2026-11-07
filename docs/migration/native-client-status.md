@@ -280,6 +280,18 @@ does not constitute microphone-test UI, standalone-meter or fullclient readiness
 Next: sharedvoice/monitor audio ownership, local playback/AEC wiring andSlint
 panel, preserving every remaining handoff stage and release/shutdown condition.
 
+Checkpoint **`ef6e860`** сохраняет verified mic-test memorycore/local tap на
+`rust/native-client`. All verification jobs завершены. Далее — **shared voice/
+monitor NativeAudio runtime +Slint wiring**, не повторять core/DSP/recovery/
+preferences. Settings close/unmount долженdispose/revoke clip, tabhide — pause;
+network ограничения сохраняются. Полная native/audio/micTestUi readiness=false;
+push/merge/release/shutdown не выполнялись.
+
+The verified microphone-test core/local tap is saved in `ef6e860`. Next: shared
+voice/monitor NativeAudio ownership andSlint wiring. Closing/unmounting settings
+must dispose the clip; hiding a tab pauses it. This is not a wired microphone-test
+UI, standalone meter, full audio/client acceptance or a published beta.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера
