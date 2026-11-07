@@ -1,5 +1,6 @@
 use crate::{
-    ChannelItem, ChatLine, FriendItem, NativeApp, NotificationItem, ScreenItem, VideoItem,
+    AudioDeviceItem, AudioSettingsView, ChannelItem, ChatLine, FriendItem, NativeApp,
+    NotificationItem, ScreenItem, VideoItem,
 };
 use base64::Engine;
 use libwebrtc::media_stream_track::MediaStreamTrack;
@@ -19,7 +20,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use zabor_native::attestation::Attestation;
-use zabor_native::audio_mix::AudioControls;
+use zabor_native::audio_preferences::AudioPreferences;
 use zabor_native::audio_settings::AudioSettings;
 use zabor_native::auth::{
     AuthClient, AuthError, Bootstrap, Captcha, Credentials, LoginOutcome, Registration,
@@ -55,7 +56,6 @@ enum Command {
     Audio,
     CheckAudio,
     Reconnect,
-    Language(String),
     ChatOpen(String),
     ChatSend(String, String),
     ChatDelete(String, String),
@@ -109,6 +109,7 @@ enum UiEvent {
     PickedFiles(String, String, Vec<PathBuf>),
     FileProgress(String, String, f32),
     ChooseDestination(String, String),
+    AudioDevices(Option<Vec<zabor_native::audio_device::AudioDevice>>),
 }
 
 struct FrameUpdate {
@@ -122,7 +123,7 @@ type VideoSink = Arc<dyn Fn(FrameUpdate) + Send + Sync>;
 struct WorkerMedia {
     video_sink: VideoSink,
     video_generation: Arc<AtomicU64>,
-    audio_controls: Arc<AudioControls>,
+    audio_preferences: Arc<AudioPreferences>,
 }
 
 pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -233,13 +234,22 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
     let (commands, receiver) = mpsc::channel(16);
-    let local_settings = profile
+    let local_settings = match profile
         .as_ref()
-        .and_then(|profile| profile.read_settings().ok())
-        .unwrap_or_else(|| json!({}));
-    let audio_controls = Arc::new(AudioControls::new(AudioSettings::from_json(
-        &local_settings,
-    )));
+        .map(|profile| profile.read_settings())
+        .transpose()?
+    {
+        Some(settings) if settings.is_object() => settings,
+        Some(_) => return Err("Profile settings are invalid".into()),
+        None => json!({}),
+    };
+    let audio_preferences = AudioPreferences::new(&local_settings);
+    audio_preferences.language(ui.get_language().as_str());
+    if let Some(settings) = audio_preferences.settings() {
+        apply_audio_settings(&ui, &settings);
+        apply_audio_devices(&ui, &[], &settings);
+    }
+    let audio_controls = audio_preferences.controls.clone();
     let stop = CancellationToken::new();
     let captcha_id = Rc::new(RefCell::new(String::new()));
     let setup_avatar = Rc::new(RefCell::new(None::<String>));
@@ -337,12 +347,23 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         receiver,
         send_update.clone(),
         stop.clone(),
-        profile,
+        profile.clone(),
         WorkerMedia {
             video_sink,
             video_generation,
-            audio_controls: audio_controls.clone(),
+            audio_preferences: audio_preferences.clone(),
         },
+    ));
+    let local_errors = send_update.clone();
+    let local_settings_job = runtime.spawn(audio_preferences.clone().run_local(
+        profile,
+        stop.clone(),
+        Arc::new(move || local_errors(UiEvent::Toast("validation.sessionSaveError"))),
+    ));
+    let remote_errors = send_update.clone();
+    let remote_settings_job = runtime.spawn(audio_preferences.clone().run_remote(
+        stop.clone(),
+        Arc::new(move || remote_errors(UiEvent::Toast("validation.connectError"))),
     ));
     let weak = ui.as_weak();
     let auth_commands = commands.clone();
@@ -422,9 +443,116 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     ui.on_logout(move || {
         let _ = logout_commands.try_send(Command::Logout);
     });
-    let language_commands = commands.clone();
+    let language_preferences = audio_preferences.clone();
+    let language_errors = send_update.clone();
+    let language_ui = ui.as_weak();
     ui.on_language_changed(move |language| {
-        let _ = language_commands.try_send(Command::Language(language.to_string()));
+        if !language_preferences.language(language.as_str()) {
+            language_errors(UiEvent::Toast("validation.sessionSaveError"));
+        }
+        if let Some(ui) = language_ui.upgrade() {
+            refresh_audio_names(&ui);
+        }
+    });
+    let edit_preferences = audio_preferences.clone();
+    let weak = ui.as_weak();
+    ui.on_audio_setting_changed(move |key, value| {
+        let Some(ui) = weak.upgrade().filter(|ui| ui.get_authenticated()) else {
+            return;
+        };
+        let value = if matches!(
+            key.as_str(),
+            "selectedInput" | "selectedOutput" | "micThresholdMode" | "smartNoiseModel"
+        ) {
+            Some(json!(value.as_str()))
+        } else {
+            serde_json::from_str(value.as_str()).ok()
+        };
+        if value.is_some_and(|value| {
+            edit_preferences.edit(ui.get_user_id().as_str(), key.as_str(), value)
+        }) {
+            if let Some(settings) = edit_preferences.settings() {
+                apply_audio_settings(&ui, &settings);
+            }
+        } else {
+            show_error(&ui, AuthError::Validation("validation.sessionSaveError"));
+        }
+    });
+    let volume_preferences = audio_preferences.clone();
+    let weak = ui.as_weak();
+    ui.on_show_user_volume(move |peer, name| {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        if peer == ui.get_user_id() || !ui.get_voice_users().iter().any(|user| user.id == peer) {
+            return;
+        }
+        if let Some(settings) = volume_preferences.settings() {
+            ui.set_peer_volume(
+                settings
+                    .user_volumes
+                    .get(peer.as_str())
+                    .copied()
+                    .unwrap_or(100.0),
+            );
+            ui.set_volume_peer(peer);
+            ui.set_volume_name(name);
+            ui.set_modal(8);
+        }
+    });
+    let volume_preferences = audio_preferences.clone();
+    let weak = ui.as_weak();
+    ui.on_peer_volume_changed(move |volume| {
+        let Some(ui) = weak.upgrade() else {
+            return;
+        };
+        let peer = ui.get_volume_peer();
+        if ui.get_authenticated()
+            && peer != ui.get_user_id()
+            && ui.get_voice_users().iter().any(|user| user.id == peer)
+            && volume_preferences.peer_volume(ui.get_user_id().as_str(), peer.as_str(), volume)
+        {
+            ui.set_peer_volume(volume.clamp(0.0, 200.0));
+        }
+    });
+    let enumeration = Arc::new(AtomicBool::new(false));
+    let device_runtime = runtime.handle().clone();
+    let device_updates = send_update.clone();
+    let preview_mode = preview.is_some() || snapshot.is_some() || interaction_check;
+    ui.on_refresh_audio_devices(move || {
+        if preview_mode || enumeration.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let enumeration = enumeration.clone();
+        let updates = device_updates.clone();
+        device_runtime.spawn(async move {
+            let devices = tokio::task::spawn_blocking(zabor_native::audio_device::devices).await;
+            enumeration.store(false, Ordering::Release);
+            updates(UiEvent::AudioDevices(devices.ok().and_then(Result::ok)));
+        });
+    });
+    let device_timer = Timer::default();
+    let weak = ui.as_weak();
+    device_timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
+        if let Some(ui) = weak
+            .upgrade()
+            .filter(|ui| ui.get_modal() == 3 && ui.get_settings_tab() == 1)
+        {
+            ui.invoke_refresh_audio_devices();
+        }
+    });
+    let meter_timer = Timer::default();
+    let weak = ui.as_weak();
+    let meter_controls = audio_controls.clone();
+    meter_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
+        if let Some(ui) = weak
+            .upgrade()
+            .filter(|ui| ui.get_modal() == 3 && ui.get_settings_tab() == 1)
+        {
+            ui.set_mic_db(
+                f32::from_bits(meter_controls.mic_db.load(Ordering::Acquire)).clamp(-100.0, 0.0),
+            );
+        }
     });
     let image_runtime = runtime.handle().clone();
     let avatar_update = send_update.clone();
@@ -775,6 +903,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         slint::CloseRequestResponse::HideWindow
     });
     let weak = ui.as_weak();
+    let updated_preferences = audio_preferences.clone();
     ui.on_process_updates(move || {
         let Some(ui) = weak.upgrade() else {
             return;
@@ -791,6 +920,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 UiEvent::SignedIn(data) => {
                     apply_bootstrap(&ui, &data);
+                    if let Some(settings) = updated_preferences.settings() {
+                        apply_audio_settings(&ui, &settings);
+                    }
                     *latest.borrow_mut() = *data;
                     ui.set_authenticated(true);
                     ui.set_busy(false);
@@ -1058,9 +1190,19 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         ui.invoke_file_action(peer.into(), id.into(), "save".into());
                     }
                 }
+                UiEvent::AudioDevices(devices) => {
+                    ui.set_audio_devices_failed(devices.is_none());
+                    if let (Some(devices), Some(settings)) =
+                        (devices, updated_preferences.settings())
+                    {
+                        apply_audio_devices(&ui, &devices, &settings);
+                    }
+                }
             }
         }
+        reconcile_volume_modal(&ui);
     });
+    let mut preview_scroll = false;
     if let Some(preview) = preview {
         match preview.as_str() {
             "login" => {}
@@ -1068,6 +1210,47 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "setup" => ui.set_auth_step(2),
             "home" => {
                 ui.set_authenticated(true);
+            }
+            "audio" | "audio-manual" | "audio-raw" | "audio-ultra" | "audio-deepfilter"
+            | "audio-general" | "audio-privacy" | "audio-volume" => {
+                apply_bootstrap(&ui, &notification_fixture());
+                ui.set_authenticated(true);
+                ui.set_connected(true);
+                let settings = AudioSettings::from_json(&json!({
+                    "micThresholdMode": if preview == "audio-manual" { "manual" } else { "auto" },
+                    "noiseSuppression": preview != "audio-raw",
+                    "ultraLowLatency": preview == "audio-ultra",
+                    "smartNoiseModel": if preview == "audio-deepfilter" { "deepfilter" } else { "rnnoise" },
+                }));
+                apply_audio_settings(&ui, &settings);
+                apply_audio_devices(&ui, &[], &settings);
+                ui.set_settings_tab(if preview == "audio-general" {
+                    0
+                } else if preview == "audio-privacy" {
+                    2
+                } else {
+                    1
+                });
+                ui.set_modal(3);
+                if [
+                    "audio-manual",
+                    "audio-raw",
+                    "audio-ultra",
+                    "audio-deepfilter",
+                ]
+                .contains(&preview.as_str())
+                {
+                    preview_scroll = true;
+                }
+                if preview == "audio-volume" {
+                    let peer = notification_fixture().requests[0].clone();
+                    ui.set_voice_active(true);
+                    ui.set_voice_users(friend_rows(std::slice::from_ref(&peer)));
+                    ui.set_volume_peer(peer.id.into());
+                    ui.set_volume_name(peer.display_name.into());
+                    ui.set_peer_volume(160.0);
+                    ui.set_modal(8);
+                }
             }
             "notifications" => {
                 apply_bootstrap(&ui, &notification_fixture());
@@ -1099,6 +1282,19 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let capture = Timer::default();
+    let preview_scroll_timer = Timer::default();
+    if preview_scroll {
+        let weak = ui.as_weak();
+        preview_scroll_timer.start(
+            TimerMode::SingleShot,
+            Duration::from_millis(100),
+            move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_settings_scroll_y(-380.0);
+                }
+            },
+        );
+    }
     let capture_error = Rc::new(RefCell::new(None));
     if interaction_check {
         let weak = ui.as_weak();
@@ -1131,10 +1327,15 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             },
         );
     }
-    ui.run()?;
+    let ui_result = ui.run();
     stop.cancel();
     worker.abort();
+    runtime.block_on(async {
+        let _ = local_settings_job.await;
+        let _ = remote_settings_job.await;
+    });
     runtime.shutdown_timeout(Duration::from_secs(2));
+    ui_result?;
     if let Some(error) = capture_error.borrow_mut().take() {
         return Err(error.into());
     }
@@ -1152,8 +1353,9 @@ async fn worker(
     let WorkerMedia {
         video_sink,
         video_generation,
-        audio_controls,
+        audio_preferences,
     } = media;
+    let audio_controls = audio_preferences.controls.clone();
     let signing = match Attestation::from_environment(zabor_native::release::TARGET_BETA_VERSION) {
         Ok(signing) => signing,
         Err(_) => {
@@ -1232,7 +1434,7 @@ async fn worker(
                             user.id.clone(),
                             friends.iter().cloned(),
                             chat_ice.clone(),
-                            false,
+                            audio_preferences.relay_only(),
                         )
                         .ok();
                     }
@@ -1256,7 +1458,7 @@ async fn worker(
                     user.id.clone(),
                     friends.iter().cloned(),
                     chat_ice.clone(),
-                    false,
+                    audio_preferences.relay_only(),
                 )
                 .ok();
             }
@@ -1401,6 +1603,7 @@ async fn worker(
                         update(UiEvent::Hub(event));
                     },
                     None => {
+                        audio_preferences.disconnect();
                         events = None; hub = None; session_ready = false; chat_transport = None;
                         if let Some(engine) = chat.as_mut() { engine.fail_downloads(None, now_ms()); }
                         if let Some(jobs) = file_jobs.as_mut() { for peer in &friends { jobs.disconnect(peer); } }
@@ -1633,6 +1836,7 @@ async fn worker(
             continue;
         }
         if matches!(command, Command::Logout) {
+            audio_preferences.logout();
             pending_join = None;
             video_generation.fetch_add(1, Ordering::AcqRel);
             video_jobs.clear();
@@ -1695,19 +1899,6 @@ async fn worker(
             }
             continue;
         }
-        if let Command::Language(language) = command {
-            if let Some(profile) = &profile {
-                if ["ru", "en"].contains(&language.as_str()) {
-                    if let Ok(mut settings) = profile.read_settings() {
-                        settings["language"] = json!(language);
-                        if profile.write_settings(&settings).is_err() {
-                            update(UiEvent::Toast("validation.sessionSaveError"));
-                        }
-                    }
-                }
-            }
-            continue;
-        }
         if matches!(
             command,
             Command::ChatOpen(_) | Command::ChatSend(_, _) | Command::ChatDelete(_, _)
@@ -1765,6 +1956,7 @@ async fn worker(
             continue;
         }
         if hub.as_ref().is_none_or(|hub| !hub.is_connected()) {
+            audio_preferences.disconnect();
             let token = match signing.as_ref().map(Attestation::token).transpose() {
                 Ok(token) => token,
                 Err(_) => {
@@ -1802,7 +1994,9 @@ async fn worker(
             let outcome = tokio::select! { _ = stop.cancelled() => break, result = auth.login(saved_credentials.as_ref().unwrap()) => result };
             match outcome {
                 Ok(LoginOutcome::SignedIn(data)) => {
-                    restore_audio(&audio_controls, profile.as_deref(), &data);
+                    if !restore_audio(&audio_preferences, &connection, &data) {
+                        update(UiEvent::Toast("validation.sessionSaveError"));
+                    }
                     sent_audio_state = None;
                     sent_speaking = false;
                     speaking_release = None;
@@ -1847,6 +2041,7 @@ async fn worker(
                 }
                 Ok(LoginOutcome::NeedsRegistration)
                 | Err(AuthError::InvalidPassword | AuthError::ClientRejected) => {
+                    audio_preferences.logout();
                     saved_credentials = None;
                     if let Some(profile) = &profile {
                         let _ = profile.clear_session();
@@ -1901,7 +2096,9 @@ async fn worker(
                 .map(|outcome| match outcome {
                     LoginOutcome::NeedsRegistration => UiEvent::MissingAccount,
                     LoginOutcome::SignedIn(data) => {
-                        restore_audio(&audio_controls, profile.as_deref(), &data);
+                        if !restore_audio(&audio_preferences, &connection, &data) {
+                            update(UiEvent::Toast("validation.sessionSaveError"));
+                        }
                         sent_audio_state = None;
                         sent_speaking = false;
                         speaking_release = None;
@@ -1964,7 +2161,6 @@ async fn worker(
                 Command::Logout
                 | Command::Reconnect
                 | Command::Leave
-                | Command::Language(_)
                 | Command::ChatOpen(_)
                 | Command::ChatSend(_, _)
                 | Command::ChatDelete(_, _)
@@ -1990,10 +2186,14 @@ async fn worker(
                         return Err(AuthError::Network);
                     };
                     if voice.is_none() {
-                        let (session, receiver) =
-                            VoiceSession::new(&connection, user, false, audio_controls.clone())
-                                .await
-                                .map_err(|_| AuthError::Network)?;
+                        let (session, receiver) = VoiceSession::new(
+                            &connection,
+                            user,
+                            audio_preferences.relay_only(),
+                            audio_controls.clone(),
+                        )
+                        .await
+                        .map_err(|_| AuthError::Network)?;
                         voice = Some(session);
                         media_events = Some(receiver);
                     }
@@ -2054,10 +2254,14 @@ async fn worker(
                     speaking_release = None;
                     sent_audio_state = None;
                     let user = current_user.as_ref().ok_or(AuthError::Network)?;
-                    let (mut session, receiver) =
-                        VoiceSession::new(&connection, user, false, audio_controls.clone())
-                            .await
-                            .map_err(|_| AuthError::Network)?;
+                    let (mut session, receiver) = VoiceSession::new(
+                        &connection,
+                        user,
+                        audio_preferences.relay_only(),
+                        audio_controls.clone(),
+                    )
+                    .await
+                    .map_err(|_| AuthError::Network)?;
                     session
                         .prepare_call(&peer)
                         .await
@@ -2138,10 +2342,14 @@ async fn worker(
                     speaking_release = None;
                     sent_audio_state = None;
                     let user = current_user.as_ref().ok_or(AuthError::Network)?;
-                    let (mut session, receiver) =
-                        VoiceSession::new(&connection, user, false, audio_controls.clone())
-                            .await
-                            .map_err(|_| AuthError::Network)?;
+                    let (mut session, receiver) = VoiceSession::new(
+                        &connection,
+                        user,
+                        audio_preferences.relay_only(),
+                        audio_controls.clone(),
+                    )
+                    .await
+                    .map_err(|_| AuthError::Network)?;
                     session
                         .prepare_call(&peer)
                         .await
@@ -2168,13 +2376,129 @@ async fn worker(
     video_jobs.clear();
 }
 
-fn restore_audio(controls: &AudioControls, profile: Option<&Profile>, data: &Bootstrap) {
-    let local = profile
-        .and_then(|profile| profile.read_settings().ok())
-        .unwrap_or_else(|| json!({}));
-    controls.apply_settings(AudioSettings::restore(&local, data.audio_settings.as_ref()));
-    controls.set_user_state(data.user.is_muted, data.user.is_deafened);
-    controls.set_server_state(data.user.is_server_muted, data.user.is_server_deafened);
+fn apply_audio_settings(ui: &NativeApp, settings: &AudioSettings) {
+    ui.set_audio_settings(AudioSettingsView {
+        input_volume: settings.input_volume,
+        output_volume: settings.output_volume,
+        selected_input: settings.selected_input.clone().into(),
+        selected_output: settings.selected_output.clone().into(),
+        noise_suppression: settings.noise_suppression,
+        threshold_mode: match settings.mic_threshold_mode {
+            zabor_native::audio_settings::ThresholdMode::Auto => "auto",
+            zabor_native::audio_settings::ThresholdMode::Manual => "manual",
+        }
+        .into(),
+        manual_threshold: settings.manual_threshold_value,
+        noise_model: match settings.smart_noise_model {
+            zabor_native::audio_settings::NoiseModel::Rnnoise => "rnnoise",
+            zabor_native::audio_settings::NoiseModel::Deepfilter => "deepfilter",
+        }
+        .into(),
+        speech_analyzer: settings.speech_analyzer,
+        echo_cancellation: settings.echo_cancellation,
+        suppression_strength: settings.suppression_strength,
+        ultra_low_latency: settings.ultra_low_latency,
+        relay_only: settings.relay_only,
+    });
+    refresh_audio_names(ui);
+}
+
+fn apply_audio_devices(
+    ui: &NativeApp,
+    devices: &[zabor_native::audio_device::AudioDevice],
+    settings: &AudioSettings,
+) {
+    let rows = |input, selected: &str| {
+        let mut rows = vec![AudioDeviceItem {
+            id: "default".into(),
+            name: "".into(),
+            fallback: "settings.audio.default".into(),
+        }];
+        let devices = devices
+            .iter()
+            .filter(|device| device.input == input)
+            .take(256)
+            .collect::<Vec<_>>();
+        if selected != "default" && !devices.iter().any(|device| device.id == selected) {
+            rows.push(AudioDeviceItem {
+                id: selected.into(),
+                name: "".into(),
+                fallback: "common.loading".into(),
+            });
+        }
+        rows.extend(devices.into_iter().map(|device| {
+            AudioDeviceItem {
+                id: device.id.clone().into(),
+                name: device.name.clone().into(),
+                fallback: if input {
+                    "settings.audio.micFallback"
+                } else {
+                    "settings.audio.speakerFallback"
+                }
+                .into(),
+            }
+        }));
+        Rc::new(VecModel::from(rows)).into()
+    };
+    ui.set_input_devices(rows(true, &settings.selected_input));
+    ui.set_output_devices(rows(false, &settings.selected_output));
+    refresh_audio_names(ui);
+}
+
+fn refresh_audio_names(ui: &NativeApp) {
+    let Ok(strings) = Strings::new(ui.get_language().as_str()) else {
+        return;
+    };
+    let label = |model: ModelRc<AudioDeviceItem>, selected: &str| {
+        model
+            .iter()
+            .find(|row| row.id == selected)
+            .map(|row| {
+                if row.name.is_empty() {
+                    strings.text(row.fallback.as_str()).into()
+                } else {
+                    row.name
+                }
+            })
+            .unwrap_or_else(|| strings.text("common.loading").into())
+    };
+    let settings = ui.get_audio_settings();
+    ui.set_input_device_name(label(
+        ui.get_input_devices(),
+        settings.selected_input.as_str(),
+    ));
+    ui.set_output_device_name(label(
+        ui.get_output_devices(),
+        settings.selected_output.as_str(),
+    ));
+}
+
+fn reconcile_volume_modal(ui: &NativeApp) {
+    if ui.get_modal() == 8
+        && (!ui.get_authenticated()
+            || !ui.get_voice_active()
+            || !ui
+                .get_voice_users()
+                .iter()
+                .any(|user| user.id == ui.get_volume_peer()))
+    {
+        ui.set_modal(0);
+        ui.set_volume_peer("".into());
+        ui.set_volume_name("".into());
+        ui.set_peer_volume(100.0);
+    }
+}
+
+fn restore_audio(preferences: &AudioPreferences, hub: &HubConnection, data: &Bootstrap) -> bool {
+    let restored =
+        preferences.begin_session(&data.user.id, hub.clone(), data.audio_settings.as_ref());
+    preferences
+        .controls
+        .set_user_state(data.user.is_muted, data.user.is_deafened);
+    preferences
+        .controls
+        .set_server_state(data.user.is_server_muted, data.user.is_server_deafened);
+    restored
 }
 
 fn show_error(ui: &NativeApp, error: AuthError) {
@@ -2219,10 +2543,111 @@ fn check_auth_interactions(ui: &NativeApp) -> Result<(), &'static str> {
         return Err("Invalid credentials reached the network operation");
     }
     check_roster_bindings(ui)?;
+    check_audio_interactions(ui)?;
     println!(
         "{}",
-        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true})
+        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeAudioInteractionCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true})
     );
+    Ok(())
+}
+
+fn check_audio_interactions(ui: &NativeApp) -> Result<(), &'static str> {
+    use slint::platform::{Key, PointerEventButton, WindowEvent};
+    let settings = Rc::new(RefCell::new(AudioSettings::default()));
+    let edited = Rc::new(RefCell::new(Vec::<String>::new()));
+    let state = settings.clone();
+    let observed = edited.clone();
+    let weak = ui.as_weak();
+    ui.on_audio_setting_changed(move |key, value| {
+        let value = if matches!(
+            key.as_str(),
+            "selectedInput" | "selectedOutput" | "micThresholdMode" | "smartNoiseModel"
+        ) {
+            Some(json!(value.as_str()))
+        } else {
+            serde_json::from_str(value.as_str()).ok()
+        };
+        let next = value.and_then(|value| state.borrow().edited(key.as_str(), value));
+        if let (Some(next), Some(ui)) = (next, weak.upgrade()) {
+            observed.borrow_mut().push(key.to_string());
+            apply_audio_settings(&ui, &next);
+            *state.borrow_mut() = next;
+        }
+    });
+    apply_audio_settings(ui, &settings.borrow());
+    apply_audio_devices(ui, &[], &settings.borrow());
+    ui.set_settings_tab(1);
+    ui.set_settings_scroll_y(0.0);
+    ui.set_modal(3);
+    let click = |x, y| {
+        let position = slint::LogicalPosition::new(x, y);
+        ui.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        ui.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+    };
+    let key = |key: Key| {
+        ui.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+        ui.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: key.into() });
+    };
+    click(550.0, 464.0);
+    key(Key::RightArrow);
+    if settings.borrow().input_volume != 105.0 {
+        return Err("Audio slider pointer/focus/arrow step failed");
+    }
+    key(Key::Home);
+    if settings.borrow().input_volume != 0.0 {
+        return Err("Audio slider minimum failed");
+    }
+    key(Key::End);
+    if settings.borrow().input_volume != 200.0 {
+        return Err("Audio slider maximum failed");
+    }
+    click(550.0, 564.0);
+    key(Key::LeftArrow);
+    if settings.borrow().output_volume != 95.0 || settings.borrow().input_volume != 200.0 {
+        return Err("Output slider changed the wrong audio preference");
+    }
+    click(734.0, 656.0);
+    if !settings.borrow().ultra_low_latency {
+        return Err("Ultra-low-latency toggle failed");
+    }
+    ui.set_settings_scroll_y(-380.0);
+    let count = edited.borrow().len();
+    click(734.0, 356.0);
+    if ui.get_settings_scroll_y() > -300.0 {
+        return Err("Audio settings scroll did not expose the disabled controls");
+    }
+    if edited.borrow().len() != count {
+        return Err("Disabled heavy audio control accepted an edit");
+    }
+    click(758.0, 116.0);
+    if ui.get_modal() != 0 {
+        return Err("Audio settings close action failed");
+    }
+    ui.set_voice_active(true);
+    let peer = zabor_native::auth::User {
+        id: "volume-fixture-peer".into(),
+        ..Default::default()
+    };
+    ui.set_voice_users(friend_rows(&[peer]));
+    ui.set_volume_peer("volume-fixture-peer".into());
+    ui.set_modal(8);
+    reconcile_volume_modal(ui);
+    if ui.get_modal() != 8 {
+        return Err("Active peer volume dialog closed prematurely");
+    }
+    ui.set_voice_users(ModelRc::default());
+    reconcile_volume_modal(ui);
+    if ui.get_modal() != 0 || !ui.get_volume_peer().is_empty() {
+        return Err("Departed peer retained a stale volume dialog");
+    }
     Ok(())
 }
 

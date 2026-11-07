@@ -182,6 +182,44 @@ impl AudioSettings {
                 .clamp(0.0, 1.0)
                 .powi(2)
     }
+
+    pub fn edited(&self, key: &str, value: Value) -> Option<Self> {
+        let valid = match key {
+            "inputVolume" | "outputVolume" | "manualThresholdValue" | "suppressionStrength" => {
+                value.as_f64().is_some_and(f64::is_finite)
+            }
+            "selectedInput" | "selectedOutput" => value
+                .as_str()
+                .is_some_and(|id| !id.is_empty() && id.len() <= 4096),
+            "noiseSuppression" | "speechAnalyzer" | "echoCancellation" | "ultraLowLatency"
+            | "relayOnly" => value.is_boolean(),
+            "language" => value == "ru" || value == "en",
+            "micThresholdMode" => value == "auto" || value == "manual",
+            "smartNoiseModel" => value == "rnnoise" || value == "deepfilter",
+            _ => false,
+        };
+        if !valid {
+            return None;
+        }
+        let mut raw = serde_json::to_value(self).ok()?;
+        raw[key] = value;
+        Some(Self::from_json(&raw))
+    }
+
+    pub fn with_peer_volume(&self, peer: &str, volume: f32) -> Option<Self> {
+        if peer.is_empty()
+            || peer.len() > 4096
+            || !volume.is_finite()
+            || (!self.user_volumes.contains_key(peer) && self.user_volumes.len() >= 4096)
+        {
+            return None;
+        }
+        let mut settings = self.clone();
+        settings
+            .user_volumes
+            .insert(peer.into(), volume.clamp(0.0, 200.0));
+        Some(settings)
+    }
 }
 
 #[cfg(test)]
@@ -226,5 +264,63 @@ mod tests {
         assert_eq!(settings.input_volume, 175.0);
         assert_eq!(settings.extra["futureLocal"], true);
         assert_eq!(settings.extra["futureServer"]["active"], true);
+    }
+
+    #[test]
+    fn typed_edits_reject_invalid_keys_and_preserve_unrelated_preferences() {
+        let settings = AudioSettings::from_json(
+            &json!({"language":"en","future":{"nested":true},"userVolumes":{"alice":160}}),
+        );
+        let edited = settings.edited("inputVolume", json!(250)).unwrap();
+        assert_eq!(edited.input_volume, 200.0);
+        assert_eq!(edited.output_volume, settings.output_volume);
+        assert_eq!(edited.language, "en");
+        assert_eq!(edited.extra, settings.extra);
+        assert_eq!(edited.user_volumes, settings.user_volumes);
+        for (key, value) in [
+            ("unknown", json!(true)),
+            ("language", json!("fr")),
+            ("selectedInput", json!("")),
+            ("noiseSuppression", json!(1)),
+            ("inputVolume", Value::Null),
+            ("smartNoiseModel", json!("other")),
+        ] {
+            assert!(settings.edited(key, value).is_none());
+        }
+        assert_eq!(
+            settings
+                .edited("suppressionStrength", json!(16.6))
+                .unwrap()
+                .suppression_strength,
+            17.0
+        );
+        assert_eq!(
+            settings
+                .edited("manualThresholdValue", json!(-90))
+                .unwrap()
+                .manual_threshold_value,
+            -60.0
+        );
+    }
+
+    #[test]
+    fn peer_volume_edits_are_bounded_and_do_not_change_other_users_or_global_gain() {
+        let settings = AudioSettings::from_json(
+            &json!({"outputVolume":175,"userVolumes":{"alice":150},"future":true}),
+        );
+        let edited = settings.with_peer_volume("bob", 300.0).unwrap();
+        assert_eq!(edited.user_volumes["bob"], 200.0);
+        assert_eq!(edited.user_volumes["alice"], 150.0);
+        assert_eq!(edited.output_volume, 175.0);
+        assert_eq!(edited.extra, settings.extra);
+        assert!(settings.with_peer_volume("", 100.0).is_none());
+        assert!(settings.with_peer_volume("bob", f32::NAN).is_none());
+        let mut full = settings;
+        full.user_volumes = (0..4096).map(|id| (id.to_string(), 100.0)).collect();
+        assert!(full.with_peer_volume("new", 100.0).is_none());
+        assert_eq!(
+            full.with_peer_volume("1", -5.0).unwrap().user_volumes["1"],
+            0.0
+        );
     }
 }

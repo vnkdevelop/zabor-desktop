@@ -149,6 +149,76 @@ Verified device recovery is saved in `8e4b7d3`. No push, merge, release or shutd
 Next: settings/device/per-user volume UI and local/server saving, then microphone
 testing and all remaining handoff stages. Full audio/client acceptance stays false.
 
+Settings/UI WIP после `534f1d4`: native audio/device/per-user gain controls и
+latest-wins persistence/server sync реализованы, но финальная проверка ещё нужна.
+Local JSON writer и network task независимы; язык и unknown fields сохраняются,
+pending привязан к owner/session, local-only `nativeAudioSync` не отправляется
+серверу. Relay-only применяется к новым RTC constructors, не к уже созданным;
+анонимность/скрытие IP не гарантируются. Mic-test, standalone meter и полная
+settings/UI/audio/client acceptance всё ещё не завершены. Подробности — handoff.
+
+Settings/UI is work in progress: native audio/device/per-user gain controls and
+latest-wins saving are implemented, with independent local/network tasks and
+owner/session guards. Language and unknown fields are preserved; local pending
+metadata is not sent to the server. Relay-only affects new RTC constructions,
+not existing connections, and makes no anonymity guarantee. Final source-frozen
+checks, microphone testing and complete UI/audio/client acceptance remain pending.
+
+Первый settings-code run прошёл:104 default-feature tests,97 neural-disabled,
+fmt/Clippy/build,9 HTTP tests,397 matching source hashes и unchanged neural metrics.
+Auth:24 captures/8 interaction runs passed. Settings capture runner остановился
+на cmd quoting; manual first PNG выявила layout defects, которые исправлены вместе
+с stale user-volume modal guard. Новый build/UI interaction/capture run выполняется;
+latest corrected sources требуют нового final source-frozen report. Это не full
+visual/UI/mic-test/audio/client acceptance. Логи/текущие jobs/точный next step — handoff.
+
+The first settings code run passed104 default-feature and97 neural-disabled tests,
+fmt/Clippy/build, nine HTTP tests and397 matching source hashes; neural metrics
+are unchanged. Auth captures/interactions passed. A later settings capture command
+failed on cmd quoting; its manual retry exposed layout defects now corrected with
+the volume-dialog lifetime guard. The fresh build/UI run is in progress; corrected
+sources still require final frozen-source verification and full acceptance.
+
+Финальный settings code run прошёл: **104 default-feature /97 neural-disabled
+tests**, fmt/Clippy/build,9HTTP/pinned artifacts и **398 matching source hashes**;
+neural metrics unchanged. Strict visible64 captures/8 interactions также прошли,
+но initial UI binary hash отличается от final rebuilt/tested binary. Сейчас
+UI/auth повторяются только на финальном бинарнике; guard не ослабляется. Полная
+visual/UI/mic-test/physical/audio/client readiness остаётсяfalse; checkpoint ещё
+не committed. Точный pending job/output — в handoff.
+
+Final settings code checks passed104 default-feature and97 neural-disabled tests,
+fmt/Clippy/build, nine HTTP/pinned-artifact checks and398 matching source hashes.
+Neural metrics are unchanged. Strict visible UI captures/interactions passed on
+an earlier build; their binary hash differs from the final tested executable.
+UI/auth evidence is being regenerated only on that final binary, retaining the
+hash guard. Complete visual/UI/microphone-test/physical/client readiness is false.
+
+**Settings/save/UI functionality проверена на final binary.**104 default-feature
+tests (47 unit+57 integration),97 no-neural tests,9HTTP/pinned artifacts/fmt/
+Clippy/build и398matching source hashes прошли.64 distinct-state settings PNG и
+8interaction runs,24auth native/reference pairs и8additional runs прошли на том
+же final tested binary.24native auth PNG byte-identical accepted checkpoint;
+64settings PNG identical preceding same-source build. Хеши final code/UI/auth/
+current.exe совпадают; neural metrics unchanged (resetRNNoise63 μs/DFN3 658 μs).
+Reports: native-audio/settings-verified-2026-11-07, native-audio/settings-no-neural-
+final-2026-11-07, native-ui/audio-settings-final-2026-11-07, native-auth/settings-
+verified-2026-11-07 под migration-artifacts/. Не full visual/UI/audio/client
+acceptance: mic-test/standalone meter/raw-Silero/outer4x/physical acceptance и
+общий remaining plan ещё нужны. Следующий этап — mic-test; no push/merge/release/
+shutdown, native/audioReady=false.
+
+**Settings saving and native UI functionality are verified on the final binary.**
+104 default-feature and97 neural-disabled tests, nine HTTP/pinned-artifact checks,
+fmt/Clippy/build and398 matching source hashes passed.64 distinct-state settings
+captures/eight interaction runs and24auth capture pairs/eight additional runs use
+the same final tested executable. Auth images match the accepted checkpoint byte
+for byte; all64settings images match the preceding same-source build. Final code,
+UI/auth and current binary hashes match; neural metrics are unchanged. Full visual/
+UI/audio/client acceptance remains false. Next: microphone testing/standalone
+meter, then raw/Silero/outer4x and every remaining handoff stage. No push, merge,
+release or shutdown was performed.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера

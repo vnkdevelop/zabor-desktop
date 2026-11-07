@@ -1,5 +1,6 @@
 import { FormButton, FormField, IconButton } from "controls.slint";
 import { ScrollView } from "std-widgets.slint";
+import { AudioSettingsPanel, AudioSettingsView, AudioDeviceItem, AudioSlider, RelaySetting } from "audio-settings.slint";
 
 export struct ChannelItem { id: string, name: string, count: int }
 export struct FriendItem { id: string, name: string, username: string, online: bool, color: color, avatar: image, speaking: bool, muted: bool, deafened: bool }
@@ -65,6 +66,18 @@ export component NativeApp inherits Window {
     in-out property <string> selected-id;
     in property <string> selected-name;
     in property <bool> reduced-motion;
+    in property <AudioSettingsView> audio-settings;
+    in property <[AudioDeviceItem]> input-devices;
+    in property <[AudioDeviceItem]> output-devices;
+    in property <string> input-device-name;
+    in property <string> output-device-name;
+    in property <bool> audio-devices-failed;
+    in property <float> mic-db: -100;
+    in-out property <int> settings-tab;
+    in-out property <length> settings-scroll-y;
+    in-out property <string> volume-peer;
+    in-out property <string> volume-name;
+    in property <float> peer-volume: 100;
     pure callback tr(string, string) -> string;
     pure callback tr-name(string, string, string) -> string;
     pure callback limit-text(string, int) -> string;
@@ -93,7 +106,13 @@ export component NativeApp inherits Window {
     callback start-share(string);
     callback stop-share;
     callback process-video;
+    callback audio-setting-changed(string, string);
+    callback refresh-audio-devices;
+    callback show-user-volume(string, string);
+    callback peer-volume-changed(float);
     changed language => { root.language-changed(root.language); }
+    changed modal => { if root.modal == 3 { root.refresh-audio-devices(); } }
+    changed settings-tab => { root.settings-scroll-y = 0px; }
 
     Rectangle {
         x: 0px; y: 0px; width: parent.width; height: 36px; background: #191919;
@@ -248,7 +267,7 @@ export component NativeApp inherits Window {
             }
             Text { x: 79px; y: 20px; width: 178px; height: 20px; text: root.user-name; color: white; font-size: 14px; font-weight: 700; overflow: elide; }
             Text { x: 79px; y: 41px; width: 178px; height: 16px; text: root.user-login; color: #949ba4; font-size: 12px; overflow: elide; }
-            IconButton { x: 268px; y: 20px; icon: @image-url("../assets/icons/gear.svg"); label: root.tr("settings.title", root.language); activated => { root.modal = 3; root.error = ""; } }
+            IconButton { x: 268px; y: 20px; icon: @image-url("../assets/icons/gear.svg"); label: root.tr("settings.title", root.language); activated => { root.settings-tab = 0; root.modal = 3; root.error = ""; } }
         }
         Text { x: 364px; y: 40px; width: parent.width - 400px; height: 120px; text: root.selected-name; font-size: 24px; font-weight: 700; color: white; wrap: word-wrap; }
         if !root.voice-active && (root.active-tab == 0 || root.selected-id == "") : Text { x: 364px; y: 180px; width: parent.width - 400px; height: 180px; text: root.joke; color: #949ba4; wrap: word-wrap; }
@@ -294,6 +313,7 @@ export component NativeApp inherits Window {
                         Rectangle { width: parent.width; height: parent.height; border-radius: 48px; border-width: user.speaking && !user.muted ? 2px : 0px; border-color: #3ba55c; background: transparent; }
                     }
                     if user.muted || user.deafened : Image { x: parent.width - 36px; y: 16px; width: 20px; height: 20px; source: user.deafened ? @image-url("../assets/icons/headphones.svg") : @image-url("../assets/icons/microphone.svg"); colorize: #da373c; }
+                    if user.id != root.user-id : IconButton { x: 12px; y: 12px; width: 44px; height: 44px; icon: @image-url("../assets/icons/headphones.svg"); label: root.tr("modals.userVolume.title", root.language); activated => { root.show-user-volume(user.id, user.name); } }
                     Text { x: 12px; y: (parent.height + 88px) / 2; width: parent.width - 24px; height: 24px; text: user.name; font-size: 16px; font-weight: 700; color: white; horizontal-alignment: center; overflow: elide; }
                 }
             }
@@ -322,7 +342,44 @@ export component NativeApp inherits Window {
         }
     }
     if root.authenticated && root.error != "" && root.modal == 0 : Rectangle { x: 356px; y: parent.height - 170px; width: parent.width - 380px; height: 44px; background: #09090be6; border-radius: 12px; Text { x: 12px; width: parent.width - 24px; height: parent.height; text: root.error; font-size: 14px; color: #da373c; wrap: word-wrap; vertical-alignment: center; } TouchArea { clicked => { root.error = ""; } } }
-    if root.modal > 0 : Rectangle {
+    if root.modal == 3 : Rectangle {
+        y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
+        Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 500px; height: min(640px, parent.height - 48px); background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
+            Text { x: 24px; y: 24px; width: parent.width - 88px; height: 28px; text: root.tr("settings.title", root.language); color: white; font-size: 20px; font-weight: 700; }
+            IconButton { x: parent.width - 64px; y: 16px; width: 44px; height: 44px; icon: @image-url("../assets/icons/window-close.svg"); label: root.tr("common.close", root.language); activated => { root.modal = 0; } }
+            HorizontalLayout { x: 24px; y: 68px; width: parent.width - 48px; height: 40px; spacing: 8px;
+                for tab[index] in ["settings.tabs.general", "settings.tabs.audio", "settings.tabs.privacy", "settings.tabs.account"] : FormButton { height: 40px; label-size: 13px; label: root.tr(tab, root.language); primary: root.settings-tab == index; activated => { root.settings-tab = index; } }
+            }
+            Rectangle { x: 0px; y: 124px; width: parent.width; height: 1px; background: #ffffff12; }
+            ScrollView { x: 24px; y: 140px; width: parent.width - 48px; height: parent.height - 164px; viewport-y <=> root.settings-scroll-y;
+                VerticalLayout { spacing: 24px;
+                    if root.settings-tab == 0 : VerticalLayout { spacing: 12px;
+                        Text { text: root.tr("settings.general.language", root.language); color: white; font-size: 15px; font-weight: 600; }
+                        Text { text: root.tr("settings.general.languageDesc", root.language); color: #949ba4; font-size: 12px; wrap: word-wrap; }
+                        HorizontalLayout { spacing: 12px;
+                            FormButton { label: root.tr("settings.general.languageRussian", root.language); primary: root.language == "ru"; activated => { root.language = "ru"; } }
+                            FormButton { label: root.tr("settings.general.languageEnglish", root.language); primary: root.language == "en"; activated => { root.language = "en"; } }
+                        }
+                    }
+                    if root.settings-tab == 1 : AudioSettingsPanel { audio: root.audio-settings; inputs: root.input-devices; outputs: root.output-devices; input-name: root.input-device-name; output-name: root.output-device-name; reduced-motion: root.reduced-motion; devices-failed: root.audio-devices-failed; mic-db: root.mic-db; tr(key) => { return root.tr(key, root.language); } edited(key, value) => { root.audio-setting-changed(key, value); } }
+                    if root.settings-tab == 2 : RelaySetting { relay-only: root.audio-settings.relay-only; reduced-motion: root.reduced-motion; tr(key) => { return root.tr(key, root.language); } toggled(value) => { root.audio-setting-changed("relayOnly", value ? "true" : "false"); } }
+                    if root.settings-tab == 3 : FormButton { label: root.tr("settings.privacy.logout", root.language); foreground: #da373c; activated => { root.logout(); } }
+                    if root.error != "" : Text { text: root.error; color: #da373c; font-size: 14px; wrap: word-wrap; }
+                }
+            }
+        }
+    }
+    if root.modal == 8 : Rectangle { y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
+        Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 340px; height: 240px; background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
+            VerticalLayout { padding: 24px; spacing: 16px;
+                Text { text: root.tr("modals.userVolume.title", root.language); color: white; font-size: 20px; font-weight: 700; }
+                Text { text: root.volume-name; color: #949ba4; font-size: 14px; overflow: elide; }
+                AudioSlider { label: root.tr("modals.userVolume.label", root.language); value: root.peer-volume; edited(value) => { root.peer-volume-changed(value); } }
+                FormButton { label: root.tr("common.close", root.language); height: 40px; activated => { root.modal = 0; } }
+            }
+        }
+    }
+    if root.modal > 0 && root.modal != 3 && root.modal != 8 : Rectangle {
         y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
         Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: root.modal == 5 ? 540px : 400px; height: root.modal == 5 ? 480px : root.modal == 3 ? 276px : 288px; background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
             VerticalLayout { padding: 32px; spacing: 16px;
@@ -332,10 +389,6 @@ export component NativeApp inherits Window {
                 if root.modal == 5 : ScrollView { height: 310px; VerticalLayout { spacing: 8px; for source in root.screen-sources : FormButton { label: source.title; primary: root.selected-screen == source.id; activated => { root.selected-screen = source.id; } } } }
                 if root.modal == 4 : Text { text: root.incoming-call-name; color: white; font-size: 20px; horizontal-alignment: center; }
                 if root.modal < 3 : FormField { text <=> root.modal-input; label: root.tr(root.modal == 1 ? "modals.createChannel.label" : "modals.addFriend.desc", root.language); disabled: root.busy; accepted => { root.submit-modal(root.modal, root.modal-input); } }
-                if root.modal == 3 : HorizontalLayout { spacing: 12px;
-                    FormButton { label: root.tr("settings.general.languageRussian", root.language); primary: root.language == "ru"; activated => { root.language = "ru"; } }
-                    FormButton { label: root.tr("settings.general.languageEnglish", root.language); primary: root.language == "en"; activated => { root.language = "en"; } }
-                }
                 if root.error != "" : Text { text: root.error; color: #da373c; font-size: 14px; wrap: word-wrap; }
                 HorizontalLayout { spacing: 16px;
                     FormButton { label: root.tr(root.modal == 4 ? "main.notifications.decline" : root.modal == 6 ? "modals.switchChannel.stay" : "common.cancel", root.language); disabled: root.busy; activated => { if root.modal == 7 { root.confirm-files(false); } if root.modal == 4 { root.answer-call(root.incoming-call-id, false); } if root.modal == 6 { root.pending-channel = ""; } root.modal = 0; } }

@@ -81,6 +81,8 @@
 
 ### 6. Обработка данных на устройстве пользователя
 
+В коде native beta настройки звука и громкость отдельных пользователей сохраняются в отдельном beta-профиле; синхронизация с сервером использует прежний `SaveAudioSettings` без аудиоданных. Локальная служебная метка `nativeAudioSync` содержит ID владельца и признак ожидающей синхронизации, не секреты; она не отправляется серверу. Смена сессии отзывает старое ожидание, выход удаляет ожидающую синхронизацию, сохраняя локальные настройки. `relayOnly` задаёт relay ICE для новых RTC-соединений, не изменяет уже созданные соединения и не гарантирует анонимность; полного применения требует перезапуск. Это ещё не полная UI/audio/physical-приёмка и не опубликованный клиент.
+
 В коде нативного клиента добавлена смена WASAPI-маршрута на том же потоке с сохранением DSP, RTC-треков и микшера. Недоступный или старый browser-hashed ID временно использует системное устройство по умолчанию, не переписывая выбранный ID в профиле. Старый PCM и AEC feedback очищаются; повторы ограничены backoff 250–2000 мс и 30-секундным периодом восстановления. Проверки пока синтетические: физическая hotplug/AEC-приёмка не завершена. Новые внешние службы и запись звука не добавляются.
 
 В разрабатываемом нативном клиенте адаптеры RNNoise, DeepFilterNet3 и Silero, ручной/автоматический SmartGate и ограниченный микшер подключены к голосовой сессии. WASAPI-захват создаёт DSP на собственном потоке; кадры передаются в libwebrtc без дополнительной capture-очереди. Mute/deafen и серверные ограничения проверяются до отправки PCM; смена состояния отзывает старые кадры. Полученный голос использует ограниченные peer-очереди и микшер. AEC получает reverse-кадры после успешной записи в WASAPI; физическая эффективность AEC, hotplug и полная функциональная/визуальная совместимость ещё требуют приёмки. Вычисления выполняются на устройстве; ONNX Runtime инициализируется с отключённой телеметрией. Подготовка сборки загружает публичные модели и библиотеки по HTTPS с проверкой закреплённых контрольных сумм, не загружая пользовательский звук на внешний сервис. PCM-очереди используются только в оперативной памяти; эти модули не добавляют аудиозапись на диск.
@@ -236,6 +238,8 @@ Processing is carried out for the following purposes:
 The Controller does not use the data for advertising, profiling or targeting, and does not take automated decisions producing legal effects.
 
 ### 6. Processing on the user's device
+
+Native beta code saves audio preferences and per-user volume in its separate beta profile; server synchronization uses the existing `SaveAudioSettings` without audio data. The local `nativeAudioSync` marker contains an owner ID and a pending-sync flag, not secrets, and is not sent to the server. Session changes cancel the old wait; logout clears pending synchronization while retaining local preferences. `relayOnly` selects relay ICE for new RTC connections, does not change existing connections, and does not guarantee anonymity; restart is required for complete application. This is not complete UI/audio/physical acceptance or a published client.
 
 Native code now switches WASAPI routes on the same owning thread while retaining DSP, RTC tracks and the mixer. An unavailable or legacy browser-hashed ID temporarily uses the system default without rewriting the selected profile ID. Stale PCM and AEC feedback are cleared; retries use 250–2000 ms backoff and a 30-second recovery window. Checks remain synthetic: physical hotplug/AEC acceptance is unfinished. This adds no external service or audio recording.
 

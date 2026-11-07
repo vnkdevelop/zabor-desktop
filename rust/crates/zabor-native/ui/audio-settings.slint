@@ -1,0 +1,157 @@
+import { FormButton } from "controls.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct AudioDeviceItem { id: string, name: string, fallback: string }
+export struct AudioSettingsView {
+    input-volume: float, output-volume: float, selected-input: string, selected-output: string,
+    noise-suppression: bool, threshold-mode: string, manual-threshold: float,
+    noise-model: string, speech-analyzer: bool, echo-cancellation: bool,
+    suppression-strength: float, ultra-low-latency: bool, relay-only: bool,
+}
+
+export component AudioSlider inherits Rectangle {
+    in property <float> value: 100;
+    in property <float> minimum: 0;
+    in property <float> maximum: 200;
+    in property <float> step: 5;
+    in property <string> label;
+    in property <string> unit: "%";
+    in property <bool> disabled;
+    in property <float> meter: -100;
+    in property <bool> show-meter;
+    callback edited(float);
+    height: 76px;
+    background: transparent;
+    opacity: root.disabled ? 0.4 : 1;
+    Text { x: 0px; y: 0px; height: 20px; width: parent.width - 72px; text: root.label; color: #949ba4; font-size: 12px; font-weight: 700; }
+    Text { x: parent.width - 72px; y: 0px; width: 72px; height: 20px; text: round(root.value) + root.unit; color: white; font-size: 12px; font-weight: 700; horizontal-alignment: right; }
+    Rectangle { x: 9px; y: 43px; width: parent.width - 18px; height: 6px; border-radius: 3px; background: #ffffff14;
+        if !root.show-meter : Rectangle { x: 0px; y: 0px; width: parent.width * clamp((root.value - root.minimum) / (root.maximum - root.minimum), 0, 1); height: parent.height; border-radius: 3px; background: #ee68a9; }
+    }
+    if root.show-meter : HorizontalLayout { x: 9px; y: 36px; width: parent.width - 18px; height: 20px; spacing: 2px;
+        for segment in 32 : Rectangle { height: 20px; border-radius: 2px; background: (segment + 0.5) / 32 <= clamp((root.meter + 60) / 48, 0, 1) ? (segment > 26 ? #ef4444 : #22c55e) : #ffffff14; }
+    }
+    Rectangle { x: 9px + (parent.width - 18px) * clamp((root.value - root.minimum) / (root.maximum - root.minimum), 0, 1) - 9px; y: 37px; width: 18px; height: 18px; border-radius: 9px; background: #ee68a9; }
+    forward-focus: keys;
+    public function set-value(value: float) { if !root.disabled { root.edited(clamp(round((value - root.minimum) / root.step) * root.step + root.minimum, root.minimum, root.maximum)); } }
+    keys := FocusScope { enabled: !root.disabled;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.DownArrow { root.set-value(root.value - root.step); return accept; }
+            if event.text == Key.RightArrow || event.text == Key.UpArrow { root.set-value(root.value + root.step); return accept; }
+            if event.text == Key.Home { root.set-value(root.minimum); return accept; }
+            if event.text == Key.End { root.set-value(root.maximum); return accept; }
+            return reject;
+        }
+    }
+    touch := TouchArea { y: 24px; height: 44px; width: parent.width; enabled: !root.disabled;
+        pointer-event(event) => { if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { keys.focus(); root.set-value(root.minimum + clamp((self.mouse-x - 9px) / (self.width - 18px), 0, 1) * (root.maximum - root.minimum)); } }
+        moved => { if self.pressed { root.set-value(root.minimum + clamp((self.mouse-x - 9px) / (self.width - 18px), 0, 1) * (root.maximum - root.minimum)); } }
+    }
+    if keys.has-focus : Rectangle { x: -2px; y: 24px; width: parent.width + 4px; height: 44px; border-radius: 12px; background: transparent; border-width: 2px; border-color: #ee68a9; }
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-enabled: !root.disabled;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step;
+    accessible-action-set-value(value) => { if value.is-float() { root.set-value(value.to-float()); } }
+    accessible-action-increment => { root.set-value(root.value + root.step); }
+    accessible-action-decrement => { root.set-value(root.value - root.step); }
+}
+
+component AudioToggle inherits Rectangle {
+    in property <string> label;
+    in property <string> hint;
+    in property <bool> checked;
+    in property <bool> disabled;
+    in property <bool> reduced-motion;
+    callback toggled(bool);
+    height: max(66px, title.preferred-height + description.preferred-height + 28px);
+    background: #222225b3; border-radius: 16px; border-width: 1px; border-color: root.checked ? #ffffff21 : #ffffff12;
+    opacity: root.disabled ? 0.4 : 1;
+    title := Text { x: 16px; y: 12px; width: parent.width - 96px; text: root.label; color: white; font-size: 15px; font-weight: 700; wrap: word-wrap; }
+    description := Text { x: 16px; y: title.y + title.preferred-height + 4px; width: parent.width - 96px; text: root.hint; color: #949ba4; font-size: 12px; wrap: word-wrap; }
+    Rectangle { x: parent.width - 68px; y: (parent.height - 32px) / 2; width: 52px; height: 32px; border-radius: 16px; background: root.checked ? #c81e70 : #ffffff1a;
+        Rectangle { x: root.checked ? 24px : 4px; y: 4px; width: 24px; height: 24px; border-radius: 12px; background: root.checked ? white : #949ba4; animate x { duration: root.reduced-motion ? 0ms : 150ms; } }
+    }
+    forward-focus: keys;
+    keys := FocusScope { enabled: !root.disabled;
+        key-pressed(event) => { if event.text == Key.Return { root.toggled(!root.checked); return accept; } return reject; }
+        key-released(event) => { if event.text == Key.Space { root.toggled(!root.checked); return accept; } return reject; }
+    }
+    TouchArea { enabled: !root.disabled; clicked => { keys.focus(); root.toggled(!root.checked); } }
+    if keys.has-focus : Rectangle { x: -2px; y: -2px; width: parent.width + 4px; height: parent.height + 4px; border-radius: 18px; background: transparent; border-width: 2px; border-color: #ee68a9; }
+    accessible-role: checkbox;
+    accessible-label: root.label;
+    accessible-description: root.hint;
+    accessible-checked: root.checked;
+    accessible-enabled: !root.disabled;
+    accessible-action-default => { if !root.disabled { root.toggled(!root.checked); } }
+}
+
+component DeviceSelect inherits Rectangle {
+    in property <[AudioDeviceItem]> items;
+    in property <string> selected;
+    in property <string> label;
+    in property <string> selected-name;
+    pure callback tr(string) -> string;
+    callback selected-id(string);
+    height: 76px; background: transparent;
+    Text { x: 0px; y: 0px; height: 20px; width: parent.width; text: root.label; color: #949ba4; font-size: 12px; font-weight: 700; }
+    FormButton { y: 28px; width: parent.width; label: root.selected-name; label-size: 14px; activated => { popup.show(); } }
+    popup := PopupWindow { x: 0px; y: root.height; width: root.width; height: min(264px, 44px * root.items.length + 16px);
+        Rectangle { background: #222225; border-radius: 12px; border-width: 1px; border-color: #ffffff21;
+            ScrollView { x: 8px; y: 8px; width: parent.width - 16px; height: parent.height - 16px;
+                VerticalLayout { spacing: 0px;
+                    for item in root.items : FormButton { height: 44px; label-size: 13px; label: item.name == "" ? root.tr(item.fallback) : item.name; primary: root.selected == item.id; activated => { root.selected-id(item.id); popup.close(); } }
+                }
+            }
+        }
+    }
+}
+
+export component AudioSettingsPanel inherits VerticalLayout {
+    in property <AudioSettingsView> audio;
+    in property <[AudioDeviceItem]> inputs;
+    in property <[AudioDeviceItem]> outputs;
+    in property <string> input-name;
+    in property <string> output-name;
+    in property <bool> reduced-motion;
+    in property <bool> devices-failed;
+    in property <float> mic-db: -100;
+    pure callback tr(string) -> string;
+    callback edited(string, string);
+    spacing: 24px;
+    DeviceSelect { label: root.tr("settings.audio.inputDevice"); items: root.inputs; selected: root.audio.selected-input; selected-name: root.input-name; tr(key) => { return root.tr(key); } selected-id(id) => { root.edited("selectedInput", id); } }
+    DeviceSelect { label: root.tr("settings.audio.outputDevice"); items: root.outputs; selected: root.audio.selected-output; selected-name: root.output-name; tr(key) => { return root.tr(key); } selected-id(id) => { root.edited("selectedOutput", id); } }
+    if root.devices-failed : Text { text: root.tr("validation.connectError"); color: #da373c; font-size: 12px; wrap: word-wrap; }
+    AudioSlider { label: root.tr("settings.audio.inputVolume"); value: root.audio.input-volume; edited(value) => { root.edited("inputVolume", value); } }
+    AudioSlider { label: root.tr("settings.audio.outputVolume"); value: root.audio.output-volume; edited(value) => { root.edited("outputVolume", value); } }
+    VerticalLayout { spacing: 12px;
+        AudioToggle { label: root.tr("settings.audio.ultraLowLatency"); hint: root.tr("settings.audio.ultraLowLatencyDesc"); checked: root.audio.ultra-low-latency; reduced-motion: root.reduced-motion; toggled(value) => { root.edited("ultraLowLatency", value ? "true" : "false"); } }
+        AudioToggle { label: root.tr("settings.audio.speechAnalyzer"); hint: root.tr(root.audio.noise-suppression && root.audio.threshold-mode == "manual" ? "settings.audio.speechAnalyzerManualHint" : "settings.audio.speechAnalyzerHint"); checked: root.audio.speech-analyzer; disabled: root.audio.ultra-low-latency || (root.audio.noise-suppression && root.audio.threshold-mode == "manual"); reduced-motion: root.reduced-motion; toggled(value) => { root.edited("speechAnalyzer", value ? "true" : "false"); } }
+        AudioToggle { label: root.tr("settings.audio.echoCancellation"); checked: root.audio.echo-cancellation; disabled: root.audio.ultra-low-latency; reduced-motion: root.reduced-motion; toggled(value) => { root.edited("echoCancellation", value ? "true" : "false"); } }
+        AudioToggle { label: root.tr("settings.audio.noiseSuppression"); checked: root.audio.noise-suppression; disabled: root.audio.ultra-low-latency; reduced-motion: root.reduced-motion; toggled(value) => { root.edited("noiseSuppression", value ? "true" : "false"); } }
+        if root.audio.noise-suppression : VerticalLayout { spacing: 16px;
+            HorizontalLayout { spacing: 8px;
+                FormButton { label: root.tr("settings.audio.smartMode"); label-size: 14px; primary: root.audio.threshold-mode == "auto"; disabled: root.audio.ultra-low-latency; activated => { root.edited("micThresholdMode", "auto"); } }
+                FormButton { label: root.tr("settings.audio.manualMode"); label-size: 14px; primary: root.audio.threshold-mode == "manual"; disabled: root.audio.ultra-low-latency; activated => { root.edited("micThresholdMode", "manual"); } }
+            }
+            if root.audio.threshold-mode == "auto" : HorizontalLayout { spacing: 8px;
+                FormButton { label: root.tr("settings.audio.model1"); label-size: 12px; primary: root.audio.noise-model == "deepfilter"; disabled: root.audio.ultra-low-latency; activated => { root.edited("smartNoiseModel", "deepfilter"); } }
+                FormButton { label: root.tr("settings.audio.model2"); label-size: 12px; primary: root.audio.noise-model == "rnnoise"; disabled: root.audio.ultra-low-latency; activated => { root.edited("smartNoiseModel", "rnnoise"); } }
+            }
+            if root.audio.threshold-mode == "auto" && root.audio.noise-model == "deepfilter" : AudioSlider { label: root.tr("settings.audio.suppressionStrength"); minimum: 5; maximum: 30; step: 1; unit: " dB"; value: root.audio.suppression-strength; disabled: root.audio.ultra-low-latency; edited(value) => { root.edited("suppressionStrength", value); } }
+            if root.audio.threshold-mode == "manual" : AudioSlider { label: root.tr("settings.audio.thresholdLabel"); minimum: -60; maximum: -12; step: 1; unit: " dB"; value: root.audio.manual-threshold; disabled: root.audio.ultra-low-latency; show-meter: true; meter: root.mic-db; edited(value) => { root.edited("manualThresholdValue", value); } }
+        }
+    }
+}
+
+export component RelaySetting inherits AudioToggle {
+    in property <bool> relay-only;
+    pure callback tr(string) -> string;
+    checked: root.relay-only;
+    label: root.tr("settings.privacy.hideIp");
+    hint: root.tr("toasts.ipPolicyRestart");
+}
