@@ -26,7 +26,9 @@ const motion = args.includes('--motion');
 if (motion) args.splice(args.indexOf('--motion'), 1);
 const layout = args.includes('--layout');
 if (layout) args.splice(args.indexOf('--layout'), 1);
-if (motion && layout) throw new Error('Motion and layout evidence must be captured separately');
+const focus = args.includes('--focus');
+if (focus) args.splice(args.indexOf('--focus'), 1);
+if ([motion, layout, focus].filter(Boolean).length > 1) throw new Error('Motion, layout and focus evidence must be captured separately');
 const value = key => args[args.indexOf(key) + 1];
 if (args.length !== 4 || !args.includes('--output') || !args.includes('--scale')) throw new Error('Usage: node scripts/native/capture-mic-test.cjs --output DIRECTORY --scale 1|1.25|1.5|2');
 const output = resolve(value('--output'));
@@ -43,7 +45,8 @@ app.whenReady().then(async () => {
   const mock = `export const MIC_TEST_SILENCE_DBFS=-70;const audio=()=>window.__audio;export const webrtc={prepareMicTest:async()=>{},releaseMicTestPreparation:()=>{},onMicTestEnded:()=>{},disposeMicTest:()=>{audio().playing=false;},pauseMicTest:()=>{audio().playing=false;},isMicTestRecording:()=>false,getMicTestPosition:()=>audio().position,getMicTestDuration:()=>5,isMicTestPlaying:()=>audio().playing,seekMicTest:seconds=>{audio().position=Math.max(0,Math.min(4.95,seconds));},playMicTest:()=>{audio().playing=true;return true;},recordMicTest:callback=>{const state=window.__fixture.state;if(state==='arming')return new Promise(()=>{});if(state==='failed')return Promise.reject(Error('synthetic failure'));callback();if(state==='recording')return new Promise(()=>{});return Promise.resolve({durationSeconds:5,peakDb:state==='silent'?-80:-20});}};`;
   const tree = `<I18nextProvider i18n={i18n}><div style={{position:'absolute',width:500,height:0,left:300,top:16}}><MicTestPanel isEnabled={true} isActive={true}/></div></I18nextProvider>`;
   const motionFixture = `function MotionFixture(){const[key,setKey]=React.useState(0);window.__resetMotion=()=>{window.__audio={playing:false,position:1.5};setKey(key=>key+1);};return ${tree.replace('<MicTestPanel ', '<MicTestPanel key={key} ')};}`;
-  const entry = `import React from 'react';import {createRoot} from 'react-dom/client';import i18n from 'i18next';import {I18nextProvider} from 'react-i18next';import {MicTestPanel} from './src/renderer/src/components/Settings/MicTestPanel';import ru from './src/renderer/src/locales/ru.json';import en from './src/renderer/src/locales/en.json';${motion ? motionFixture : ''}async function boot(){window.__fixture=await window.fixture.get();window.__audio={playing:false,position:1.5};await i18n.init({lng:window.__fixture.locale,fallbackLng:'ru',resources:{ru:{translation:ru},en:{translation:en}},interpolation:{escapeValue:false}});createRoot(document.getElementById('root')).render(${motion ? '<MotionFixture/>' : tree});}boot();`;
+  const focusFixture = `function FocusFixture(){const[active,setActive]=React.useState(true);window.__setMicActive=setActive;return ${tree.replace('isActive={true}', 'isActive={active}')};}`;
+  const entry = `import React from 'react';import {createRoot} from 'react-dom/client';import i18n from 'i18next';import {I18nextProvider} from 'react-i18next';import {MicTestPanel} from './src/renderer/src/components/Settings/MicTestPanel';import ru from './src/renderer/src/locales/ru.json';import en from './src/renderer/src/locales/en.json';${motion ? motionFixture : focus ? focusFixture : ''}async function boot(){window.__fixture=await window.fixture.get();window.__audio={playing:false,position:1.5};await i18n.init({lng:window.__fixture.locale,fallbackLng:'ru',resources:{ru:{translation:ru},en:{translation:en}},interpolation:{escapeValue:false}});createRoot(document.getElementById('root')).render(${motion ? '<MotionFixture/>' : focus ? '<FocusFixture/>' : tree});}boot();`;
   const built = await build({ stdin: { contents: entry, resolveDir: process.cwd(), loader: 'tsx' }, jsx: 'automatic', bundle: true, format: 'iife', platform: 'browser', target: 'es2022', write: false, metafile: true, plugins: [{ name: 'local-only-audio-fixture', setup(builder) { builder.onResolve({ filter: /services\/webrtc$/ }, () => ({ path: 'audio-fixture', namespace: 'fixture' })); builder.onLoad({ filter: /.*/, namespace: 'fixture' }, () => ({ contents: mock, loader: 'js' })); } }] });
   if (Object.keys(built.metafile.inputs).some(file => /services[\\/]webrtc\.ts$/.test(file))) throw new Error('Real audio service must not enter the reference fixture');
   const bundle = built.outputFiles[0].text;
@@ -57,6 +60,16 @@ app.whenReady().then(async () => {
   window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_, callback) => callback({ cancel: true }));
   mkdirSync(output, { recursive: true });
   const captures = [];
+  if (focus) {
+    await require('./capture-mic-focus.cjs')({ window, output, scale, load: async (locale, state) => {
+      fixture = { locale, state };
+      await window.loadFile(join(temporary, 'index.html'));
+    } });
+    window.webContents.debugger.detach();
+    window.destroy();
+    app.quit();
+    return;
+  }
   if (motion) {
     for (const locale of ['ru', 'en']) for (const captureFrames of [false, true]) {
       fixture = { locale, state: 'playing' };

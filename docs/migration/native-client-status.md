@@ -464,6 +464,22 @@ Next remaining raster/layout/focus and synchronized/cold/card/pulse/dot acceptan
 checked baseline/font/solver/runtime/DSP work must not be repeated. Full client
 readiness remainsfalse. No push/merge/release/shutdown.
 
+### Visible-panel focus / Space checked locally
+
+Current regression `mic-focus-final-2026-11-07`: **162default/152no-neural tests**,
+417matching sources,9HTTP/pinned/fmt/Clippy/fresh build;56panel/64settings/24auth
++8+8+8interactions and48unchanged caption-row checks. **800RU/EN four-DPI focus
+pairs** passed;176focused/272no-outline selected-control annulus checks stayed
+within1physicalpx. New pointer focus hides outline, same-target pointer preserves
+keyboard outline; down-focus/Tab/reverseTab/Shift/modifiers/armedSpace/unarmed/
+repeat/focus-transfer releases checked. Static panel/settings/auth/reference/
+neural unchanged. Current binary **6cb78662f9dee911862d53ff94b1f29e7c4e38bba68c49628cedabeba54baf81**
+matches all audio/UI/auth/motion/focus/review reports;0post-result hash mismatches.
+8native/2554frames and8explicitlywarmedReact/2328frames with241+40separatePNGs passed.
+This doesn't establish exact focus raster/pressed keyboard/full-modal/hiddenDOM/
+programmatic/window/accessibility/cold/physical/full-client acceptance. All
+readinessflags remainfalse; remaining migration plan unchanged. No release/shutdown.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final

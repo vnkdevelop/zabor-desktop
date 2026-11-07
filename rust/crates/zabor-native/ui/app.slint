@@ -78,6 +78,9 @@ export component NativeApp inherits Window {
     in property <float> mic-test-pulse;
     in property <float> mic-test-dot-pulse;
     in property <float> mic-test-text-scale: 1;
+    in property <int> mic-test-focus-reset;
+    out property <string> mic-test-focused-control;
+    out property <bool> mic-test-focus-outline;
     pure callback mic-thumb-spring(float, bool) -> float;
     out property <float> mic-test-thumb-scale: 1;
     out property <bool> mic-test-thumb-animating;
@@ -367,6 +370,11 @@ export component NativeApp inherits Window {
         y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
         test-panel := MicTestPanel { x: (parent.width - self.width) / 2; y: settings-dialog.y + settings-dialog.height + 12px + self.slide; test: root.mic-test; active: root.mic-test-active && (root.reduced-motion || root.mic-test-revealed); reduced-motion: root.reduced-motion; pulse: root.mic-test-pulse; dot-pulse: root.mic-test-dot-pulse;
             text-scale: root.mic-test-text-scale; screen-y: 36px + self.y;
+            focus-reset: root.mic-test-focus-reset;
+            focus-updated(control, focused, outline) => {
+                if focused { root.mic-test-focused-control = control; root.mic-test-focus-outline = outline; }
+                if !focused && root.mic-test-focused-control == control { root.mic-test-focused-control = ""; root.mic-test-focus-outline = false; }
+            }
             thumb-updated(scale, running) => { root.mic-test-thumb-scale = scale; root.mic-test-thumb-animating = running; }
             private property <length> slide: root.mic-test-active && (root.reduced-motion || root.mic-test-revealed) ? 0px : -self.height - 32px;
             opacity: root.mic-test-active && (root.reduced-motion || root.mic-test-revealed) ? 1 : 0;

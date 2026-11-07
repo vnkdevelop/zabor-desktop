@@ -2,6 +2,37 @@ export struct MicTestView {
     stage: string, issue: string, playing: bool, duration: float, position: float,
 }
 
+component MicFocusScope inherits FocusScope {
+    in property <string> control;
+    in property <int> focus-reset;
+    private property <bool> keyboard-focus;
+    private property <bool> focused;
+    out property <bool> outline-visible: self.enabled && root.focused && root.keyboard-focus;
+    focus-on-click: false;
+    public function pointer-focus() {
+        if !root.focused { root.keyboard-focus = false; }
+        self.focus();
+    }
+    focus-gained(reason) => {
+        root.focused = true;
+        if reason == FocusReason.tab-navigation { root.keyboard-focus = true; }
+        if reason == FocusReason.pointer-click { root.keyboard-focus = false; }
+    }
+    focus-lost(reason) => { root.focused = false; }
+    capture-key-pressed(event) => {
+        if !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta { root.keyboard-focus = true; }
+        return reject;
+    }
+    callback focus-updated(string, bool, bool);
+    changed focused => { root.focus-updated(root.control, self.enabled && root.focused, root.outline-visible); }
+    changed enabled => {
+        if !self.enabled { self.clear-focus(); root.focused = false; root.keyboard-focus = false; }
+        root.focus-updated(root.control, self.enabled && root.focused, root.outline-visible);
+    }
+    changed outline-visible => { root.focus-updated(root.control, self.enabled && root.focused, root.outline-visible); }
+    changed focus-reset => { self.clear-focus(); root.focused = false; root.keyboard-focus = false; }
+}
+
 component TestButton inherits Rectangle {
     in property <string> label;
     in property <bool> disabled;
@@ -11,6 +42,10 @@ component TestButton inherits Rectangle {
     in property <float> pulse;
     in property <float> dot-pulse;
     in property <length> label-top;
+    in property <string> control;
+    in property <int> focus-reset;
+    callback focus-updated(string, bool, bool);
+    private property <bool> space-held;
     callback activated;
     height: 36px;
     background: transparent;
@@ -38,12 +73,16 @@ component TestButton inherits Rectangle {
         }
     }
     forward-focus: keys;
-    keys := FocusScope { enabled: !root.disabled;
-        key-pressed(event) => { if event.text == Key.Return { root.activated(); return accept; } return reject; }
-        key-released(event) => { if event.text == Key.Space { root.activated(); return accept; } return reject; }
+    keys := MicFocusScope { enabled: !root.disabled; control: root.control; focus-reset: root.focus-reset;
+        focus-updated(control, focused, outline) => { if !focused { root.space-held = false; } root.focus-updated(control, focused, outline); }
+        key-pressed(event) => { if event.text == Key.Space { root.space-held = true; return accept; } if event.text == Key.Return { root.activated(); return accept; } return reject; }
+        key-released(event) => { if event.text == Key.Space { if root.space-held { root.space-held = false; root.activated(); } return accept; } return reject; }
     }
-    touch := TouchArea { enabled: !root.disabled; clicked => { keys.focus(); root.activated(); } }
-    if keys.has-focus : Rectangle { x: -2px; y: -2px; width: parent.width + 4px; height: parent.height + 4px; background: transparent; border-radius: 14px; border-width: 2px; border-color: #ee68a9; }
+    touch := TouchArea { enabled: !root.disabled;
+        pointer-event(event) => { if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { keys.pointer-focus(); } }
+        clicked => { root.activated(); }
+    }
+    if keys.outline-visible : Rectangle { x: -4px; y: -4px; width: parent.width + 8px; height: parent.height + 8px; background: transparent; border-radius: root.primary ? 20px : 12px; border-width: 2px; border-color: #ee68a9; }
     accessible-role: button;
     accessible-label: root.label;
     accessible-enabled: !root.disabled;
@@ -71,6 +110,8 @@ export component MicTestPanel inherits Rectangle {
     callback record;
     callback toggle-playback;
     callback seek(float);
+    in property <int> focus-reset;
+    callback focus-updated(string, bool, bool);
     width: 156px;
     height: 36px + (root.test.stage == "ready" ? 27px : 0px) + (root.test.issue != "" ? 19.75px : 0px);
     background: transparent;
@@ -110,14 +151,19 @@ export component MicTestPanel inherits Rectangle {
         x: 0px; y: 0px; width: root.width; height: 36px; border-radius: 16px; border-width: 1px; border-color: #ffffff12; background: #161618bf; clip: true;
         Rectangle { x: 12px; y: 0px; width: parent.width - 24px; height: 1px; background: #ffffff24; }
         playback := Rectangle { x: 1px; y: 0px; width: 36px; height: 36px; border-radius: 12px; background: play-touch.has-hover ? #ffffff0f : transparent;
+            private property <bool> space-held;
             Image { x: 11px; y: 11px; width: 14px; height: 14px; source: root.test.playing ? @image-url("../assets/icons/test-pause.svg") : @image-url("../assets/icons/test-play.svg"); }
             forward-focus: play-keys;
-            play-keys := FocusScope { enabled: root.active;
-                key-pressed(event) => { if event.text == Key.Return { root.toggle-playback(); return accept; } return reject; }
-                key-released(event) => { if event.text == Key.Space { root.toggle-playback(); return accept; } return reject; }
+            play-keys := MicFocusScope { enabled: root.active; control: "playback"; focus-reset: root.focus-reset;
+                focus-updated(control, focused, outline) => { if !focused { playback.space-held = false; } root.focus-updated(control, focused, outline); }
+                key-pressed(event) => { if event.text == Key.Space { playback.space-held = true; return accept; } if event.text == Key.Return { root.toggle-playback(); return accept; } return reject; }
+                key-released(event) => { if event.text == Key.Space { if playback.space-held { playback.space-held = false; root.toggle-playback(); } return accept; } return reject; }
             }
-            play-touch := TouchArea { enabled: root.active; clicked => { play-keys.focus(); root.toggle-playback(); } }
-            if play-keys.has-focus : Rectangle { x: 2px; y: 2px; width: 32px; height: 32px; background: transparent; border-width: 2px; border-color: #ee68a9; border-radius: 10px; }
+            play-touch := TouchArea { enabled: root.active;
+                pointer-event(event) => { if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { play-keys.pointer-focus(); } }
+                clicked => { root.toggle-playback(); }
+            }
+            if play-keys.outline-visible : Rectangle { x: -4px; y: -4px; width: 44px; height: 44px; background: transparent; border-width: 2px; border-color: #ee68a9; }
             accessible-role: button;
             accessible-label: root.tr(root.test.playing ? "settings.audio.micTestPause" : "settings.audio.micTestPlay");
             accessible-enabled: root.active;
@@ -131,7 +177,8 @@ export component MicTestPanel inherits Rectangle {
                 transform-origin: { x: 5px, y: 5px };
             }
         }
-        seek-keys := FocusScope { enabled: root.active;
+        seek-keys := MicFocusScope { enabled: root.active; control: "seek"; focus-reset: root.focus-reset;
+            focus-updated(control, focused, outline) => { root.focus-updated(control, focused, outline); }
             key-pressed(event) => {
                 if event.text == Key.LeftArrow { root.seek-to(root.test.position - 0.5); return accept; }
                 if event.text == Key.RightArrow { root.seek-to(root.test.position + 0.5); return accept; }
@@ -142,7 +189,7 @@ export component MicTestPanel inherits Rectangle {
             pointer-event(event) => {
                 if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                     root.move-thumb(root.thumb-scale, 1.5, false);
-                    seek-keys.focus(); root.scrubbing = true;
+                    seek-keys.pointer-focus(); root.scrubbing = true;
                     root.scrub-position = clamp((self.mouse-x - 2px) / track.width, 0, 1) * root.test.duration;
                 }
                 if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) || event.kind == PointerEventKind.cancel {
@@ -165,14 +212,18 @@ export component MicTestPanel inherits Rectangle {
             accessible-action-increment => { root.seek-to(root.test.position + 0.5); }
             accessible-action-decrement => { root.seek-to(root.test.position - 0.5); }
         }
-        if seek-keys.has-focus : Rectangle { x: 36px; y: 2px; width: parent.width - 38px; height: 32px; border-radius: 10px; background: transparent; border-width: 2px; border-color: #ee68a9; }
+        if seek-keys.outline-visible : Rectangle { x: 33px; y: -4px; width: parent.width - 30px; height: 44px; background: transparent; border-width: 2px; border-color: #ee68a9; }
     }
     if root.test.stage != "ready" : TestButton { x: 0px; y: 0px; width: root.width; primary: true; height: 36px; reduced-motion: root.reduced-motion; pulse: root.pulse; dot-pulse: root.dot-pulse; recording: root.test.stage == "recording";
+        control: "primary"; focus-reset: root.focus-reset;
+        focus-updated(control, focused, outline) => { root.focus-updated(control, focused, outline); }
         label: root.tr(root.test.stage == "recording" ? "settings.audio.micTestTalk" : root.test.stage == "arming" ? "settings.audio.micTestArming" : "settings.audio.micTestListen");
         disabled: !root.active || root.test.stage != "idle";
         activated => { root.record(); }
     }
     if root.test.stage == "ready" : TestButton { x: (root.width - self.width) / 2; y: 42px; width: min(root.width, retake.preferred-width + 18px); height: 21px; reduced-motion: root.reduced-motion; disabled: !root.active;
+        control: "retake"; focus-reset: root.focus-reset;
+        focus-updated(control, focused, outline) => { root.focus-updated(control, focused, outline); }
         label-top: root.text-top(56px, retake.font-metrics.ascent) - 42px;
         label: root.tr("settings.audio.micTestRetake"); activated => { root.record(); }
         retake := Text { visible: false; text: root.tr("settings.audio.micTestRetake"); font-size: 10px; font-family: "Segoe UI"; font-weight: 600; }
