@@ -10,6 +10,8 @@ pub mod audio_playback;
 #[cfg(feature = "native-media")]
 pub mod audio_preferences;
 pub mod audio_route;
+#[cfg(feature = "native-media")]
+pub mod audio_runtime;
 pub mod audio_settings;
 pub mod auth;
 pub mod chat;

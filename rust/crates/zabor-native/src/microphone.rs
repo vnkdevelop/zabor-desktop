@@ -81,7 +81,15 @@ pub struct MonitoredMicFrame {
     pub pcm: [i16; 480],
     pub local: Option<[f32; 480]>,
     pub local_metrics: MicMetrics,
+    pub network_metrics: MicMetrics,
     pub epoch: u64,
+}
+
+#[derive(Clone, Copy)]
+struct ProcessingIntent {
+    monitoring: bool,
+    network: bool,
+    publish: bool,
 }
 
 impl MicProcessor {
@@ -175,7 +183,17 @@ impl MicProcessor {
     }
 
     pub fn process(&mut self, samples: &[f32], channels: usize, gap: bool) -> [i16; 480] {
-        self.process_frame(samples, channels, gap, false).pcm
+        self.process_frame(
+            samples,
+            channels,
+            gap,
+            ProcessingIntent {
+                monitoring: false,
+                network: true,
+                publish: true,
+            },
+        )
+        .pcm
     }
 
     pub fn process_monitored(
@@ -184,7 +202,36 @@ impl MicProcessor {
         channels: usize,
         gap: bool,
     ) -> MonitoredMicFrame {
-        self.process_frame(samples, channels, gap, true)
+        self.process_frame(
+            samples,
+            channels,
+            gap,
+            ProcessingIntent {
+                monitoring: true,
+                network: true,
+                publish: true,
+            },
+        )
+    }
+
+    pub fn process_shared(
+        &mut self,
+        samples: &[f32],
+        channels: usize,
+        gap: bool,
+        monitoring: bool,
+        network: bool,
+    ) -> MonitoredMicFrame {
+        self.process_frame(
+            samples,
+            channels,
+            gap,
+            ProcessingIntent {
+                monitoring,
+                network,
+                publish: false,
+            },
+        )
     }
 
     fn process_frame(
@@ -192,7 +239,7 @@ impl MicProcessor {
         samples: &[f32],
         channels: usize,
         gap: bool,
-        monitoring: bool,
+        intent: ProcessingIntent,
     ) -> MonitoredMicFrame {
         let mut frame = MonitoredMicFrame {
             pcm: [0; 480],
@@ -201,9 +248,13 @@ impl MicProcessor {
                 db: -100.0,
                 ..MicMetrics::default()
             },
+            network_metrics: MicMetrics {
+                db: -100.0,
+                ..MicMetrics::default()
+            },
             epoch: self.epoch,
         };
-        let result = self.process_inner(samples, channels, gap, monitoring, &mut frame);
+        let result = self.process_inner(samples, channels, gap, intent, &mut frame);
         frame.epoch = self.epoch;
         if result.is_err() {
             self.failed = true;
@@ -229,9 +280,14 @@ impl MicProcessor {
         samples: &[f32],
         channels: usize,
         gap: bool,
-        monitoring: bool,
+        intent: ProcessingIntent,
         frame: &mut MonitoredMicFrame,
     ) -> Result<(), MediaError> {
+        let ProcessingIntent {
+            monitoring,
+            network,
+            publish,
+        } = intent;
         if !(1..=2).contains(&channels)
             || samples.len() != 480 * channels
             || samples.iter().any(|sample| !sample.is_finite())
@@ -321,17 +377,23 @@ impl MicProcessor {
             frame.local = Some(local);
             frame.local_metrics = metrics;
         }
-        let muted = self.controls.effectively_muted() || !current_epoch;
+        let muted = !network || self.controls.effectively_muted() || !current_epoch;
         if muted {
             frame.pcm.fill(0);
         }
-        self.controls.mic_db.store(
-            if muted { -100.0_f32 } else { metrics.db }.to_bits(),
-            Ordering::Release,
-        );
-        self.controls
-            .speaking
-            .store(!muted && metrics.speaking, Ordering::Release);
+        frame.network_metrics = MicMetrics {
+            db: if muted { -100.0 } else { metrics.db },
+            speaking: !muted && metrics.speaking,
+            ..metrics
+        };
+        if publish {
+            self.controls
+                .mic_db
+                .store(frame.network_metrics.db.to_bits(), Ordering::Release);
+            self.controls
+                .speaking
+                .store(frame.network_metrics.speaking, Ordering::Release);
+        }
         Ok(())
     }
 }

@@ -292,6 +292,52 @@ voice/monitor NativeAudio ownership andSlint wiring. Closing/unmounting settings
 must dispose the clip; hiding a tab pauses it. This is not a wired microphone-test
 UI, standalone meter, full audio/client acceptance or a published beta.
 
+### Shared voice/monitor runtime: WIP
+
+App-scoped NativeAudio ownership, independent voice/monitor leases and one
+cancellable pending startup are implemented after `cb6e8a1`; cancellation keeps
+the owning factory quarantined until it returns. Voice teardown preserves local
+capture/playback demand; idle release is ten seconds. `AudioFlow` connects the
+existing owning capture/DSP and selected output to MicTest, retaining network
+mute/deafen/epoch guards and suppressing local-only network PCM/speaking. Remote
+and local output remain separate until mixing; only successful current-route
+WASAPI writes acknowledge playback and append combined AEC reverse. New fake-
+runtime/local-source/neural tests and Clippy are in progress. Native Slint panel,
+standalone meter and physical/full client acceptance remain pending; no release
+or shutdown. Точные jobs и план продолжения — в handoff.
+
+Shared runtime development passed14tests/defaultClippy. Self-review then added
+an owning-capture generation reset for activation during local DSP, deferred
+network metrics until final voice-generation commit, three unit tests and a
+late-local-neural-frame/source comparison. The complete default/no-neural/frozen-
+source/final-binary/settings/auth regression is in progress. This is not Slint
+panel/standalone-meter or physical/full acceptance. On success, save runtime
+checkpoint and proceed to UI wiring; all release/shutdown constraints remain.
+
+### Shared voice/monitor runtime проверен / verified
+
+Финальный прогон: **137default-feature tests (52unit+85integration)**,
+**128neural-disabled (52unit+76integration)**,9HTTP/pinned artifacts/fmt/Clippy/
+build и **402matching source hashes**. Общий capture/DSP/runtime и voice/monitor
+leases, cancellation quarantine, idle10s, final voice/route/epoch guards,
+local-only no-network metrics/PCM и late local-preroll reset проверены локально.
+64settings и24auth изображения/8+8interaction runs unchanged на finaltestedbinary;
+0source/capture/hash mismatches, neural metrics unchanged. Reports под
+migration-artifacts/native-audio/shared-runtime-verified-2026-11-07,
+shared-runtime-no-neural-2026-11-07 и native-ui/native-auth/
+shared-runtime-regression-2026-11-07. Далее **Slint mic-test panel/standalone local
+meter**, не переписывать runtime/DSP/core/device/preferences. UI/physical/full
+native/audio acceptance не завершены; readinessfalse, no push/release/shutdown.
+
+The shared voice/monitor runtime passed137default-feature and128neural-disabled
+tests, nine HTTP/pinned-artifact checks, fmt, Clippy, build and402matching source
+hashes. Capture/DSP ownership, cancellation quarantine, ten-second idle release,
+final generation/route guards, local-only PCM/metrics restrictions and late local
+preroll resets passed synthetic/local-source checks. All64settings/24auth images
+and neural metrics are unchanged on the finaltestedbinary. Next: Slint microphone-
+test panel and standalone local meter on the existing runtime; full UI, physical
+and client/audio acceptance remain unfinished. No publication or shutdown.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера

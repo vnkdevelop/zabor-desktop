@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use zabor_native::attestation::Attestation;
 use zabor_native::audio_preferences::AudioPreferences;
+use zabor_native::audio_runtime::SharedAudio;
 use zabor_native::audio_settings::AudioSettings;
 use zabor_native::auth::{
     AuthClient, AuthError, Bootstrap, Captcha, Credentials, LoginOutcome, Registration,
@@ -32,6 +33,7 @@ use zabor_native::chat_transport::{ChatTransport, ChatTransportEvent};
 use zabor_native::file_jobs::{FileEvent, FileJobs};
 use zabor_native::hub::{HubConnection, HubEvent};
 use zabor_native::media::{MediaError, MediaEvent};
+use zabor_native::native_audio::NativeAudio;
 use zabor_native::profile::Profile;
 use zabor_native::roster::{respond_notification, NotificationKind};
 use zabor_native::screen::{ScreenCapture, ScreenSource, SourceKind};
@@ -124,6 +126,7 @@ struct WorkerMedia {
     video_sink: VideoSink,
     video_generation: Arc<AtomicU64>,
     audio_preferences: Arc<AudioPreferences>,
+    audio_runtime: Arc<SharedAudio<NativeAudio>>,
 }
 
 pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -251,6 +254,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
     let audio_controls = audio_preferences.controls.clone();
     let stop = CancellationToken::new();
+    let audio_runtime = SharedAudio::native(audio_controls.clone(), stop.child_token());
+    let audio_runtime_job = runtime.spawn(audio_runtime.clone().run());
     let captcha_id = Rc::new(RefCell::new(String::new()));
     let setup_avatar = Rc::new(RefCell::new(None::<String>));
     let latest = Rc::new(RefCell::new(Bootstrap::default()));
@@ -352,6 +357,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             video_sink,
             video_generation,
             audio_preferences: audio_preferences.clone(),
+            audio_runtime: audio_runtime.clone(),
         },
     ));
     let local_errors = send_update.clone();
@@ -1333,6 +1339,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     runtime.block_on(async {
         let _ = local_settings_job.await;
         let _ = remote_settings_job.await;
+        let _ = audio_runtime_job.await;
     });
     runtime.shutdown_timeout(Duration::from_secs(2));
     ui_result?;
@@ -1354,6 +1361,7 @@ async fn worker(
         video_sink,
         video_generation,
         audio_preferences,
+        audio_runtime,
     } = media;
     let audio_controls = audio_preferences.controls.clone();
     let signing = match Attestation::from_environment(zabor_native::release::TARGET_BETA_VERSION) {
@@ -1837,6 +1845,7 @@ async fn worker(
         }
         if matches!(command, Command::Logout) {
             audio_preferences.logout();
+            audio_runtime.reset();
             pending_join = None;
             video_generation.fetch_add(1, Ordering::AcqRel);
             video_jobs.clear();
@@ -2042,6 +2051,7 @@ async fn worker(
                 Ok(LoginOutcome::NeedsRegistration)
                 | Err(AuthError::InvalidPassword | AuthError::ClientRejected) => {
                     audio_preferences.logout();
+                    audio_runtime.reset();
                     saved_credentials = None;
                     if let Some(profile) = &profile {
                         let _ = profile.clear_session();
@@ -2191,6 +2201,7 @@ async fn worker(
                             user,
                             audio_preferences.relay_only(),
                             audio_controls.clone(),
+                            audio_runtime.clone(),
                         )
                         .await
                         .map_err(|_| AuthError::Network)?;
@@ -2259,6 +2270,7 @@ async fn worker(
                         user,
                         audio_preferences.relay_only(),
                         audio_controls.clone(),
+                        audio_runtime.clone(),
                     )
                     .await
                     .map_err(|_| AuthError::Network)?;
@@ -2347,6 +2359,7 @@ async fn worker(
                         user,
                         audio_preferences.relay_only(),
                         audio_controls.clone(),
+                        audio_runtime.clone(),
                     )
                     .await
                     .map_err(|_| AuthError::Network)?;

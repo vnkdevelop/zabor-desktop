@@ -1,5 +1,7 @@
 use crate::audio_mix::AudioControls;
 use crate::audio_playback::AudioPlayback;
+#[cfg(windows)]
+use crate::audio_runtime::{SharedAudio, VoiceLease};
 use crate::auth::User;
 use crate::hub::HubConnection;
 use crate::media::PeerLifetime;
@@ -14,7 +16,6 @@ use std::collections::BTreeSet;
 use std::sync::{atomic::Ordering, Arc};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Deserialize)]
 pub struct ChannelMembership {
@@ -30,9 +31,10 @@ pub struct VoiceSession {
     relay_only: bool,
     capture: Option<ScreenCapture>,
     controls: Arc<AudioControls>,
-    audio_stop: CancellationToken,
     #[cfg(windows)]
-    audio: Option<NativeAudio>,
+    audio_runtime: Arc<SharedAudio<NativeAudio>>,
+    #[cfg(windows)]
+    audio: Option<VoiceLease<NativeAudio>>,
     playback: Option<AudioPlayback>,
 }
 
@@ -42,6 +44,7 @@ impl VoiceSession {
         user: &User,
         relay_only: bool,
         controls: Arc<AudioControls>,
+        #[cfg(windows)] audio_runtime: Arc<SharedAudio<NativeAudio>>,
     ) -> Result<(Self, mpsc::Receiver<MediaEvent>), MediaError> {
         let local_id = user.id.clone();
         let (mut engine, events) = MediaEngine::new(local_id.clone());
@@ -73,7 +76,8 @@ impl VoiceSession {
                 relay_only,
                 capture: None,
                 controls,
-                audio_stop: CancellationToken::new(),
+                #[cfg(windows)]
+                audio_runtime,
                 #[cfg(windows)]
                 audio: None,
                 playback: None,
@@ -116,7 +120,9 @@ impl VoiceSession {
         self.engine.authorize_peers(self.peers.iter().cloned());
         #[cfg(windows)]
         if let Some(audio) = &self.audio {
-            audio.activate();
+            if !audio.activate() {
+                return Err(MediaError::Microphone);
+            }
         }
         for id in self.peers.iter().filter(|id| !previous.contains(*id)) {
             let offer = self.engine.offer(id, false).await?;
@@ -172,7 +178,9 @@ impl VoiceSession {
         self.engine.authorize_peers(self.peers.iter().cloned());
         #[cfg(windows)]
         if let Some(audio) = &self.audio {
-            audio.activate();
+            if !audio.activate() {
+                return Err(MediaError::Microphone);
+            }
         }
         Ok(())
     }
@@ -264,10 +272,10 @@ impl VoiceSession {
             if self.audio.is_some() {
                 return Ok(());
             }
-            let audio =
-                NativeAudio::start(self.controls.clone(), self.audio_stop.child_token()).await?;
-            self.engine.attach_audio_source(audio.source.clone())?;
-            self.playback = Some(AudioPlayback::new(audio.mixer.clone()));
+            let audio = self.audio_runtime.voice().await?;
+            let device = audio.device().ok_or(MediaError::Microphone)?;
+            self.engine.attach_audio_source(device.source.clone())?;
+            self.playback = Some(AudioPlayback::new(device.mixer.clone()));
             self.audio = Some(audio);
             Ok(())
         }
@@ -276,7 +284,6 @@ impl VoiceSession {
     }
 
     fn stop_audio(&mut self) {
-        self.audio_stop.cancel();
         self.controls.speaking.store(false, Ordering::Release);
         self.controls
             .mic_db
@@ -309,7 +316,7 @@ impl VoiceSession {
         }
         let failed = self.controls.processor_failed.load(Ordering::Acquire);
         #[cfg(windows)]
-        let failed = failed || self.audio.as_ref().is_some_and(NativeAudio::failed);
+        let failed = failed || self.audio.as_ref().is_some_and(VoiceLease::failed);
         failed
     }
 
