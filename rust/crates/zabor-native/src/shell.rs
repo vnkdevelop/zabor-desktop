@@ -1,5 +1,5 @@
 use crate::{
-    AudioDeviceItem, AudioSettingsView, ChannelItem, ChatLine, FriendItem, NativeApp,
+    AudioDeviceItem, AudioSettingsView, ChannelItem, ChatLine, FriendItem, MicTestView, NativeApp,
     NotificationItem, ScreenItem, VideoItem,
 };
 use base64::Engine;
@@ -33,6 +33,8 @@ use zabor_native::chat_transport::{ChatTransport, ChatTransportEvent};
 use zabor_native::file_jobs::{FileEvent, FileJobs};
 use zabor_native::hub::{HubConnection, HubEvent};
 use zabor_native::media::{MediaError, MediaEvent};
+use zabor_native::mic_test::{MicTestIssue, MicTestSnapshot, MicTestStage};
+use zabor_native::mic_test_ui::MicTestUi;
 use zabor_native::native_audio::NativeAudio;
 use zabor_native::profile::Profile;
 use zabor_native::roster::{respond_notification, NotificationKind};
@@ -254,8 +256,58 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
     let audio_controls = audio_preferences.controls.clone();
     let stop = CancellationToken::new();
-    let audio_runtime = SharedAudio::native(audio_controls.clone(), stop.child_token());
+    let preview_mode = preview.is_some() || snapshot.is_some() || interaction_check;
+    let audio_runtime = if preview_mode {
+        SharedAudio::new(audio_controls.clone(), stop.child_token(), |_, _, _| {
+            Box::pin(async { Err(MediaError::Microphone) })
+        })
+    } else {
+        SharedAudio::native(audio_controls.clone(), stop.child_token())
+    };
     let audio_runtime_job = runtime.spawn(audio_runtime.clone().run());
+    let mic_test_ui = Rc::new(RefCell::new(MicTestUi::new(audio_runtime.clone())));
+    apply_mic_test(&ui, MicTestSnapshot::default());
+    let local_ui = ui.as_weak();
+    let local_test = mic_test_ui.clone();
+    let local_runtime = runtime.handle().clone();
+    ui.on_mic_test_context_changed(move || {
+        if let Some(ui) = local_ui.upgrade().filter(|_| !preview_mode) {
+            synchronize_mic_test(&ui, &mut local_test.borrow_mut(), &local_runtime);
+        }
+    });
+    let local_ui = ui.as_weak();
+    let local_test = mic_test_ui.clone();
+    let local_runtime = runtime.handle().clone();
+    ui.on_mic_test_record(move || {
+        if let Some(ui) = local_ui.upgrade().filter(|_| !preview_mode) {
+            let mut test = local_test.borrow_mut();
+            synchronize_mic_test(&ui, &mut test, &local_runtime);
+            test.record(std::time::Instant::now(), &local_runtime);
+            apply_mic_test(&ui, test.snapshot(std::time::Instant::now()));
+        }
+    });
+    let local_ui = ui.as_weak();
+    let local_test = mic_test_ui.clone();
+    let local_runtime = runtime.handle().clone();
+    ui.on_mic_test_toggle(move || {
+        if let Some(ui) = local_ui.upgrade().filter(|_| !preview_mode) {
+            let mut test = local_test.borrow_mut();
+            synchronize_mic_test(&ui, &mut test, &local_runtime);
+            test.toggle_playback();
+            apply_mic_test(&ui, test.snapshot(std::time::Instant::now()));
+        }
+    });
+    let local_ui = ui.as_weak();
+    let local_test = mic_test_ui.clone();
+    let local_runtime = runtime.handle().clone();
+    ui.on_mic_test_seek(move |seconds| {
+        if let Some(ui) = local_ui.upgrade().filter(|_| !preview_mode) {
+            let mut test = local_test.borrow_mut();
+            synchronize_mic_test(&ui, &mut test, &local_runtime);
+            test.seek(f64::from(seconds));
+            apply_mic_test(&ui, test.snapshot(std::time::Instant::now()));
+        }
+    });
     let captcha_id = Rc::new(RefCell::new(String::new()));
     let setup_avatar = Rc::new(RefCell::new(None::<String>));
     let latest = Rc::new(RefCell::new(Bootstrap::default()));
@@ -446,7 +498,15 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let logout_commands = commands.clone();
+    let logout_test = mic_test_ui.clone();
+    let logout_audio = audio_runtime.clone();
+    let logout_ui = ui.as_weak();
     ui.on_logout(move || {
+        logout_test.borrow_mut().close();
+        logout_audio.reset();
+        if let Some(ui) = logout_ui.upgrade() {
+            ui.set_modal(0);
+        }
         let _ = logout_commands.try_send(Command::Logout);
     });
     let language_preferences = audio_preferences.clone();
@@ -524,7 +584,6 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let enumeration = Arc::new(AtomicBool::new(false));
     let device_runtime = runtime.handle().clone();
     let device_updates = send_update.clone();
-    let preview_mode = preview.is_some() || snapshot.is_some() || interaction_check;
     ui.on_refresh_audio_devices(move || {
         if preview_mode || enumeration.swap(true, Ordering::AcqRel) {
             return;
@@ -549,15 +608,36 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     });
     let meter_timer = Timer::default();
     let weak = ui.as_weak();
-    let meter_controls = audio_controls.clone();
-    meter_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
-        if let Some(ui) = weak
-            .upgrade()
-            .filter(|ui| ui.get_modal() == 3 && ui.get_settings_tab() == 1)
-        {
-            ui.set_mic_db(
-                f32::from_bits(meter_controls.mic_db.load(Ordering::Acquire)).clamp(-100.0, 0.0),
-            );
+    let meter_test = mic_test_ui.clone();
+    let meter_runtime = runtime.handle().clone();
+    let mut motion_started = std::time::Instant::now();
+    let mut motion_stage = slint::SharedString::default();
+    meter_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
+        if let Some(ui) = weak.upgrade() {
+            if !preview_mode {
+                synchronize_mic_test(&ui, &mut meter_test.borrow_mut(), &meter_runtime);
+            }
+            ui.set_mic_test_revealed(ui.get_mic_test_active());
+            if ui.get_mic_test_active() && !ui.get_reduced_motion() {
+                let stage = ui.get_mic_test().stage;
+                if stage != motion_stage {
+                    motion_stage = stage;
+                    motion_started = std::time::Instant::now();
+                }
+                let seconds = motion_started.elapsed().as_secs_f32();
+                let phase = 1.0 - (seconds / 0.9 % 2.0 - 1.0).abs();
+                ui.set_mic_test_pulse(if phase < 0.5 {
+                    2.0 * phase * phase
+                } else {
+                    1.0 - (-2.0 * phase + 2.0).powi(2) / 2.0
+                });
+                ui.set_mic_test_dot_pulse(
+                    (1.0 - (seconds * std::f32::consts::PI / 0.76).cos()) / 2.0,
+                );
+            } else {
+                ui.set_mic_test_pulse(0.0);
+                ui.set_mic_test_dot_pulse(0.0);
+            }
         }
     });
     let image_runtime = runtime.handle().clone();
@@ -1218,7 +1298,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_authenticated(true);
             }
             "audio" | "audio-manual" | "audio-raw" | "audio-ultra" | "audio-deepfilter"
-            | "audio-general" | "audio-privacy" | "audio-volume" => {
+            | "audio-general" | "audio-privacy" | "audio-volume" | "mic-idle" | "mic-arming"
+            | "mic-recording" | "mic-playing" | "mic-paused" | "mic-silent" | "mic-failed" => {
                 apply_bootstrap(&ui, &notification_fixture());
                 ui.set_authenticated(true);
                 ui.set_connected(true);
@@ -1238,6 +1319,33 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     1
                 });
                 ui.set_modal(3);
+                if preview.starts_with("mic-") {
+                    ui.set_mic_test(MicTestView {
+                        stage: match preview.as_str() {
+                            "mic-arming" => "arming",
+                            "mic-recording" => "recording",
+                            "mic-playing" | "mic-paused" | "mic-silent" => "ready",
+                            _ => "idle",
+                        }
+                        .into(),
+                        issue: match preview.as_str() {
+                            "mic-silent" => "silent",
+                            "mic-failed" => "failed",
+                            _ => "",
+                        }
+                        .into(),
+                        playing: ["mic-playing", "mic-silent"].contains(&preview.as_str()),
+                        duration: if ["mic-playing", "mic-paused", "mic-silent"]
+                            .contains(&preview.as_str())
+                        {
+                            5.0
+                        } else {
+                            0.0
+                        },
+                        position: 1.5,
+                    });
+                    ui.set_mic_db(-24.0);
+                }
                 if [
                     "audio-manual",
                     "audio-raw",
@@ -1325,6 +1433,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             Duration::from_millis(500),
             move || {
                 if let Some(ui) = weak.upgrade() {
+                    println!("{}", json!({"nativeMicTestCapture": {"stage":ui.get_mic_test().stage.as_str(),"issue":ui.get_mic_test().issue.as_str(),"playing":ui.get_mic_test().playing,"duration":ui.get_mic_test().duration,"position":ui.get_mic_test().position,"panelX":(ui.window().size().width as f32 / ui.window().scale_factor() - 156.0) / 2.0,"panelY":ui.get_mic_test_panel_y(),"panelWidth":156,"panelHeight":36.0 + if ui.get_mic_test().stage == "ready" {27.0} else {0.0} + if ui.get_mic_test().issue.is_empty() {0.0} else {19.75},"physicalDevices":false}}));
                     if let Err(failure) = save_snapshot(&ui, &path) {
                         *error.borrow_mut() = Some(failure.to_string());
                     }
@@ -1334,6 +1443,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let ui_result = ui.run();
+    mic_test_ui.borrow_mut().close();
     stop.cancel();
     worker.abort();
     runtime.block_on(async {
@@ -2389,6 +2499,43 @@ async fn worker(
     video_jobs.clear();
 }
 
+fn apply_mic_test(ui: &NativeApp, snapshot: MicTestSnapshot) {
+    ui.set_mic_test(MicTestView {
+        stage: match snapshot.stage {
+            MicTestStage::Idle => "idle",
+            MicTestStage::Arming => "arming",
+            MicTestStage::Recording => "recording",
+            MicTestStage::Ready => "ready",
+        }
+        .into(),
+        issue: match snapshot.issue {
+            Some(MicTestIssue::Silent) => "silent",
+            Some(MicTestIssue::Failed) => "failed",
+            None => "",
+        }
+        .into(),
+        playing: snapshot.playing,
+        duration: snapshot.duration_seconds as f32,
+        position: snapshot.position_seconds as f32,
+    });
+    ui.set_mic_db(snapshot.meter_db);
+}
+
+fn synchronize_mic_test(
+    ui: &NativeApp,
+    test: &mut MicTestUi<NativeAudio>,
+    runtime: &tokio::runtime::Handle,
+) {
+    test.synchronize(
+        ui.get_user_id().as_str(),
+        ui.get_authenticated() && ui.get_modal() == 3,
+        ui.get_settings_tab() == 1,
+        ui.get_audio_settings().noise_suppression,
+        runtime,
+    );
+    apply_mic_test(ui, test.snapshot(std::time::Instant::now()));
+}
+
 fn apply_audio_settings(ui: &NativeApp, settings: &AudioSettings) {
     ui.set_audio_settings(AudioSettingsView {
         input_volume: settings.input_volume,
@@ -2557,15 +2704,17 @@ fn check_auth_interactions(ui: &NativeApp) -> Result<(), &'static str> {
     }
     check_roster_bindings(ui)?;
     check_audio_interactions(ui)?;
+    check_mic_test_interactions(ui)?;
     println!(
         "{}",
-        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeAudioInteractionCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true})
+        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeAudioInteractionCheck":"passed","nativeMicTestInteractionCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true,"physicalDevices":false})
     );
     Ok(())
 }
 
 fn check_audio_interactions(ui: &NativeApp) -> Result<(), &'static str> {
     use slint::platform::{Key, PointerEventButton, WindowEvent};
+    ui.set_reduced_motion(true);
     let settings = Rc::new(RefCell::new(AudioSettings::default()));
     let edited = Rc::new(RefCell::new(Vec::<String>::new()));
     let state = settings.clone();
@@ -2609,7 +2758,8 @@ fn check_audio_interactions(ui: &NativeApp) -> Result<(), &'static str> {
         ui.window()
             .dispatch_event(WindowEvent::KeyReleased { text: key.into() });
     };
-    click(550.0, 464.0);
+    let offset = ui.get_settings_dialog_y() - 78.0;
+    click(550.0, 464.0 + offset);
     key(Key::RightArrow);
     if settings.borrow().input_volume != 105.0 {
         return Err("Audio slider pointer/focus/arrow step failed");
@@ -2622,25 +2772,25 @@ fn check_audio_interactions(ui: &NativeApp) -> Result<(), &'static str> {
     if settings.borrow().input_volume != 200.0 {
         return Err("Audio slider maximum failed");
     }
-    click(550.0, 564.0);
+    click(550.0, 564.0 + offset);
     key(Key::LeftArrow);
     if settings.borrow().output_volume != 95.0 || settings.borrow().input_volume != 200.0 {
         return Err("Output slider changed the wrong audio preference");
     }
-    click(734.0, 656.0);
+    click(734.0, 656.0 + offset);
     if !settings.borrow().ultra_low_latency {
         return Err("Ultra-low-latency toggle failed");
     }
     ui.set_settings_scroll_y(-380.0);
     let count = edited.borrow().len();
-    click(734.0, 356.0);
+    click(734.0, 356.0 + offset);
     if ui.get_settings_scroll_y() > -300.0 {
         return Err("Audio settings scroll did not expose the disabled controls");
     }
     if edited.borrow().len() != count {
         return Err("Disabled heavy audio control accepted an edit");
     }
-    click(758.0, 116.0);
+    click(758.0, 116.0 + offset);
     if ui.get_modal() != 0 {
         return Err("Audio settings close action failed");
     }
@@ -2660,6 +2810,181 @@ fn check_audio_interactions(ui: &NativeApp) -> Result<(), &'static str> {
     reconcile_volume_modal(ui);
     if ui.get_modal() != 0 || !ui.get_volume_peer().is_empty() {
         return Err("Departed peer retained a stale volume dialog");
+    }
+    Ok(())
+}
+
+fn check_mic_test_interactions(ui: &NativeApp) -> Result<(), &'static str> {
+    use slint::platform::{Key, PointerEventButton, WindowEvent};
+    use zabor_native::mic_test::{MicTest, MONITOR_SETTLE, PIPELINE_FLUSH};
+    let test = Arc::new(MicTest::default());
+    let weak = ui.as_weak();
+    let local = test.clone();
+    ui.on_mic_test_context_changed(move || {
+        if let Some(ui) = weak.upgrade() {
+            local.configure(
+                ui.get_authenticated()
+                    && ui.get_modal() == 3
+                    && ui.get_audio_settings().noise_suppression,
+                ui.get_settings_tab() == 1,
+            );
+            apply_mic_test(&ui, local.snapshot(std::time::Instant::now()));
+        }
+    });
+    let weak = ui.as_weak();
+    let local = test.clone();
+    ui.on_mic_test_record(move || {
+        if let Some(ui) = weak.upgrade().filter(|ui| ui.get_mic_test_active()) {
+            local.begin(std::time::Instant::now());
+            apply_mic_test(&ui, local.snapshot(std::time::Instant::now()));
+        }
+    });
+    let weak = ui.as_weak();
+    let local = test.clone();
+    ui.on_mic_test_toggle(move || {
+        if let Some(ui) = weak.upgrade().filter(|ui| ui.get_mic_test_active()) {
+            if local.snapshot(std::time::Instant::now()).playing {
+                local.pause();
+            } else {
+                local.play(None);
+            }
+            apply_mic_test(&ui, local.snapshot(std::time::Instant::now()));
+        }
+    });
+    let weak = ui.as_weak();
+    let local = test.clone();
+    ui.on_mic_test_seek(move |seconds| {
+        if let Some(ui) = weak.upgrade().filter(|ui| ui.get_mic_test_active()) {
+            local.seek(f64::from(seconds));
+            apply_mic_test(&ui, local.snapshot(std::time::Instant::now()));
+        }
+    });
+    apply_audio_settings(ui, &AudioSettings::default());
+    ui.set_settings_tab(1);
+    ui.set_modal(3);
+    ui.invoke_mic_test_context_changed();
+    ui.set_mic_test_revealed(true);
+    let pointer = |pressed, x, y| {
+        let position = slint::LogicalPosition::new(x, y);
+        ui.window().dispatch_event(if pressed {
+            WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            }
+        } else {
+            WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            }
+        });
+    };
+    let click = |x, y| {
+        pointer(true, x, y);
+        pointer(false, x, y);
+    };
+    let key = |key: Key| {
+        ui.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+        ui.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: key.into() });
+    };
+    click(550.0, ui.get_mic_test_panel_y() + 18.0);
+    if ui.get_mic_test().stage != "arming" {
+        return Err("Microphone record pointer callback failed");
+    }
+    let token = test
+        .capture_token()
+        .ok_or("Microphone capture token missing")?;
+    click(550.0, ui.get_mic_test_panel_y() + 18.0);
+    if test.capture_token() != Some(token) {
+        return Err("Disabled recording button started a duplicate capture");
+    }
+    let complete = |sample: f32| -> Result<(), &'static str> {
+        let token = test
+            .capture_token()
+            .ok_or("Microphone retake token missing")?;
+        let now = std::time::Instant::now();
+        test.prepared(token, now);
+        test.snapshot(now + MONITOR_SETTLE);
+        for index in 0..500 {
+            test.capture(
+                token,
+                &[sample; 480],
+                -24.0,
+                now + MONITOR_SETTLE + PIPELINE_FLUSH + Duration::from_millis(index * 10),
+            );
+        }
+        apply_mic_test(ui, test.snapshot(now + Duration::from_secs(6)));
+        Ok(())
+    };
+    complete(0.1)?;
+    if ui.get_mic_test().stage != "ready" || !ui.get_mic_test().playing {
+        return Err("Microphone ready player failed");
+    }
+    let y = ui.get_mic_test_panel_y() + 18.0;
+    pointer(true, 568.0, y);
+    ui.window().dispatch_event(WindowEvent::PointerMoved {
+        position: slint::LogicalPosition::new(615.0, y),
+    });
+    if test.snapshot(std::time::Instant::now()).position_seconds != 0.0 {
+        return Err("Microphone scrub committed before pointer-up");
+    }
+    pointer(false, 615.0, y);
+    if (ui.get_mic_test().position - 4.95).abs() > 0.001 {
+        return Err("Microphone pointer-up seek/tail bound failed");
+    }
+    key(Key::LeftArrow);
+    if (ui.get_mic_test().position - 4.45).abs() > 0.001 {
+        return Err("Microphone half-second keyboard seek failed");
+    }
+    key(Key::RightArrow);
+    pointer(true, 548.0, y);
+    pointer(false, 580.0, y);
+    if (ui.get_mic_test().position - 69.0 / 104.0 * 5.0).abs() > 0.001 {
+        return Err("Microphone release without pointer-move used a stale seek target");
+    }
+    test.seek(1.5);
+    apply_mic_test(ui, test.snapshot(std::time::Instant::now()));
+    click(490.0, ui.get_mic_test_panel_y() + 18.0);
+    if ui.get_mic_test().playing {
+        return Err("Microphone pause button failed");
+    }
+    key(Key::Return);
+    if !ui.get_mic_test().playing {
+        return Err("Microphone keyboard playback failed");
+    }
+    ui.set_settings_tab(0);
+    ui.invoke_mic_test_context_changed();
+    if ui.get_mic_test().playing || ui.get_mic_test().duration != 5.0 {
+        return Err("Microphone tab hide did not pause/retain clip");
+    }
+    ui.set_settings_tab(1);
+    ui.invoke_mic_test_context_changed();
+    ui.set_mic_test_revealed(true);
+    if ui.get_mic_test().playing {
+        return Err("Microphone tab show caused late autoplay");
+    }
+    click(550.0, ui.get_mic_test_panel_y() + 51.0);
+    if ui.get_mic_test().stage != "arming" || ui.get_mic_test().duration != 0.0 {
+        return Err("Microphone retake did not reset clip");
+    }
+    complete(0.0)?;
+    if ui.get_mic_test().issue != "silent" {
+        return Err("Microphone silence state failed");
+    }
+    let audio = AudioSettings {
+        noise_suppression: false,
+        ..AudioSettings::default()
+    };
+    apply_audio_settings(ui, &audio);
+    ui.invoke_mic_test_context_changed();
+    if test.snapshot(std::time::Instant::now()).stored_samples != 0 {
+        return Err("Microphone disable did not dispose buffer");
+    }
+    ui.set_modal(0);
+    ui.invoke_mic_test_context_changed();
+    if test.has_demand() {
+        return Err("Microphone close retained local demand");
     }
     Ok(())
 }

@@ -29,6 +29,8 @@ pub mod manual_gate;
 pub mod media;
 pub mod mic_test;
 #[cfg(feature = "native-media")]
+pub mod mic_test_ui;
+#[cfg(feature = "native-media")]
 pub mod microphone;
 pub mod motion;
 #[cfg(all(windows, feature = "native-media"))]

@@ -422,6 +422,11 @@ pub struct MonitorLease<D: SharedAudioDevice> {
 }
 
 impl<D: SharedAudioDevice> MonitorLease<D> {
+    pub fn is_current(&self) -> bool {
+        !self.shared.stop.is_cancelled()
+            && self.shared.monitor.load(Ordering::Acquire) == self.generation
+    }
+
     pub fn configure(&self, visible: bool) {
         if self.shared.monitor.load(Ordering::Acquire) == self.generation {
             self.shared.mic_test.configure(true, visible);

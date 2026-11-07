@@ -345,6 +345,49 @@ switches and disposing it on close/disable/logout. No second capture/DSP runtime
 or rewrite of checked core/preferences/device recovery is needed. Full client/
 audio/micTestUi readiness remainsfalse; no push, merge, release or shutdown.
 
+Slint microphone-test panel/local-meter wiring is implemented as WIP after
+`b755fe5`: settings-modal monitor lifetime, independent local callbacks and
+preparation, immediate close/logout disposal, session-reset owner guards and
+native accessible record/play/pause/scrub/retake states. The unchanged React
+reference passed14development captures at1x; current controller tests/build and
+full UI/source/binary regression remain pending. This is not full physical,
+motion, audio or client acceptance; readinessfalse, no publication/shutdown.
+
+Panel/controller development passed7tests, Clippy and build. Native pointer
+checks then found and fixed real Slint default-centering defects in player,
+playback lane and filled track; panel stacking/reveal and separate pulse/dot
+phases were corrected. The complete two-feature/source/binary/native-reference/
+settings/auth regression is in progress. Exact reference spring/motion/pixel and
+physical/full audio/client acceptance remain unfinished; no release/shutdown.
+
+First full panel pipeline passed144default/135no-neural tests,409matching
+source hashes,56panel pairs,64settings and24auth captures with unchanged
+protected UI/neural regressions. Subsequent image/platform-font review corrected
+dot centering, actual border/track insets, issue/retake Semibold face and added a
+release-without-pointer-move seek case. Final reviewed-source pipeline is running;
+the previous pass is not evidence for these last edits. Exact motion/pixel,
+physical/audio/client acceptance remains pending; no publication or shutdown.
+
+Функциональная Slint-панель/local meter прошли финальный прогон:
+**144default (52unit+92integration) /135no-neural (52unit+83integration)**,
+9HTTP/artifacts/fmt/Clippy/build и409matching sources.56RU/EN/four-DPI native/
+reference pairs+8interactions,64settings+8interactions,24auth+8interactions на
+одном final tested/current binary;0hash mismatches, protected UI/neural unchanged.
+Settings-modal lease, independent local callbacks/preparation, pause/retain on
+hide, close/disable/logout disposal и release-without-move seek checked.
+Далее local-only DSP-health/retry/meter reset, exact font/spring/motion/pixel and
+raw/Silero/outer4x/physical/full acceptance; **не переписывать panel/runtime/core**.
+Readinessfalse; no push/merge/release/shutdown.
+
+Functional Slint panel/local-meter wiring passed144default and135neural-disabled
+tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
+build. All56native/reference pairs,64settings and24auth captures share the final
+tested binary; protected UI/neural regressions are unchanged. Local callbacks,
+settings-modal ownership and record/play/pause/seek/retake lifecycle are checked.
+Exact font/raster/spring/motion parity and local-only DSP health, physical and
+complete audio/client acceptance remain pending. This is a saved-development
+milestone, not a published/fully accepted client.
+
 Пять сравнений с неизменённым TypeScript прошли: tonal notches/EQ/deesser,
 manual threshold/hold/lookahead/makeup, model-input gain/ALC, manual SmartGate
 и voicing/attack/release/preroll на одинаковых VAD-решениях. Четыре теста микшера
