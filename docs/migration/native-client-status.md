@@ -513,6 +513,21 @@ evidence; remaining play/raster/modal/cold/physical/full migration stays pending
 Do not redo checked pause/font/caption/focus/Space/spring/DSP/runtime work.
 All jobs complete; no push/merge/release/shutdown, readinessfalse.
 
+### Microphone feedback WIP preserved; functional blocks continue
+
+Primary/outline0.99 and retake immobility passed296development pairs/16outline
+checks at100% DPI. Final code passed162default/152neural-disabled tests,423source
+hashes and static/caption/settings/auth preservation. Final motion failed on a
+native cold406ms initial observation; remaining focus800pairs/448annulus checks
+passed, but pressed stopped at RU200%90second deadline after888matching pairs
+at100/125/150%. Full regression and pressed-stage acceptance remainfalse.
+`mic-pressed-final-2026-11-07/preservation-boundary.json` retains all4439artifacts
+and the exact final executablef4bcd0a9… under `binary-frozen/`; no failures/gates
+were hidden or weakened. This is saved WIP, not a verified pressed milestone.
+Per owner direction, continue functional call/reconnect/media/profile/packaging
+blocks; keep outstanding visual/physical/full-client acceptance separate.
+No pending GUI jobs, publication, merge or shutdown.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-fn key(ui: &NativeApp, key: Key, down_only: bool) {
+pub(super) fn key(ui: &NativeApp, key: Key, down_only: bool) {
     ui.window()
         .dispatch_event(WindowEvent::KeyPressed { text: key.into() });
     if !down_only {
@@ -15,7 +15,7 @@ fn key(ui: &NativeApp, key: Key, down_only: bool) {
     }
 }
 
-fn pointer(ui: &NativeApp, control: &str, pressed: bool) {
+pub(super) fn pointer(ui: &NativeApp, control: &str, pressed: bool) {
     let origin_x = (ui.window().size().width as f32 / ui.window().scale_factor() - 156.0) / 2.0;
     let (x, y) = match control {
         "seek" => (origin_x + 96.0, ui.get_mic_test_panel_y() + 18.0),
@@ -41,7 +41,7 @@ fn pointer(ui: &NativeApp, control: &str, pressed: bool) {
     });
 }
 
-fn save_panel(
+pub(super) fn save_panel(
     ui: &NativeApp,
     path: &PathBuf,
     panel_y: f32,

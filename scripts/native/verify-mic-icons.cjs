@@ -5,7 +5,9 @@ const { join, resolve } = require('node:path');
 const { homedir } = require('node:os');
 
 const args = process.argv.slice(2);
-if (args.length !== 2 || args[0] !== '--output') throw new Error('Usage: node scripts/native/verify-mic-icons.cjs --output DIRECTORY');
+const pressed = args.includes('--pressed');
+if (pressed) args.splice(args.indexOf('--pressed'), 1);
+if (args.length !== 2 || args[0] !== '--output') throw new Error('Usage: node scripts/native/verify-mic-icons.cjs --output DIRECTORY [--pressed]');
 const output = resolve(args[1]);
 if (existsSync(output)) throw new Error('Icon regression output already exists');
 const read = path => JSON.parse(readFileSync(path));
@@ -17,12 +19,14 @@ const previous = {
   auth: 'migration-artifacts/native-auth/mic-focus-final-2026-11-07',
 };
 const priorAudio = read(join(previous.audio, 'verification.json'));
-const sourceFiles = [...Object.keys(priorAudio.sources), 'scripts/native/measure-mic-icons.py', 'scripts/native/verify-mic-icons.cjs'];
+const additions = ['scripts/native/measure-mic-icons.py', 'scripts/native/verify-mic-icons.cjs', 'scripts/native/capture-mic-pressed.cjs', 'scripts/native/verify-mic-pressed.cjs', 'scripts/native/measure-mic-pressed.py', 'rust/crates/zabor-native/src/shell/mic_pressed.rs'];
+const sourceFiles = [...Object.keys(priorAudio.sources), ...additions.filter(path => existsSync(path) && !priorAudio.sources[path])];
 if (new Set(sourceFiles).size !== sourceFiles.length) throw new Error('Duplicate source inventory');
 const sources = Object.fromEntries(sourceFiles.map(path => [path, digest(path)]));
 const priorPanel = read(join(previous.panel, 'verification.json'));
 const referenceSources = Object.fromEntries(Object.keys(priorPanel.sources).filter(path => !sources[path]).map(path => [path, digest(path)]));
 const paths = Object.fromEntries(['audio-default', 'audio-no-neural', 'panel', 'baseline', 'settings', 'auth', 'motion', 'focus', 'focus-review', 'icon-review'].map(name => [name, join(output, name)]));
+if (pressed) for (const name of ['pressed', 'pressed-review']) paths[name] = join(output, name);
 const cargo = join(process.env.CARGO_HOME || join(homedir(), '.cargo'), 'bin/cargo.exe');
 const binary = resolve('rust/target/debug/zabor-native.exe');
 const checks = [];
@@ -54,6 +58,10 @@ const freezeFile = (path, expected) => {
 try {
   for (const name of ['capture-mic-test.cjs', 'verify-mic-icons.cjs']) run(`${name}-syntax`, [process.execPath, '--check', `scripts/native/${name}`]);
   run('icon-measure-syntax', ['python', '-B', '-c', "import ast;from pathlib import Path;ast.parse(Path('scripts/native/measure-mic-icons.py').read_text())"]);
+  if (pressed) {
+    for (const name of ['capture-mic-pressed.cjs', 'verify-mic-pressed.cjs']) run(`${name}-syntax`, [process.execPath, '--check', `scripts/native/${name}`]);
+    run('pressed-measure-syntax', ['python', '-B', '-c', "import ast;from pathlib import Path;ast.parse(Path('scripts/native/measure-mic-pressed.py').read_text())"]);
+  }
   run('no-neural-clippy', [cargo, 'clippy', '--manifest-path', 'rust/Cargo.toml', '-p', 'zabor-native', '--locked', '--no-default-features', '--features', 'native-media', '--all-targets', '-j', '4', '--', '-D', 'warnings']);
   const tests = run('no-neural-test', [cargo, 'test', '--manifest-path', 'rust/Cargo.toml', '-p', 'zabor-native', '--locked', '--no-default-features', '--features', 'native-media', '-j', '4', '--', '--nocapture']);
   const nativeTestsPassed = [...tests.matchAll(/test result: ok\. (\d+) passed/g)].reduce((sum, match) => sum + Number(match[1]), 0);
@@ -72,7 +80,11 @@ try {
   run('motion', [process.execPath, 'scripts/native/verify-mic-motion.cjs', '--output', paths.motion, '--audio-report', paths['audio-default']]);
   run('focus', [process.execPath, 'scripts/native/verify-mic-focus.cjs', '--output', paths.focus]);
   run('focus-review', ['python', '-B', 'scripts/native/measure-mic-focus.py', '--captures', paths.focus, '--output', paths['focus-review']]);
-  const reportPaths = Object.fromEntries(Object.entries(paths).map(([name, path]) => [name, join(path, ['baseline', 'focus-review', 'icon-review'].includes(name) ? 'comparison.json' : 'verification.json')]));
+  if (pressed) {
+    run('pressed', [process.execPath, 'scripts/native/verify-mic-pressed.cjs', '--output', paths.pressed]);
+    run('pressed-review', ['python', '-B', 'scripts/native/measure-mic-pressed.py', '--captures', paths.pressed, '--output', paths['pressed-review']]);
+  }
+  const reportPaths = Object.fromEntries(Object.entries(paths).map(([name, path]) => [name, join(path, ['baseline', 'focus-review', 'icon-review', 'pressed-review'].includes(name) ? 'comparison.json' : 'verification.json')]));
   const reports = Object.fromEntries(Object.entries(reportPaths).map(([name, path]) => { freezeFile(path); return [name, read(path)]; }));
   for (const [name, report] of Object.entries(reports)) {
     if (name !== 'audio-no-neural' && (report.binarySha256 || report.nativeBinarySha256) !== binarySha256) throw new Error(`Binary mismatch: ${name}`);
@@ -95,11 +107,13 @@ try {
   const icons = reports['icon-review'];
   const outlines = reports['focus-review'];
   if (settingsChanges.length || authChanges.length || neuralChanges.length || icons.iconImprovementChecks !== 'passed' || icons.pauseContourAccepted !== true || icons.playContourAccepted !== false || icons.measurements.length !== 24 || icons.measurements.filter(item => item.check === 'pause-improvement').length !== 16 || icons.measurements.filter(item => item.check === 'play-unchanged').length !== 8 || icons.unexpectedChanges.length || icons.referenceChanges.length || reports.baseline.textRowChecks !== 'passed' || reports.focus.automatedChecks !== 'passed' || reports.focus.captures.length !== 800 || reports.focus.differences.length || outlines.outlineBoundsChecks !== 'passed' || outlines.measurements.length !== 448 || reports.motion.coldStartMotionAccepted !== false) throw new Error('Icon/isolation/regression acceptance guard failed');
+  if (pressed && (reports.pressed.automatedChecks !== 'passed' || reports.pressed.pressedStateAccepted !== true || reports.pressed.captures.length !== 1184 || reports.pressed.differences.length || reports['pressed-review'].pressedOutlineChecks !== 'passed' || reports['pressed-review'].measurements.length !== 64)) throw new Error('Pressed-state/rendered-outline acceptance guard failed');
   for (const path of sourceFiles) if (reports.motion.sources[path] !== sources[path]) throw new Error('Motion source inventory differs');
   checkSources();
   for (const [path, value] of Object.entries(files)) if (digest(path) !== value) throw new Error(`Final evidence hash mismatch: ${path}`);
   if (digest(binary) !== binarySha256) throw new Error('Final executable changed');
   const summary = { automatedChecks: 'passed', binarySha256, sources, referenceSources, files, checks, defaultTests: audio.nativeTestsPassed, noNeuralTests: nativeTestsPassed, iconMeasurements: icons.measurements.length, pauseContourAccepted: true, playContourAccepted: false, panelCaptures: reports.panel.captures.length, settingsCaptures: reports.settings.captures.length, authCaptures: reports.auth.captures.length, panelChanges: changes(reports.panel, priorPanel), settingsChanges, authChanges, neuralChanges, focusPairs: reports.focus.captures.length, outlineMeasurements: outlines.measurements.length, nativeMotionFrames: reports.motion.runs.reduce((sum, run) => sum + run.frames.length, 0), nativeClientReady: false, audioIntegrationAccepted: false, micTestUiReady: false, focusRasterAccepted: false, broaderModalFocusAccepted: false, coldStartMotionAccepted: false, scope: 'exact React DOM/native SVG pause contour and strictly improved16pause pixel measurements;8play images and asset unchanged, play contour mismatch remains unaccepted; isolated unchanged non-icon panel/settings/auth/reference/neural evidence and existing local-only tests/caption/focus/annulus/warmed motion regressions; not exact raster/pressed keyboard/full-modal/cold/physical/full-client acceptance' };
+  if (pressed) Object.assign(summary, { pressedStateAccepted: true, pressedPairs: reports.pressed.captures.length, pressedOutlineMeasurements: reports['pressed-review'].measurements.length, pressedScope: reports.pressed.scope, pressedRasterScope: reports['pressed-review'].scope, scope: 'verified pause contour/pixel improvement and original play preservation with complete local audio/caption/static UI/focus/annulus/warmed motion regression; settled primary/retake keyboard/pointer feedback and selected outline-contraction proof in separate pressed reports; exact raster, broader modal/window/continuous focus, cold/physical/full-client acceptance remains separate' });
   writeFileSync(join(output, 'verification.json'), JSON.stringify(summary, null, 2), { flag: 'wx' });
   console.log(JSON.stringify({ automatedChecks: 'passed', defaultTests: summary.defaultTests, noNeuralTests: summary.noNeuralTests, sources: sourceFiles.length, iconMeasurements: summary.iconMeasurements, focusPairs: summary.focusPairs, outlineMeasurements: summary.outlineMeasurements, binarySha256, output }));
 } catch (error) {

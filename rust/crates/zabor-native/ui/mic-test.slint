@@ -2,6 +2,10 @@ export struct MicTestView {
     stage: string, issue: string, playing: bool, duration: float, position: float,
 }
 
+export struct MicButtonFeedback {
+    pointer-pressed: bool, space-held: bool, scale: float, outline-scale: float, disabled: bool,
+}
+
 component MicFocusScope inherits FocusScope {
     in property <string> control;
     in property <int> focus-reset;
@@ -46,6 +50,14 @@ component TestButton inherits Rectangle {
     in property <int> focus-reset;
     callback focus-updated(string, bool, bool);
     private property <bool> space-held;
+    private property <bool> pointer-active;
+    private property <float> visual-scale: root.disabled && !root.reduced-motion ? 1 + root.pulse * 0.03 : root.primary && !root.disabled && (root.pointer-active || root.space-held) ? 0.99 : 1;
+    private property <float> outline-scale: root.visual-scale;
+    changed disabled => { if root.disabled { root.pointer-active = false; } }
+    private property <MicButtonFeedback> feedback: { pointer-pressed: touch.pressed, space-held: root.space-held, scale: root.visual-scale, outline-scale: root.outline-scale, disabled: root.disabled };
+    callback feedback-updated(string, MicButtonFeedback);
+    changed feedback => { root.feedback-updated(root.control, root.feedback); }
+    init => { root.feedback-updated(root.control, root.feedback); }
     callback activated;
     height: 36px;
     background: transparent;
@@ -54,8 +66,8 @@ component TestButton inherits Rectangle {
         background: root.disabled ? #c81e7033 : root.primary ? (touch.has-hover ? #de217c : #c81e70e6) : touch.has-hover ? #ffffff17 : #161618b3;
         border-width: root.primary ? 0px : 1px;
         border-color: #ffffff0f;
-        transform-scale-x: root.disabled && !root.reduced-motion ? 1 + root.pulse * 0.03 : touch.pressed ? 0.99 : 1;
-        transform-scale-y: root.disabled && !root.reduced-motion ? 1 + root.pulse * 0.03 : touch.pressed ? 0.99 : 1;
+        transform-scale-x: root.visual-scale;
+        transform-scale-y: root.visual-scale;
         transform-origin: { x: root.width / 2, y: root.height / 2 };
         HorizontalLayout { alignment: center; spacing: 6px;
         if root.recording : Rectangle { width: 8px; background: transparent;
@@ -79,10 +91,17 @@ component TestButton inherits Rectangle {
         key-released(event) => { if event.text == Key.Space { if root.space-held { root.space-held = false; root.activated(); } return accept; } return reject; }
     }
     touch := TouchArea { enabled: !root.disabled;
-        pointer-event(event) => { if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { keys.pointer-focus(); } }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left { root.pointer-active = true; keys.pointer-focus(); }
+            if event.kind == PointerEventKind.move && (self.mouse-x < 0px || self.mouse-y < 0px || self.mouse-x >= self.width || self.mouse-y >= self.height) { root.pointer-active = false; }
+            if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) || event.kind == PointerEventKind.cancel { root.pointer-active = false; }
+        }
         clicked => { root.activated(); }
     }
-    if keys.outline-visible : Rectangle { x: -4px; y: -4px; width: parent.width + 8px; height: parent.height + 8px; background: transparent; border-radius: root.primary ? 20px : 12px; border-width: 2px; border-color: #ee68a9; }
+    if keys.outline-visible : Rectangle { x: -4px; y: -4px; width: parent.width + 8px; height: parent.height + 8px; background: transparent; border-radius: root.primary ? 20px : 12px; border-width: 2px; border-color: #ee68a9;
+        transform-scale-x: root.outline-scale; transform-scale-y: root.outline-scale;
+        transform-origin: { x: self.width / 2, y: self.height / 2 };
+    }
     accessible-role: button;
     accessible-label: root.label;
     accessible-enabled: !root.disabled;
@@ -112,6 +131,7 @@ export component MicTestPanel inherits Rectangle {
     callback seek(float);
     in property <int> focus-reset;
     callback focus-updated(string, bool, bool);
+    callback feedback-updated(string, MicButtonFeedback);
     width: 156px;
     height: 36px + (root.test.stage == "ready" ? 27px : 0px) + (root.test.issue != "" ? 19.75px : 0px);
     background: transparent;
@@ -217,6 +237,7 @@ export component MicTestPanel inherits Rectangle {
     if root.test.stage != "ready" : TestButton { x: 0px; y: 0px; width: root.width; primary: true; height: 36px; reduced-motion: root.reduced-motion; pulse: root.pulse; dot-pulse: root.dot-pulse; recording: root.test.stage == "recording";
         control: "primary"; focus-reset: root.focus-reset;
         focus-updated(control, focused, outline) => { root.focus-updated(control, focused, outline); }
+        feedback-updated(control, feedback) => { root.feedback-updated(control, feedback); }
         label: root.tr(root.test.stage == "recording" ? "settings.audio.micTestTalk" : root.test.stage == "arming" ? "settings.audio.micTestArming" : "settings.audio.micTestListen");
         disabled: !root.active || root.test.stage != "idle";
         activated => { root.record(); }
@@ -224,6 +245,7 @@ export component MicTestPanel inherits Rectangle {
     if root.test.stage == "ready" : TestButton { x: (root.width - self.width) / 2; y: 42px; width: min(root.width, retake.preferred-width + 18px); height: 21px; reduced-motion: root.reduced-motion; disabled: !root.active;
         control: "retake"; focus-reset: root.focus-reset;
         focus-updated(control, focused, outline) => { root.focus-updated(control, focused, outline); }
+        feedback-updated(control, feedback) => { root.feedback-updated(control, feedback); }
         label-top: root.text-top(56px, retake.font-metrics.ascent) - 42px;
         label: root.tr("settings.audio.micTestRetake"); activated => { root.record(); }
         retake := Text { visible: false; text: root.tr("settings.audio.micTestRetake"); font-size: 10px; font-family: "Segoe UI"; font-weight: 600; }

@@ -1,7 +1,7 @@
 import { FormButton, FormField, IconButton } from "controls.slint";
 import { ScrollView } from "std-widgets.slint";
 import { AudioSettingsPanel, AudioSettingsView, AudioDeviceItem, AudioSlider, RelaySetting } from "audio-settings.slint";
-import { MicTestPanel, MicTestView } from "mic-test.slint";
+import { MicTestPanel, MicTestView, MicButtonFeedback } from "mic-test.slint";
 
 export struct ChannelItem { id: string, name: string, count: int }
 export struct FriendItem { id: string, name: string, username: string, online: bool, color: color, avatar: image, speaking: bool, muted: bool, deafened: bool }
@@ -81,6 +81,9 @@ export component NativeApp inherits Window {
     in property <int> mic-test-focus-reset;
     out property <string> mic-test-focused-control;
     out property <bool> mic-test-focus-outline;
+    out property <MicButtonFeedback> mic-test-primary-feedback;
+    out property <MicButtonFeedback> mic-test-retake-feedback;
+    changed mic-test-focus-reset => { root.mic-test-focused-control = ""; root.mic-test-focus-outline = false; }
     pure callback mic-thumb-spring(float, bool) -> float;
     out property <float> mic-test-thumb-scale: 1;
     out property <bool> mic-test-thumb-animating;
@@ -376,6 +379,10 @@ export component NativeApp inherits Window {
                 if !focused && root.mic-test-focused-control == control { root.mic-test-focused-control = ""; root.mic-test-focus-outline = false; }
             }
             thumb-updated(scale, running) => { root.mic-test-thumb-scale = scale; root.mic-test-thumb-animating = running; }
+            feedback-updated(control, feedback) => {
+                if control == "primary" { root.mic-test-primary-feedback = feedback; }
+                if control == "retake" { root.mic-test-retake-feedback = feedback; }
+            }
             private property <length> slide: root.mic-test-active && (root.reduced-motion || root.mic-test-revealed) ? 0px : -self.height - 32px;
             opacity: root.mic-test-active && (root.reduced-motion || root.mic-test-revealed) ? 1 : 0;
             animate opacity, slide { duration: root.reduced-motion ? 0ms : 420ms; easing: cubic-bezier(0.16, 1, 0.3, 1); }

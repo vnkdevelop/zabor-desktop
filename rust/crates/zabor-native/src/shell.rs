@@ -46,6 +46,7 @@ use zeroize::Zeroizing;
 
 mod mic_focus;
 mod mic_motion;
+mod mic_pressed;
 
 enum Command {
     Authenticate {
@@ -1304,6 +1305,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let motion_preview = matches!(preview.as_deref(), Some("mic-motion" | "mic-motion-frames"));
     let motion_capture = preview.as_deref() == Some("mic-motion-frames");
     let focus_preview = preview.as_deref() == Some("mic-focus");
+    let pressed_preview = preview.as_deref() == Some("mic-pressed");
     if let Some(preview) = preview {
         match preview.as_str() {
             "login" => {}
@@ -1315,7 +1317,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             "audio" | "audio-manual" | "audio-raw" | "audio-ultra" | "audio-deepfilter"
             | "audio-general" | "audio-privacy" | "audio-volume" | "mic-idle" | "mic-arming"
             | "mic-recording" | "mic-playing" | "mic-paused" | "mic-silent" | "mic-failed"
-            | "mic-motion" | "mic-motion-frames" | "mic-focus" => {
+            | "mic-motion" | "mic-motion-frames" | "mic-focus" | "mic-pressed" => {
                 apply_bootstrap(&ui, &notification_fixture());
                 ui.set_authenticated(true);
                 ui.set_connected(true);
@@ -1426,7 +1428,17 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let capture_error = Rc::new(RefCell::new(None));
-    if focus_preview {
+    if pressed_preview {
+        if !reduced_motion || interaction_check {
+            return Err("Pressed preview requires reduced motion and no interaction-check".into());
+        }
+        mic_pressed::start(
+            &ui,
+            &capture,
+            snapshot.ok_or("Pressed evidence directory is required")?,
+            capture_error.clone(),
+        )?;
+    } else if focus_preview {
         if !reduced_motion || interaction_check {
             return Err("Focus preview requires reduced motion and no interaction-check".into());
         }
