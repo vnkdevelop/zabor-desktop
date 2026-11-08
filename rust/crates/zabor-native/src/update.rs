@@ -45,6 +45,38 @@ impl VerifiedRelease {
         now: u64,
         minimum_sequence: u64,
     ) -> Result<Self, &'static str> {
+        Self::verify_inner(
+            raw,
+            signature,
+            trusted_public_key,
+            Some(now),
+            minimum_sequence,
+        )
+    }
+
+    pub fn verify_retained(
+        raw: &[u8],
+        signature: &[u8],
+        trusted_public_key: &[u8],
+        expected_manifest_sha256: &str,
+        highest_sequence: u64,
+    ) -> Result<Self, &'static str> {
+        let release = Self::verify_inner(raw, signature, trusted_public_key, None, 0)?;
+        if release.manifest_sha256 != expected_manifest_sha256
+            || release.manifest.sequence > highest_sequence
+        {
+            return Err("retained-receipt-mismatch");
+        }
+        Ok(release)
+    }
+
+    fn verify_inner(
+        raw: &[u8],
+        signature: &[u8],
+        trusted_public_key: &[u8],
+        now: Option<u64>,
+        minimum_sequence: u64,
+    ) -> Result<Self, &'static str> {
         if raw.is_empty() || raw.len() > MAX_MANIFEST_BYTES {
             return Err("invalid-manifest-length");
         }
@@ -73,8 +105,7 @@ impl VerifiedRelease {
             || !hex_digest(&manifest.commit, 40)
             || manifest.sequence == 0
             || manifest.sequence < minimum_sequence
-            || manifest.issued_at > now
-            || manifest.expires_at <= now
+            || now.is_some_and(|now| manifest.issued_at > now || manifest.expires_at <= now)
             || manifest.expires_at <= manifest.issued_at
             || manifest.expires_at - manifest.issued_at > 7 * 24 * 60 * 60
             || !(1..=1000).contains(&manifest.data_schema)
