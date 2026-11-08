@@ -6,10 +6,27 @@ UI or full-client acceptance.
 
 ## Owning API
 
-`rust/crates/zabor-profile-helper` is a standalone native Windows crate. Its own
-manifest and lock use versions already pinned in the parent Rust lock. The isolated
-`[workspace]` is intentional until MAIN registers the package and native dependency.
-No root Cargo/Cargo.lock or zabor-native manifest/lib changes are made here.
+`rust/crates/zabor-profile-helper` is now registered in the root Rust workspace.
+Its original isolated `[workspace]` has been removed; the historical standalone
+Cargo.lock is retained as checked-source provenance, not the active workspace lock.
+The root lock adds only the helper record, preserving all existing dependency pins.
+The native manifest/lib and application wiring remain unchanged in this step.
+
+### Primary workspace registration — 2026-11-09
+
+Primary source636db12 integrated the checked import pair. The following independent
+workspace group passed13helper tests,fmt,locked/offline metadata,strict all-targets
+Clippy,normal helper feature tree,native-media library types and Graphify.
+Evidence: `migration-artifacts/native-data/profile-workspace-2026-11-09/checked-v1/`.
+All778previous lock records and default members remain unchanged. Only root membership,
+one root lock record and the helper's standalone-workspace removal alter manifests.
+The checked normal helper tree does not activate `test-source`. The primary native
+manifest and the separate app-owned dev-only Slint renderer seam are not edited.
+Graphify reported no topology change,retained its outputs and10zero-node warnings;
+semantic documentation refresh and whole-native readiness are not claimed.
+The exact guarded source save is recorded in this group's `save-verification.json`.
+Native dependency,original registered worker/account-key/consent/recovery wiring and
+real Chromium provenance remain required before end-to-end import acceptance.
 
 1. Retain `OwnerRegistry` in the original application operation/drain owner.
 2. `prepare()` registers an immutable operation before native process acquisition.
@@ -38,11 +55,12 @@ original immutable entry and observation even after registry history reclamation
 
 ### Exact MAIN integration recipe
 
-- MAIN registers `crates/zabor-profile-helper` in `rust/Cargo.toml`, removes the
-  helper's temporary standalone `[workspace]`, adds the native path dependency
-  `zabor-profile-helper = { path = "../zabor-profile-helper" }`, and reconciles only
-  the new workspace package records in the root lock with existing dependency pins.
-  The `test-source` feature must not be enabled in the shipped native dependency.
+- Root workspace registration and the single helper lock record are checked above.
+  MAIN still adds the native path dependency
+  `zabor-profile-helper = { path = "../zabor-profile-helper" }`, preserving the
+  app-owned dev-only renderer seam and reconciling only the native package's new
+  dependency reference. The `test-source` feature must not be enabled in the shipped
+  native dependency.
 - Before any snapshot/export, MAIN obtains explicit copy-import consent and an
   independently authenticated account ID/login plus expected public key (or a
   separately authorized new-key state). `ImportOwner::verified` validates shape
@@ -74,9 +92,11 @@ original immutable entry and observation even after registry history reclamation
   signature/pin does not attest arbitrary writable sidecars. This crate pins the
   exact runtime/helper files, not an installer or the full runtime distribution.
 
-Common startup/UI/authentication wiring and package registration are intentionally
-not edited in this worktree. The compiled synthetic runner is not a production
-account-proof implementation; its seed public metadata is fixture expectation only.
+The original isolated helper stage did not edit common startup/UI/authentication
+or package registration. Primary has since checked only workspace registration;
+application/account-proof wiring is still missing. The compiled synthetic runner
+is not a production account-proof implementation; its seed public metadata is
+fixture expectation only.
 
 ## Windows lifetime and isolation
 

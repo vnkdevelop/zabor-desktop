@@ -7997,6 +7997,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zabor-profile-helper"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "windows-sys 0.61.2",
+ "zeroize",
+]
+
+[[package]]
 name = "zabor-stream-audio"
 version = "0.1.0"
 dependencies = [
