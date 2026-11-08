@@ -1,0 +1,556 @@
+{
+  "settings": {
+    "title": "настройки",
+    "tabs": {
+      "general": "общие",
+      "audio": "звук",
+      "privacy": "конфиденциальность",
+      "account": "аккаунт"
+    },
+    "general": {
+      "system": "система",
+      "autoLaunch": "запускать вместе с Windows",
+      "autoLaunchDesc": "zabor откроется автоматически при включении компьютера",
+      "minimizeToTray": "сворачивать в трей",
+      "minimizeToTrayDesc": "при нажатии на крестик приложение свернётся, а не закроется",
+      "language": "язык приложения",
+      "languageDesc": "выберите основной язык интерфейса",
+      "languageRussian": "русский",
+      "languageEnglish": "english",
+      "updates": "обновления приложения",
+      "currentVersion": "текущая версия",
+      "checkUpdates": "проверить обновления",
+      "checkingUpdates": "проверка...",
+      "latestVersionInstalled": "у вас установлена актуальная версия",
+      "updateAvailableNotice": "доступна версия v{{version}}",
+      "checkFailed": "не удалось проверить обновления"
+    },
+    "audio": {
+      "inputDevice": "устройство ввода",
+      "outputDevice": "устройство вывода",
+      "inputVolume": "громкость микрофона",
+      "outputVolume": "громкость звука",
+      "noiseSuppression": "шумоподавление",
+      "default": "по умолчанию",
+      "micFallback": "микрофон",
+      "speakerFallback": "динамики",
+      "calibrateSensitivity": "калибровка микрофона",
+      "calibrateDesc": "подбор уверенности Silero под ваш голос",
+      "calibrateButton": "калибровка",
+      "calibrating": "анализ голоса...",
+      "calibrationComplete": "успешно",
+      "calibrationSuccess": "успешно",
+      "doNotSpeak": "говорите обычным голосом",
+      "speakNormally": "говорите обычным голосом",
+      "micThresholdAuto": "автоматическая сила шумоподавления",
+      "micThresholdLabel": "максимальное шумоподавление, дБ",
+      "noiseSuppressionMode": "режим шумоподавления",
+      "smartMode": "умное",
+      "manualMode": "ручное",
+      "threshold": "порог",
+      "thresholdLabel": "порог срабатывания микрофона",
+      "checking": "проверяем",
+      "preparing": "подготовка",
+      "noiseModel": "модель шумоподавления",
+      "model1": "модель 1",
+      "model2": "модель 2",
+      "suppressionStrength": "сила подавления",
+      "suppressionStrengthWeaker": "слабже",
+      "suppressionStrengthStronger": "сильнее",
+      "speechAnalyzer": "анализатор речи (нестабильно)",
+      "speechAnalyzerHint": "нейросеть отделяет голос от других звуков, может плохо работать с некоторыми микрофонами, немного увеличивает задержку",
+      "speechAnalyzerManualHint": "доступен только в умном режиме — в режиме «ручное» речь определяет ваш порог",
+      "echoCancellation": "эхоподавление",
+      "micTestListen": "послушать себя",
+      "micTestArming": "подготовка…",
+      "micTestTalk": "болтайте",
+      "micTestRetake": "перезаписать?",
+      "micTestPlay": "воспроизвести",
+      "micTestPause": "пауза",
+      "micTestSeek": "позиция воспроизведения",
+      "micTestSilent": "микрофон молчит",
+      "micTestFailed": "не удалось записать",
+      "calibrationPhrase": "«съешь ещё этих мягких французских булок»",
+      "ultraLowLatency": "ультранизкая задержка",
+      "ultraLowLatencyDesc": "минимально возможная задержка голоса без тяжёлых фильтров и обработок.",
+      "ultraLowLatencyActive": "активен режим ультранизкой задержки",
+      "ultraLowLatencyActiveDesc": "нейросети и буферы ожидания отключены для минимальной задержки"
+    },
+    "privacy": {
+      "newPassword": "новый пароль",
+      "passwordHint": "максимум 25 символов",
+      "changePassword": "сменить пароль",
+      "changePasswordTitle": "сменить пароль",
+      "logout": "выйти из аккаунта",
+      "changePasswordFailed": "не удалось сменить пароль",
+      "network": "сеть",
+      "hideIp": "скрывать мой IP-адрес",
+      "hideIpDesc": "весь голос идёт через сервер ретрансляции, собеседники не видят ваш IP. задержка чуть выше. полностью применяется после перезапуска.",
+      "visibility": "видимость",
+      "showLastOnline": "показывать время последнего входа",
+      "deleteAccount": "удалить аккаунт",
+      "deleteAccountTitle": "удаление аккаунта",
+      "deleteAccountWarning": "это действие необратимо. все ваши данные, достижения, список друзей и созданные каналы будут удалены навсегда.",
+      "deleteAccountPrompt": "для подтверждения введите «подтверждаю»:",
+      "deleteAccountConfirmWord": "подтверждаю",
+      "deleteAccountConfirmBtn": "удалить навсегда",
+      "deleteAccountFailed": "не удалось удалить аккаунт",
+      "confirmTitle": "точно ли вы хотите поменять пароль?",
+      "confirmWarning": "после смены пароля используйте новый пароль для входа в аккаунт.",
+      "confirmButton": "точно поменять",
+      "samePassword": "новый пароль совпадает с текущим",
+      "newPasswordValue": "новый пароль:",
+      "showPassword": "показать пароль",
+      "hidePassword": "скрыть пароль"
+    }
+  },
+  "presence": {
+    "online": "в сети",
+    "offline": "не в сети",
+    "justNow": "был(а) в сети только что",
+    "minutesAgo_one": "был(а) в сети {{count}} минуту назад",
+    "minutesAgo_few": "был(а) в сети {{count}} минуты назад",
+    "minutesAgo_many": "был(а) в сети {{count}} минут назад",
+    "hoursAgo_one": "был(а) в сети {{count}} час назад",
+    "hoursAgo_few": "был(а) в сети {{count}} часа назад",
+    "hoursAgo_many": "был(а) в сети {{count}} часов назад",
+    "yesterday": "был(а) в сети вчера",
+    "lastSeenDate": "был(а) в сети {{date}}"
+  },
+  "chat": {
+    "storageFailed": "не удалось открыть или сохранить переписку",
+    "keyChanged": "ключ шифрования собеседника изменился. сообщения не принимаются",
+    "empty": "сообщений пока нет",
+    "connected": "на связи",
+    "connecting": "подключение...",
+    "offline": "не в сети",
+    "call": "позвонить",
+    "activeCall": "активный звонок",
+    "activeChannel": "активный канал",
+    "participants": "участников: {{count}}",
+    "minimize": "свернуть",
+    "open": "открыть чат",
+    "returnToCall": "вернуться к звонку",
+    "attach": "прикрепить файл",
+    "dropToSend": "отпустите файл для отправки",
+    "sendFileConfirm": "отправить файл?",
+    "sendFile": "отправить",
+    "placeholder": "написать сообщение",
+    "download": "скачать",
+    "cancel": "отмена",
+    "saveFile": "сохранить файл",
+    "openFile": "открыть файл",
+    "copy": "копировать",
+    "clearFile": "очистить файл",
+    "deleteMessage": "удалить сообщение",
+    "delivery": {
+      "pending": "ожидает",
+      "sent": "отправлено",
+      "delivered": "доставлено",
+      "read": "прочитано",
+      "failed": "ошибка"
+    },
+    "file": {
+      "deletedBySender": "файл удалён отправителем",
+      "deletedByYou": "вы удалили файл",
+      "failed": "не удалось передать, нажмите для повтора"
+    },
+    "units": {
+      "b": "б",
+      "kb": "кб",
+      "mb": "мб",
+      "gb": "гб"
+    },
+    "encryption": "шифрование",
+    "information": "информация о чате",
+    "retentionHint": "чаты очищаются каждые 14 дней",
+    "encryptionHint": "защищено сквозным шифрованием",
+    "routeP2p": "прямое p2p-соединение",
+    "routeTurn": "защищённый turn-шлюз",
+    "routeRelay": "серверная доставка (текст)",
+    "copySelected": "скопировать выделенное"
+  },
+  "auth": {
+    "login": "логин",
+    "password": "пароль",
+    "continue": "продолжить",
+    "loading": "загрузка...",
+    "accountNotFound": "аккаунт не найден",
+    "createNewProfile": "создать новый профиль с таким логином?",
+    "yes": "да",
+    "no": "нет",
+    "createProfile": "создать профиль",
+    "howOthersSeeYou": "как вас будут видеть другие?",
+    "displayName": "отображаемое имя",
+    "max20chars": "максимум 20 символов",
+    "creating": "создание...",
+    "create": "создать",
+    "cropTitle": "обрезка аватара",
+    "captcha": "код с картинки",
+    "captchaPlaceholder": "символы",
+    "refreshCaptcha": "обновить",
+    "stepLogin": "логин",
+    "stepConfirm": "подтверждение",
+    "stepSetup": "профиль"
+  },
+  "titlebar": {
+    "wordmark": "zabor",
+    "minimize": "свернуть",
+    "maximize": "развернуть",
+    "restore": "восстановить",
+    "close": "закрыть"
+  },
+  "main": {
+    "tabs": {
+      "channels": "каналы",
+      "friends": "друзья"
+    },
+    "voice": {
+      "endCall": "завершить",
+      "mute": "выключить микрофон",
+      "unmute": "включить микрофон",
+      "deafen": "выключить звук",
+      "undeafen": "включить звук",
+      "ping": "пинг",
+      "offline": "офлайн",
+      "voiceChannels": "голосовые каналы",
+      "pingValue": "{{ping}} мс"
+    },
+    "notifications": {
+      "title": "уведомления",
+      "friendRequest": "запрос в друзья",
+      "channelInvite": "приглашение от {{name}}",
+      "accept": "принять",
+      "decline": "отклонить",
+      "join": "войти",
+      "none": "нет уведомлений"
+    },
+    "user": {
+      "copyUsername": "нажмите, чтобы скопировать",
+      "copied": "скопировано!"
+    },
+    "connection": {
+      "noConnection": "нет соединения с сервером",
+      "reconnecting": "нет соединения с сервером. переподключение...",
+      "connecting": "подключение",
+      "clientRejectedTitle": "сервер отклонил эту сборку",
+      "clientRejected": {
+        "missing": "сборка не передала подпись. к официальному серверу подключаются только приложения со страницы релизов zabor.",
+        "malformed": "подпись сборки повреждена. переустановите приложение со страницы релизов zabor.",
+        "unknown_channel": "канал сборки не распознан. к официальному серверу подключаются только приложения со страницы релизов zabor.",
+        "invalid_signature": "подпись сборки недействительна. к официальному серверу подключаются только приложения со страницы релизов zabor.",
+        "expired": "подпись просрочена. проверьте дату и время в системе и перезапустите приложение.",
+        "replay": "подпись уже использована. перезапустите приложение.",
+        "outdated_version": "версия приложения устарела. установите свежую версию со страницы релизов zabor.",
+        "unknown": "сервер отклонил подключение этой сборки приложения."
+      }
+    }
+  },
+  "modals": {
+    "createChannel": {
+      "title": "создать канал",
+      "label": "название канала",
+      "placeholder": "максимум 25 символов",
+      "submit": "создать"
+    },
+    "renameChannel": {
+      "title": "переименовать канал",
+      "label": "новое название",
+      "submit": "сохранить"
+    },
+    "addFriend": {
+      "title": "добавить друга",
+      "desc": "введите логин пользователя",
+      "placeholder": "логин",
+      "errorNotFound": "пользователь не найден",
+      "errorAlreadyFriend": "он уже с тобой дружит ;) ",
+      "submit": "найти",
+      "sent": "отправлено"
+    },
+    "kick": {
+      "title": "исключить пользователя?",
+      "desc": "вы уверены, что хотите лишить пользователя <1>{{name}}</1> доступа к каналу?",
+      "submit": "исключить"
+    },
+    "switchChannel": {
+      "title": "сменить канал?",
+      "desc": "вы покинете текущий канал и перейдёте в другой.",
+      "stay": "остаться",
+      "switching": "переход...",
+      "switch": "перейти"
+    },
+    "inviteToChannel": {
+      "title": "пригласить в канал",
+      "searchPlaceholder": "поиск среди друзей...",
+      "noFriends": "друзья не найдены",
+      "sent": "✓ отправлено",
+      "alreadyMember": "уже состоит",
+      "full": "канал заполнен"
+    },
+    "members": {
+      "title": "участники",
+      "creator": "создатель"
+    },
+    "channelFull": {
+      "title": "канал переполнен",
+      "desc": "максимальное количество участников в канале — {{max}}. подождите, пока кто-то выйдет.",
+      "gotIt": "понятно"
+    },
+    "channelInviteFull": {
+      "title": "нельзя пригласить",
+      "desc": "в канале уже {{count}} из {{max}} участников. чтобы пригласить кого-то ещё, освободите место.",
+      "gotIt": "понятно"
+    },
+    "streamVolume": {
+      "title": "громкость трансляции",
+      "label": "громкость"
+    },
+    "userVolume": {
+      "title": "громкость пользователя",
+      "label": "громкость"
+    },
+    "update": {
+      "title": "доступно обновление",
+      "whatsNew": "что нового",
+      "noNotes": "вышла новая версия zabor с улучшениями и исправлениями.",
+      "downloading": "скачивание обновления...",
+      "downloadingTitle": "скачиваю обновление",
+      "downloadingDesc": "загружаю новую версию. пожалуйста, не закрывайте окно.",
+      "downloadedTitle": "обновление готово к установке",
+      "downloadedDesc": "zabor закроется и запустит установщик.",
+      "installingTitle": "устанавливаю обновление",
+      "installingDesc": "закрываю zabor и обновляю. приложение перезапустится само на новой версии.",
+      "errorTitle": "не удалось загрузить обновление",
+      "viewOnGithub": "на GitHub",
+      "later": "позже",
+      "install": "установить",
+      "downloadingBtn": "загрузка...",
+      "updateNow": "обновить"
+    }
+  },
+  "common": {
+    "cancel": "отмена",
+    "save": "сохранить",
+    "close": "закрыть",
+    "loading": "загрузка...",
+    "error": "ошибка",
+    "apply": "применить",
+    "fileTooLarge": "макс 5 МБ",
+    "onlyImages": "только изображения",
+    "invite": "пригласить",
+    "channelMembers": "участники канала",
+    "dismiss": "сбросить"
+  },
+  "achievements": {
+    "title": "достижения",
+    "myTitle": "мои достижения",
+    "toastTitle": "достижение получено",
+    "empty": "нет достижений",
+    "hiddenTitle": "скрытое достижение",
+    "hiddenDesc": "???",
+    "unlocked": "✓ получено",
+    "hiddenBadge": "скрытое",
+    "hoursUnit": " ч",
+    "summary": "{{unlocked}} / {{total}} получено",
+    "first_channel": {
+      "title": "первооткрыватель",
+      "description": "создать свой первый канал"
+    },
+    "soul_1": {
+      "title": "болтун",
+      "description": "провести 10 часов в каналах"
+    },
+    "soul_2": {
+      "title": "душа компании",
+      "description": "провести 50 часов в каналах"
+    },
+    "soul_3": {
+      "title": "оратор",
+      "description": "провести 100 часов в каналах"
+    },
+    "crowd": {
+      "title": "массовка",
+      "description": "быть в канале c 8 участниками"
+    },
+    "collector": {
+      "title": "коллекционер",
+      "description": "побывать в 10 разных каналах"
+    },
+    "modnik": {
+      "title": "модник",
+      "description": "загрузить GIF-аватарку"
+    },
+    "victim": {
+      "title": "жертва",
+      "description": "быть кикнутым из канала"
+    },
+    "first_call": {
+      "title": "первый звонок",
+      "description": "совершить первый звонок"
+    },
+    "same_wave": {
+      "title": "переговорщики",
+      "description": "звонок длительностью 5+ часов"
+    },
+    "gossip": {
+      "title": "мошенник",
+      "description": "совершить 50 звонков"
+    },
+    "busy": {
+      "title": "занят",
+      "description": "отклонить 5 звонков"
+    },
+    "first_friend": {
+      "title": "первый друг",
+      "description": "добавить первого друга"
+    },
+    "magnet": {
+      "title": "магнит",
+      "description": "добавить 20 друзей"
+    },
+    "popular": {
+      "title": "глава захолустья",
+      "description": "твой профиль просмотрели 100 раз"
+    }
+  },
+  "profile": {
+    "editTitle": "редактировать профиль",
+    "displayName": "отображаемое имя",
+    "aboutMe": "о себе",
+    "aboutMePlaceholder": "напишите немного о себе...",
+    "copyLogin": "скопировать логин",
+    "loginCopied": "скопировано!",
+    "inviteToChannel": "позвать в канал",
+    "inviting": "зовём...",
+    "kick": "исключить из канала",
+    "call": "позвонить",
+    "chat": "чат",
+    "removeFriend": "удалить из друзей",
+    "userOffline": "пользователь не в сети"
+  },
+  "contextMenu": {
+    "rename": "переименовать",
+    "leaveChannel": "выйти из канала",
+    "profile": "профиль",
+    "call": "позвонить",
+    "invite": "позвать в канал",
+    "inviting": "зовём...",
+    "kick": "исключить",
+    "volume": "громкость",
+    "streamVolume": "громкость трансляции",
+    "remove": "удалить"
+  },
+  "toasts": {
+    "calling": "дозвон...",
+    "missedCall": "пропущенный звонок от: {{name}}",
+    "missedChannelInvite": "пропущенный зов в канал: {{name}}",
+    "noAnswer": "не отвечает",
+    "notification": "уведомление",
+    "accessRestricted": "доступ ограничен",
+    "adminRestricted": "администратор запретил это действие",
+    "micNotHearing": "вас не слышно, проверьте микрофон",
+    "micNoAccess": "нет доступа к микрофону. проверьте разрешения в ОС.",
+    "micBusy": "микрофон занят другим приложением.",
+    "micBusyCalibration": "нельзя калибровать микрофон во время разговора",
+    "calibrationFailed": "не удалось получить доступ к микрофону для калибровки",
+    "micNotFound": "микрофон не найден. подключите устройство и попробуйте снова.",
+    "audioError": "ошибка аудио: {{message}}",
+    "incomingCall": "входящий звонок...",
+    "incomingChannelInvite": "вас зовут в канал",
+    "startupCalibration": "калибровка микрофона... говорите обычным голосом.",
+    "calibrationComplete": "микрофон успешно откалиброван!",
+    "calibrationNeedSilence": "говорите обычным голосом во время калибровки.",
+    "calibrationNeedVoice": "говорите обычным голосом на протяжении всей калибровки и повторите.",
+    "calibrationFailedRetry": "калибровка не удалась. повторите.",
+    "calibrationEngineUnavailable": "шумоподавление не запустилось на этом устройстве. перезапустите приложение.",
+    "calibrationNoMic": "микрофон недоступен. проверьте устройство ввода и повторите.",
+    "calibrationTimeout": "микрофон перестал отдавать звук. проверьте устройство и повторите.",
+    "calibrationBusy": "калибровка уже идёт. дождитесь её окончания.",
+    "micUnknownError": "неизвестная ошибка микрофона",
+    "channelJoinFailed": "не удалось войти в канал: сервер не ответил. попробуйте снова.",
+    "relayUnavailable": "скрытие IP включено, но сервер ретрансляции недоступен — соединение не будет установлено.",
+    "ipPolicyRestart": "настройка ip полностью применится после перезапуска zabor.",
+    "passwordChanged": "пароль успешно изменён",
+    "streamLimitReached": "в канале уже запущено максимальное количество стримов (3)",
+    "streamStartFailed": "не удалось запустить трансляцию экрана"
+  },
+  "stream": {
+    "pickerTitle": "выбор источника",
+    "screens": "экраны",
+    "apps": "приложения",
+    "cameras": "камеры",
+    "screen": "экран",
+    "camera": "камера",
+    "shareAudio": "передавать звук?",
+    "allowRemoteControl": "разрешить удаленное управление",
+    "quality": "качество",
+    "qualityLow": "low",
+    "qualityMedium": "medium",
+    "qualityHigh": "high",
+    "detailsLow": "1280x720 30fps (~2.5 Мбит/с)",
+    "detailsMedium": "1280x720 60fps (~3.0 Мбит/с)",
+    "detailsHigh": "1920x1080 60fps (~6 Мбит/с)",
+    "noSources": "источники не найдены",
+    "loadingSources": "загрузка источников...",
+    "confirm": "поехали",
+    "streamLabel": "трансляция {{name}}",
+    "minimizeHint": "свернуть трансляцию в миниатюру",
+    "startHint": "начать трансляцию",
+    "stopHint": "остановить трансляцию",
+    "fullscreenHint": "развернуть на весь экран (F)",
+    "exitFullscreenHint": "вернуться в режим фокуса (F)",
+    "broadcastOf": "трансляция {{name}}",
+    "loading": "загрузка трансляции",
+    "revokeRemoteControlHint": "отозвать удаленное управление (клик или ctrl+alt+backspace)",
+    "remoteControlActiveHint": "удаленное управление активно (ctrl+alt+k для отключения)",
+    "remoteControlCapture": "перехватить управление (ctrl+alt+k)",
+    "remoteControlRelease": "отпустить управление (ctrl+alt+k)",
+    "cursorHidden": "курсор скрыт",
+    "cursorShown": "курсор показан",
+    "cursorCaptured": "курсор захвачен",
+    "cursorReleased": "курсор освобождён",
+    "captureCursor": "захватить мышь",
+    "releaseCursor": "освободить мышь",
+    "controlBusy": "управление сейчас занято",
+    "hostControlling": "управляет вашим пк",
+    "remoteControlAllowedHint": "удаленное управление разрешено"
+  },
+  "joke": {
+    "title": "шутейка:",
+    "fallback": "сегодня сервер шутит молча."
+  },
+  "validation": {
+    "minChars": "минимум 4 символа",
+    "maxChars": "максимум 25 символов",
+    "latinOnly": "только латиница и цифры",
+    "emptyName": "имя не может быть пустым",
+    "maxNameChars": "максимум 20 символов",
+    "connectionError": "ошибка подключения к серверу",
+    "invalidPassword": "неверный пароль!",
+    "networkError": "ошибка сети, попробуйте ещё раз",
+    "registerError": "ошибка регистрации",
+    "connectError": "ошибка подключения",
+    "authThrottled": "слишком много попыток входа. попробуйте снова через {{minutes}} мин.",
+    "captchaRequired": "введите код с картинки",
+    "invalidCaptcha": "неверный код с картинки",
+    "expiredCaptcha": "код устарел, обновите картинку",
+    "sessionSaveError": "не удалось обновить сохранённую сессию. после перезапуска может потребоваться повторный вход"
+  },
+  "updater": {
+    "title": "zabor",
+    "version": "версия",
+    "downloading": "скачивание обновления...",
+    "installing": "устанавливаю обновление...",
+    "installingDesc": "приложение перезапустится автоматически",
+    "errorTitle": "не удалось загрузить обновление",
+    "errorUnknown": "произошла непредвиденная ошибка",
+    "betaUnverified": "не удалось проверить beta-обновление",
+    "betaManifestInvalid": "не удалось проверить данные beta-релиза",
+    "checksumMissing": "отсутствует контрольная сумма установщика",
+    "retry": "повторить",
+    "cancel": "отмена",
+    "close": "закрыть",
+    "mb": "мб",
+    "pleaseWait": "пожалуйста, подождите..."
+  }
+}

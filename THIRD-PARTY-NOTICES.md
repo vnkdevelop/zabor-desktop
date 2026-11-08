@@ -130,6 +130,8 @@ Windows x64 PyPI wheel (Apache-2.0 с LLVM exceptions); его лицензия 
 ## DeepFilterNet 3 — model weights
 
 - File: `src/renderer/public/deepfilternet3/models/DeepFilterNet3_onnx.tar.gz`
+- Native copy: `rust/crates/zabor-native/assets/models/DeepFilterNet3_onnx.tar.gz`;
+  identical bytes and the same licence/copyright/provenance apply.
 - Size: 7 983 136 bytes
 - SHA-256: `c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616`
 - Upstream: <https://github.com/Rikorose/DeepFilterNet> (`models/DeepFilterNet3_onnx.tar.gz`)
@@ -169,6 +171,8 @@ refuses to build if the bytes change.
 ## Silero VAD
 
 - File: `src/renderer/public/silero_vad.onnx`
+- Native copy: `rust/crates/zabor-native/assets/models/silero_vad.onnx`;
+  identical bytes and the same licence/provenance apply.
 - Licence: MIT
 - Upstream: <https://github.com/snakers4/silero-vad>
 

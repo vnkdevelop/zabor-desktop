@@ -1,0 +1,48 @@
+{
+  "resourceVersion": 1,
+  "sourceCommit": "f7de0e0ffd8db19f7eba41e6f999f2524e5ebf8a",
+  "scope": "Exact working-copy bytes; native resources are independent of the retained renderer reference",
+  "noticePath": "THIRD-PARTY-NOTICES.md",
+  "legalApproval": false,
+  "resources": [
+    {
+      "path": "catalogs/ru.json",
+      "sourcePath": "src/renderer/src/locales/ru.json",
+      "size": 30087,
+      "sha256": "066fd2522dc46cdf7987df79a653521e8d34516b09dffb037356303353194fcc",
+      "sourceGitBlob": "8028fcf5985247fc6065c0a1fc0c3e6c59274e2a",
+      "sourceGitSha256": "7a2512aa21bc7a42c907d041108382a6a49a7f758870fbd2ab3c6becad1980d8",
+      "checkoutEncoding": "UTF-8, CRLF; native bytes preserved with -text"
+    },
+    {
+      "path": "catalogs/en.json",
+      "sourcePath": "src/renderer/src/locales/en.json",
+      "size": 21345,
+      "sha256": "a353e37199ad8e79aa2ea44d3afdacedaca13af4e28382db9f8ea0a23793958a",
+      "sourceGitBlob": "9bb216da76c296138ec1ddd20c8797f804d588f8",
+      "sourceGitSha256": "6ed418c42471b4a96f6a247b65025ae3e4db5091012ca4cff96a41d3d19d6e10",
+      "checkoutEncoding": "UTF-8, CRLF; native bytes preserved with -text"
+    },
+    {
+      "path": "models/DeepFilterNet3_onnx.tar.gz",
+      "sourcePath": "src/renderer/public/deepfilternet3/models/DeepFilterNet3_onnx.tar.gz",
+      "size": 7983136,
+      "sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+      "sourceGitBlob": "1c4f4ffe1015fbb4541433cf291234ca32338871",
+      "sourceGitSha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+      "upstream": "https://github.com/Rikorose/DeepFilterNet",
+      "implementationRevision": "d375b2d8309e0935d165700c91da9de862a99c31",
+      "licenseExpression": "MIT OR Apache-2.0"
+    },
+    {
+      "path": "models/silero_vad.onnx",
+      "sourcePath": "src/renderer/public/silero_vad.onnx",
+      "size": 2327524,
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "sourceGitBlob": "80c5592ef1f4c9ede3e357bbd02eb863358a6a9d",
+      "sourceGitSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "upstream": "https://github.com/snakers4/silero-vad",
+      "licenseExpression": "MIT"
+    }
+  ]
+}

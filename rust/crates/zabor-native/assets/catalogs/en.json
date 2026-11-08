@@ -1,0 +1,554 @@
+{
+  "settings": {
+    "title": "settings",
+    "tabs": {
+      "general": "general",
+      "audio": "audio",
+      "privacy": "privacy",
+      "account": "account"
+    },
+    "general": {
+      "system": "system",
+      "autoLaunch": "launch on startup",
+      "autoLaunchDesc": "zabor will open automatically when you turn on your computer",
+      "minimizeToTray": "minimize to tray",
+      "minimizeToTrayDesc": "when you click the close button, the app will minimize instead of closing",
+      "language": "app language",
+      "languageDesc": "choose the primary interface language",
+      "languageRussian": "русский",
+      "languageEnglish": "english",
+      "updates": "app updates",
+      "currentVersion": "current version",
+      "checkUpdates": "check for updates",
+      "checkingUpdates": "checking...",
+      "latestVersionInstalled": "you have the latest version installed",
+      "updateAvailableNotice": "version v{{version}} is available",
+      "checkFailed": "failed to check for updates"
+    },
+    "audio": {
+      "inputDevice": "input device",
+      "outputDevice": "output device",
+      "inputVolume": "microphone volume",
+      "outputVolume": "audio volume",
+      "noiseSuppression": "noise suppression",
+      "default": "default",
+      "micFallback": "microphone",
+      "speakerFallback": "speakers",
+      "calibrateSensitivity": "microphone calibration",
+      "calibrateDesc": "tunes Silero confidence for your voice",
+      "calibrateButton": "calibration",
+      "calibrating": "analyzing voice...",
+      "calibrationComplete": "success",
+      "calibrationSuccess": "success",
+      "doNotSpeak": "speak in your normal voice",
+      "speakNormally": "speak in your normal voice",
+      "micThresholdAuto": "automatic noise suppression strength",
+      "micThresholdLabel": "maximum noise suppression, dB",
+      "noiseSuppressionMode": "noise suppression mode",
+      "smartMode": "smart",
+      "manualMode": "manual",
+      "threshold": "threshold",
+      "thresholdLabel": "microphone activation threshold",
+      "checking": "checking",
+      "preparing": "preparing",
+      "noiseModel": "noise suppression model",
+      "model1": "model 1",
+      "model2": "model 2",
+      "suppressionStrength": "suppression strength",
+      "suppressionStrengthWeaker": "weaker",
+      "suppressionStrengthStronger": "stronger",
+      "speechAnalyzer": "speech analyzer (unstable)",
+      "speechAnalyzerHint": "the neural network separates voice from other sounds, may not work well with some microphones, slightly increases latency",
+      "speechAnalyzerManualHint": "available in smart mode only — in manual mode your threshold decides what counts as speech",
+      "echoCancellation": "echo cancellation",
+      "micTestListen": "hear yourself",
+      "micTestArming": "getting ready…",
+      "micTestTalk": "keep talking",
+      "micTestRetake": "record again?",
+      "micTestPlay": "play",
+      "micTestPause": "pause",
+      "micTestSeek": "playback position",
+      "micTestSilent": "no sound captured",
+      "micTestFailed": "recording failed",
+      "calibrationPhrase": "\"the quick brown fox jumps over the lazy dog\"",
+      "ultraLowLatency": "ultra-low latency",
+      "ultraLowLatencyDesc": "minimum possible voice latency without heavy filters and processing.",
+      "ultraLowLatencyActive": "ultra-low latency mode is active",
+      "ultraLowLatencyActiveDesc": "neural networks and delay buffers are disabled for minimal latency"
+    },
+    "privacy": {
+      "newPassword": "new password",
+      "passwordHint": "maximum 25 characters",
+      "changePassword": "change password",
+      "changePasswordTitle": "change password",
+      "logout": "logout",
+      "changePasswordFailed": "failed to change password",
+      "network": "network",
+      "hideIp": "hide my IP address",
+      "hideIpDesc": "all voice traffic goes through the relay server, so other people cannot see your IP. slightly higher latency. fully applies after a restart.",
+      "visibility": "visibility",
+      "showLastOnline": "show last seen time",
+      "deleteAccount": "delete account",
+      "deleteAccountTitle": "delete account",
+      "deleteAccountWarning": "this action cannot be undone. all your data, achievements, friends list, and created channels will be permanently deleted.",
+      "deleteAccountPrompt": "to confirm, type «confirm»:",
+      "deleteAccountConfirmWord": "confirm",
+      "deleteAccountConfirmBtn": "delete permanently",
+      "deleteAccountFailed": "failed to delete account",
+      "confirmTitle": "are you sure you want to change your password?",
+      "confirmWarning": "after changing your password, use the new password to log in.",
+      "confirmButton": "confirm change",
+      "samePassword": "new password matches current password",
+      "newPasswordValue": "new password:",
+      "showPassword": "show password",
+      "hidePassword": "hide password"
+    }
+  },
+  "presence": {
+    "online": "online",
+    "offline": "offline",
+    "justNow": "last seen just now",
+    "minutesAgo_one": "last seen {{count}} minute ago",
+    "minutesAgo_other": "last seen {{count}} minutes ago",
+    "hoursAgo_one": "last seen {{count}} hour ago",
+    "hoursAgo_other": "last seen {{count}} hours ago",
+    "yesterday": "last seen yesterday",
+    "lastSeenDate": "last seen {{date}}"
+  },
+  "chat": {
+    "storageFailed": "could not open or save the chat",
+    "keyChanged": "the contact's encryption key has changed. messages are not accepted",
+    "empty": "no messages yet",
+    "connected": "connected",
+    "connecting": "connecting...",
+    "offline": "offline",
+    "call": "call",
+    "activeCall": "active call",
+    "activeChannel": "active channel",
+    "participants": "participants: {{count}}",
+    "minimize": "minimize",
+    "open": "open chat",
+    "returnToCall": "return to call",
+    "attach": "attach file",
+    "dropToSend": "drop file to send",
+    "sendFileConfirm": "send file?",
+    "sendFile": "send",
+    "placeholder": "write a message",
+    "download": "download",
+    "cancel": "cancel",
+    "saveFile": "save file",
+    "openFile": "open file",
+    "copy": "copy",
+    "clearFile": "clear file",
+    "deleteMessage": "delete message",
+    "delivery": {
+      "pending": "pending",
+      "sent": "sent",
+      "delivered": "delivered",
+      "read": "read",
+      "failed": "failed"
+    },
+    "file": {
+      "deletedBySender": "file deleted by sender",
+      "deletedByYou": "you deleted the file",
+      "failed": "transfer failed, tap to retry"
+    },
+    "units": {
+      "b": "b",
+      "kb": "kb",
+      "mb": "mb",
+      "gb": "gb"
+    },
+    "encryption": "encryption",
+    "information": "chat information",
+    "retentionHint": "chats are cleared every 14 days",
+    "encryptionHint": "protected with end-to-end encryption",
+    "routeP2p": "direct p2p connection",
+    "routeTurn": "secure turn gateway",
+    "routeRelay": "server relay (text)",
+    "copySelected": "copy selected"
+  },
+  "auth": {
+    "login": "login",
+    "password": "password",
+    "continue": "continue",
+    "loading": "loading...",
+    "accountNotFound": "account not found",
+    "createNewProfile": "create new profile with this login?",
+    "yes": "yes",
+    "no": "no",
+    "createProfile": "create profile",
+    "howOthersSeeYou": "how will others see you?",
+    "displayName": "display name",
+    "max20chars": "maximum 20 characters",
+    "creating": "creating...",
+    "create": "create",
+    "cropTitle": "crop avatar",
+    "captcha": "code from image",
+    "captchaPlaceholder": "characters",
+    "refreshCaptcha": "refresh",
+    "stepLogin": "login",
+    "stepConfirm": "confirm",
+    "stepSetup": "setup"
+  },
+  "titlebar": {
+    "wordmark": "zabor",
+    "minimize": "minimize",
+    "maximize": "maximize",
+    "restore": "restore",
+    "close": "close"
+  },
+  "main": {
+    "tabs": {
+      "channels": "channels",
+      "friends": "friends"
+    },
+    "voice": {
+      "endCall": "end call",
+      "mute": "mute microphone",
+      "unmute": "unmute microphone",
+      "deafen": "mute playback",
+      "undeafen": "unmute playback",
+      "ping": "ping",
+      "offline": "offline",
+      "voiceChannels": "voice channels",
+      "pingValue": "{{ping}} ms"
+    },
+    "notifications": {
+      "title": "notifications",
+      "friendRequest": "friend request",
+      "channelInvite": "invite from {{name}}",
+      "accept": "accept",
+      "decline": "decline",
+      "join": "join",
+      "none": "no notifications"
+    },
+    "user": {
+      "copyUsername": "click to copy",
+      "copied": "copied!"
+    },
+    "connection": {
+      "noConnection": "no server connection",
+      "reconnecting": "no server connection. reconnecting...",
+      "connecting": "connecting",
+      "clientRejectedTitle": "the server rejected this build",
+      "clientRejected": {
+        "missing": "this build sent no signature. only apps from the zabor releases page can connect to the official server.",
+        "malformed": "the build signature is malformed. reinstall the app from the zabor releases page.",
+        "unknown_channel": "the build channel was not recognised. only apps from the zabor releases page can connect to the official server.",
+        "invalid_signature": "the build signature is invalid. only apps from the zabor releases page can connect to the official server.",
+        "expired": "the build signature has expired. check your system date and time, then restart the app.",
+        "replay": "this signature has already been used. restart the app.",
+        "outdated_version": "this app version is out of date. install the latest build from the zabor releases page.",
+        "unknown": "the server rejected the connection from this build."
+      }
+    }
+  },
+  "modals": {
+    "createChannel": {
+      "title": "create channel",
+      "label": "channel name",
+      "placeholder": "maximum 25 characters",
+      "submit": "create"
+    },
+    "renameChannel": {
+      "title": "rename channel",
+      "label": "new name",
+      "submit": "save"
+    },
+    "addFriend": {
+      "title": "add friend",
+      "desc": "enter user login",
+      "placeholder": "login",
+      "errorNotFound": "user not found",
+      "errorAlreadyFriend": "they are already your friend ;) ",
+      "submit": "find",
+      "sent": "sent"
+    },
+    "kick": {
+      "title": "kick user?",
+      "desc": "are you sure you want to remove <1>{{name}}</1> from the channel?",
+      "submit": "kick"
+    },
+    "switchChannel": {
+      "title": "switch channel?",
+      "desc": "you will leave the current channel and move to another one.",
+      "stay": "stay",
+      "switching": "switching...",
+      "switch": "switch"
+    },
+    "inviteToChannel": {
+      "title": "invite to channel",
+      "searchPlaceholder": "search friends...",
+      "noFriends": "no friends found",
+      "sent": "✓ sent",
+      "alreadyMember": "already member",
+      "full": "channel is full"
+    },
+    "members": {
+      "title": "members",
+      "creator": "creator"
+    },
+    "channelFull": {
+      "title": "channel is full",
+      "desc": "maximum number of participants in the channel is {{max}}. please wait until someone leaves.",
+      "gotIt": "got it"
+    },
+    "channelInviteFull": {
+      "title": "can't invite",
+      "desc": "the channel already has {{count}} of {{max}} participants. free up a slot to invite someone else.",
+      "gotIt": "got it"
+    },
+    "streamVolume": {
+      "title": "stream volume",
+      "label": "volume"
+    },
+    "userVolume": {
+      "title": "user volume",
+      "label": "volume"
+    },
+    "update": {
+      "title": "update available",
+      "whatsNew": "what's new",
+      "noNotes": "a new version of zabor is available with improvements and fixes.",
+      "downloading": "downloading update...",
+      "downloadingTitle": "downloading update",
+      "downloadingDesc": "downloading the new version. please keep this window open.",
+      "downloadedTitle": "update ready to install",
+      "downloadedDesc": "zabor will close and run the installer.",
+      "installingTitle": "installing update",
+      "installingDesc": "closing zabor and updating. the app will restart itself on the new version.",
+      "errorTitle": "failed to download update",
+      "viewOnGithub": "on GitHub",
+      "later": "later",
+      "install": "install",
+      "downloadingBtn": "downloading...",
+      "updateNow": "update"
+    }
+  },
+  "common": {
+    "cancel": "cancel",
+    "save": "save",
+    "close": "close",
+    "loading": "loading...",
+    "error": "error",
+    "apply": "apply",
+    "fileTooLarge": "max 5 MB",
+    "onlyImages": "images only",
+    "invite": "invite",
+    "channelMembers": "channel members",
+    "dismiss": "dismiss"
+  },
+  "achievements": {
+    "title": "achievements",
+    "myTitle": "my achievements",
+    "toastTitle": "achievement unlocked",
+    "empty": "no achievements",
+    "hiddenTitle": "hidden achievement",
+    "hiddenDesc": "???",
+    "unlocked": "✓ unlocked",
+    "hiddenBadge": "hidden",
+    "hoursUnit": " h",
+    "summary": "{{unlocked}} / {{total}} unlocked",
+    "first_channel": {
+      "title": "pioneer",
+      "description": "create your first channel"
+    },
+    "soul_1": {
+      "title": "chatterbox",
+      "description": "spend 10 hours in channels"
+    },
+    "soul_2": {
+      "title": "life of the party",
+      "description": "spend 50 hours in channels"
+    },
+    "soul_3": {
+      "title": "orator",
+      "description": "spend 100 hours in channels"
+    },
+    "crowd": {
+      "title": "extra",
+      "description": "be in a channel with 8 participants"
+    },
+    "collector": {
+      "title": "collector",
+      "description": "visit 10 different channels"
+    },
+    "modnik": {
+      "title": "fashionista",
+      "description": "upload a GIF avatar"
+    },
+    "victim": {
+      "title": "victim",
+      "description": "get kicked from a channel"
+    },
+    "first_call": {
+      "title": "first call",
+      "description": "make your first call"
+    },
+    "same_wave": {
+      "title": "negotiators",
+      "description": "call duration of 5+ hours"
+    },
+    "gossip": {
+      "title": "scammer",
+      "description": "make 50 calls"
+    },
+    "busy": {
+      "title": "busy",
+      "description": "decline 5 calls"
+    },
+    "first_friend": {
+      "title": "first friend",
+      "description": "add your first friend"
+    },
+    "magnet": {
+      "title": "magnet",
+      "description": "add 20 friends"
+    },
+    "popular": {
+      "title": "mayor of nowhere",
+      "description": "your profile was viewed 100 times"
+    }
+  },
+  "profile": {
+    "editTitle": "edit profile",
+    "displayName": "display name",
+    "aboutMe": "about me",
+    "aboutMePlaceholder": "write a little about yourself...",
+    "copyLogin": "copy login",
+    "loginCopied": "copied!",
+    "inviteToChannel": "invite to channel",
+    "inviting": "inviting...",
+    "kick": "kick from channel",
+    "call": "call",
+    "chat": "chat",
+    "removeFriend": "remove friend",
+    "userOffline": "user is offline"
+  },
+  "contextMenu": {
+    "rename": "rename",
+    "leaveChannel": "leave channel",
+    "profile": "profile",
+    "call": "call",
+    "invite": "invite to channel",
+    "inviting": "inviting...",
+    "kick": "kick",
+    "volume": "volume",
+    "streamVolume": "stream volume",
+    "remove": "remove"
+  },
+  "toasts": {
+    "calling": "calling...",
+    "missedCall": "missed call from: {{name}}",
+    "missedChannelInvite": "missed channel invite: {{name}}",
+    "noAnswer": "no answer",
+    "notification": "notification",
+    "accessRestricted": "access restricted",
+    "adminRestricted": "administrator restricted this action",
+    "micNotHearing": "you are not heard, check your microphone",
+    "micNoAccess": "no access to microphone. check OS permissions.",
+    "micBusy": "microphone is busy with another application.",
+    "micBusyCalibration": "cannot calibrate microphone during a call",
+    "calibrationFailed": "failed to access microphone for calibration",
+    "micNotFound": "microphone not found. connect the device and try again.",
+    "audioError": "audio error: {{message}}",
+    "incomingCall": "incoming call...",
+    "incomingChannelInvite": "you are invited to a channel",
+    "startupCalibration": "microphone calibration... speak in your normal voice.",
+    "calibrationComplete": "microphone successfully calibrated!",
+    "calibrationNeedSilence": "speak in your normal voice during calibration.",
+    "calibrationNeedVoice": "keep speaking in your normal voice throughout calibration, then try again.",
+    "calibrationFailedRetry": "calibration failed. please try again.",
+    "calibrationEngineUnavailable": "noise suppression failed to start on this device. please restart the app.",
+    "calibrationNoMic": "the microphone is unavailable. check the input device and try again.",
+    "calibrationTimeout": "the microphone stopped sending audio. check the device and try again.",
+    "calibrationBusy": "calibration is already running. please wait for it to finish.",
+    "micUnknownError": "unknown microphone error",
+    "channelJoinFailed": "could not join the channel: the server did not respond. please try again.",
+    "relayUnavailable": "IP hiding is on, but the relay server is unreachable — the connection will not be established.",
+    "ipPolicyRestart": "the ip setting fully applies after you restart zabor.",
+    "passwordChanged": "password successfully changed",
+    "streamLimitReached": "channel has reached the maximum number of streams (3)",
+    "streamStartFailed": "failed to start screen share"
+  },
+  "stream": {
+    "pickerTitle": "select source",
+    "screens": "screens",
+    "apps": "applications",
+    "cameras": "cameras",
+    "screen": "screen",
+    "camera": "camera",
+    "shareAudio": "share audio?",
+    "allowRemoteControl": "allow remote control",
+    "quality": "quality",
+    "qualityLow": "low",
+    "qualityMedium": "medium",
+    "qualityHigh": "high",
+    "detailsLow": "1280x720 30fps (~2.5 Mbit/s)",
+    "detailsMedium": "1280x720 60fps (~3.0 Mbit/s)",
+    "detailsHigh": "1920x1080 60fps (~6 Mbit/s)",
+    "noSources": "no sources found",
+    "loadingSources": "loading sources...",
+    "confirm": "go live",
+    "minimizeHint": "minimize stream to thumbnail",
+    "startHint": "start streaming",
+    "stopHint": "stop streaming",
+    "fullscreenHint": "enter fullscreen (F)",
+    "exitFullscreenHint": "return to focus mode (F)",
+    "streamLabel": "{{name}}'s stream",
+    "broadcastOf": "{{name}}'s stream",
+    "loading": "loading stream",
+    "revokeRemoteControlHint": "revoke remote control (click or ctrl+alt+backspace)",
+    "remoteControlActiveHint": "remote control active (ctrl+alt+k to exit)",
+    "remoteControlCapture": "take remote control (ctrl+alt+k)",
+    "remoteControlRelease": "release remote control (ctrl+alt+k)",
+    "cursorHidden": "cursor hidden",
+    "cursorShown": "cursor shown",
+    "cursorCaptured": "cursor captured",
+    "cursorReleased": "cursor released",
+    "captureCursor": "capture mouse",
+    "releaseCursor": "release mouse",
+    "controlBusy": "remote control is busy",
+    "hostControlling": "is controlling your pc",
+    "remoteControlAllowedHint": "remote control is allowed"
+  },
+  "joke": {
+    "title": "joke:",
+    "fallback": "today the server is joking silently."
+  },
+  "validation": {
+    "minChars": "minimum 4 characters",
+    "maxChars": "maximum 25 characters",
+    "latinOnly": "only latin letters and numbers",
+    "emptyName": "name cannot be empty",
+    "maxNameChars": "maximum 20 characters",
+    "connectionError": "connection error",
+    "invalidPassword": "incorrect password!",
+    "networkError": "network error, try again",
+    "registerError": "registration error",
+    "connectError": "connection error",
+    "authThrottled": "too many sign-in attempts. try again in {{minutes}} min.",
+    "captchaRequired": "enter code from image",
+    "invalidCaptcha": "invalid code from image",
+    "expiredCaptcha": "code expired, refresh image",
+    "sessionSaveError": "could not update the saved session. you may need to sign in again after restarting"
+  },
+  "updater": {
+    "title": "zabor",
+    "version": "version",
+    "downloading": "downloading update...",
+    "installing": "installing update...",
+    "installingDesc": "the app will restart automatically",
+    "errorTitle": "failed to download update",
+    "errorUnknown": "an unexpected error occurred",
+    "betaUnverified": "the beta update could not be verified",
+    "betaManifestInvalid": "the beta release data could not be verified",
+    "checksumMissing": "the installer checksum is missing",
+    "retry": "retry",
+    "cancel": "cancel",
+    "close": "close",
+    "mb": "mb",
+    "pleaseWait": "please wait..."
+  }
+}

@@ -7,10 +7,8 @@ use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::TensorRef;
 use std::sync::OnceLock;
 
-const DEEPFILTER_MODEL: &[u8] = include_bytes!(
-    "../../../../src/renderer/public/deepfilternet3/models/DeepFilterNet3_onnx.tar.gz"
-);
-const SILERO_MODEL: &[u8] = include_bytes!("../../../../src/renderer/public/silero_vad.onnx");
+const DEEPFILTER_MODEL: &[u8] = include_bytes!("../assets/models/DeepFilterNet3_onnx.tar.gz");
+const SILERO_MODEL: &[u8] = include_bytes!("../assets/models/silero_vad.onnx");
 
 #[derive(Debug, thiserror::Error)]
 pub enum NeuralError {

@@ -8,8 +8,8 @@ pub struct Strings {
 impl Strings {
     pub fn new(language: &str) -> Result<Self, String> {
         let source = match language {
-            "ru" => include_str!("../../../../src/renderer/src/locales/ru.json"),
-            "en" => include_str!("../../../../src/renderer/src/locales/en.json"),
+            "ru" => include_str!("../assets/catalogs/ru.json"),
+            "en" => include_str!("../assets/catalogs/en.json"),
             _ => return Err("Unsupported language".into()),
         };
         Ok(Self {
