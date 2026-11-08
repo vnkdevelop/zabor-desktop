@@ -2138,7 +2138,7 @@ async fn worker(
                             let sink = video_sink.clone();
                             let generation = video_generation.load(Ordering::Acquire);
                             let id = peer.clone();
-                            let mut receiver = VideoReceiver::new(track, lifetime.clone(), Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), ticket, generation, lease: delivery.lease, frame: delivery.frame }); }));
+                            let mut receiver = VideoReceiver::with_audio_runtime(track, lifetime.clone(), Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), ticket, generation, lease: delivery.lease, frame: delivery.frame }); }), audio_runtime.as_ref());
                             let mut retired_video = None;
                             let Some(watch) = work.commit_peer_resource(voice_ticket, &lifetime, || {
                                 retired_video = video_jobs.remove(&peer);

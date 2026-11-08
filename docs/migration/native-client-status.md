@@ -1270,10 +1270,37 @@ tests/Leave prefix/entered worker-end exactly saved4b5ff3a.
 Tested executable SHA-256:
 `58b1418a9799814254e18393f9e7591aa1ecd8b7c8afabfd088ce44cc9b1afa5`.
 terminalMediaRetirementChecked=true covers only explicit Leave/entered worker-end
-ownership;save/post-saveGraphify/guard/compact next,temporary launcher removed.
+ownership;Saved2ccbc75/post-saveGraphify/438/3/24/current-frozen exe+ONNX/3SDK/proofs/
+clean-tree guard passed,temporary launcher removed.
 Worker-future abort before terminal prefix,
 native stop/close/sink/callback/task termination/driver/worker/physical/full-client
 readiness remain false;no generalized off-thread Voice/peer teardown authority.
+
+### Video task join: targeted components checked
+
+VideoReceiver now prepares existing private AudioCleanup root before replacement/
+native stream acquisition,retains original future/JoinHandle in unchanged observer;
+Drop invalidates lease,cancels token,aborts without synchronously waiting. New public
+with_audio_runtime wrapper bridges bin/library without opening tracker;one worker
+constructor shares existing app drain. Default constructor/API/frame loop/lease-peer-
+receiver/currentIntent/storedVoiceTicket/Leave-worker-end-bundle/other worker/native/
+audio/strict helpers/old fixtures-tests unchanged. Source438/3/5SDK/fullproof chain,
+exact reconstruction outside registered video ownership/five new tests/one constructor.
+Initial E0624 compile failure retained;corrected with private-tracker wrapper only.
+Revised video suite sh_1ba23e680001ETi5NMSs4R3XTc passed7,19cases;full333/323 not yet
+launched. По уточнению владельца 2026-11-08 полный default/neural/RUEN/four-DPI/
+точный сравнительный и многоуровневый hash audit отложены до завершения функционального
+переноса. По ходу сохраняются сборка/типы/тесты затронутой логики и проверки безопасности
+данных/авторизации/шифрования/native-владения. Неиспользованный временный full-verifier
+удалён;отложенные проверки не считаются пройденными. Initial Graphify passed before
+API correction;final update sh_1ba2a8a38001H8yZRrQdIbHyu4 pending.
+Targeted fmt/Clippy(native-media,all-targets)/shell-Voice-Leave/local RTP job
+sh_1ba29c630001WoePMXEEBqhjKx passed92shell/3localRTP;with7video tests102targeted
+tests passed. videoTaskJoinChecked=true narrow registration/original task completion;
+full/default/neural/visual acceptance still deferred. Initial outer cmd quoting failure corrected
+before Rust execution,not a test failure.
+Native acquisition/remove_sink/Drop/syscall/driver/lastArc/worker abort before terminal
+prefix/generalized off-thread teardown/shared runtime/physical/full-client remain open.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

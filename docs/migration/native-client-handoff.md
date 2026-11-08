@@ -2,17 +2,16 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `4b5ff3a`: terminal media retirement;
-Leave/entered worker-end retire whole original owner,Voice Drop before receivers.
-Final `terminal-media-retirement-final-2026-11-08` прошёл328default/318neural-disabled tests
-и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
-иactual/frozen executable+ONNX DLL сверены
-независимо без расхождений. Binary SHA-256:
-`58b1418a9799814254e18393f9e7591aa1ecd8b7c8afabfd088ce44cc9b1afa5`.
-Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
-После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
-compact;actual saved commit брать из Git и
-`native-calls/terminal-media-retirement-post-save-2026-11-08/saved-boundary.json`.
+Последний функционально проверенный этап после `2ccbc75`: video task join;
+регистрация до native acquisition,наблюдаемый исходный JoinHandle,общий app drain.
+Прошли7video/92shell-Voice-Leave/3localRTP tests,fmt и Clippy(native-media/all-targets).
+По уточнению владельца полный DSP/default и точный визуальный/multi-hash прогон
+отложены до завершения функционального переноса. Не объявлять их пройденными.
+Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
+328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
+post-save guard passed. Его frozen executable58b1418a… не является новой video-join
+сборкой. Latest saved source commit брать из Git. Graphify pending ниже;
+no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
@@ -31,6 +30,16 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Рабочая ветка `rust/native-client`. Проверенные этапы сохранять коммитами. Push и публикация `3.8.0-rust` разрешены только после готовности полного клиента; merge в main не разрешён.
 - После полного завершения, проверки и сохранения результатов выполнить штатное завершение Windows без принудительного закрытия приложений. До полной готовности **не выключать**. Выключение ещё не выполнялось.
 - Не останавливаться для запроса «продолжи». После каждого завершённого и проверенного этапа сохранять handoff/commit и выполнять compact сессии, не теряя текущие и последующие задачи.
+- Уточнение владельца 2026-11-08: ускорить функциональный перенос; точное
+  соответствие настоящему ZABOR проверить одним итоговым этапом после переноса.
+  По ходу обязательны сборка/типы и тесты затронутой логики; авторизацию,шифрование,
+  сохранность данных и безопасное владение native-ресурсами не откладывать.
+  Не повторять полную default/neural/RUEN/four-DPI регрессию и многоуровневые hash-
+  audits после каждой малой правки. Полная регрессия,точные визуальные/поведенческие
+  сравнения,физические/длительные сценарии и release acceptance — в финале.
+  Следующие этапы группировать по пользовательским сценариям и недостающим функциям,
+  а не тратить отдельный полный прогон на каждую микрограницу. Прежние доказательства
+  и эталон не изменять;не объявлять отложенные проверки пройденными.
 
 ## Правила выполнения
 
@@ -38,6 +47,61 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Video task join — targeted checks passed 2026-11-08
+
+- Saved2ccbc75/post-save **sh_1ba1d489b001wXtev5MpGtZWwt completed/passed**:
+  clean tree,438/3/24/current-frozen exe+ONNX/3SDK/final-independent-source-exactcases-
+  recheck/predecessor proofs matched0mismatches;existing7Graphify warnings retained.
+- VideoSubscription previously dropped its JoinHandle after abort without observing
+  completion. New VideoReceiver retains existing private AudioCleanup tracker;
+  start prepares registration before self.stop/native NativeVideoStream::new.
+  Original future/JoinHandle retained by unchanged AudioCleanupTask observer.
+  Drop invalidates original lease,cancels original token,then aborts without blocking.
+  Existing observer accepts requested cancellation only and preserves sticky panic/
+  unexpected abort/incomplete observer failures;wait cancellation is not completion.
+- Public with_audio_runtime accepts SharedAudio only,delegates internally to private
+  tracker;no public AudioCleanup exposure. One worker constructor shares app drain.
+  No audio runtime/cleanup/playback/observer/native SDK/Voice/peer implementation
+  changes. Original decode/frame loop,current-intent/storedVoiceTicket/original-peer/
+  receiver identity guards and all Leave/entered worker-end/bundle/call/idle helpers
+  unchanged. No generic native off-thread teardown introduced. Default constructor
+  remains compatible with existing callers,standalone tracker and awaitable drain.
+- Source `native-calls/video-task-join-source-audit-2026-11-08.json`:438primary/3ref/
+  5SDK sources (prior3 plus native+public video stream wrappers),full predecessor
+  chain;only video.rs and one shell.rs constructor differ from saved2ccbc75.
+  Reconstruction outside registered video ownership/five new tests/one constructor
+  exactly saved2ccbc75;all old tests/fixtures/native/strict guards untouched.
+- Initial **sh_1ba216e4e001Gd1T8E8v9EIchl failed compile E0624** before test execution:
+  bin shell cannot call library pub(crate) with_cleanup/cleanup_tracker. Corrected
+  using new public with_audio_runtime wrapper without opening internal tracker or
+  changing audio logic;original failure log retained. Revised filtered video suite
+  **sh_1ba23e680001ETi5NMSs4R3XTc completed/passed7**:five new/two previous tests,19new cases
+  (3heldDrop/6native streams/3held local callbacks/3sealed starts/4join results).
+  Active original+replacement task observer remains pending until actual task Drop/
+  held callback completion;no callback/native syscall deadline or universal quiescence.
+- Initial Graphify **sh_1ba21cf98001CATEngCdIOo4v2 passed** before constructor API
+  correction;final Graphify **sh_1ba2a8a38001H8yZRrQdIbHyu4 pending**.
+  По уточнению владельца полный333/323/
+  neural/8inert RUEN/four-DPI/multi-hash audit отложен до общего финального этапа,
+  не запускался. Незадействованный временный video-task-join-verify launcher удалён.
+  Targeted fmt/Clippy(native-media,all-targets)/shell Voice-Leave regressions/local RTP
+  **sh_1ba29c630001WoePMXEEBqhjKx completed/passed** в video-task-join-targeted-revision:
+  fmt/Clippy и92shell/3localRTP tests. Вместе с7video suite —102passed targeted tests.
+  Initial sh_1ba296384001tsedBKpLnCjBQx failed at outer cmd quoting before execution;
+  no Rust/test failure,cmd argv quoting corrected,raw harness failure retained.
+  Текущий шаг: save/update Graphify → функциональные медиа/UI этапы,без повторного
+  full-suite/hash-matrix на каждую правку. Следующая группа: stream picker/quality,
+  camera/system audio/stream restore/SFU/control,profile/UI/import и packaging.
+  Не требовать новый438/3/24/hash-chain отчёт для каждой небольшой функциональной
+  правки. Финальный прогон обязан покрыть все сохранённые тесты/исходники/эталон.
+- Worker-future abort/panic before terminal prefix,unbounded synchronous native
+  acquisition/remove_sink/Drop,external last-Arc/driver/physical/shared runtime/
+  monitor/acquisition/reset/start/factory/Windows journal-filesystem-SessionIo/chat-
+  final-save/media-SFU-control/fullUI-profile-import-packaging/visual/two-device and
+  full-client gates remain open. videoTaskJoinChecked=true только для регистрации/
+  наблюдаемого task completion в проверенных локальных сценариях;
+  generalizedOffThreadVoicePeerTeardownAccepted and nativeClientReady remain false.
 
 ## Terminal media retirement — checked locally 2026-11-08
 
@@ -95,9 +159,9 @@ push/merge/release/shutdown не выполнялись. После каждог
   FinalProof **5792c1cf592d1dc260c4ec6aa9314e7bc78da392dcfaec393fd4ed855ce8251e**.
   IndependentProof0332c338…;SourceScopeProof2f5e4a60…;ExactCasesProofa40ec4b7…;
   RecheckProofc27d3eb9…. Temporary launcher deleted immediately,no helper/profile
-  cleanup debt. Save narrow terminalMediaRetirementChecked=true then post-save
-  Graphify/clean-tree/frozen438/3/24/exe+ONNX/3SDK/final-independent-source-exactcases-
-  recheck/predecessor proofs guard/compact. No next source patch before saved guard.
+  cleanup debt. Saved2ccbc75/post-saveGraphify/clean-tree/frozen438/3/24/exe+ONNX/3SDK/
+  final-independent-source-exactcases-recheck/predecessor proofs guard passed;
+  terminalMediaRetirementChecked remains narrow.
 - Only entered Leave/worker-end owner retirement is covered. Worker-future abort or
   panic before entering terminal prefix remains open;native stop/close/sink/callback/
   task/driver/worker deadlines remain open. priorityRevokedResourceRetirementAccepted,
