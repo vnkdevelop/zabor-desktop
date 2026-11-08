@@ -256,6 +256,45 @@ impl<'a> VoiceWork<'a> {
         installed.filter(|installed| *installed).map(|_| prepared)
     }
 
+    pub(super) fn take_call_media(
+        &self,
+        voice: &mut Option<VoiceSession>,
+        events: &mut Option<mpsc::Receiver<MediaEvent>>,
+        videos: &mut BTreeMap<String, VideoReceiver>,
+        resource_ticket: Option<IntentTicket>,
+        friend: bool,
+        mut accepted: impl FnMut(Option<&VoiceSession>),
+    ) -> Option<VoiceMediaResources> {
+        if friend {
+            if videos.is_empty() {
+                return self
+                    .take_previous_voice(voice, events, resource_ticket, false, &mut accepted)
+                    .map(|(voice, events)| (voice, events, BTreeMap::new()));
+            }
+            return self.take_previous_media(
+                voice,
+                events,
+                videos,
+                resource_ticket,
+                false,
+                &mut accepted,
+            );
+        }
+        if (voice.is_some() || events.is_some() || !videos.is_empty())
+            && resource_ticket != Some(self.ticket)
+        {
+            return None;
+        }
+        let retired = if videos.is_empty() {
+            None
+        } else {
+            Some(self.retire_videos(videos, resource_ticket, |_, _| true)?)
+        };
+        self.commit(|| accepted(voice.as_ref()))?;
+        drop(retired);
+        None
+    }
+
     pub(super) fn install_voice(
         &self,
         voice: &mut Option<VoiceSession>,

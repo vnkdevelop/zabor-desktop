@@ -3215,19 +3215,17 @@ async fn worker(
                     }
                 }
                 Command::Call(peer) => {
-                    video_generation.fetch_add(1, Ordering::AcqRel);
-                    video_jobs.clear();
-                    paused_video.clear();
-                    stream_drops.clear();
-                    if !friends.contains(&peer) {
-                        return Err(AuthError::Network);
-                    }
-                    let Some(mut previous) = previous_voice_work.take_previous_voice(
+                    let Some(mut previous) = previous_voice_work.take_call_media(
                         &mut voice,
                         &mut media_events,
+                        &mut video_jobs,
                         voice_ticket,
-                        false,
-                        |_| {},
+                        friends.contains(&peer),
+                        |_| {
+                            video_generation.fetch_add(1, Ordering::AcqRel);
+                            paused_video.clear();
+                            stream_drops.clear();
+                        },
                     ) else {
                         return Err(AuthError::Network);
                     };

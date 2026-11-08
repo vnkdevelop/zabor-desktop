@@ -1176,9 +1176,37 @@ exactly equal saved82f4d95. Tested executable SHA-256:
 `803c9ea2dda86f07a48199429888585e40c111b7d23db55be988896b64230e34`.
 voiceMediaBundleExtractionChecked=true/voiceMediaBundleRestoreChecked=true are narrow
 three owner-transfer takes/one same-original-ticket optional-events restore only;
-save/post-saveGraphify/guard/compact next,temporary launcher removed immediately.
+Saved54519c7/post-saveGraphify/438/3/24/current-frozen exe+ONNX/3SDK/proofs/clean-tree
+guard passed;temporary launcher removed immediately.
 Native subscriptions/task join/remove_sink/callback/syscall/physical/full readiness
 remain false;this is owner transfer,not generalized native off-thread teardown.
+
+### Call media transition: components checked locally
+
+One Call prefix/one helper/three tests only. Valid friend extracts original-ticket
+Voice/events/video tuple through unchanged prior EndCall send or LeaveChannel invoke.
+Invalid friend retires original video receivers under intent->peer gates but retains
+original Voice/events;live poison remains quarantined/dead poison never reopened.
+Empty native slots preserve absent-ticket/fresh-epoch behavior. Metadata clearing
+rechecks original intent after staged partial retirement;not atomic full-map clear.
+Native Drop/borrowed FnMut capture disposal outside gates. Existing strict helpers/
+native implementations/tests/fixtures/other worker scopes exactly equal saved54519c7;
+source438/3/3SDK audit passed. Revised143case filtered tests passed3;Graphify passed
+5996nodes/14806edges/264communities. Full `native-calls/call-media-transition-final-
+2026-11-08/` passed322default/312neural-disabled/bothClippy/fmt/pinned/9HTTP/neural/
+freshbuild/8inert RUEN/four-DPI/Graphify;protected neural metrics unchanged. Independent
+438/3/24/current-frozen exe+ONNX/3SDK/proofs matched0mismatches. All319/309previous
+test names/multiplicity/836diagnostic signatures and main39/Voice19/media3/all previous
+suites retained.143exact new cases/790prior component-video markers per mode;separate
+audit individually verifies120take/7held gate/16native local wait cases exactly once.
+Previous strict helpers/native implementations/tests/fixtures/other worker branches
+and Call protocol/preparation/StartCall/install tail byte-for-byte unchanged.
+Tested executable SHA-256:
+`aa6298239c160e9c0e4e15324f2eb623360093d05819229b7945fad53678e87f`.
+callMediaTransitionChecked=true covers only one Call prefix with separate accepted
+whole-owner/rejected-original-Voice-preserving retirement;save/post-saveGraphify/guard/
+compact next,temporary launcher removed immediately. Leave/idle/worker-end/video subscription task join/native
+sink callbacks/syscalls/shared resources/physical/full-client readiness remain false.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

@@ -2523,6 +2523,269 @@ async fn native_voice_media_bundle_keeps_active_receiver_ownership_through_leave
 }
 
 #[tokio::test]
+async fn native_call_media_transition_preserves_rejected_owner_and_checks_original_resource_admission(
+) {
+    timeout(Duration::from_secs(20), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        let mut requests = 0;
+        for friend in [false, true] {
+            for slots in ["empty", "voice", "events", "videos", "mixed"] {
+                for mode in ["live", "leave-pending", "leave-consumed", "logout-pending", "logout-consumed", "window", "missing", "reticket", "panic", "dead", "live-poison", "dead-poison"] {
+                    let intents = Arc::new(CriticalIntents::default());
+                    let original = intents.ticket();
+                    let stop = CancellationToken::new();
+                    let controls = AudioPreferences::new(&json!({})).controls.clone();
+                    let audio = SharedAudio::new(controls.clone(), stop.child_token(), |_, _, _| Box::pin(async { panic!("Call transition must not start physical audio") }));
+                    let generation = audio.demand.reserve().unwrap();
+                    assert!(audio.demand.activate(generation));
+                    let monitor = audio.monitor(true);
+                    let (mut voice, mut events) = if matches!(slots, "voice" | "events" | "mixed") {
+                        let (mut session, receiver) = VoiceSession::new(&hub, &user(), false, controls.clone(), audio.clone()).await.unwrap();
+                        requests += 1;
+                        session.call_peer = Some("old-peer".into());
+                        if slots == "events" { drop(session); (None, Some(receiver)) } else { (Some(session), Some(receiver)) }
+                    } else { (None, None) };
+                    let has_voice = voice.is_some();
+                    let has_events = events.is_some();
+                    let has_video = matches!(slots, "videos" | "mixed");
+                    let mut video = VoiceMediaVideoFixture::new(intents.clone(), &controls);
+                    video.control_owners.store(Arc::strong_count(&controls), Ordering::Release);
+                    if !has_video { video.videos.clear(); }
+                    if matches!(mode, "live-poison" | "dead-poison") {
+                        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| video.lifetime.commit(|| panic!("Expected Call original peer poison")))).is_err());
+                    }
+                    if matches!(mode, "dead" | "dead-poison") { video.engine.disconnect_peer("peer"); }
+                    match mode {
+                        "leave-pending" | "leave-consumed" | "reticket" => intents.request(CriticalAction::Leave),
+                        "logout-pending" | "logout-consumed" => intents.request(CriticalAction::Logout),
+                        "window" => stop.cancel(),
+                        _ => {},
+                    }
+                    if mode.ends_with("consumed") || mode == "reticket" { intents.next().await; }
+                    let resource_ticket = (mode != "missing").then_some(original);
+                    let ticket = if mode == "reticket" { intents.ticket() } else { original };
+                    let update = |_| panic!("Call transition must not publish inside acceptance");
+                    let work = VoiceWork::new(&intents, ticket, &stop, &update);
+                    let admitted = (matches!(mode, "live" | "panic" | "dead" | "live-poison" | "dead-poison") || (slots == "empty" && matches!(mode, "missing" | "reticket")))
+                        && (!friend || has_voice || !has_video || !video.lifetime.is_alive());
+                    let extracted = friend && admitted;
+                    let retired = !friend && admitted && has_video && mode != "live-poison";
+                    video.control_owners.store(Arc::strong_count(&controls) - usize::from(friend && has_voice), Ordering::Release);
+                    let snapshot = audio.mic_test.snapshot(Instant::now());
+                    let monitor_current = monitor.is_current();
+                    let epoch = controls.capture_epoch.load(Ordering::Acquire);
+                    let callback_drops = Arc::new(AtomicUsize::new(0));
+                    let probe = VoiceExtractionDropCheck { intents: intents.clone(), drops: callback_drops.clone() };
+                    let mut callbacks = 0;
+                    let callbacks_ref = &mut callbacks;
+                    let mut paused = BTreeSet::<String>::from(["peer".into()]);
+                    let mut drops = StreamDropGrace::default();
+                    drops.schedule("peer".into(), Instant::now());
+                    let video_generation = AtomicU64::new(7);
+                    let (paused_ref, drops_ref, generation_ref) = (&mut paused, &mut drops, &video_generation);
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work.take_call_media(&mut voice, &mut events, &mut video.videos, resource_ticket, friend, move |session| {
+                        let _ = &probe;
+                        *callbacks_ref += 1;
+                        assert_eq!(session.is_some(), has_voice);
+                        generation_ref.fetch_add(1, Ordering::AcqRel);
+                        paused_ref.clear();
+                        drops_ref.clear();
+                        assert_ne!(mode, "panic", "Expected Call metadata callback unwind");
+                    })));
+                    assert_eq!(result.is_err(), admitted && mode == "panic");
+                    assert_eq!(callbacks, usize::from(admitted));
+                    assert_eq!(video_generation.load(Ordering::Acquire), 7 + u64::from(admitted));
+                    assert_eq!(paused.is_empty(), admitted);
+                    assert_eq!(drops.next_deadline().is_none(), admitted);
+                    assert_eq!(callback_drops.load(Ordering::Acquire), 1);
+                    assert_eq!(voice.is_some(), has_voice && !extracted);
+                    assert_eq!(events.is_some(), has_events && !extracted);
+                    if let Some(session) = &voice { assert_eq!(session.call_peer.as_deref(), Some("old-peer")); }
+                    if let Some(events) = &events { assert_eq!(events.is_closed(), !has_voice); }
+                    assert_eq!(video.videos.len(), usize::from(has_video && !extracted && !retired));
+                    if let Some(receiver) = video.videos.get("peer") { assert!(receiver.lifetime().is_same(&video.lifetime)); }
+                    if let Ok(result) = &result {
+                        assert_eq!(result.is_some(), extracted);
+                        if let Some(previous) = result {
+                            assert_eq!(previous.0.is_some(), has_voice);
+                            assert_eq!(previous.1.is_some(), has_events);
+                            assert_eq!(previous.2.len(), usize::from(has_video));
+                            if let Some(receiver) = previous.2.get("peer") { assert!(receiver.lifetime().is_same(&video.lifetime)); }
+                        }
+                    }
+                    drop(result);
+                    assert_eq!(video.drops.load(Ordering::Acquire), usize::from(!has_video || extracted || retired));
+                    video.control_owners.store(Arc::strong_count(&controls) - usize::from(voice.is_some()), Ordering::Release);
+                    drop((voice, events, std::mem::take(&mut video.videos)));
+                    assert_eq!(video.drops.load(Ordering::Acquire), 1);
+                    assert_eq!(resource_ticket, (mode != "missing").then_some(original));
+                    assert_eq!(monitor.is_current(), monitor_current);
+                    assert_eq!(audio.demand.active(), generation);
+                    assert_eq!(controls.capture_epoch.load(Ordering::Acquire), epoch);
+                    assert_eq!(audio.mic_test.snapshot(Instant::now()), snapshot);
+                    audio.wait_for_cleanup().await.unwrap();
+                    video.engine.close();
+                    println!("call media take friend={friend} slots={slots} mode={mode} original_ticket_identity=true invalid_owner_retained=true voice_before_receiver=true callback_drop_outside=true physical_audio=false");
+                }
+            }
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; requests]);
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_call_media_transition_linearizes_priority_and_rechecks_window_after_intent_or_peer_wait(
+) {
+    timeout(Duration::from_secs(15), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        for (friend, mode) in [(false, "leave"), (false, "logout"), (false, "window-intent"), (false, "window-peer"), (true, "leave"), (true, "logout"), (true, "window-intent")] {
+            let intents = Arc::new(CriticalIntents::default());
+            let original = intents.ticket();
+            let stop = CancellationToken::new();
+            let controls = AudioPreferences::new(&json!({})).controls.clone();
+            let audio = SharedAudio::new(controls.clone(), stop.child_token(), |_, _, _| Box::pin(async { panic!("Call gate must not start physical audio") }));
+            let (session, receiver) = VoiceSession::new(&hub, &user(), false, controls.clone(), audio.clone()).await.unwrap();
+            let mut voice = Some(session);
+            let mut events = Some(receiver);
+            let mut video = VoiceMediaVideoFixture::new(intents.clone(), &controls);
+            video.control_owners.store(Arc::strong_count(&controls) - usize::from(friend), Ordering::Release);
+            let update = |_| {};
+            let work = VoiceWork::new(&intents, original, &stop, &update);
+            let (entered, waiting) = std::sync::mpsc::channel();
+            let (release, held) = std::sync::mpsc::channel();
+            let (started, starting) = std::sync::mpsc::channel();
+            let (done, finished) = std::sync::mpsc::channel();
+            let metadata = AtomicUsize::new(0);
+            let result = std::thread::scope(|scope| {
+                let (work, intents, lifetime, metadata) = (&work, &intents, &video.lifetime, &metadata);
+                let (voice, events, videos) = (&mut voice, &mut events, &mut video.videos);
+                if mode.starts_with("window-") {
+                    let holder = scope.spawn(move || {
+                        let held = || { entered.send(()).unwrap(); held.recv_timeout(Duration::from_secs(3)).unwrap(); };
+                        if mode == "window-peer" { lifetime.commit(held) } else { intents.commit(original, IntentScope::Session, held) }
+                    });
+                    waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    let extractor = scope.spawn(move || {
+                        started.send(()).unwrap();
+                        let result = work.take_call_media(voice, events, videos, Some(original), friend, |_| panic!("Stopped Call callback ran"));
+                        done.send(()).unwrap();
+                        result
+                    });
+                    starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                    stop.cancel();
+                    release.send(()).unwrap();
+                    holder.join().unwrap().unwrap();
+                    finished.recv_timeout(Duration::from_secs(1)).unwrap();
+                    extractor.join().unwrap()
+                } else {
+                    let extractor = scope.spawn(move || work.take_call_media(voice, events, videos, Some(original), friend, |_| {
+                        entered.send(()).unwrap();
+                        held.recv_timeout(Duration::from_secs(3)).unwrap();
+                        metadata.store(1, Ordering::Release);
+                    }));
+                    waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    let requester = scope.spawn(move || {
+                        started.send(()).unwrap();
+                        intents.request(if mode == "leave" { CriticalAction::Leave } else { CriticalAction::Logout });
+                        assert_eq!(metadata.load(Ordering::Acquire), 1);
+                        done.send(()).unwrap();
+                    });
+                    starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                    release.send(()).unwrap();
+                    finished.recv_timeout(Duration::from_secs(1)).unwrap();
+                    requester.join().unwrap();
+                    extractor.join().unwrap()
+                }
+            });
+            let admitted = !mode.starts_with("window-");
+            assert_eq!(result.is_some(), friend && admitted);
+            assert_eq!(voice.is_some(), !friend || !admitted);
+            assert_eq!(events.is_some(), voice.is_some());
+            assert_eq!(video.videos.len(), usize::from(!admitted));
+            assert_eq!(metadata.load(Ordering::Acquire), usize::from(admitted));
+            assert!(work.commit(|| panic!("Revoked Call metadata tail ran")).is_none());
+            drop(result);
+            video.control_owners.store(Arc::strong_count(&controls) - usize::from(voice.is_some()), Ordering::Release);
+            drop((voice, events, std::mem::take(&mut video.videos)));
+            assert_eq!(video.drops.load(Ordering::Acquire), 1);
+            audio.wait_for_cleanup().await.unwrap();
+            video.engine.close();
+            println!("call media gate friend={friend} mode={mode} strict_intent_linearization=true peer_wait_stop_rechecked=true original_resource_ticket=true native_drop_outside=true physical_audio=false");
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; 7]);
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_call_media_transition_keeps_active_owner_through_exact_call_or_channel_hint_and_cancellation(
+) {
+    use libwebrtc::video_frame::{I420Buffer, VideoFrame, VideoRotation};
+    timeout(Duration::from_secs(20), async {
+        let PreviousVoiceProtocolFixture { hub, events: _events, server } = previous_voice_protocol_fixture().await;
+        let mut expected = Vec::new();
+        for active in [false, true] {
+            for was_call in [false, true] {
+                for mode in ["live", "leave", "logout", "window"] {
+                    let intents = Arc::new(CriticalIntents::default());
+                    let original = intents.ticket();
+                    let stop = CancellationToken::new();
+                    let controls = AudioPreferences::new(&json!({})).controls.clone();
+                    let audio = SharedAudio::new(controls.clone(), stop.child_token(), |_, _, _| Box::pin(async { panic!("Call wait must not start physical audio") }));
+                    let (mut session, receiver) = VoiceSession::new(&hub, &user(), false, controls.clone(), audio.clone()).await.unwrap();
+                    expected.push(("GetIceServers".into(), true));
+                    if was_call { session.call_peer = Some("old-peer".into()); } else { session.channel = Some("old-channel".into()); }
+                    let (mut voice, mut events) = (Some(session), Some(receiver));
+                    let mut video = VoiceMediaVideoFixture::new(intents.clone(), &controls);
+                    video.control_owners.store(Arc::strong_count(&controls) - 1, Ordering::Release);
+                    if active {
+                        video.videos.get_mut("peer").unwrap().start();
+                        video.source.capture_frame(&VideoFrame::new(VideoRotation::VideoRotation0, I420Buffer::new_black(160, 96)));
+                        assert!(video.videos.get("peer").unwrap().is_playing());
+                    }
+                    let update = |_| {};
+                    let work = VoiceWork::new(&intents, original, &stop, &update);
+                    let entered = Notify::new();
+                    let release = Notify::new();
+                    let mut flags = 1;
+                    let waiting = async {
+                        let mut previous = work.take_call_media(&mut voice, &mut events, &mut video.videos, Some(original), true, |_| {}).unwrap();
+                        if previous.0.as_ref().unwrap().call_peer.is_some() { hub.send("EndCall", Vec::new()).await.unwrap(); } else { previous.0.as_mut().unwrap().leave(&hub).await; }
+                        assert_eq!(video.drops.load(Ordering::Acquire), 0);
+                        entered.notify_one();
+                        release.notified().await;
+                        drop(previous);
+                        assert_eq!(work.commit(|| flags = 0), Some(()));
+                    };
+                    let revoker = async {
+                        entered.notified().await;
+                        match mode { "leave" => intents.request(CriticalAction::Leave), "logout" => intents.request(CriticalAction::Logout), "window" => stop.cancel(), _ => release.notify_one() }
+                    };
+                    let (_, result) = tokio::join!(revoker, work.run(waiting));
+                    expected.push((if was_call { "EndCall" } else { "LeaveChannel" }.into(), !was_call));
+                    assert_eq!(result.is_some(), mode == "live");
+                    assert_eq!(flags, usize::from(mode != "live"));
+                    video.released.notified().await;
+                    assert_eq!(video.drops.load(Ordering::Acquire), 1);
+                    assert!(voice.is_none() && events.is_none() && video.videos.is_empty());
+                    assert!(work.commit(|| 42).is_some() == (mode == "live"));
+                    audio.wait_for_cleanup().await.unwrap();
+                    video.engine.close();
+                    println!("call media wait active={active} was_call={was_call} mode={mode} original_tuple_owned=true exact_empty_arg_hint=true EndCall_send_LeaveChannel_invoke=true voice_before_receiver=true post_wait_accepted={} physical_audio=false", mode == "live");
+                }
+            }
+        }
+        hub.close();
+        assert_eq!(server.await.unwrap(), expected);
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn native_resource_metadata_rechecks_actual_mute_result_and_preserves_monitor() {
     timeout(Duration::from_secs(15), async {
         let fixture = fixture("unused").await;
