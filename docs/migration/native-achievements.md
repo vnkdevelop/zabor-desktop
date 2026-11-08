@@ -203,3 +203,67 @@ unsafe block or blanket Clippy suppression is added to native code.
 
 No full neural/media/UI/raster matrix, physical OS resources, production backend,
 release pins, source import, push, merge or publication is part of this subset.
+
+## Knowledge-only follow-up: completed audit, incomplete global resolution
+
+This section supersedes the historical raw-Graphify status above, not the
+verified functional source milestone. All four Rust files and achievements.slint
+remain byte-identical to `01ed463e6e222599e579ab9014aa71b9376527f6`. No tests or
+source compilation were repeated, and no primary graph/source was written.
+
+The installed library's supported deterministic NetworkX Louvain fallback
+completed: 539 communities, 2.768s partition time and 14.962s total community
+analysis. The earlier 120s update-pipeline timeout did not measure its exact slow
+phase; it was not evidence that clustering alone could not complete.
+
+Child outputs, all relative to this worktree:
+
+- `graphify-out/GRAPH_REPORT.md`: full scope/provenance/diagnostic report and
+  library topology report, with explicit incomplete-map flags.
+- `graphify-out/graph.json`: original wide raw 14168-node / 32877-record map,
+  preserved byte-identical; SHA-256
+  `2af01ff6385fbced608120dbb68b56b0216d6aecf670bd96f9859807b099e46a`.
+- `graphify-out/graph.clustered.json`: the same nodes and every original ordered
+  edge record, annotated with communities and explicit directed/multigraph
+  schema. No edge is removed, remapped or promoted in confidence.
+- `graphify-out/native-achievements-audit-01ed463/`: source-byte/baseline
+  verification, raw diagnostics, per-edge dangling/self-loop/parallel provenance
+  ledgers, and numeric community/cohesion analysis.
+- `graphify-out/native-achievements-authored/`: separately named six-authored-file
+  code/Slint/doc knowledge map, report, explicit semantic resource, source hashes,
+  diagnostics and scope-exclusion ledger. It is not a replacement or shrink of
+  either root or primary's narrower map. Lexical external-reference nodes are
+  explicitly not resolved external implementations; documented primary mapping
+  remains a required binding, not an invented runtime call.
+
+The full root retains 1951 dangling records: 1938 originate in baseline files
+whose repository content matches `3c873d45ac326f2a50fc68bd1e3477dd48403a34`, and
+13 originate in the authored Rust files. This is verified origin/source
+attribution, not a claim to have reconstructed an identical pre-authored whole
+graph. All 13 authored entries are lexical `imports_from` records: Rust
+`use` extraction emits bare final-segment IDs without resolving/creating those
+module/type endpoints (`graphify/extractors/rust.py:323-331`). They are parser
+representation gaps, not evidence that the previously verified Rust imports fail.
+
+The one self-loop is baseline vendor `wexchange/__init__.py:30`,
+`from . import c_export`, collapsed to the package-file node; it is not a recursive
+code call. All 49 directed same-pair groups are baseline relation variants; none
+is authored. The annotated multigraph preserves every variant. All records remain
+in the maps and audit ledgers; excluding dangling endpoints or collapsing
+parallel connectivity happens only inside the documented partition projection.
+
+Root projection is 30926 valid directed records / 30727 unweighted undirected
+topology edges, including all original nodes. Numeric cohesion scores refer to
+that algorithmic topology, not a silently repaired raw graph. The root's 32057
+EXTRACTED / 820 INFERRED tags are retained; global inferred-edge correctness was
+not fully semantically audited. Raw code/Markdown headings do not establish full
+Slint/doc semantic coverage; the separately scoped resource supplies explicit
+authored declarations/contracts without making that global claim.
+
+`healthy_graph=false` remains authoritative for root. Full module/symbol
+resolution repair requires language-aware treatment of external references and
+provenance-preserving multigraph construction beyond this authorized child-only
+operation. Unrelated source/extractor changes, force/shrink overrides, primary
+map replacement, HTML/model/API/network operations and physical/full-client
+acceptance were not performed. Temporary local graph scripts are removed after
+the final graph verification.
