@@ -184,6 +184,48 @@ fn destination_inside_the_electron_source_is_rejected_before_any_source_write() 
 }
 
 #[test]
+fn changed_closed_source_bytes_fail_admission_but_snapshot_cleanup_still_runs() {
+    let fixture = Fixture::new();
+    let snapshot = fixture.snapshot();
+    std::fs::write(
+        fixture.source.path().join("session.enc"),
+        b"changed fixture ciphertext",
+    )
+    .unwrap();
+    assert!(snapshot.verify_source_unchanged().is_err());
+    assert!(fixture.prepare(&snapshot).is_err());
+    assert!(!fixture.parent.path().join(JOURNAL).exists());
+    assert!(snapshot.close().is_err());
+    assert_eq!(
+        std::fs::read_dir(fixture.scratch.path()).unwrap().count(),
+        0
+    );
+}
+
+#[test]
+fn uncopied_source_changes_and_new_root_files_fail_the_complete_inventory_gate() {
+    for changed in ["Preferences", "new-root-entry"] {
+        let fixture = Fixture::new();
+        std::fs::write(
+            fixture.source.path().join("Preferences"),
+            b"synthetic preferences",
+        )
+        .unwrap();
+        let snapshot = fixture.snapshot();
+        assert!(!snapshot.root().join("Preferences").exists());
+        std::fs::write(fixture.source.path().join(changed), b"changed source bytes").unwrap();
+        assert!(snapshot.verify_source_unchanged().is_err());
+        assert!(fixture.prepare(&snapshot).is_err());
+        assert!(!fixture.parent.path().join(JOURNAL).exists());
+        assert!(snapshot.close().is_err());
+        assert_eq!(
+            std::fs::read_dir(fixture.scratch.path()).unwrap().count(),
+            0
+        );
+    }
+}
+
+#[test]
 fn wrong_settings_types_and_future_or_duplicate_messages_cannot_publish() {
     for variant in 0..3 {
         let mut fixture = Fixture::new();

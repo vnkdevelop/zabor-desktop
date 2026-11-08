@@ -118,6 +118,7 @@ pub struct Snapshot {
     directory: tempfile::TempDir,
     source: PathBuf,
     _source_lock: File,
+    source_inventory: BTreeMap<PathBuf, Option<(u64, String)>>,
 }
 
 impl Snapshot {
@@ -126,7 +127,17 @@ impl Snapshot {
     }
 
     pub fn close(self) -> Result<(), ImportError> {
-        self.directory.close().map_err(|_| ImportError::Storage)
+        let unchanged = self.verify_source_unchanged();
+        self.directory.close().map_err(|_| ImportError::Storage)?;
+        unchanged
+    }
+
+    pub fn verify_source_unchanged(&self) -> Result<(), ImportError> {
+        if inventory(&self.source)? == self.source_inventory {
+            Ok(())
+        } else {
+            Err(ImportError::Locked)
+        }
     }
 
     pub fn copy(source: &Path, scratch: &Path) -> Result<Self, ImportError> {
@@ -138,6 +149,7 @@ impl Snapshot {
             return Err(ImportError::Path);
         }
         let source_lock = read_handle(&source, true)?;
+        let source_inventory = inventory(&source)?;
         let before = source_entries(&source)?;
         let mut handles = Vec::new();
         let mut total = 0_u64;
@@ -178,6 +190,9 @@ impl Snapshot {
         if before != source_entries(&source)? {
             return Err(ImportError::Locked);
         }
+        if source_inventory != inventory(&source)? {
+            return Err(ImportError::Locked);
+        }
         write_new(
             &directory.path().join(".native-copy-snapshot"),
             b"zabor-electron-copy-v1",
@@ -186,6 +201,7 @@ impl Snapshot {
             directory,
             source,
             _source_lock: source_lock,
+            source_inventory,
         })
     }
 }
@@ -219,6 +235,7 @@ impl PreparedImport {
         exported: &Zeroizing<Vec<u8>>,
         now: i64,
     ) -> Result<Self, ImportError> {
+        snapshot.verify_source_unchanged()?;
         if exported.len() > MAX_EXPORT || now < RETENTION_MS {
             return Err(ImportError::Invalid);
         }
@@ -281,6 +298,7 @@ impl PreparedImport {
         let stage = parent.join(STAGE);
         std::fs::create_dir(&stage).map_err(|_| ImportError::Storage)?;
         build_stage(snapshot, &stage, &data, owner, now)?;
+        snapshot.verify_source_unchanged()?;
         let files = hashes(&stage, false)?;
         let receipt = Receipt {
             version: 1,
@@ -891,9 +909,11 @@ fn hash_file(path: &Path) -> Result<(u64, String), ImportError> {
     let mut input = read_handle(path, false)?.take(MAX_SNAPSHOT + 1);
     let mut hash = Sha256::new();
     let mut size = 0_u64;
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = Zeroizing::new([0_u8; 64 * 1024]);
     loop {
-        let read = input.read(&mut buffer).map_err(|_| ImportError::Storage)?;
+        let read = input
+            .read(&mut buffer[..])
+            .map_err(|_| ImportError::Storage)?;
         if read == 0 {
             break;
         }
@@ -948,6 +968,35 @@ fn source_entries(source: &Path) -> Result<BTreeSet<PathBuf>, ImportError> {
         return Err(ImportError::Invalid);
     }
     Ok(entries)
+}
+
+fn inventory(source: &Path) -> Result<BTreeMap<PathBuf, Option<(u64, String)>>, ImportError> {
+    let mut files = BTreeMap::new();
+    let mut total = 0_u64;
+    for path in tree_entries(source)? {
+        let relative = path
+            .strip_prefix(source)
+            .map_err(|_| ImportError::Path)?
+            .to_path_buf();
+        let value = if path.is_dir() {
+            None
+        } else {
+            let size = std::fs::metadata(&path)
+                .map_err(|_| ImportError::Storage)?
+                .len();
+            total = total.checked_add(size).ok_or(ImportError::Invalid)?;
+            if total > MAX_SNAPSHOT {
+                return Err(ImportError::Invalid);
+            }
+            let hashed = hash_file(&path)?;
+            if hashed.0 != size {
+                return Err(ImportError::Locked);
+            }
+            Some(hashed)
+        };
+        files.insert(relative, value);
+    }
+    Ok(files)
 }
 
 fn tree_entries(root: &Path) -> Result<Vec<PathBuf>, ImportError> {

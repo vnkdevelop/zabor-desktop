@@ -22,7 +22,8 @@ const read = (name, optional = false) => {
 };
 
 try {
-  if (process.platform !== 'win32' || process.argv.length !== 3 || !path.basename(root).startsWith('zabor-electron-copy-')) throw new Error('snapshot-only');
+  const switches = new Set([`--user-data-dir=${root}`, '--disable-background-networking', '--disable-component-update', '--disable-domain-reliability', '--no-proxy-server', '--host-resolver-rules=MAP * ~NOTFOUND']);
+  if (process.platform !== 'win32' || process.argv.length < 3 || process.argv.slice(3).some(value => !switches.has(value)) || !path.basename(root).startsWith('zabor-electron-copy-')) throw new Error('snapshot-only');
   assertPath(root);
   if (read('.native-copy-snapshot').toString() !== 'zabor-electron-copy-v1') throw new Error('snapshot-only');
   app.setPath('appData', root);
