@@ -1237,9 +1237,43 @@ byte-for-byte unchanged outside idle prefix/helper/three new tests.
 Tested executable SHA-256:
 `18dce57d9bb5646646633f9e4861d24e3aedf10028e49fa647e3c56bade58b53`.
 idleMediaRetirementChecked=true covers only one original-ticket idle prefix;
-save/post-saveGraphify/guard/compact next,temporary launcher removed immediately.
+Saved4b5ff3a/post-saveGraphify/438/3/24/current-frozen exe+ONNX/3SDK/proofs/clean-tree
+guard passed,temporary launcher removed immediately.
 Priority revoked-owner retirement/native sink/task/
 syscall/shared-resource/worker/physical/full-client readiness remains false.
+
+### Terminal media retirement: components checked locally
+
+One explicit Leave/entered worker-end prefix and one concrete exclusive-slot helper,
+three tests only. Whole original Voice/events/video map/optional original ticket
+transferred unconditionally for retirement,including revoked/missing tickets and
+live/live-poisoned orphan receivers. No renewed current-Voice/peer admission or
+individual video mutation. Whole tuple drops Voice then events then video outside
+gates,on unwind/cancellation. Leave keeps original demand-only reset/metadata/hints
+and drops before publication/hints;worker extracts before unchanged hub.close then
+original generation increment and tuple Drop. Source438/3/3SDK/predecessor audit
+passed;all other worker/native/helper/fixture/test scopes exactly saved4b5ff3a.
+Initial new Leave test epoch assertion corrected to exact original demand.reset
+capture_epoch+1;production/previous tests/deadlines/flags unchanged. Filtered83case
+job sh_1ba14d90d001wyyJfT487Q2XoF passed3,83unique markers independently counted.
+Full `native-calls/terminal-media-retirement-final-2026-11-08/` passed328default/
+318neural-disabled/bothClippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI
+auth-roster-audio-MicTest/Graphify,neural metrics unchanged. Graphify retained6005
+nodes/14853edges/256communities,existing7metadata warnings/HTML5000limit retained.
+Independent438/3/24/current-frozen exe+ONNX/3SDK/proofs0mismatches. All325/315prior
+pass names/multiplicity/1053diagnostic signatures-markers/multiplicity retained;
+previous component/video/Call/idle subsets and all previous suites checked,main45/
+Voice19/media3. Each55whole-owner/8held-gate/20actual Leave case exactly once per
+mode,83newmarkers. Separate evidence recheck passed,all previous Checked flags
+retained;all code/native/helpers/fixtures/previous tests outside one helper/three
+tests/Leave prefix/entered worker-end exactly saved4b5ff3a.
+Tested executable SHA-256:
+`58b1418a9799814254e18393f9e7591aa1ecd8b7c8afabfd088ce44cc9b1afa5`.
+terminalMediaRetirementChecked=true covers only explicit Leave/entered worker-end
+ownership;save/post-saveGraphify/guard/compact next,temporary launcher removed.
+Worker-future abort before terminal prefix,
+native stop/close/sink/callback/task termination/driver/worker/physical/full-client
+readiness remain false;no generalized off-thread Voice/peer teardown authority.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

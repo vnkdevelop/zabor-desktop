@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `a97cbcb`: idle media retirement;
-original ticket/events retained,live orphan refused,dead-map Drop outside gates.
-Final `idle-media-retirement-final-2026-11-08` прошёл325default/315neural-disabled tests
+Последний проверенный компонентный этап после `4b5ff3a`: terminal media retirement;
+Leave/entered worker-end retire whole original owner,Voice Drop before receivers.
+Final `terminal-media-retirement-final-2026-11-08` прошёл328default/318neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`18dce57d9bb5646646633f9e4861d24e3aedf10028e49fa647e3c56bade58b53`.
+`58b1418a9799814254e18393f9e7591aa1ecd8b7c8afabfd088ce44cc9b1afa5`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
 compact;actual saved commit брать из Git и
-`native-calls/idle-media-retirement-post-save-2026-11-08/saved-boundary.json`.
+`native-calls/terminal-media-retirement-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Историческийaa629823… Call-transition binary не заменяет
+visual/physical gates. Исторический18dce57d… idle-retirement binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,74 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Terminal media retirement — checked locally 2026-11-08
+
+- Saved4b5ff3a/post-save **sh_1ba0e233b001SxoehgCj4lJfm5 completed/passed**:
+  clean tree,438/3/24/current-frozen exe+ONNX/3SDK/final-independent-source-exactcases-
+  recheck/predecessor proofs matched0mismatches;existing7Graphify warnings retained.
+- Original Leave cleared video map before Voice Drop;entered worker-end cleared map
+  before automatic Voice Drop. New concrete take_ending_media transfers exact
+  optional original Voice/events/video map/ticket via exclusive worker borrows.
+  Retirement only,unconditional even after Leave/Logout/window revocation,missing
+  ticket and live/live-poisoned orphan peers. No renewed current-Voice/peer gate;
+  never use this helper for fresh acquisition,individual video mutation or install.
+- Whole outer tuple drops Voice then events then receivers outside all acceptance
+  gates;original metadata/hints retained. Leave resets only audio demand,extracts,
+  resets metadata,drops tuple before publication/send_leave_hints. Worker extracts
+  tuple before unchanged hub.close,then original generation increment and tuple Drop.
+  Tuple retained across unwind/cancellation;no generalized native off-thread teardown.
+- Source audit `native-calls/terminal-media-retirement-source-audit-2026-11-08.json`
+  passed438primary/3reference/3SDK/proof chain;only three existing sources changed.
+  Reconstruction outside one helper/three tests/Leave prefix/entered worker-end
+  exactly saved4b5ff3a. All strict intent/Session/Voice/PeerLifetime/audio/video/bundle/
+  Call/idle/normalLogout helpers/native implementations/fixtures/previous tests and
+  remaining worker branches unchanged. Production take sites exactly2.
+- Initial **sh_1ba12ad15001C7MLIWoIkOWJpU passed2/failed1**:new actual Leave test
+  incorrectly expected unchanged capture_epoch although original AudioDemand.reset
+  calls capture_restarting once. Assertion corrected to exact epoch+1;production/
+  old tests/flags/deadlines unchanged,original failure log retained.
+  Latest filtered **sh_1ba14d90d001wyyJfT487Q2XoF completed/passed3**:
+  55whole-owner variants,8held-intent/peer-gate transfer variants,20actual Leave
+  configured/active/live-poisoned variants;83unique markers independently counted
+  in development-revision/cases.json. MicTest240000/monitor independent.
+  Native sink capture release is explicitly not callback/native task completion.
+- Development Graphify **sh_1ba1512ca001ppyTWFNjmJV3Sk completed/passed**:
+  6005nodes/14853edges/256communities;existing7metadata warnings/HTML5000limit retained.
+- Full **sh_1ba15d7c1001Vs0MUnFha7grvz completed/passed**:
+  `native-calls/terminal-media-retirement-final-2026-11-08/`;328default/318neural-
+  disabled/bothClippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI auth-
+  roster-audio-MicTest/Graphify. Protected neural metrics unchanged. Final Graphify
+  has no code topology changes,retains6005nodes/14853edges/256communities and warnings.
+- Independent `native-calls/terminal-media-retirement-final-independent-2026-11-08.json`
+  passed438primary/3reference/24evidence/current-frozen exe+ONNX/3SDK/predecessor
+  chain0mismatches. All325/315previous test pass names/multiplicity and1053diagnostic
+  signatures/markers/multiplicity retained,only measured _ms normalized. Previous
+  component/video/Call/idle subsets and original logs/counts/flags/deadlines unchanged.
+  Three new tests/main45-Voice19-media3/all previous suites verified in both modes.
+  Each55whole-owner/8held-gate/20actual Leave case exactly once per mode,83markers.
+- Exact-case `native-calls/terminal-media-retirement-cases-independent-2026-11-08.json`
+  and separate `native-calls/terminal-media-retirement-evidence-recheck-2026-11-08.json`
+  passed. Current/frozen exe+ONNX,438/3/24/3SDK/full proof chain rehashed0mismatches;
+  all previous Checked flags retained. No previous raw evidence/source/count/deadline
+  modifications. Source reconstruction outside one helper/three tests/Leave prefix/
+  entered worker-end exactly saved4b5ff3a;all strict helpers/native implementations/
+  fixtures/previous tests/Call-idle-normalLogout and other worker branches unchanged.
+- Executable **58b1418a9799814254e18393f9e7591aa1ecd8b7c8afabfd088ce44cc9b1afa5**.
+  FinalProof **5792c1cf592d1dc260c4ec6aa9314e7bc78da392dcfaec393fd4ed855ce8251e**.
+  IndependentProof0332c338…;SourceScopeProof2f5e4a60…;ExactCasesProofa40ec4b7…;
+  RecheckProofc27d3eb9…. Temporary launcher deleted immediately,no helper/profile
+  cleanup debt. Save narrow terminalMediaRetirementChecked=true then post-save
+  Graphify/clean-tree/frozen438/3/24/exe+ONNX/3SDK/final-independent-source-exactcases-
+  recheck/predecessor proofs guard/compact. No next source patch before saved guard.
+- Only entered Leave/worker-end owner retirement is covered. Worker-future abort or
+  panic before entering terminal prefix remains open;native stop/close/sink/callback/
+  task/driver/worker deadlines remain open. priorityRevokedResourceRetirementAccepted,
+  generalizedOffThreadVoicePeerTeardownAccepted and nativeClientReady remain false.
+  Next generalized video subscription/native sink/task ownership,then shared runtime/
+  monitor acquisition/maintenance/reset/start/factory and all remaining filesystem-
+  SessionIo-journal/chat-final-save/media-SFU-control/fullUI-profile-import-packaging/
+  visual/physical/two-device/full-client gates. No push/merge/release/shutdown yet.
 
 ## Idle media retirement — checked locally 2026-11-08
 
@@ -99,9 +167,9 @@ push/merge/release/shutdown не выполнялись. После каждог
   FinalProof **0d8e8e9e8a8385fc231bb29ccc9acfb40c2a2a38fb831ffbb1152f3ef64d1304**.
   IndependentProoffa20b95f…;SourceScopeProof2144e5c0…;ExactCasesProofe94dcf8c…;
   RecheckProofcec736d2…. Temporary launcher deleted immediately,no helper/profile
-  cleanup debt. Save narrow idleMediaRetirementChecked=true then post-saveGraphify/
-  clean-tree/frozen438/3/24/exe+ONNX/3SDK/final-independent-source-exactcases-recheck/
-  predecessor proofs guard/compact. No next source patch before saved guard passes.
+  cleanup debt. Saved4b5ff3a/post-saveGraphify/clean-tree/frozen438/3/24/exe+ONNX/3SDK/
+  final-independent-source-exactcases-recheck/predecessor proofs guard passed;
+  idleMediaRetirementChecked remains narrow.
 - This is idle-only admission,not priority revoked-resource retirement. Leave/Logout
   must still dispose revoked owners and must not reuse current VoiceWork to skip
   cleanup. Leave/worker-end Voice-before-receiver map ownership/gates and native

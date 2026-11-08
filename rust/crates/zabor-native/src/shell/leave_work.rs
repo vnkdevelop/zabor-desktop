@@ -42,22 +42,25 @@ impl VoiceLeave<'_> {
         self.call_recovery.clear();
         *self.pending_join = None;
         self.video_generation.fetch_add(1, Ordering::AcqRel);
-        self.video_jobs.clear();
+        let retired = take_ending_media(
+            self.voice,
+            self.media_events,
+            self.video_jobs,
+            self.voice_ticket,
+        );
         self.paused_video.clear();
         self.stream_drops.clear();
-        *self.abandoned_call |= self
-            .voice
+        *self.abandoned_call |= retired
+            .0
             .as_ref()
             .is_some_and(|session| session.call_peer.is_some());
-        *self.pending_stop_stream |= self.voice.as_ref().is_some_and(VoiceSession::is_sharing);
-        *self.voice = None;
-        *self.voice_ticket = None;
-        *self.media_events = None;
+        *self.pending_stop_stream |= retired.0.as_ref().is_some_and(VoiceSession::is_sharing);
         *self.call_connected = false;
         *self.sent_audio_state = None;
         *self.sent_speaking = false;
         *self.speaking_release = None;
         *self.local_speaking = false;
+        drop(retired);
         if !stop.is_cancelled() && intents.is_current(ticket, IntentScope::Voice) {
             update(UiEvent::VoiceEnded.guarded(ticket, IntentScope::Voice));
         }
@@ -79,6 +82,27 @@ impl VoiceLeave<'_> {
             }
         }
     }
+}
+
+type EndingMedia = (
+    Option<VoiceSession>,
+    Option<mpsc::Receiver<MediaEvent>>,
+    BTreeMap<String, VideoReceiver>,
+    Option<IntentTicket>,
+);
+
+pub(super) fn take_ending_media(
+    voice: &mut Option<VoiceSession>,
+    events: &mut Option<mpsc::Receiver<MediaEvent>>,
+    videos: &mut BTreeMap<String, VideoReceiver>,
+    resource_ticket: &mut Option<IntentTicket>,
+) -> EndingMedia {
+    (
+        voice.take(),
+        events.take(),
+        std::mem::take(videos),
+        resource_ticket.take(),
+    )
 }
 
 pub(super) struct LeaveHintResult {

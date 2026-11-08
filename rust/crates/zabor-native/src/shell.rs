@@ -3433,11 +3433,17 @@ async fn worker(
                 .guarded(command_ticket, operation_scope),
         );
     }
+    let retired = leave_work::take_ending_media(
+        &mut voice,
+        &mut media_events,
+        &mut video_jobs,
+        &mut voice_ticket,
+    );
     if let Some(hub) = hub {
         hub.close();
     }
     video_generation.fetch_add(1, Ordering::AcqRel);
-    video_jobs.clear();
+    drop(retired);
 }
 
 fn apply_mic_test(ui: &NativeApp, snapshot: MicTestSnapshot) {
