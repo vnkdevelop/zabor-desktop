@@ -8,10 +8,16 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+#[path = "update_url.rs"]
+mod url_policy;
+
+use url_policy::RedirectChain;
+
 pub struct StagedArchive {
     root: Arc<UpdateRoot>,
     operation: u64,
     path: tempfile::TempPath,
+    deadline: Instant,
     pub length: u64,
     pub sha256: String,
 }
@@ -180,34 +186,19 @@ impl UpdateIo {
         if budget.is_zero() || budget > Duration::from_secs(600) {
             return Err("download-budget-invalid".into());
         }
-        let address = reqwest::Url::parse(url).map_err(|_| "invalid-update-url")?;
         let manifest = candidate.release().manifest();
-        let native_url = !self.root.sandbox_scoped()
-            && address.scheme() == "https"
-            && address.host_str() == Some("github.com")
-            && address.path()
-                == format!(
-                    "/vnkdevelop/zabor-desktop/releases/download/v{}/{}",
-                    manifest.version, manifest.package_name
-                );
-        let fixture_url = self.root.sandbox_scoped()
-            && address.scheme() == "http"
-            && address.host_str() == Some("127.0.0.1")
-            && address.port().is_some();
-        if (!native_url && !fixture_url)
-            || !address.username().is_empty()
-            || address.password().is_some()
-            || address.query().is_some()
-            || address.fragment().is_some()
-        {
-            return Err("update-url-policy-rejected".into());
-        }
+        let mut chain = RedirectChain::start(
+            url,
+            &manifest.version,
+            &manifest.package_name,
+            self.root.sandbox_scoped(),
+        )?;
         let root = self.root.clone();
         let cancel = cancellation.clone();
         let expected_size = manifest.package_size;
         let expected_sha256 = manifest.package_sha256.clone();
+        let deadline = Instant::now() + budget;
         self.register(operation, cancellation, async move {
-            let deadline = Instant::now() + budget;
             root.check(operation, &cancel, deadline)?;
             let owned = root.clone();
             let token = cancel.clone();
@@ -223,15 +214,27 @@ impl UpdateIo {
             .map_err(|_| "download-stage-owner-failed")??;
             let client = reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                .referer(false)
                 .no_proxy()
                 .connect_timeout(budget.min(Duration::from_secs(5)))
                 .timeout(budget)
                 .build()
                 .map_err(|_| "native-http-client-failed")?;
-            let mut response = tokio::select! {
-                biased;
-                _ = cancel.cancelled() => return Err("operation-cancelled".into()),
-                value = client.get(address).send() => value.map_err(|_| "update-request-failed")?,
+            let mut response = loop {
+                root.check(operation, &cancel, deadline)?;
+                let response = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return Err("operation-cancelled".into()),
+                    value = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline),client.get(chain.request_url()).send()) =>
+                        value.map_err(|_|"download-deadline")?.map_err(|_|"update-request-failed")?,
+                };
+                root.check(operation, &cancel, deadline)?;
+                if response.status().is_redirection() {
+                    chain.advance(response.status(), response.headers())?;
+                    root.check(operation, &cancel, deadline)?;
+                } else {
+                    break response;
+                }
             };
             if response.status() != reqwest::StatusCode::OK
                 || response
@@ -247,7 +250,8 @@ impl UpdateIo {
                 let chunk = tokio::select! {
                     biased;
                     _ = cancel.cancelled() => return Err("operation-cancelled".into()),
-                    value = response.chunk() => value.map_err(|_| "update-response-read-failed")?,
+                    value = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline),response.chunk()) =>
+                        value.map_err(|_|"download-deadline")?.map_err(|_| "update-response-read-failed")?,
                 };
                 let Some(chunk) = chunk else {
                     break;
@@ -295,6 +299,7 @@ impl UpdateIo {
                 root,
                 operation,
                 path,
+                deadline,
                 length,
                 sha256,
             }))
@@ -325,19 +330,21 @@ impl UpdateIo {
         }
         let root = self.root.clone();
         let token = cancellation.clone();
+        let deadline = archive.deadline.min(Instant::now() + budget);
         self.register(operation, cancellation, async move {
             tokio::task::spawn_blocking(move || {
                 root.prepare(
                     StageContext {
                         operation,
                         cancellation: &token,
-                        deadline: Instant::now() + budget,
+                        deadline,
                         now,
                         crash,
                     },
                     candidate,
                     archive.path(),
-                )
+                )?;
+                root.check(operation, &token, deadline)
             })
             .await
             .map_err(|_| "stage-native-owner-failed")?

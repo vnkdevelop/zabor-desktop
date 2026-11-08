@@ -1,9 +1,11 @@
 # Operation-owned native update IO and protected recovery
 
-Continuation of clean source `3321ee4`, isolated in `native-release-packaging`.
-The ownership boundary remains new update IO/helper modules, their tests, separate
-packaging scripts and this document. No `lib.rs`, shared Cargo file, shell, Slint,
-Electron validator, DSP/SDK/CRT/ONNX pin or release approval is changed.
+Original IO/helper implementation continued from clean source `3321ee4` and was
+saved as `88f3cd41`, isolated in `native-release-packaging`. The redirect continuation
+owns only `update_io.rs`, `update_io_tests.rs`, nested `update_url.rs`,
+`verify-update-io.py` and this document. No helper, C++, `lib.rs`, shared Cargo file,
+shell, Slint, Electron validator, DSP/SDK/CRT/ONNX pin or release approval is changed
+by the redirect continuation.
 
 ## Implemented filesystem boundary
 
@@ -64,11 +66,58 @@ not native completion. Disk workers' original blocking joins are awaited rather
 than aborted. `drain` seals admission, cancels registered work and observes every
 original join and outcome. Main must retain and drain the owner across app exit.
 
-HTTP uses an explicit signed-release URL policy, no proxy or redirect fallback,
-connection/request deadlines, bounded chunks, signed total length and streaming
-SHA-256. The only HTTP test endpoint is explicit `127.0.0.1:PORT` under a sandbox
-scope. Production URLs are not contacted. Stale operations, late cancelled
-responses, wrong lengths/digests and incomplete downloads are not staged success.
+HTTP uses an explicit signed-release URL policy, no proxy or automatic redirect
+fallback, a single overall deadline, bounded chunks, signed total length and
+streaming SHA-256. The only HTTP test endpoint is explicit `127.0.0.1:PORT` under
+a sandbox scope. Production URLs are not contacted. Stale operations, late
+cancelled responses, wrong lengths/digests and incomplete downloads are not staged
+success.
+
+### Operation-owned manual release redirects
+
+`UpdateIo::download(operation, candidate, cancellation, url, budget)` keeps its
+existing public signature and result type. Private `url_policy::RedirectChain`
+is wired by `update_io.rs` with a path attribute, without another root module or
+dependency. It validates the initial URL before admission and validates every
+`Location` before the next request. `Policy::none()` remains mandatory.
+
+- Native initial URL is exactly
+  `https://github.com/vnkdevelop/zabor-desktop/releases/download/v{signed_version}/{signed_package_name}`.
+  The package name must be `ZABOR-Native-Beta-{signed_version}-x64.zip`.
+- Subsequent native hops permit only that exact GitHub route or HTTPS
+  `release-assets.githubusercontent.com`, with no explicit port. There is no
+  wildcard `githubusercontent.com`, alternate GitHub route, private host, HTTP
+  downgrade or fallback endpoint. GitHub changes to this allowlist require a
+  separately reviewed policy change, not a permissive retry.
+- Only 301, 302, 303, 307 and 308 are followed, as fresh credential-free GETs.
+  There are at most **4 redirects / 5 requests**. Exactly one nonempty `Location`
+  is required; raw `Location` and resolved URL are each bounded to **8192 bytes**.
+  Invalid header text, controls, whitespace, backslashes, userinfo and fragments
+  fail closed. Scheme-relative URLs are refused. Relative references use URL
+  resolution and must preserve the current origin before allowlist validation.
+- The original URL and accepted hop URLs are fingerprinted for loop detection.
+  Signed CDN query bytes are retained as opaque request data, not interpreted as
+  approval or copied into staging names, reports or error text. Raw SAS URLs are
+  not logged by this module; transport errors map to fixed error codes.
+- A fresh private reqwest client has no caller headers, authentication, cookie
+  provider or credentials, disables referer generation and proxies, and has
+  automatic redirects disabled. Response cookies/headers are not copied into
+  any subsequent request. Redirect bodies are dropped rather than staged.
+- The deadline is captured before job admission and used with `timeout_at` for
+  every hop and body read. Connection timeout is additionally capped at 5 seconds.
+  Redirects do not reset the budget. The returned archive privately retains that
+  deadline; staging may shorten it with its own budget but cannot extend it.
+- Every hop checks the same root, original operation and cancellation token before
+  and after request/validation. There is one registered download join, not a new
+  job or operation per redirect. Admission barriers, blocking-owner joins,
+  cancellation-safe drain and signed receipt/acceptance checks are unchanged.
+- Sandbox mode permits only an initial explicit `http://127.0.0.1:PORT` and
+  redirects on that exact origin. It cannot transition into the native policy,
+  another port, localhost alias, private host or production CDN.
+
+Final success still requires HTTP **200**, exact signed byte length and exact
+signed SHA-256, including when `Content-Length` is absent. A permitted redirect
+host or a completed HTTP request is never a release/installation receipt.
 
 ## Recovery and health
 
@@ -96,10 +145,11 @@ stale in-memory state. A successful native join alone is not installation approv
 
 ## Explicitly remaining integration/acceptance gates
 
-- Main-owned module/dependency wiring is untouched. These sources use only
-  existing lock-pinned dependencies; the temporary harness supplies module wiring
-  outside the repository. `zip 9.4.1`/existing flate2 backend will need direct
-  main-owned wiring, not a version or lockfile update.
+- Main-owned module/dependency wiring is untouched in this worktree. The parent
+  reports that `88f3cd41` was already integrated as `8768a18`, with module wiring
+  `a2dac6a` and 46 passing main tests. This continuation neither repeats nor edits
+  that work. Its temporary harness supplies isolated module wiring and uses only
+  existing lock-pinned dependencies, without a version or root-lock update.
 - Provision trusted manifest and acceptance public keys, publisher certificate
   pin, and independently authenticated native helper. Resolve the actual complete
   owner acceptance; local test receipts are not release approval.
@@ -149,7 +199,7 @@ temp root, with a marker binding it to this worktree. It rejects unowned directo
 and never uses another agent's target. The agent removes this harness, target and
 sandbox roots before the final scoped save.
 
-## Checked scoped result
+## Original `88f3cd41` checked scoped result
 
 - Native primitive compiled Windows x64 with static CRT, `/W4 /WX`.
 - External harness Clippy **all targets**, `-D warnings`, and fmt passed without
@@ -210,3 +260,68 @@ receipt. Original helper-host launch/registered blocking ownership, app/resource
 drain, authenticated health IPC, bootstrap baseline/recovery, real trust pins/
 certification, legal approval and all listed hostile/physical/crash gates remain
 required. No live root was opened or installed; publication/shutdown remain false.
+
+## Redirect continuation source receipt
+
+Own branch/base: `native-release-packaging` / `88f3cd41e013511c528b1e4fb9c3137a528e780a`.
+Verification freezes source bytes for the duration of the external harness run.
+SHA-256 of the checked working-tree bytes:
+
+| File | SHA-256 |
+| --- | --- |
+| `rust/crates/zabor-native/src/update_io.rs` | `91c8c8024853a985d73d6d7c9a66aa09d796234afb96fa67eb99372e5584f690` |
+| `rust/crates/zabor-native/src/update_io_tests.rs` | `1da600640095cebe496a50d17ced3ffa1b928178c20d84c736111f75d32aab18` |
+| `rust/crates/zabor-native/src/update_url.rs` | `0f21f90ec0dbe9b66d4f6a9852bf3c550ae4cac94364e178c23e842755b653fd` |
+| `scripts/native/packaging/verify-update-io.py` | `5a805d6024d7575ce12af4d41c86cfd3b60622f1e99face40784cb78d005ca26` |
+| Unchanged `rust/Cargo.lock` | `de798febe6ef3ec707f994f5eb26d834ab8f04edaedbcf40440fa0d268f7129f` |
+
+## Redirect continuation checked result
+
+- The existing external frozen-dependency harness compiled the native primitive
+  with static CRT, `/W4 /WX`; Rust compilation, fmt and **all-target Clippy
+  `-D warnings` passed** without suppressions or shared-file changes.
+- **59 passed, 0 failed, 1 ignored**: 19 release/update, 19 helper, 15 IO and
+  6 pure redirect-policy tests. The existing ignored crash worker remains covered
+  by its parent subprocess test; no helper implementation or new helper test was
+  added by this continuation.
+- Redirect tests cover the exact native initial route and CDN allowlist without
+  network calls; same-origin relative/absolute loopback redirects; missing,
+  duplicate, malformed, non-ASCII and oversized `Location`; resolved-URL size;
+  loops and hop exhaustion; host/port/userinfo/fragment/downgrade rejection;
+  cookie/referer/auth-header non-forwarding; redirect-body disposal; exact final
+  200/digest/length, including truncated or oversized bodies without a length
+  header; stale/cancelled original operations between hops; total deadline and
+  refusing a fresh stage budget after that deadline.
+- Two new test-fixture errors were corrected after the first run: a parser-invalid
+  maximum HTTP length was replaced with a valid oversized redirect-body length,
+  and the relative loop reference was corrected to resolve to the current URL.
+  The production redirect policy was not relaxed.
+- **194 existing root-lock dependency versions/checksums** remain the exact
+  external subset. The root lock and frozen source hashes were rechecked by the
+  successful harness. Python AST syntax and `git diff --check` also passed.
+- Owned scratch
+  `C:\Users\porad\AppData\Local\Temp\opencode\native-update-io-redirect-88f3cd41`
+  was removed after the completed run, including its target, helper binary and
+  sandbox roots. No build/test process remains pending.
+- No real GitHub/CDN request, production signing, app installation/launch, push,
+  merge or OS shutdown was performed. No inventory/neural/UI matrix was run.
+  App-host/process identity, authenticated health, whole-app drain, OS/power-loss
+  crash acceptance and provisioned production trust remain **false/unapproved**.
+- Own `graphify update .` completed: **13,968 nodes, 30,247 edges, 536 communities**.
+  A follow-up graph query resolves `RedirectChain`, `start`, `advance`, `validate`
+  and the policy tests to `rust/crates/zabor-native/src/update_url.rs`. This is the
+  CLI's code-only AST refresh, with no LLM call; doc/paper/image semantic refresh
+  was not rerun. No main graph was written.
+- Exact remaining Graphify diagnostics: **9 zero-node sources absent from the
+  graph**, and HTML skipped because **13,968 nodes exceeds the 5,000-node limit**.
+  The zero-node JSON paths are `.vscode/launch.json`, `client-release-approval.json`,
+  `rust/crates/zabor-native/assets/locales/en.json`,
+  `rust/crates/zabor-native/assets/locales/ru.json`,
+  `rust/vendor/rnnoise2-sys-0.1.2/.cargo_vcs_info.json`,
+  `rust/vendor/webrtc-vad-0.4.0/.cargo_vcs_info.json`,
+  `scripts/native/packaging/policy.json`, `src/renderer/src/locales/en.json` and
+  `src/renderer/src/locales/ru.json`. The CLI also reports that doc/paper/image
+  changes require the AI `/graphify --update` workflow and suggests setting
+  `GEMINI_API_KEY` or `GOOGLE_API_KEY` for semantic extraction. No key was requested,
+  printed or provisioned here. No Rust/Clippy warning was suppressed. Git's
+  LF-to-CRLF checkout-normalization notices do not indicate a diff/fmt failure.

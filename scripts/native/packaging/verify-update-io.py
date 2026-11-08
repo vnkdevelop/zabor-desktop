@@ -65,7 +65,7 @@ def main():
     rustfmt = cargo.with_name("rustfmt.exe")
     vswhere = Path("C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe")
     source = ROOT / "rust/crates/zabor-native/src"
-    files = [source / name for name in ["release.rs", "update.rs", "update_helper.rs", "update_helper_tests.rs", "update_io.rs", "update_io_tests.rs"]]
+    files = [source / name for name in ["release.rs", "update.rs", "update_helper.rs", "update_helper_tests.rs", "update_io.rs", "update_io_tests.rs", "update_url.rs"]]
     cpp = ROOT / "rust/crates/zabor-native/update-helper/native_update_helper.cpp"
     source_hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                      for path in [*files, cpp, Path(__file__).resolve()]}
