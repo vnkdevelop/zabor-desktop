@@ -1117,9 +1117,41 @@ executable SHA-256:
 peerExclusiveCommitChecked=true/incomingVideoResourceAcceptanceChecked=true only
 for exclusive metadata and one incoming-track extraction/install scope. Callback
 unwind retains installed receiver with poisoned peer admission,not rollback/health
-acceptance. Save/post-saveGraphify/guard/compact next;all temporary helpers removed.
+acceptance. Savedf2c5340fae2819072f161c81c98a978d3f92210e/post-saveGraphify/438/3/24/
+current-frozen binary+ONNX/dependency/proofs/clean-tree guard passed;helpers removed.
 Other video restart/stop/prune/shared-resource/native lifecycle/timing/full readiness
 remain open,no generalized off-thread teardown/native-start/stop deadline claim.
+
+### Video transition and retirement resource acceptance: components checked locally
+
+take_video requires original Voice ticket/receiver Arc identity;metadata predicate
+sees target in max3 count before extraction. Missing peer allowed only for absent
+slot. Native start/stop/watching-send outside gates,three original-resource installs
+recheck afterward. retire_videos stages selected live receivers under intent->peer;
+monotonic dead receivers require original intent only. Live poison stays quarantined,
+dead poison can retire without reopening;Some(retired) is not complete/bounded cleanup.
+Four take sites/three install sites/three UserLeft-event-Join retirement sites only.
+Grace cancellation/UI outside gates;peer poison does not suppress UserLeft Voice.handle
+or Session processing. Three existing sources/two helpers/four tests/438/3/3SDK source
+scope audit passed;four filtered tests cover132new cases,including12active local video
+and5max3/local wire/30second grace/expiry UI. Final
+`native-calls/video-transition-final-2026-11-08/` passed315default/305neural-disabled,
+bothClippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI+Graphify;
+protected neural metrics unchanged. Independent438/3/24/current-frozen exe+ONNX/
+3SDK/proofs matched0mismatches;all311/301previous pass names/multiplicity retained;
+four new tests/main32/Voice19/media3/all previous suites verified in both modes.
+132new/496prior markers and diagnostic signatures/multiplicity checked. Parser
+correction only handles unchanged Leave diagnostic interleaved atone raw pass line;
+original proof retained,no logs/sources/counts/deadlines changed. Independent source
+reconstruction outside2helpers/4tests/4worker scopes exactly equals savedf2c5340.
+Three existing sources changed,no sources added;previous strict gates/Voice/PeerLifetime/
+audio/native video/incoming-track runtime unchanged. Tested executable SHA-256:
+`2418139faf5cf14f7d5780491edb70d619d762fde007da2621757dbaa7f63682`.
+videoTransitionResourceAcceptanceChecked=true/videoRetirementResourceAcceptanceChecked
+=true are narrow4take/3install/3retirement site acceptance;save/post-saveGraphify/guard/
+compact next,all temporary helpers removed. Native subscription task join/remove_sink/
+native timing/shared/runtime/full-client acceptance remain false;no native teardown
+deadline/generalized off-thread Drop claim.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

@@ -111,6 +111,65 @@ impl<'a> VoiceWork<'a> {
         installed.filter(|installed| *installed).and(replaced)
     }
 
+    pub(super) fn take_video(
+        &self,
+        videos: &mut BTreeMap<String, VideoReceiver>,
+        resource_ticket: Option<IntentTicket>,
+        lifetime: Option<&PeerLifetime>,
+        peer: &str,
+        mut accepted: impl FnMut(&BTreeMap<String, VideoReceiver>) -> bool,
+    ) -> Option<Option<VideoReceiver>> {
+        let mut receiver = None;
+        let mut take = || {
+            if videos.get(peer).is_some_and(|receiver| {
+                lifetime.is_none_or(|lifetime| !receiver.lifetime().is_same(lifetime))
+            }) {
+                return false;
+            }
+            if accepted(videos) {
+                receiver = videos.remove(peer);
+            }
+            true
+        };
+        let taken = match lifetime {
+            Some(lifetime) => self.commit_peer_resource(resource_ticket, lifetime, &mut take),
+            None => self.commit_resource(resource_ticket, &mut take),
+        };
+        taken.filter(|taken| *taken).map(|_| receiver)
+    }
+
+    pub(super) fn retire_videos(
+        &self,
+        videos: &mut BTreeMap<String, VideoReceiver>,
+        resource_ticket: Option<IntentTicket>,
+        mut selected: impl FnMut(&str, &VideoReceiver) -> bool,
+    ) -> Option<BTreeMap<String, VideoReceiver>> {
+        let mut retired = BTreeMap::new();
+        let accepted = self.commit_resource(resource_ticket, || {
+            for peer in videos.keys().cloned().collect::<Vec<_>>() {
+                if self.stop.is_cancelled() {
+                    break;
+                }
+                let receiver = videos.get(&peer).unwrap();
+                if !selected(&peer, receiver) {
+                    continue;
+                }
+                let lifetime = receiver.lifetime().clone();
+                let mut take = || {
+                    if !self.stop.is_cancelled() {
+                        retired.insert(peer.clone(), videos.remove(&peer).unwrap());
+                    }
+                };
+                if lifetime.is_alive() {
+                    lifetime.commit(&mut take);
+                } else {
+                    take();
+                }
+            }
+        });
+        accepted.map(|_| retired)
+    }
+
     pub(super) fn take_previous_voice(
         &self,
         voice: &mut Option<VoiceSession>,

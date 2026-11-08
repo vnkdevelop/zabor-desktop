@@ -1322,6 +1322,596 @@ async fn peer_video_active_native_preparation_rechecks_original_resources_before
     }).await.unwrap();
 }
 
+#[tokio::test]
+async fn video_transition_take_checks_original_resources_and_keeps_captures_outside_gates() {
+    use libwebrtc::peer_connection_factory::{
+        native::PeerConnectionFactoryExt, PeerConnectionFactory,
+    };
+    struct Probe {
+        intents: Arc<CriticalIntents>,
+        lifetime: PeerLifetime,
+        drops: Arc<AtomicUsize>,
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let _ = self.intents.ticket();
+            let _ = self.lifetime.commit(|| ());
+            self.drops.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    let factory = PeerConnectionFactory::default();
+    let source = NativeVideoSource::new(
+        VideoResolution {
+            width: 160,
+            height: 96,
+        },
+        true,
+    );
+    for path in ["start", "stop", "dropped"] {
+        for occupied in [false, true] {
+            for mode in [
+                "live",
+                "leave",
+                "logout",
+                "window",
+                "missing",
+                "reticket",
+                "dead",
+                "replacement",
+                "poison",
+                "wrong-peer",
+                "no-peer",
+                "deny",
+                "panic",
+            ] {
+                let (mut engine, lifetime) = peer();
+                let (mut other, wrong) = peer();
+                let intents = Arc::new(CriticalIntents::default());
+                let original = intents.ticket();
+                let stop = CancellationToken::new();
+                let receiver_drops = Arc::new(AtomicUsize::new(0));
+                let capture_drops = Arc::new(AtomicUsize::new(0));
+                let mut videos = std::collections::BTreeMap::new();
+                if occupied {
+                    let probe = Probe {
+                        intents: intents.clone(),
+                        lifetime: lifetime.clone(),
+                        drops: receiver_drops.clone(),
+                    };
+                    videos.insert(
+                        "peer".into(),
+                        VideoReceiver::new(
+                            factory.create_video_track("transition-configured", source.clone()),
+                            lifetime.clone(),
+                            Arc::new(move |_| {
+                                let _ = &probe;
+                            }),
+                        ),
+                    );
+                }
+                match mode {
+                    "leave" | "reticket" => {
+                        intents.request(CriticalAction::Leave);
+                        intents.next().await;
+                    }
+                    "logout" => {
+                        intents.request(CriticalAction::Logout);
+                        intents.next().await;
+                    }
+                    "window" => stop.cancel(),
+                    "dead" | "replacement" => {
+                        engine.disconnect_peer("peer");
+                        if mode == "replacement" {
+                            engine
+                                .create_data_channel(
+                                    "peer",
+                                    "transition-replacement",
+                                    DataChannelInit::default(),
+                                )
+                                .unwrap();
+                            assert!(!engine.peer_lifetime("peer").unwrap().is_same(&lifetime));
+                        }
+                    }
+                    "poison" => {
+                        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            lifetime.commit(|| panic!("Expected transition peer poison"))
+                        }))
+                        .is_err());
+                    }
+                    _ => {}
+                }
+                let expected = match mode {
+                    "no-peer" => None,
+                    "wrong-peer" => Some(&wrong),
+                    _ => Some(&lifetime),
+                };
+                let resource_ticket = (mode != "missing").then_some(original);
+                let update =
+                    |_| panic!("Video transition metadata must not publish under acceptance gates");
+                let work = VoiceWork::new(
+                    &intents,
+                    if mode == "reticket" {
+                        intents.ticket()
+                    } else {
+                        original
+                    },
+                    &stop,
+                    &update,
+                );
+                let probe = Probe {
+                    intents: intents.clone(),
+                    lifetime: lifetime.clone(),
+                    drops: capture_drops.clone(),
+                };
+                let mut callbacks = 0;
+                let mut paused = if path == "start" {
+                    std::collections::BTreeSet::from(["peer".to_string()])
+                } else {
+                    std::collections::BTreeSet::new()
+                };
+                let now = Instant::now();
+                let mut grace = zabor_native::video::StreamDropGrace::default();
+                let callbacks_ref = &mut callbacks;
+                let paused_ref = &mut paused;
+                let grace_ref = &mut grace;
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    work.take_video(
+                        &mut videos,
+                        resource_ticket,
+                        expected,
+                        "peer",
+                        move |videos| {
+                            let _ = &probe;
+                            *callbacks_ref += 1;
+                            assert_eq!(videos.contains_key("peer"), occupied);
+                            match path {
+                                "start" => {
+                                    paused_ref.remove("peer");
+                                }
+                                "stop" => {
+                                    paused_ref.insert("peer".into());
+                                }
+                                _ => grace_ref.schedule("peer".into(), now),
+                            }
+                            assert_ne!(mode, "panic", "Expected video transition predicate unwind");
+                            mode != "deny" && path != "dropped"
+                        },
+                    )
+                }));
+                let admitted = matches!(mode, "live" | "deny" | "panic")
+                    || (!occupied && matches!(mode, "no-peer" | "wrong-peer"));
+                assert_eq!(callbacks, usize::from(admitted));
+                assert_eq!(
+                    paused.contains("peer"),
+                    (path == "start" && !admitted) || (path == "stop" && admitted)
+                );
+                assert_eq!(
+                    grace.next_deadline(),
+                    (path == "dropped" && admitted).then_some(now + Duration::from_secs(30))
+                );
+                assert_eq!(result.is_err(), mode == "panic");
+                let extracted =
+                    admitted && mode != "panic" && mode != "deny" && path != "dropped" && occupied;
+                if let Ok(result) = result {
+                    assert_eq!(result.is_some(), admitted);
+                    assert_eq!(result.as_ref().is_some_and(Option::is_some), extracted);
+                    assert_eq!(receiver_drops.load(Ordering::Acquire), 0);
+                    drop(result);
+                }
+                assert_eq!(videos.contains_key("peer"), occupied && !extracted);
+                assert_eq!(
+                    receiver_drops.load(Ordering::Acquire),
+                    usize::from(extracted)
+                );
+                assert_eq!(capture_drops.load(Ordering::Acquire), 1);
+                drop(videos);
+                assert_eq!(
+                    receiver_drops.load(Ordering::Acquire),
+                    usize::from(occupied)
+                );
+                assert_eq!(resource_ticket, (mode != "missing").then_some(original));
+                engine.close();
+                other.close();
+                println!("video transition take path={path} occupied={occupied} mode={mode} original_ticket_peer=true capture_receiver_drop_outside=true physical_audio=false");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn video_transition_retirement_handles_dead_poison_and_partial_unwind_without_native_drop_in_gates(
+) {
+    use libwebrtc::peer_connection_factory::{
+        native::PeerConnectionFactoryExt, PeerConnectionFactory,
+    };
+    struct Probe {
+        intents: Arc<CriticalIntents>,
+        lifetime: PeerLifetime,
+        drops: Arc<AtomicUsize>,
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let _ = self.intents.ticket();
+            let _ = self.lifetime.commit(|| ());
+            self.drops.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    let factory = PeerConnectionFactory::default();
+    let source = NativeVideoSource::new(
+        VideoResolution {
+            width: 160,
+            height: 96,
+        },
+        true,
+    );
+    for selection in ["none", "first", "all"] {
+        for mode in [
+            "live",
+            "dead",
+            "live-poison",
+            "dead-poison",
+            "replacement",
+            "leave",
+            "logout",
+            "window",
+            "missing",
+            "reticket",
+            "panic",
+            "window-during-selection",
+        ] {
+            let (mut first, lifetime) = peer();
+            let (mut second, second_lifetime) = peer();
+            let intents = Arc::new(CriticalIntents::default());
+            let original = intents.ticket();
+            let stop = CancellationToken::new();
+            let drops = [Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0))];
+            let capture_drops = Arc::new(AtomicUsize::new(0));
+            let mut videos = std::collections::BTreeMap::new();
+            for (index, (id, lifetime)) in [("a", &lifetime), ("b", &second_lifetime)]
+                .into_iter()
+                .enumerate()
+            {
+                let probe = Probe {
+                    intents: intents.clone(),
+                    lifetime: lifetime.clone(),
+                    drops: drops[index].clone(),
+                };
+                videos.insert(
+                    id.into(),
+                    VideoReceiver::new(
+                        factory.create_video_track("retirement-configured", source.clone()),
+                        lifetime.clone(),
+                        Arc::new(move |_| {
+                            let _ = &probe;
+                        }),
+                    ),
+                );
+            }
+            if matches!(mode, "live-poison" | "dead-poison") {
+                assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                    || lifetime.commit(|| panic!("Expected retirement peer poison"))
+                ))
+                .is_err());
+            }
+            match mode {
+                "dead" | "dead-poison" | "replacement" => {
+                    first.disconnect_peer("peer");
+                    if mode == "replacement" {
+                        first
+                            .create_data_channel(
+                                "peer",
+                                "retired-original-replacement",
+                                DataChannelInit::default(),
+                            )
+                            .unwrap();
+                        assert!(!first.peer_lifetime("peer").unwrap().is_same(&lifetime));
+                    }
+                }
+                "leave" | "reticket" => {
+                    intents.request(CriticalAction::Leave);
+                    intents.next().await;
+                }
+                "logout" => {
+                    intents.request(CriticalAction::Logout);
+                    intents.next().await;
+                }
+                "window" => stop.cancel(),
+                _ => {}
+            }
+            let update = |_| {};
+            let work = VoiceWork::new(
+                &intents,
+                if mode == "reticket" {
+                    intents.ticket()
+                } else {
+                    original
+                },
+                &stop,
+                &update,
+            );
+            let resource_ticket = (mode != "missing").then_some(original);
+            let probe = Probe {
+                intents: intents.clone(),
+                lifetime: lifetime.clone(),
+                drops: capture_drops.clone(),
+            };
+            let stop_ref = &stop;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                work.retire_videos(&mut videos, resource_ticket, move |id, _| {
+                    let _ = &probe;
+                    let selected = selection == "all" || (selection == "first" && id == "a");
+                    if selected && mode == "window-during-selection" {
+                        stop_ref.cancel();
+                    }
+                    assert!(
+                        !(selected && mode == "panic" && id == "b"),
+                        "Expected second retirement predicate unwind"
+                    );
+                    selected
+                })
+            }));
+            let admitted = !matches!(mode, "leave" | "logout" | "window" | "missing" | "reticket");
+            let unwound = mode == "panic" && selection == "all";
+            assert_eq!(result.is_err(), unwound);
+            let extracted = [
+                admitted
+                    && selection != "none"
+                    && !matches!(mode, "live-poison" | "window-during-selection"),
+                admitted
+                    && selection == "all"
+                    && !matches!(mode, "panic" | "window-during-selection"),
+            ];
+            if let Ok(result) = result {
+                assert_eq!(result.is_some(), admitted);
+                let keys: Vec<_> = result
+                    .as_ref()
+                    .map(|retired| retired.keys().map(String::as_str).collect())
+                    .unwrap_or_default();
+                let expected: Vec<_> = ["a", "b"]
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(i, _)| extracted[*i])
+                    .map(|(_, id)| id)
+                    .collect();
+                assert_eq!(keys, expected);
+                assert!(drops.iter().all(|drops| drops.load(Ordering::Acquire) == 0));
+                drop(result);
+            }
+            for (index, id) in ["a", "b"].into_iter().enumerate() {
+                assert_eq!(videos.contains_key(id), !extracted[index]);
+                assert_eq!(
+                    drops[index].load(Ordering::Acquire),
+                    usize::from(extracted[index])
+                );
+            }
+            assert_eq!(capture_drops.load(Ordering::Acquire), 1);
+            drop(videos);
+            assert!(drops.iter().all(|drops| drops.load(Ordering::Acquire) == 1));
+            first.close();
+            second.close();
+            println!("video transition retire selection={selection} mode={mode} original_identity=true dead_monotonic_admission=true partial_drop_outside=true physical_audio=false");
+        }
+    }
+    let (mut engine, lifetime) = peer();
+    let intents = CriticalIntents::default();
+    let original = intents.ticket();
+    let stop = CancellationToken::new();
+    let update = |_| {};
+    let work = VoiceWork::new(&intents, original, &stop, &update);
+    let mut videos = std::collections::BTreeMap::from([(
+        "peer".into(),
+        VideoReceiver::new(
+            factory.create_video_track("retire-held", source.clone()),
+            lifetime.clone(),
+            Arc::new(|_| {}),
+        ),
+    )]);
+    let (entered, waiting) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let (selected, selecting) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        let lifetime = &lifetime;
+        let holder = scope.spawn(move || {
+            lifetime.commit(|| {
+                entered.send(()).unwrap();
+                held.recv_timeout(Duration::from_secs(3)).unwrap();
+            })
+        });
+        waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+        let work = &work;
+        let videos = &mut videos;
+        let retire = scope.spawn(move || {
+            work.retire_videos(videos, Some(original), |_, _| {
+                selected.send(()).unwrap();
+                true
+            })
+        });
+        selecting.recv_timeout(Duration::from_secs(1)).unwrap();
+        stop.cancel();
+        release.send(()).unwrap();
+        holder.join().unwrap().unwrap();
+        assert!(retire.join().unwrap().unwrap().is_empty());
+    });
+    assert_eq!(videos.len(), 1);
+    assert!(work
+        .retire_videos(&mut videos, Some(original), |_, _| panic!(
+            "Stopped retirement predicate ran"
+        ))
+        .is_none());
+    drop(videos);
+    engine.close();
+    println!("video transition retire held_peer=true stop_after_peer_wait=true original_intent_order=true physical_audio=false");
+}
+
+#[tokio::test]
+async fn video_transition_active_stop_and_restart_recheck_original_frames_before_installation() {
+    use libwebrtc::peer_connection_factory::{
+        native::PeerConnectionFactoryExt, PeerConnectionFactory,
+    };
+    timeout(Duration::from_secs(20), async {
+        let factory = PeerConnectionFactory::default();
+        let source = NativeVideoSource::new(VideoResolution { width: 160, height: 96 }, true);
+        for path in ["stop", "restart"] {
+            for mode in ["live", "leave", "logout", "window", "dead", "replacement"] {
+                let (mut engine, lifetime) = peer();
+                let intents = CriticalIntents::default();
+                let original = intents.ticket();
+                let stop = CancellationToken::new();
+                let generation = AtomicU64::new(7);
+                let update = |_| {};
+                let work = VoiceWork::new(&intents, original, &stop, &update);
+                let (sender, mut frames) = mpsc::channel(16);
+                let mut receiver = VideoReceiver::new(factory.create_video_track("transition-active", source.clone()), lifetime.clone(), frame_sink(sender, original, 7));
+                receiver.start();
+                let mut ticker = tokio::time::interval(Duration::from_millis(33));
+                let old = loop {
+                    tokio::select! {
+                        _ = ticker.tick() => { source.capture_frame(&VideoFrame::new(VideoRotation::VideoRotation0, I420Buffer::new_black(160, 96))); },
+                        frame = frames.recv() => break frame.unwrap(),
+                    }
+                };
+                assert!(old.is_current(&intents, &generation, &stop));
+                if path == "restart" { receiver.stop(); assert!(!old.lease.is_alive()); }
+                let mut videos = std::collections::BTreeMap::from([("alice".into(), receiver)]);
+                let mut receiver = work.take_video(&mut videos, Some(original), Some(&lifetime), "alice", |videos| videos.values().filter(|receiver| receiver.is_playing()).count() < 3).unwrap().unwrap();
+                assert!(videos.is_empty());
+                let new = if path == "restart" {
+                    receiver.start();
+                    let frame = loop {
+                        tokio::select! {
+                            _ = ticker.tick() => { source.capture_frame(&VideoFrame::new(VideoRotation::VideoRotation0, I420Buffer::new_black(160, 96))); },
+                            frame = frames.recv() => { let frame = frame.unwrap(); if frame.lease.is_alive() { break frame; } },
+                        }
+                    };
+                    assert!(frame.is_current(&intents, &generation, &stop));
+                    Some(frame)
+                } else {
+                    receiver.stop();
+                    assert!(!old.lease.is_alive());
+                    None
+                };
+                match mode {
+                    "leave" => { intents.request(CriticalAction::Leave); intents.next().await; },
+                    "logout" => { intents.request(CriticalAction::Logout); intents.next().await; },
+                    "window" => stop.cancel(),
+                    "dead" | "replacement" => {
+                        engine.disconnect_peer("peer");
+                        if mode == "replacement" { engine.create_data_channel("peer", "transition-active-replacement", DataChannelInit::default()).unwrap(); assert!(!engine.peer_lifetime("peer").unwrap().is_same(&lifetime)); }
+                    },
+                    _ => {},
+                }
+                let installed = work.install_video(&mut videos, Some(original), &lifetime, ("alice".into(), receiver), || {});
+                assert_eq!(installed.is_some(), mode == "live");
+                assert_eq!(videos.len(), usize::from(mode == "live"));
+                assert!(!old.is_current(&intents, &generation, &stop));
+                if let Some(frame) = &new { assert_eq!(frame.is_current(&intents, &generation, &stop), mode == "live"); }
+                assert_eq!(generation.load(Ordering::Acquire), 7);
+                assert_eq!(videos.values().filter(|receiver| receiver.is_playing()).count(), usize::from(path == "restart" && mode == "live"));
+                drop(installed); drop(videos);
+                if let Some(frame) = &new { assert!(!frame.lease.is_alive()); }
+                engine.close();
+                println!("video transition active path={path} mode={mode} native_subscription=true original_frame_ticket_generation=true final_recheck=true task_join_claim=false physical_audio=false");
+            }
+        }
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn video_transition_max_three_watch_wire_and_thirty_second_expiry_preserve_contract() {
+    use libwebrtc::peer_connection_factory::{
+        native::PeerConnectionFactoryExt, PeerConnectionFactory,
+    };
+    timeout(Duration::from_secs(20), async {
+        let factory = PeerConnectionFactory::default();
+        let source = NativeVideoSource::new(VideoResolution { width: 160, height: 96 }, true);
+        for (mode, others, occupied, active) in [("absent", 0, false, false), ("one", 0, true, false), ("below", 2, true, false), ("cap", 3, true, false), ("target-counts", 2, true, true)] {
+            let fixture = fixture().await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+            let (mut engine, lifetime) = peer();
+            let intents = CriticalIntents::default();
+            let original = intents.ticket();
+            let stop = CancellationToken::new();
+            let updates = Mutex::new(Vec::new());
+            let update = |event| {
+                let _ = intents.ticket();
+                assert_eq!(lifetime.commit(|| ()), Some(()));
+                updates.lock().unwrap().push(event);
+            };
+            let work = VoiceWork::new(&intents, original, &stop, &update);
+            let mut videos = std::collections::BTreeMap::new();
+            for index in 0..others {
+                let mut receiver = VideoReceiver::new(factory.create_video_track("transition-other", source.clone()), lifetime.clone(), Arc::new(|_| {}));
+                receiver.start();
+                videos.insert(format!("other-{index}"), receiver);
+            }
+            if occupied {
+                let mut receiver = VideoReceiver::new(factory.create_video_track("transition-target", source.clone()), lifetime.clone(), Arc::new(|_| {}));
+                if active { receiver.start(); }
+                videos.insert("peer".into(), receiver);
+            }
+            let playing_before = others + usize::from(active);
+            assert_eq!(videos.values().filter(|receiver| receiver.is_playing()).count(), playing_before);
+            let mut paused = std::collections::BTreeSet::from(["peer".to_string()]);
+            let mut grace = zabor_native::video::StreamDropGrace::default();
+            let now = Instant::now();
+            grace.schedule("peer".into(), now);
+            let expected = videos.get("peer").map(|receiver| receiver.lifetime().clone());
+            let receiver = work.take_video(&mut videos, Some(original), expected.as_ref(), "peer", |videos| {
+                paused.remove("peer");
+                assert_eq!(videos.values().filter(|receiver| receiver.is_playing()).count(), playing_before);
+                playing_before < 3
+            }).unwrap();
+            grace.cancel("peer");
+            let watching = occupied && playing_before < 3;
+            assert_eq!(receiver.is_some(), watching);
+            if let Some(mut receiver) = receiver {
+                receiver.start();
+                assert!(receiver.is_playing());
+                assert!(work.send_peer(receiver.lifetime(), &hub, "SendStreamViewState", vec![json!("peer"), json!("watching")]).await.unwrap().is_ok());
+                let replaced = work.install_video(&mut videos, Some(original), expected.as_ref().unwrap(), ("peer".into(), receiver), || {}).unwrap();
+                assert!(replaced.is_none());
+            }
+            assert!(!paused.contains("peer"));
+            assert_eq!(grace.next_deadline(), None);
+            assert_eq!(videos.values().filter(|receiver| receiver.is_playing()).count(), playing_before + usize::from(watching && !active));
+            work.take_video(&mut videos, Some(original), expected.as_ref(), "peer", |_| { grace.schedule("peer".into(), now); false }).unwrap();
+            assert!(work.commit_resource(Some(original), || grace.take_expired(now + Duration::from_secs(29))).unwrap().is_empty());
+            work.take_video(&mut videos, Some(original), expected.as_ref(), "peer", |_| { grace.schedule("peer".into(), now + Duration::from_secs(20)); false }).unwrap();
+            assert!(work.commit_resource(Some(original), || grace.take_expired(now + Duration::from_secs(30))).unwrap().is_empty());
+            let expired = work.commit_resource(Some(original), || grace.take_expired(now + Duration::from_secs(50))).unwrap();
+            assert_eq!(expired, ["peer"]);
+            for peer in expired {
+                let receiver = work.take_video(&mut videos, Some(original), expected.as_ref(), &peer, |_| { paused.insert(peer.clone()); true }).unwrap();
+                if let Some(mut receiver) = receiver {
+                    receiver.stop();
+                    let replaced = work.install_video(&mut videos, Some(original), expected.as_ref().unwrap(), (peer.clone(), receiver), || {}).unwrap();
+                    assert!(replaced.is_none());
+                }
+                work.publish(UiEvent::RemoveVideo(peer.clone()));
+                work.publish(UiEvent::Hub(super::HubEvent { target: "UserStoppedStreaming".into(), arguments: vec![json!(peer)] }));
+            }
+            assert!(paused.contains("peer"));
+            assert_eq!(grace.next_deadline(), None);
+            assert_eq!(videos.values().filter(|receiver| receiver.is_playing()).count(), others);
+            {
+            let updates = updates.lock().unwrap();
+            assert_eq!(updates.len(), 2);
+            assert!(matches!(&updates[0], UiEvent::Guarded(ticket, IntentScope::Voice, event) if *ticket == original && matches!(event.as_ref(), UiEvent::RemoveVideo(peer) if peer == "peer")));
+            assert!(matches!(&updates[1], UiEvent::Guarded(ticket, IntentScope::Voice, event) if *ticket == original && matches!(event.as_ref(), UiEvent::Hub(event) if event.target == "UserStoppedStreaming" && event.arguments == [json!("peer")])));
+            }
+            hub.send("Hold", vec![]).await.unwrap();
+            fixture.held.notified().await;
+            hub.close();
+            let requests = fixture.server.await.unwrap();
+            let views: Vec<_> = requests.iter().filter(|request| request["target"] == "SendStreamViewState").collect();
+            assert_eq!(views.len(), usize::from(watching));
+            for request in views { assert_eq!(request["arguments"], json!(["peer", "watching"])); }
+            drop(videos); engine.close();
+            println!("video transition watch mode={mode} max_three_includes_target=true exact_two_arg_wire=true repeated_grace_seconds=30 expiry_ui_outside_gates=true physical_audio=false");
+        }
+    }).await.unwrap();
+}
+
 fn frame_sink(
     sender: mpsc::Sender<FrameUpdate>,
     ticket: IntentTicket,

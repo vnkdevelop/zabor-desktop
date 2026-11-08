@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `9f98397`: peer-exclusive metadata
-acceptance и original-ticket/lifetime извлечение/установка нового видеотрека.
-Final `peer-acceptance-final-2026-11-08` прошёл311default/301neural-disabled tests
+Последний проверенный компонентный этап после `f2c5340`: original-resource video
+transition/retirement admission;native start/stop/Drop остаются вне acceptance gates.
+Final `video-transition-final-2026-11-08` прошёл315default/305neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`3a2b502bc32b0e342d8ba716c80d4a1b962fdbb5d75f3439c92c468591eb0a83`.
+`2418139faf5cf14f7d5780491edb70d619d762fde007da2621757dbaa7f63682`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
 compact;actual saved commit брать из Git и
-`native-calls/peer-acceptance-post-save-2026-11-08/saved-boundary.json`.
+`native-calls/video-transition-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Историческийd2f889d6… resource-metadata binary не заменяет
+visual/physical gates. Исторический3a2b502b… peer-acceptance binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,93 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Video transition and retirement admission — checked locally 2026-11-08
+
+- Saved predecessor **f2c5340fae2819072f161c81c98a978d3f92210e**;post-save
+  **sh_1b9c37c70001jSxKHsmb8IRRs0 completed/passed**:clean tree,438/3/24/current+
+  frozen executable+ONNX/3SDK/final-independent-source-predecessor proofs matched.
+- Two new VoiceWork helpers only. take_video holds unchanged original-resource
+  Voice intent then original selected receiver peer acceptance;requires same Arc
+  identity. Optional missing peer is admitted only when no receiver slot exists.
+  Borrowed FnMut metadata/eligibility observes map before extraction,including target
+  in max3 playing count. Extracted receiver owns subscription outside both gates.
+  Native start/stop and watching-send remain outside gates;three final install_video
+  calls reuse original Voice ticket/lifetime after native mutation or protocol wait.
+- retire_videos holds original Voice intent and individual original live peer gates;
+  already-dead atomic lifetime is monotonic,so dead extraction does not require live
+  peer acceptance. Selected FnMut predicate and outer retirement map keep captures
+  and extracted resources outside gates on rejection/unwind. Window stop rechecked
+  after peer wait and before extraction. Live poisoned peer stays in map until native
+  invalidation;dead poisoned peer can be retired,never reopened or reticketed. Partial
+  rejection/window cancellation can leave some slots unextracted;Some(retired) means
+  initial intent admitted,not complete/bounded native cleanup. Native Drop is outside.
+- Four transition take sites:StreamDropped scheduling metadata,UserStarted/Stopped,
+  ExpireStreams. Three native stop/start final installations. Three retirement sites:
+  UserLeft/UserDeleted,event dead receiver prune,successful Join membership prune.
+  StreamDropGrace extraction/paused metadata use original resource ticket;grace cancel/
+  UI publication outside gates. UserLeft retains native receiver Drop before Voice
+  handle/peer invalidation. Refusal due live poisoned peer does not skip subsequent
+  Voice.handle or Session event processing;that native invalidation can enable later
+  dead prune. Absent-slot paused removal is separately original-ticket guarded.
+- Four new tests **sh_1b9ca7dec0011UvUPHsu64ebyP passed4**:78configured take cases
+  (3paths/occupied-empty/13live-revoked-poison-missing-mismatched/deny/unwind modes),
+  36configured two-receiver retire cases plus1held peer/window-stop case;12active local
+  native stop/restart/frame rechecks and5max3/exact2argument local watching protocol/
+  repeated30second grace/expiry UI cases. Frame Voice ticket/generation7/lease retained;
+  target-playing receiver counts toward cap before extraction. No physical endpoints,
+  two-device or native subscription task-join/native syscall deadline claim.
+- Source scope `native-calls/video-transition-source-audit-2026-11-08.json` passed
+  438primary/3reference/3SDK:three existing sources,no added sources. Outside2helpers/
+  4new tests/4worker scopes exactly equals savedf2c5340;all existing strict intent/
+  Session/Voice/PeerLifetime/audio/metadata/incoming-video methods and other worker
+  scopes unchanged. Native video/peer/SDK implementation unchanged. Source helper
+  deleted immediately. Development Graphify **sh_1b9cae6f9001zVQWKSNrwjsP5t passed**:
+  5980nodes/14686edges/256communities;existing7metadata warnings/HTML5000limit retained.
+- Full **sh_1b9cd887b001eiaRI15WmwJIRC completed/passed**:
+  `native-calls/video-transition-final-2026-11-08/`;315default/305neural-disabled,
+  bothClippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI auth/roster/audio/
+  MicTest+Graphify. Protected neural metrics unchanged. Independent
+  `native-calls/video-transition-final-independent-2026-11-08.json` passed0mismatches:
+  438primary/3reference/24evidence/current+frozen exe+ONNX/3SDK/source/final/predecessor+
+  post-save/parser proofs checked. All311/301previous names/multiplicity retained;
+  four new tests/main32/VoiceWork19/media3/every prior suite verified in both modes.
+  Each mode132new/496prior markers and all prior diagnostic signatures/multiplicity
+  verified,normalizing only measured `_ms`. Prior13protocol waits/3normal Logout/
+  4partial-poison/original Voice Leave-Logout tail_runs=0 preserved. Independent source
+  reconstruction outside2helpers/4tests/4worker scopes exactly equals savedf2c5340.
+  All existing strict intent/Session/Voice/PeerLifetime/audio/metadata/incoming-video
+  methods and native video runtime/start/stop/decoder/peer callbacks unchanged.
+- Initial independent parser saw314/315default names:existing `leave stalled-session`
+  diagnostic interleaved the pass line for actual_logout_worker_registers_durable_clear_
+  before_blocked_resource_cleanup atline240,with `ok` onnextline. Raw proof and initial
+  parser SHA retained in `native-calls/video-transition-independent-log-interleave-
+  2026-11-08.json`. Added existing logout-admission/leave-stalled diagnostic prefixes
+  to signature/multiplicity audit in both predecessor/current logs,then removed only
+  those verified diagnostic strings before exact pass-name parsing. Corrected audit
+  passed315/305/all311/301previous names. No raw logs,sources,counts or deadlines edited.
+- Executable **2418139faf5cf14f7d5780491edb70d619d762fde007da2621757dbaa7f63682**.
+  FinalProof **790b288d7f85e7b9a98ef31048cdcca702ffd8d83cbae4d7018c62f61fd65e56**.
+  IndependentProoffb838c0f…;SourceScopeProofc56486fc…;ParserProof6a5802c7….
+  All source/final/independent temporary launchers removed immediately,no helper or
+  profile cleanup debt. Save narrow videoTransitionResourceAcceptanceChecked and
+  videoRetirementResourceAcceptanceChecked,then post-saveGraphify/frozen source+
+  evidence/current-frozen exe+ONNX/3SDK/predecessor+parser proofs/clean-tree guard/
+  compact. No next source patch before guard. Full/native/worker/audio/call=false.
+- Next:remaining reconnect/Join/Call/Answer/Leave/worker-end map clears and general
+  video subscription task/native sink lifecycle before shared-runtime/monitor
+  acquisition/maintenance/reset/start/factory admission and lifecycle ownership.
+  libwebrtc0.4.0 native/video_stream.rs inspected read-only:NativeVideoStream.close
+  calls native remove_sink before frame_queue.close;Drop calls close. Current
+  VideoSubscription.Drop active=false/abort does not observe JoinHandle completion,
+  hence frame-lease invalidation is not native callback/sink/task teardown proof.
+  Any task-cleanup observer must retain original future/JoinHandle and register before
+  native stream/sink acquisition,not infer completion from lost observers. Do not
+  silently reuse audio cleanup sealing as generalized video shutdown authority or
+  introduce native off-thread Drop without establishing ownership/teardown safety.
+  General native Voice/audio/health/destructor/worker/UI/driver/socket/Windows journal/
+  filesystem/chat-final-save/media-SFU-control/UI-profile-import-packaging/visual-
+  physical-two-device/full-client gates remain false. No push/merge/release/shutdown.
 
 ## Peer-exclusive incoming-video acceptance — checked locally 2026-11-08
 
@@ -100,9 +187,8 @@ push/merge/release/shutdown не выполнялись. После каждог
   FinalProof **2cfa0c3dee344dd6d160f5fa98af53e031e97f8b0f3058797962ec8335c4476d**.
   IndependentProof7c885fc0…;SourceScopeProofb91bc091…;all source/final/independent
   temporary helpers deleted immediately,no helper/profile cleanup debt.
-  Save narrow peerExclusiveCommitChecked/incomingVideoResourceAcceptanceChecked,
-  then post-saveGraphify/frozen source-evidence/current-frozen binary-ONNX/dependency/
-  predecessor-proof/clean-tree guard/compact. No next source patch before guard.
+  Savedf2c5340fae2819072f161c81c98a978d3f92210e/post-saveGraphify/frozen sources+
+  evidence/current-frozen binary+ONNX/dependency/proof/clean-tree guard passed.
 - Next:remaining UserStarted/StoppedStreaming,UserLeft/prune/ExpireStreams receiver
   extraction/start/stop admission and shared-runtime/monitor acquisition/lifecycle.
   Live receiver restart/stop admission should stage/extract subscription or receiver

@@ -1926,30 +1926,49 @@ async fn worker(
                             audio_controls.set_server_state(user.is_server_muted, user.is_server_deafened);
                         }
                         if event.target == "StreamDropped" && voice_work.as_ref().is_some_and(VoiceWork::is_current) {
-                            if let Some(peer) = event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer))) { stream_drops.schedule(peer.into(), std::time::Instant::now()); }
+                            if let (Some(work), Some(peer)) = (voice_work.as_ref(), event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)))) {
+                                let lifetime = video_jobs.get(peer).map(|receiver| receiver.lifetime().clone());
+                                work.take_video(&mut video_jobs, voice_ticket, lifetime.as_ref(), peer, |_| { stream_drops.schedule(peer.into(), std::time::Instant::now()); false });
+                            }
                         }
                         if event.target == "UserStoppedStreaming" {
                             if let (Some(work), Some(peer)) = (voice_work.as_ref().filter(|work| work.is_current()), event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)))) {
-                                paused_video.insert(peer.into());
-                                stream_drops.cancel(peer);
-                                if let Some(receiver) = video_jobs.get_mut(peer) { receiver.stop(); }
-                                work.publish(UiEvent::RemoveVideo(peer.into()));
+                                let lifetime = video_jobs.get(peer).map(|receiver| receiver.lifetime().clone());
+                                if let Some(receiver) = work.take_video(&mut video_jobs, voice_ticket, lifetime.as_ref(), peer, |_| { paused_video.insert(peer.into()); true }) {
+                                    stream_drops.cancel(peer);
+                                    if let Some(mut receiver) = receiver {
+                                        receiver.stop();
+                                        let replaced = work.install_video(&mut video_jobs, voice_ticket, lifetime.as_ref().unwrap(), (peer.into(), receiver), || {});
+                                        drop(replaced);
+                                    }
+                                    work.publish(UiEvent::RemoveVideo(peer.into()));
+                                }
                             }
                         }
                         if event.target == "UserStartedStreaming" {
                             if let (Some(work), Some(peer)) = (voice_work.as_ref().filter(|work| work.is_current()), event.arguments.first().and_then(serde_json::Value::as_str).filter(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)))) {
-                                paused_video.remove(peer);
-                                stream_drops.cancel(peer);
-                                if video_jobs.values().filter(|receiver| receiver.is_playing()).count() < 3 {
-                                    if let Some(receiver) = video_jobs.get_mut(peer) {
+                                let lifetime = video_jobs.get(peer).map(|receiver| receiver.lifetime().clone());
+                                if let Some(receiver) = work.take_video(&mut video_jobs, voice_ticket, lifetime.as_ref(), peer, |videos| { paused_video.remove(peer); videos.values().filter(|receiver| receiver.is_playing()).count() < 3 }) {
+                                    stream_drops.cancel(peer);
+                                    if let Some(mut receiver) = receiver {
                                         receiver.start();
                                         if receiver.is_playing() { if let Some(hub) = &hub { let _ = work.send_peer(receiver.lifetime(), hub, "SendStreamViewState", vec![json!(peer), json!("watching")]).await; } }
+                                        let replaced = work.install_video(&mut video_jobs, voice_ticket, lifetime.as_ref().unwrap(), (peer.into(), receiver), || {});
+                                        drop(replaced);
                                     }
                                 }
                             }
                         }
                         if matches!(event.target.as_str(), "UserLeft" | "UserDeleted") {
-                            if let (Some(work), Some(peer)) = (voice_work.as_ref().filter(|work| work.is_current()), event.arguments.first().and_then(serde_json::Value::as_str)) { video_jobs.remove(peer); paused_video.remove(peer); stream_drops.cancel(peer); work.publish(UiEvent::RemoveVideo(peer.into())); }
+                            if let (Some(work), Some(peer)) = (voice_work.as_ref().filter(|work| work.is_current()), event.arguments.first().and_then(serde_json::Value::as_str)) {
+                                if let Some(retired) = work.retire_videos(&mut video_jobs, voice_ticket, |id, _| id == peer) {
+                                    drop(retired);
+                                    if work.commit_resource(voice_ticket, || { if video_jobs.contains_key(peer) { false } else { paused_video.remove(peer); true } }) == Some(true) {
+                                        stream_drops.cancel(peer);
+                                        work.publish(UiEvent::RemoveVideo(peer.into()));
+                                    }
+                                }
+                            }
                         }
                         if matches!(event.target.as_str(), "FriendAdded" | "FriendRequestAccepted") {
                             if let Some(user) = event.arguments.first().and_then(|value| serde_json::from_value::<zabor_native::auth::User>(value.clone()).ok()) { if !user.id.is_empty() && current_user.as_ref().is_none_or(|owner| owner.id != user.id) && !friends.contains(&user.id) { friends.push(user.id); } }
@@ -2059,8 +2078,9 @@ async fn worker(
                             if result.is_none() { continue; }
                         }
                         if let Some(work) = voice_work.as_ref().filter(|work| work.is_current()) {
-                            video_jobs.retain(|peer, receiver| { if receiver.is_alive() { true } else { stream_drops.cancel(peer); work.publish(UiEvent::RemoveVideo(peer.clone())); false } });
-                            paused_video.retain(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)));
+                            let Some(retired) = work.retire_videos(&mut video_jobs, voice_ticket, |_, receiver| !receiver.is_alive()) else { continue; };
+                            for (peer, receiver) in retired { stream_drops.cancel(&peer); work.publish(UiEvent::RemoveVideo(peer)); drop(receiver); }
+                            if work.commit_resource(voice_ticket, || paused_video.retain(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)))).is_none() { continue; }
                             if event.target == "ForceLeaveVoice" || voice.as_ref().is_some_and(|voice| voice.channel.is_none() && voice.call_peer.is_none()) {
                                 let Some(disposed) = work.take_voice(&mut voice, &mut media_events, voice_ticket, |_| {}) else { continue; };
                                 drop(disposed);
@@ -2372,11 +2392,38 @@ async fn worker(
             if !work.is_current() {
                 continue;
             }
-            for peer in stream_drops.take_expired(std::time::Instant::now()) {
+            let Some(expired) = work.commit_resource(voice_ticket, || {
+                stream_drops.take_expired(std::time::Instant::now())
+            }) else {
+                continue;
+            };
+            for peer in expired {
                 if voice.as_ref().is_some_and(|voice| voice.has_peer(&peer)) {
-                    paused_video.insert(peer.clone());
-                    if let Some(receiver) = video_jobs.get_mut(&peer) {
+                    let lifetime = video_jobs
+                        .get(&peer)
+                        .map(|receiver| receiver.lifetime().clone());
+                    let Some(receiver) = work.take_video(
+                        &mut video_jobs,
+                        voice_ticket,
+                        lifetime.as_ref(),
+                        &peer,
+                        |_| {
+                            paused_video.insert(peer.clone());
+                            true
+                        },
+                    ) else {
+                        continue;
+                    };
+                    if let Some(mut receiver) = receiver {
                         receiver.stop();
+                        let replaced = work.install_video(
+                            &mut video_jobs,
+                            voice_ticket,
+                            lifetime.as_ref().unwrap(),
+                            (peer.clone(), receiver),
+                            || {},
+                        );
+                        drop(replaced);
                     }
                     work.publish(UiEvent::RemoveVideo(peer.clone()));
                     work.publish(UiEvent::Hub(HubEvent {
@@ -3124,7 +3171,14 @@ async fn worker(
                     };
                     match joined {
                         Ok(users) => {
-                            video_jobs.retain(|peer, _| users.iter().any(|user| &user.id == peer));
+                            let Some(retired) = join_work.retire_videos(
+                                &mut video_jobs,
+                                voice_ticket,
+                                |peer, _| !users.iter().any(|user| user.id == peer),
+                            ) else {
+                                return Err(AuthError::Network);
+                            };
+                            drop(retired);
                             Ok(UiEvent::Voice(channel, users))
                         }
                         Err(error) => {
