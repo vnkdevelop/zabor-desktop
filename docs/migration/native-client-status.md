@@ -14,6 +14,19 @@ Compaction/continuation context: [native-client-handoff.md](native-client-handof
 
 ## Где остановилась исходная сессия
 
+Сохранённый этап **`0dcfef75fa2dfcd35cac38b0724c27b412682445`** после `5b8d656`/`e3cc8cd`: миниатюры desktop/window/camera,
+два столбца источников, явное исключение собственного HWND и обновление раз в пять
+секунд с сохранением живого выбора. Прошли 130 затронутых тестов, normal/fixture
+Clippy, native build и расширенные RU/EN inert проверки. Старые миниатюры очищаются
+при ошибке превью/закрытии выбора/retirement/exit. Это не готовность клиента.
+Исходный зарегистрированный native actor и Voice/query tickets
+сохраняются через отмену, UI не ждёт весь preview pass. Pinned SDK уже исключает окна
+своего процесса; клиент добавляет точный HWND guard. Подробности и оставшиеся границы:
+[native-picker-thumbnails.md](native-picker-thumbnails.md).
+Graphify: 6502 nodes/16134 edges/283 communities; прежние семь zero-node warnings
+и HTML limit 5000 остаются. Следующий блок — adaptive bitrate/viewer interest/SFU/
+remote control. Physical/full-client acceptance, публикация и shutdown не выполнены.
+
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
 
 Рабочая ветка: `rust/native-client`. Checkpoint рабочего Electron/WASM-клиента перед переносом: `d088795`. Нативный код находится в `rust/crates/zabor-native`; состояние этой ветки не означает перенос в основную пользовательскую папку или публикацию релиза.

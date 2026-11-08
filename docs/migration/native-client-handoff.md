@@ -10,10 +10,11 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **5b8d6563e46827e60b25c03d103752e8e7a40588**:
-isolated desktop/window stream audio,180targeted tests/fmt/normal+fixture
-Clippy/normal native build/RUEN inert picker и Graphify passed,clean tree confirmed.
-Camera source **df43be2** retained;physical camera/audio/complete client readiness=false.
+сборкой. Latest saved source commit — **0dcfef75fa2dfcd35cac38b0724c27b412682445**:
+query-owned desktop/window/camera thumbnails,own-HWND filter,130targeted tests/fmt/
+normal+fixtureClippy/nativebuild/expandedRUENinertpicker/Graphifypassed.
+Audio source **5b8d656** and camera **df43be2** retained;physical camera/audio/
+complete client readiness=false. Metadata-only continuation save follows this source.
 no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
@@ -50,6 +51,70 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Picker thumbnails — saved checked components 2026-11-08
+
+- Resumed saved source5b8d656,metadatae3cc8cd,clean rust/native-client tree.
+  Implemented two-column RGBA thumbnail tiles,exact own-HWND filtering,safe winit
+  handle lookup and five-second query-owned refresh. Pinned SDK already excludes
+  current-process windows;explicit client filter is defense in depth,not a claim
+  that prior SDK did no filtering. Reference/locale/dependency pins unchanged.
+- PickerQuery registers original blocking actor before native acquisition;inventory
+  publishes before sequential previews,so command worker does not await whole pass.
+  Desktop uses existing SDK,camera uses existing NativeOwner/Completion/no RTC track.
+  Original Voice/query tickets gate inventory/images;tab/modal/Leave/Logout/app exit
+  cancel original query;running native task remains observed after await cancellation.
+- Initial fmt command failed because cargo is not on current PATH;explicit
+  C:\Users\porad\.cargo\bin\cargo.exe fmt succeeded. **sh_1bada8990001JNOMx1kCO2Q29f
+  failed** because CriticalIntents lacked originalVoice token for independent jobs.
+  Added readonly voice_token(original ticket) from existingchangedepoch;Leave/Logout
+  revoke it,Session remains independent. Existingcommit/run linearization unchanged.
+  CorrectednewSlintcontentproperty deprecations,notunrelatedsettingsscrollwarning.
+  **sh_1baddb957001KczMV1CigxAyjV passed**130tests/bothClippy/build/RUEN.
+  Privacycompletion nowclearsfailedpreviewpixels andsource models onclose/retire/exit;
+  expandedinertcheckscoverHWND,pixels,wrongtab/unknownid,two columns/oddlastrow/live
+  selection retention/removal. **sh_1baec841e001HAYfaHjEfZffIp failed**after34library
+  testspassed:Image.size() isEuclidSize2D,notPhysicalSize. Width/heighttuplecorrected.
+  **sh_1baefc137001FV4vB6eeUE029m passed**remaining96shellguards,bothClippy/build,
+  expandedRUEN and16scopedsource/normalbinarychecks;unchanged34libresultsreused.
+  Total130affectedtests;checkednormalcamera fixturemarkersabsent. Stagebinarynot
+  newfullclientattestation. Evidencecorrected/verification.json. No pending jobs.
+  FirstGraphify **sh_1baeccdef001L5HvC4XW8jb49M passed**6502nodes/16134edges/
+  280communities,existing7warnings/HTML5000limit. FinalsourceGraphify andguardedsave
+  **sh_1baf6c8a1001Go1EG5r89HxMmJ passed**6502nodes/16134edges/283communities;
+  source **0dcfef75fa2dfcd35cac38b0724c27b412682445**,12nativepaths/16checkedhashes,
+  reusedlibrarysourcesunchanged,only3continuationdocsremain. StagebinarySHA256
+  ae231c2988d641e92e00d73627be61d011ea25af83ceb6c94aac999db94c2a97,
+  notfull-clientattestation. No pendingjobs. Scope:native-picker-thumbnails.md.
+- Affected tests,normal/fixtureClippy,normalbuild,RUEN expanded inert interactions
+  passed;source/Graphify savedabove. Application icons/loading skeleton/pair-settings exact
+  layout,physical privacy/hotplug/long-session/universalnativebounds and all adaptive
+  bitrate/SFU/RC/profile/import/packaging/finalacceptance remain open. No devices/
+  production/push/publication/shutdown. Source0dcfef7saved;wholeclientnotready.
+- Continueaftermetadata/compact from0dcfef7;nojobsrequirewaiting. Nextfunctionalgroup:
+  adaptivebitrate/viewerinterest/SFU/remotecontrol,thenremainingUI/profile/GIF/crop/
+  avatar/import/rollback/packaging/updater/licenses/signatures and alloriginal
+  ownership/data-integrity/finalphysical/paritygates. KeeporiginalVoice/Session/
+  peer/frame/UI tickets,pinneddependencies,separatemic/monitor/shareownership and
+  registerednativecleanup. Do notrepeatcomprehensive/default/neural/multihash/visual
+  matrixuntilfunctionalcompletion. Finishallacceptancebeforepush3.8.0-rust/
+  publication/nonforcedWindowsshutdown;nevermerge main automatically.
+- Next grouped stage reference map,read-only exploration completed:
+  webrtc.ts7219-7260 viewerinterest/preview;7263-7416 loss ladder/profile and2500ms
+  stats;8063-8560 SFUpublisher,P2Psenderactivity,fallback,deliveryepochs andviewer
+  snapshots. signalr.ts958-971 receivesviewerstate/publishrequired/deliverymode/
+  fallback/ready;2211-2252 sendsviewstate/SfuPublish/SfuSubscribe/unsubscribe/ready/
+  keyframe/failure. Native Voice.handle currently lacks theseSFU targets;do not
+  claimexistingP2P fallback equalsSFUmigration. Pinnedlibwebrtc has asyncget_stats
+  returningVec<RtcStats>,RtpEncodingParameters.active/scale_resolution_down_by and
+  typedRemoteInbound/outbound counters. Keepretainedlow2.5/medium3.5/high6.0initial
+  sendercontract/cameradefaults while portingreference'sadaptiveprofile separately;
+  referenceadaptive/SFUmiddlebaseline is3.0,not3.5. Do not silentlyrewriteoldproofs.
+  SFUpublishermustcarryonlyvideo/optionalshareaudio,nevermicrophone. PreserveP2P
+  peers/capture/quality andoriginalVoice/routeepochs;native acquisition/mutation/
+  Drop stayoutsideacceptancegates. RC reference remoteControl.ts useszabor-rc-v1/
+  4243,exactLEpackets,whitelist andshortcutfilters. FullremainingUI/profile/import/
+  packaging/data-integrity/nativeownership/finalacceptance gates unchanged.
 
 ## Isolated stream audio — verified functional stage 2026-11-08
 
