@@ -102,6 +102,43 @@ impl Drop for AudioSessionRestore<'_> {
     }
 }
 
+pub struct AudioSessionLogout<'a> {
+    preferences: &'a AudioPreferences,
+    state: Option<MutexGuard<'a, State>>,
+    session: Option<HubConnection>,
+    stop: CancellationToken,
+    applied: bool,
+}
+
+impl AudioSessionLogout<'_> {
+    pub fn apply(&mut self) {
+        if self.applied {
+            return;
+        }
+        let state = self.state.as_mut().unwrap();
+        std::mem::swap(&mut state.session, &mut self.session);
+        state.epoch = state.epoch.wrapping_add(1);
+        state.dirty = false;
+        state.editable = false;
+        state.serial = state.serial.wrapping_add(1);
+        self.applied = true;
+    }
+}
+
+impl Drop for AudioSessionLogout<'_> {
+    fn drop(&mut self) {
+        if self.applied {
+            self.preferences
+                .changed
+                .send_replace(self.state.as_ref().unwrap().serial);
+        }
+        drop(self.state.take());
+        if self.applied {
+            self.stop.cancel();
+        }
+    }
+}
+
 impl AudioPreferences {
     pub fn new(local: &Value) -> Arc<Self> {
         let mut local = local.clone();
@@ -337,6 +374,21 @@ impl AudioPreferences {
             state.editable = false;
             self.notify(&mut state);
         }
+    }
+
+    pub fn try_prepare_logout(&self) -> Result<Option<AudioSessionLogout<'_>>, &'static str> {
+        let state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(TryLockError::WouldBlock) => return Ok(None),
+            Err(TryLockError::Poisoned(_)) => return Err("audio preferences unavailable"),
+        };
+        Ok(Some(AudioSessionLogout {
+            preferences: self,
+            stop: state.session_stop.clone(),
+            state: Some(state),
+            session: None,
+            applied: false,
+        }))
     }
 
     fn ticket(&self) -> Option<SaveTicket> {

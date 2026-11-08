@@ -731,10 +731,40 @@ Verified13main/9preferences/10profile/6SessionIo proof suites and all retained
 Actual/frozen executable SHA-256:
 `561f80f11e6d21bb134ef145d9170f99904710b299a4e0c24ef35116b5d5e217`.
 audioRestorationWorkChecked=true is narrow component acceptance only;
-source save/post-save Graphify/guard/compact next, no push/release/shutdown.
+saved23fb7141d3c723f9ee47bf0d80a99d5afdaf6906/post-save Graphify/438-source/
+3reference/24evidence/current+frozen binary/clean-tree guard passed, compact done;
+no push/release/shutdown.
 Failed-auth/runtime cleanup and resume
 ChatEngine::set_friends storage work still have external waits under intent gate;
 actual UI/OS/worker/client bounds and readiness remainfalse. No new acceptance.
+
+### Failed-auth audio reset intent gate: components checked locally
+
+Preference/demand/MicTest/runtime preparation tries all resource locks before
+the original-ticket intent commit. Application uses only extraction/swaps/atomics;
+pending factory has a revocation marker before deferred cancellation and remains
+quarantined until its owning startup returns. Deferred old-token/watch/device
+cleanup runs after intent/resource guards release. Worker-state acceptance uses
+a second strict commit with the same ticket, extracting old objects for teardown
+outside gate. Contention wait is pinned and Leave-aware, Logout/window-cancelable.
+438-source development108tests/fmt/Clippy passed; independent438/3/freeze/exact
+counts match.7new resource/cancel/owner/clip/single-start/legacy preference tests
+passed. Preserved legacy partial cleanup for individual poisoned resource locks
+without clearing poison, returning explicit incompletefalse; added2poison tests.
+Corrected v2development110tests passed; independent438/3/freeze/exact suite counts
+match. All four poison cases retained legacy partial cleanup/poison/false-result.
+Final `native-calls/audio-reset-final-2026-11-08/` passed253default/243neural-disabled
+tests, both Clippy modes/fmt/pinned/9HTTP/neural/freshbuild and8inert RUEN/four-DPI
+interactions; protected neural metrics unchanged. Independent438primary+3reference/
+all24evidence/current+frozen executable+ONNX audit found0mismatches/exact7existing
+changes/no added modules.9new tests and16main/10preferences/6runtime/3MicTest/
+10profile/6SessionIo suites plus13stalled protocol/late-resume/original-ticket
+RTP/voice/Leave controls verified in both modes. Executable SHA-256:
+`c98d1f357c56568041318d68a35bd2362fa3303023efa61a79b6c7407e1c6ab3`.
+audioResetIntentWorkChecked=true is narrow component acceptance only;
+source save/post-save Graphify/guard/compact next, no push/release/shutdown.
+Normal worker/
+UI/native synchronous cleanup, chat-storage/actualOS/fullclient bounds remainfalse.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

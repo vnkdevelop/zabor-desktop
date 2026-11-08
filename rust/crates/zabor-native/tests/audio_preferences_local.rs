@@ -517,6 +517,81 @@ async fn prepared_restore_resource_locks_never_hold_priority_intent_gate() {
 }
 
 #[tokio::test]
+async fn prepared_logout_matches_legacy_without_losing_discarded_saves_or_touching_next_owner() {
+    timeout(Duration::from_secs(8), async {
+        let mut fixture = Fixture::new().await;
+        let preferences = AudioPreferences::new(&json!({"language":"en"}));
+        let legacy = AudioPreferences::new(&json!({"language":"en"}));
+        for prefs in [&preferences, &legacy] {
+            assert!(prefs.begin_session("alice", fixture.hub.clone(), None));
+            assert!(prefs.edit("alice", "inputVolume", json!(175)));
+        }
+        let stop = CancellationToken::new();
+        let failures = Arc::new(AtomicUsize::new(0));
+        let observed = failures.clone();
+        let remote = tokio::spawn(preferences.clone().run_remote(
+            stop.clone(),
+            Arc::new(move || {
+                observed.fetch_add(1, Ordering::AcqRel);
+            }),
+        ));
+        let pending = fixture.request().await;
+        for revoked in [false, true] {
+            let intents = CriticalIntents::default();
+            let ticket = intents.ticket();
+            let mut logout = preferences.try_prepare_logout().unwrap().unwrap();
+            assert!(preferences.try_prepare_logout().unwrap().is_none());
+            if revoked {
+                intents.request(CriticalAction::Logout);
+                assert!(intents
+                    .commit(ticket, IntentScope::Session, || logout.apply())
+                    .is_none());
+            }
+            drop(logout);
+            assert!(preferences.edit("alice", "inputVolume", json!(175)));
+        }
+        pending.reply.send(Value::Null).unwrap();
+        assert!(timeout(Duration::from_millis(650), fixture.requests.recv())
+            .await
+            .is_err());
+        let controls_revision = preferences
+            .controls
+            .settings_revision
+            .load(Ordering::Acquire);
+        legacy.logout();
+        {
+            let mut logout = preferences.try_prepare_logout().unwrap().unwrap();
+            logout.apply();
+            logout.apply();
+        }
+        assert_eq!(preferences.settings(), legacy.settings());
+        assert_eq!(
+            preferences
+                .controls
+                .settings_revision
+                .load(Ordering::Acquire),
+            controls_revision
+        );
+        assert!(!preferences.edit("alice", "outputVolume", json!(140)));
+        assert!(preferences.begin_session(
+            "bob",
+            fixture.hub.clone(),
+            Some(&json!({"inputVolume":31}))
+        ));
+        assert!(preferences.edit("bob", "outputVolume", json!(140)));
+        let latest = fixture.request().await;
+        assert_eq!(latest.settings["inputVolume"], json!(31.0));
+        assert_eq!(latest.settings["outputVolume"], json!(140.0));
+        latest.reply.send(Value::Null).unwrap();
+        stop.cancel();
+        remote.await.unwrap();
+        assert_eq!(failures.load(Ordering::Acquire), 0);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn untouched_profile_is_not_rewritten_and_storage_failure_is_explicit() {
     let temporary = tempfile::tempdir().unwrap();
     let profile = Arc::new(Profile::open(temporary.path()).unwrap());

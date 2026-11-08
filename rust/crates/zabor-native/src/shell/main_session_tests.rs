@@ -1,6 +1,7 @@
 use super::{
-    main_session, restore_audio, restore_audio_session, AuthClient, Command, CommandQueue,
-    MainResult, SessionWork, UiEvent, VoiceLeave, VoiceSession, VoiceWork,
+    main_session, reset_audio_session, restore_audio, restore_audio_session,
+    try_reset_audio_session, AuthClient, Command, CommandQueue, MainResult, SessionWork, UiEvent,
+    VoiceLeave, VoiceSession, VoiceWork,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -1177,4 +1178,189 @@ async fn logout_between_audio_acceptance_and_worker_acceptance_rejects_original_
     assert_eq!(preferences.settings().unwrap().input_volume, 31.0);
     hub.close();
     fixture.server.await.unwrap();
+}
+
+#[tokio::test]
+async fn held_failed_auth_preferences_services_leave_and_cancels_logout_or_window_before_reset() {
+    timeout(Duration::from_secs(15), async {
+        for action in ["leave", "logout", "window"] {
+            let fixture = fixture("unused").await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+            let preferences = AudioPreferences::new(&json!({"inputVolume":99}));
+            assert!(preferences.begin_session("original-owner", hub.clone(), None));
+            let held = Arc::new(Notify::new());
+            let (release, blocked) = std::sync::mpsc::channel();
+            let holder = {
+                let preferences = preferences.clone();
+                let held = held.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _held = preferences.try_prepare_logout().unwrap().unwrap();
+                    held.notify_one();
+                    blocked.recv().unwrap();
+                })
+            };
+            held.notified().await;
+            let intents = Arc::new(CriticalIntents::default());
+            let ticket = intents.ticket();
+            let stop = CancellationToken::new();
+            let audio = audio(&stop);
+            let monitor = audio.monitor(true);
+            let now = Instant::now();
+            let capture = audio.mic_test.begin(now).unwrap();
+            audio.mic_test.prepared(capture, now);
+            audio.mic_test.snapshot(now + zabor_native::mic_test::MONITOR_SETTLE);
+            for index in 0..500 {
+                assert!(audio.mic_test.capture(
+                    capture, &[0.1; 480], -20.0,
+                    now + zabor_native::mic_test::MONITOR_SETTLE + zabor_native::mic_test::PIPELINE_FLUSH + Duration::from_millis(index * 10),
+                ));
+            }
+            let original = audio.mic_test.snapshot(now);
+            let started = Arc::new(Notify::new());
+            let commits = Arc::new(AtomicUsize::new(0));
+            let (sender, mut published) = mpsc::unbounded_channel();
+            let (commands, mut queued) = mpsc::channel(16);
+            let queue = CommandQueue { sender: commands, intents: intents.clone() };
+            for _ in 0..16 { queue.try_send(Command::Join("old-channel".into())).unwrap_or_else(|_| panic!("Voice FIFO fixture failed")); }
+            let task = {
+                let preferences = preferences.clone();
+                let audio = audio.clone();
+                let intents = intents.clone();
+                let stop = stop.clone();
+                let started = started.clone();
+                let commits = commits.clone();
+                tokio::spawn(async move {
+                    let update = |event| { let _ = sender.send(event); };
+                    let work = SessionWork::new(&intents, ticket, &stop, &update);
+                    let future = reset_audio_session(&work, &preferences, &audio);
+                    tokio::pin!(future);
+                    let mut first = true;
+                    let started_future = std::future::poll_fn(|cx| {
+                        let result = future.as_mut().poll(cx);
+                        if first { first = false; started.notify_one(); }
+                        result
+                    });
+                    let generation = AtomicU64::new(1);
+                    let result = drive(&work, ticket, &audio, &generation, None, started_future).await;
+                    if let Some(Some(true)) = result {
+                        assert!(work.commit(|| commits.fetch_add(1, Ordering::AcqRel)).is_some());
+                    }
+                    result
+                })
+            };
+            started.notified().await;
+            let measured = Instant::now();
+            if action == "leave" {
+                for _ in 0..2 {
+                    queue.try_send(Command::Leave).unwrap_or_else(|_| panic!("Priority Leave failed"));
+                    assert!(matches!(timeout(Duration::from_millis(1500), published.recv()).await.unwrap().unwrap().for_current(&intents), Some(UiEvent::VoiceEnded)));
+                    assert_eq!(audio.demand.active(), 0);
+                    assert!(monitor.is_current());
+                    assert_eq!(audio.mic_test.snapshot(now), original);
+                    assert!(!task.is_finished());
+                }
+                release.send(()).unwrap();
+                holder.await.unwrap();
+                assert_eq!(task.await.unwrap(), Some(Some(true)));
+                assert_eq!(commits.load(Ordering::Acquire), 1);
+                assert!(!monitor.is_current());
+                assert!(!audio.mic_test.has_demand());
+                assert_eq!(audio.mic_test.snapshot(now).stored_samples, 0);
+                assert!(!preferences.edit("original-owner", "outputVolume", json!(140)));
+                for _ in 0..16 { let command = queued.try_recv().unwrap(); assert!(!intents.is_current(command.ticket, command.command.scope())); }
+            } else {
+                if action == "logout" { queue.try_send(Command::Logout).unwrap_or_else(|_| panic!("Priority Logout failed")); } else { stop.cancel(); }
+                assert!(timeout(Duration::from_millis(1500), task).await.unwrap().unwrap().is_none());
+                assert_eq!(commits.load(Ordering::Acquire), 0);
+                assert_eq!(audio.mic_test.snapshot(now), original);
+                release.send(()).unwrap();
+                holder.await.unwrap();
+                assert!(preferences.edit("original-owner", "outputVolume", json!(140)));
+            }
+            println!("audio reset held=preferences-lock action={action} fixture_ms={} original_ticket=true detached_jobs=0 physical_audio=false", measured.elapsed().as_millis());
+            hub.close();
+            fixture.server.await.unwrap();
+        }
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn failed_auth_reset_releases_partial_resources_and_rechecks_original_ticket_before_worker_cleanup(
+) {
+    let fixture = fixture("unused").await;
+    let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+        .await
+        .unwrap();
+    let preferences = AudioPreferences::new(&json!({"inputVolume":99}));
+    assert!(preferences.begin_session("original-owner", hub.clone(), None));
+    let intents = CriticalIntents::default();
+    let ticket = intents.ticket();
+    let stop = CancellationToken::new();
+    let update = |_| {};
+    let work = SessionWork::new(&intents, ticket, &stop, &update);
+    let audio = audio(&stop);
+    let old = audio.monitor(true);
+    {
+        let held = audio.try_prepare_reset().unwrap().unwrap();
+        assert!(try_reset_audio_session(&work, &preferences, &audio).is_none());
+        assert!(preferences.try_prepare_logout().unwrap().is_some());
+        drop(held);
+    }
+    assert!(old.is_current());
+    assert_eq!(
+        reset_audio_session(&work, &preferences, &audio).await,
+        Some(true)
+    );
+    assert!(!old.is_current());
+    assert!(preferences.try_prepare_logout().unwrap().is_some());
+    assert!(audio.try_prepare_reset().unwrap().is_some());
+    intents.request(CriticalAction::Logout);
+    assert!(work
+        .commit(|| panic!("Stale failed-auth worker cleanup ran"))
+        .is_none());
+    assert_eq!(intents.next().await, CriticalAction::Logout);
+    assert!(preferences.begin_session("next-owner", hub.clone(), Some(&json!({"inputVolume":31}))));
+    let current = audio.monitor(true);
+    let generation = audio.demand.reserve().unwrap();
+    audio.demand.activate(generation);
+    assert!(reset_audio_session(&work, &preferences, &audio)
+        .await
+        .is_none());
+    assert!(current.is_current());
+    assert_eq!(audio.demand.active(), generation);
+    assert!(preferences.edit("next-owner", "outputVolume", json!(140)));
+    hub.close();
+    fixture.server.await.unwrap();
+}
+
+#[tokio::test]
+async fn failed_auth_preference_poison_still_resets_runtime_and_reports_incomplete_cleanup() {
+    let preferences = AudioPreferences::new(&json!({"inputVolume":99}));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _held = preferences.try_prepare_logout().unwrap().unwrap();
+        panic!("Expected preference fixture poison");
+    }))
+    .is_err());
+    let intents = CriticalIntents::default();
+    let ticket = intents.ticket();
+    let stop = CancellationToken::new();
+    let update = |_| {};
+    let work = SessionWork::new(&intents, ticket, &stop, &update);
+    let audio = audio(&stop);
+    let old = audio.monitor(true);
+    assert_eq!(
+        reset_audio_session(&work, &preferences, &audio).await,
+        Some(false)
+    );
+    assert_eq!(audio.demand.active(), 0);
+    assert!(!old.is_current());
+    assert!(!audio.mic_test.has_demand());
+    assert!(preferences.try_prepare_logout().is_err());
+    intents.request(CriticalAction::Logout);
+    let current = audio.monitor(true);
+    assert!(reset_audio_session(&work, &preferences, &audio)
+        .await
+        .is_none());
+    assert!(current.is_current());
+    println!("audio reset poison=preferences legacy_partial=true poison_retained=true complete=false physical_audio=false");
 }

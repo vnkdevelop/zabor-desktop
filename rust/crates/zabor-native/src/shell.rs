@@ -2708,21 +2708,26 @@ async fn worker(
                 }
                 Ok(LoginOutcome::NeedsRegistration)
                 | Err(AuthError::InvalidPassword | AuthError::ClientRejected) => {
+                    let reset = run_session!(
+                        auth_work,
+                        reset_audio_session(&auth_work, &audio_preferences, &audio_runtime)
+                    );
+                    let Some(Some(reset)) = reset else {
+                        continue;
+                    };
                     let Some(disposed) = auth_work.commit(|| {
-                        audio_preferences.logout();
-                        audio_runtime.reset();
-                        saved_credentials = None;
-                        current_user = None;
-                        file_progress.clear();
                         chat_failed = false;
-                        friends.clear();
-                        selected_chat = None;
                         (
                             file_jobs.take(),
                             chat.take(),
                             chat_transport.take(),
                             voice.take(),
                             media_events.take(),
+                            saved_credentials.take(),
+                            current_user.take(),
+                            std::mem::take(&mut file_progress),
+                            std::mem::take(&mut friends),
+                            selected_chat.take(),
                         )
                     }) else {
                         continue;
@@ -2730,9 +2735,15 @@ async fn worker(
                     if let Some(mut engine) = disposed.1 {
                         engine.fail_downloads(None, now_ms());
                     }
-                    drop((disposed.0, disposed.2, disposed.3, disposed.4));
+                    drop((
+                        disposed.0, disposed.2, disposed.3, disposed.4, disposed.5, disposed.6,
+                        disposed.7, disposed.8, disposed.9,
+                    ));
                     auth_work.publish(UiEvent::VoiceEnded);
                     auth_work.publish(UiEvent::SignedOut);
+                    if !reset {
+                        auth_work.publish(UiEvent::Toast("validation.sessionSaveError"));
+                    }
                     if matches!(
                         run_session!(auth_work, session_io.clear(command_ticket)),
                         Some(Err(_))
@@ -3275,6 +3286,57 @@ fn reconcile_volume_modal(ui: &NativeApp) {
         ui.set_volume_name("".into());
         ui.set_peer_volume(100.0);
     }
+}
+
+async fn reset_audio_session<D: zabor_native::audio_runtime::SharedAudioDevice>(
+    work: &SessionWork<'_>,
+    preferences: &AudioPreferences,
+    runtime: &SharedAudio<D>,
+) -> Option<bool> {
+    loop {
+        if !work.is_current() {
+            return None;
+        }
+        if let Some(result) = try_reset_audio_session(work, preferences, runtime) {
+            return result;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+fn try_reset_audio_session<D: zabor_native::audio_runtime::SharedAudioDevice>(
+    work: &SessionWork<'_>,
+    preferences: &AudioPreferences,
+    runtime: &SharedAudio<D>,
+) -> Option<Option<bool>> {
+    let mut logout = match preferences.try_prepare_logout() {
+        Ok(None) => return None,
+        Ok(logout) => logout,
+        Err(_) => None,
+    };
+    let mut reset = match runtime.try_prepare_reset() {
+        Ok(None) => return None,
+        Ok(reset) => reset,
+        Err(_) => None,
+    };
+    let result = work.commit(|| {
+        if let Some(logout) = &mut logout {
+            logout.apply();
+        }
+        if let Some(reset) = &mut reset {
+            reset.apply();
+        }
+        logout.is_some()
+            && reset
+                .as_ref()
+                .is_some_and(|reset| reset.resources_complete())
+    });
+    if let Some(reset) = &mut reset {
+        reset.release_resources();
+    }
+    drop(logout);
+    drop(reset);
+    Some(result)
 }
 
 async fn restore_audio_session(

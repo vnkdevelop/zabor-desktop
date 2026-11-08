@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 
 pub const SAMPLE_RATE: usize = 48000;
@@ -175,6 +175,21 @@ pub struct MicTest {
     state: Mutex<State>,
 }
 
+pub(crate) struct MicTestDispose<'a> {
+    state: MutexGuard<'a, State>,
+    replaced: State,
+    applied: bool,
+}
+
+impl MicTestDispose<'_> {
+    pub(crate) fn apply(&mut self) {
+        if !self.applied {
+            std::mem::swap(&mut *self.state, &mut self.replaced);
+            self.applied = true;
+        }
+    }
+}
+
 impl Default for MicTest {
     fn default() -> Self {
         Self {
@@ -208,6 +223,27 @@ impl MicTest {
             state.enabled = false;
             state.visible = false;
         }
+    }
+
+    pub(crate) fn try_prepare_dispose(&self) -> Result<Option<MicTestDispose<'_>>, &'static str> {
+        let state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(TryLockError::WouldBlock) => return Ok(None),
+            Err(TryLockError::Poisoned(_)) => return Err("microphone test unavailable"),
+        };
+        let replaced = State {
+            generation: state.generation.wrapping_add(1),
+            input_revision: state.input_revision,
+            playback_revision: state.playback_revision.wrapping_add(1),
+            render_sequence: state.render_sequence,
+            meter_db: -100.0,
+            ..State::default()
+        };
+        Ok(Some(MicTestDispose {
+            state,
+            replaced,
+            applied: false,
+        }))
     }
 
     pub fn begin(&self, now: Instant) -> Option<CaptureToken> {
@@ -528,5 +564,42 @@ mod tests {
         });
         assert_eq!(test.snapshot(Instant::now()).position_seconds, 0.01);
         assert!(!test.played(ticket, 7));
+    }
+
+    #[test]
+    fn prepared_dispose_preserves_discarded_clip_and_revokes_once_without_dropping_it_during_apply()
+    {
+        let test = MicTest::default();
+        let now = Instant::now();
+        test.configure(true, true);
+        let token = test.begin(now).unwrap();
+        test.prepared(token, now);
+        test.snapshot(now + MONITOR_SETTLE);
+        for index in 0..500 {
+            assert!(test.capture(
+                token,
+                &[0.1; 480],
+                -20.0,
+                now + MONITOR_SETTLE + PIPELINE_FLUSH + Duration::from_millis(index * 10),
+            ));
+        }
+        let original = test.snapshot(now);
+        let ticket = test.render(&mut [0.0; 960], 7, 1.0).unwrap();
+        drop(test.try_prepare_dispose().unwrap().unwrap());
+        assert_eq!(test.snapshot(now), original);
+        assert!(test.validate_playback(ticket, 7));
+        let mut prepared = test.try_prepare_dispose().unwrap().unwrap();
+        assert!(test.try_prepare_dispose().unwrap().is_none());
+        prepared.apply();
+        let generation = prepared.state.generation;
+        prepared.apply();
+        assert_eq!(prepared.state.generation, generation);
+        assert_eq!(prepared.replaced.clip.as_ref().unwrap().len(), CLIP_SAMPLES);
+        assert!(prepared.state.clip.is_none());
+        drop(prepared);
+        assert!(!test.has_demand());
+        assert!(!test.validate_playback(ticket, 7));
+        assert!(!test.capture(token, &[0.1; 480], -20.0, now));
+        assert_eq!(test.snapshot(now), MicTestSnapshot::default());
     }
 }

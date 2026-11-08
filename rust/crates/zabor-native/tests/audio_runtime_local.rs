@@ -230,6 +230,41 @@ async fn cancelled_start_stays_quarantined_until_its_owning_factory_returns() {
 }
 
 #[tokio::test]
+async fn prepared_reset_quarantines_the_old_factory_before_deferred_token_cancellation() {
+    let stats = Stats::new(0);
+    let shared = shared(stats.clone(), CancellationToken::new());
+    let old = Arc::new(shared.monitor(true));
+    let waiting = old.clone();
+    let task = tokio::spawn(async move { waiting.ready().await });
+    stats.started().await;
+    let mut reset = shared.try_prepare_reset().unwrap().unwrap();
+    reset.apply();
+    reset.apply();
+    reset.release_resources();
+    assert!(!stats.tokens.lock().unwrap()[0].is_cancelled());
+    let current = shared.monitor(true);
+    assert!(current.ready().await.is_err());
+    assert_eq!(stats.starts.load(Ordering::Acquire), 1);
+    stats.gate.add_permits(1);
+    assert!(tokio::time::timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_err());
+    assert!(stats.tokens.lock().unwrap()[0].is_cancelled());
+    assert!(!old.is_current());
+    assert!(current.is_current());
+    stats.gate.add_permits(1);
+    let device = current.ready().await.unwrap();
+    drop(reset);
+    assert!(!device.failed());
+    assert!(current.is_current());
+    assert_eq!(stats.starts.load(Ordering::Acquire), 2);
+    assert_eq!(stats.maximum.load(Ordering::Acquire), 1);
+    shared.reset();
+}
+
+#[tokio::test]
 async fn old_monitor_and_voice_leases_cannot_reactivate_or_dispose_a_new_owner() {
     let stats = Stats::new(2);
     let shared = shared(stats, CancellationToken::new());
