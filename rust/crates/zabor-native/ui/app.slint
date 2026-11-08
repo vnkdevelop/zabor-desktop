@@ -50,6 +50,7 @@ export component NativeApp inherits Window {
     in property <bool> profile-friend;
     in-out property <bool> profile-editing;
     in-out property <bool> profile-saving;
+    in-out property <int> profile-request-status;
     in-out property <bool> authenticated;
     in-out property <bool> connected;
     in-out property <int> active-tab;
@@ -144,6 +145,7 @@ export component NativeApp inherits Window {
     callback open-profile(string);
     callback edit-profile;
     callback cancel-profile-edit;
+    callback add-profile-friend;
     callback save-profile;
     callback submit-modal(int, string);
     callback choose-channel(string);
@@ -532,9 +534,10 @@ export component NativeApp inherits Window {
                         Text { text: "@" + root.profile-login; font-size: 16px; font-weight: 700; color: #ee68a9; }
                         if root.profile-about != "" : Text { text: root.profile-about; font-size: 14px; color: #f2f3f5; wrap: word-wrap; }
                         if root.profile-friend && root.profile-id != root.user-id : HorizontalLayout { spacing: 16px;
-                            FormButton { label: root.tr("profile.chat", root.language); activated => { root.choose-friend(root.profile-id); root.modal = 0; } }
-                            FormButton { label: root.tr("profile.call", root.language); primary: true; disabled: root.busy || !root.connected; activated => { root.call-friend(root.profile-id); root.modal = 0; } }
+                            FormButton { label: root.tr("profile.chat", root.language); activated => { root.active-tab = 1; root.choose-friend(root.profile-id); root.modal = 0; } }
+                            FormButton { label: root.tr("profile.call", root.language); primary: true; disabled: root.busy || !root.connected || !root.profile-online; activated => { root.call-friend(root.profile-id); root.modal = 0; } }
                         }
+                        if !root.profile-friend && root.profile-id != root.user-id : FormButton { label: root.tr(root.profile-request-status == 2 ? "modals.addFriend.sent" : root.profile-request-status == 1 ? "common.loading" : "modals.addFriend.title", root.language); primary: true; disabled: root.profile-request-status != 0 || root.busy || !root.connected; activated => { root.add-profile-friend(); } }
                         FormButton { label: root.tr("common.close", root.language); activated => { root.modal = 0; } }
                     }
                     if root.profile-editing : VerticalLayout { spacing: 12px; alignment: start; vertical-stretch: 0;

@@ -17,6 +17,8 @@ pub(super) fn is_session_command(command: &Command) -> bool {
             | Command::Captcha
             | Command::Modal { .. }
             | Command::UpdateProfile(..)
+            | Command::LookupProfile(..)
+            | Command::ProfileAddFriend(..)
             | Command::Notification(
                 NotificationKind::Friend | NotificationKind::Channel,
                 _,
@@ -50,6 +52,34 @@ pub(super) async fn compute(
             .captcha()
             .await
             .map(|captcha| MainResult::Event(UiEvent::Captcha(captcha))),
+        Command::LookupProfile(query) => {
+            let result = if user.as_ref().is_some_and(|user| user.id == query.owner)
+                && query.id != query.owner
+            {
+                tokio::select! {
+                    biased;
+                    _ = query.stop.cancelled() => Err(AuthError::Network),
+                    result = auth.get_user_by_username(&query.username) => result,
+                }
+            } else {
+                Err(AuthError::Network)
+            };
+            Ok(MainResult::Event(UiEvent::ProfileLookup(query, result)))
+        }
+        Command::ProfileAddFriend(query) => {
+            let sent = if user.as_ref().is_some_and(|user| user.id == query.owner)
+                && query.id != query.owner
+            {
+                tokio::select! {
+                    biased;
+                    _ = query.stop.cancelled() => false,
+                    result = connection.invoke("SendFriendRequest", vec![serde_json::json!(query.username)], Duration::from_secs(20)) => matches!(result, Ok(serde_json::Value::Bool(true))),
+                }
+            } else {
+                false
+            };
+            Ok(MainResult::Event(UiEvent::ProfileFriendResult(query, sent)))
+        }
         Command::UpdateProfile(update, query) => {
             let user = user.ok_or(AuthError::Network)?;
             let result = tokio::select! {

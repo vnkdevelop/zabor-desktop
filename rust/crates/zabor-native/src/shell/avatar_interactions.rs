@@ -182,6 +182,60 @@ pub(super) fn check(ui: &NativeApp) -> Result<(), &'static str> {
     if *saves.borrow() != 1 {
         return Err("Profile save pointer callback missing");
     }
+    ui.set_profile_editing(false);
+    ui.set_profile_id("peer-action-fixture".into());
+    ui.set_profile_name("Peer".into());
+    ui.set_profile_login("peer".into());
+    ui.set_profile_about("".into());
+    ui.set_profile_friend(true);
+    ui.set_connected(true);
+    ui.set_busy(false);
+    ui.set_profile_online(false);
+    let calls = Rc::new(RefCell::new(0));
+    let count = calls.clone();
+    ui.on_call_friend(move |_| *count.borrow_mut() += 1);
+    click(630.0, 490.0);
+    if *calls.borrow() != 0 || ui.get_modal() != 9 {
+        return Err("Offline peer profile dispatched a call or closed the modal");
+    }
+    ui.set_profile_online(true);
+    click(630.0, 490.0);
+    if *calls.borrow() != 1 || ui.get_modal() != 0 {
+        return Err("Online profile call pointer callback missing");
+    }
+    ui.set_modal(9);
+    ui.set_voice_active(true);
+    ui.set_active_tab(0);
+    let chats = Rc::new(RefCell::new(0));
+    let count = chats.clone();
+    ui.on_choose_friend(move |_| *count.borrow_mut() += 1);
+    click(450.0, 490.0);
+    if *chats.borrow() != 1
+        || ui.get_active_tab() != 1
+        || !ui.get_voice_active()
+        || ui.get_modal() != 0
+    {
+        return Err("Profile chat failed to select friends without leaving Voice");
+    }
+    ui.set_modal(9);
+    ui.set_profile_friend(false);
+    ui.set_profile_request_status(0);
+    let additions = Rc::new(RefCell::new(0));
+    let count = additions.clone();
+    ui.on_add_profile_friend(move || *count.borrow_mut() += 1);
+    click(550.0, 490.0);
+    if *additions.borrow() != 1 || ui.get_modal() != 9 {
+        return Err("Profile add-friend pointer callback missing or closed modal");
+    }
+    for status in [1, 2] {
+        ui.set_profile_request_status(status);
+        click(550.0, 490.0);
+        if *additions.borrow() != 1 {
+            return Err("Loading/sent profile add-friend dispatched a duplicate");
+        }
+    }
+    ui.set_profile_request_status(0);
+    ui.set_voice_active(false);
     ui.set_modal(0);
     ui.set_authenticated(false);
     ui.set_auth_step(0);

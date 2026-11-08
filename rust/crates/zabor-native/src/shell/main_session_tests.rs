@@ -67,6 +67,9 @@ fn answer(method: &str) -> Value {
         "GetIceServers" => json!({"iceServers":[]}),
         "GetRegistrationCaptcha" => json!({"id":"fixture-captcha","imageBase64":"fixture-image"}),
         "UpdateProfile" => Value::Null,
+        "GetUserByUsername" => {
+            json!({"id":"fixture-peer","username":"Fixture","displayName":"Fresh Peer","isOnline":false,"friendRequestsReceived":["fixture-owner"]})
+        }
         "CheckUserExists"
         | "EnableCallResume"
         | "CreateChannel"
@@ -83,6 +86,14 @@ async fn fixture(hold: &'static str) -> Fixture {
 }
 
 async fn fixture_with_login(hold: &'static str, login_result: Value) -> Fixture {
+    fixture_with_response(hold, login_result, None).await
+}
+
+async fn fixture_with_response(
+    hold: &'static str,
+    login_result: Value,
+    held_result: Option<Value>,
+) -> Fixture {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/zabor_v3", listener.local_addr().unwrap());
     let held = Arc::new(Notify::new());
@@ -128,7 +139,7 @@ async fn fixture_with_login(hold: &'static str, login_result: Value) -> Fixture 
             tokio::select! {
                 _ = server_release.notified(), if waiting.is_some() => {
                     let request = waiting.take().unwrap();
-                     let result = if hold == "Login" { login_result.clone() } else { answer(hold) };
+                     let result = if hold == "Login" { login_result.clone() } else { held_result.clone().unwrap_or_else(|| answer(hold)) };
                      let _ = socket.send(Message::text(encode(&json!({"type":3,"invocationId":request["invocationId"],"result":result})).unwrap())).await;
                     server_answered.notify_one();
                 },
@@ -149,7 +160,8 @@ async fn fixture_with_login(hold: &'static str, login_result: Value) -> Fixture 
                             if method == "LoginAndResume" { assert_eq!(request["arguments"].as_array().unwrap().len(), 3); assert_eq!(request["arguments"][2], RESUME_SESSION); }
                             if method == "Login" { assert_eq!(request["arguments"].as_array().unwrap().len(), 2); }
                             if matches!(method, "CreateChannel" | "SendFriendRequest") { assert_eq!(request["arguments"], json!(["Fixture"])); }
-                            if method == "UpdateProfile" { assert_eq!(request["arguments"], json!(["New Name", null, "#123abc", "about me"])); }
+                             if method == "UpdateProfile" { assert_eq!(request["arguments"], json!(["New Name", null, "#123abc", "about me"])); }
+                             if method == "GetUserByUsername" { assert_eq!(request["arguments"], json!(["Fixture"])); }
                             if matches!(method, "AcceptFriendRequest" | "DeclineFriendRequest" | "DeclineChannelInvite") { assert_eq!(request["arguments"], json!(["fixture-id"])); }
                             if method == hold {
                                 assert!(waiting.is_none());
@@ -327,6 +339,323 @@ fn profile_update() -> zabor_native::auth::ProfileUpdate {
         color: "#123abc".into(),
         about: " about me ".into(),
     }
+}
+
+fn peer_query(intents: &CriticalIntents) -> super::profile_lookup::Request {
+    super::profile_lookup::Request::new("fixture-owner", "fixture-peer", " Fixture ", intents)
+        .unwrap()
+}
+
+#[tokio::test]
+async fn peer_lookup_keeps_original_session_future_and_trimmed_wire_on_priority_leave() {
+    timeout(Duration::from_secs(10), async {
+        let fixture = fixture("GetUserByUsername").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let intents = Arc::new(CriticalIntents::default());
+        let query = peer_query(&intents);
+        let original = query.clone();
+        let controls = intents.clone();
+        let connection = hub.clone();
+        let task = tokio::spawn(async move {
+            let stop = CancellationToken::new();
+            let audio = audio(&stop);
+            let generation = AtomicU64::new(0);
+            let update = |_| {};
+            let work = SessionWork::new(&controls, query.ticket, &stop, &update);
+            drive(
+                &work,
+                query.ticket,
+                &audio,
+                &generation,
+                Some(&connection),
+                main_session::compute(
+                    Command::LookupProfile(query),
+                    &AuthClient::new(connection.clone()),
+                    &connection,
+                    Some(user()),
+                ),
+            )
+            .await
+        });
+        fixture.held.notified().await;
+        intents.request(CriticalAction::Leave);
+        fixture.release.notify_one();
+        let Some(Ok(MainResult::Event(UiEvent::ProfileLookup(query, Ok(Some(peer)))))) =
+            task.await.unwrap()
+        else {
+            panic!("lookup did not finish across Leave")
+        };
+        assert!(query.same(&original) && query.alive());
+        assert_eq!(query.ticket, original.ticket);
+        assert!(query.matches_user(&peer));
+        assert_eq!(peer.friend_requests_received, ["fixture-owner"]);
+        assert!(!peer.is_online);
+        hub.close();
+        assert_eq!(
+            fixture
+                .server
+                .await
+                .unwrap()
+                .iter()
+                .filter(|method| method.as_str() == "GetUserByUsername")
+                .count(),
+            1
+        );
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn peer_lookup_logout_observes_original_future_exit_and_discards_late_server_reply() {
+    timeout(Duration::from_secs(10), async {
+        let fixture = fixture("GetUserByUsername").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let intents = CriticalIntents::default();
+        let query = peer_query(&intents);
+        let original = query.clone();
+        let connection = hub.clone();
+        let task = tokio::spawn(async move {
+            main_session::compute(
+                Command::LookupProfile(query),
+                &AuthClient::new(connection.clone()),
+                &connection,
+                Some(user()),
+            )
+            .await
+        });
+        fixture.held.notified().await;
+        intents.request(CriticalAction::Logout);
+        let MainResult::Event(event) = timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("lookup result changed kind")
+        };
+        assert!(event.for_current(&intents).is_none());
+        assert!(!original.alive());
+        fixture.release.notify_one();
+        fixture.answered.notified().await;
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), ["GetUserByUsername"]);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn profile_add_friend_requires_literal_true_and_never_reloads_or_closes_profile() {
+    timeout(Duration::from_secs(10), async {
+        for reply in [json!(true), json!(false), Value::Null] {
+            let fixture =
+                fixture_with_response("SendFriendRequest", json!(user()), Some(reply.clone()))
+                    .await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+                .await
+                .unwrap();
+            let intents = CriticalIntents::default();
+            let query = peer_query(&intents);
+            let original = query.clone();
+            let connection = hub.clone();
+            let task = tokio::spawn(async move {
+                main_session::compute(
+                    Command::ProfileAddFriend(query),
+                    &AuthClient::new(connection.clone()),
+                    &connection,
+                    Some(user()),
+                )
+                .await
+            });
+            fixture.held.notified().await;
+            fixture.release.notify_one();
+            let MainResult::Event(UiEvent::ProfileFriendResult(query, sent)) =
+                task.await.unwrap().unwrap()
+            else {
+                panic!("add-friend did not return its typed result")
+            };
+            assert!(query.same(&original));
+            assert_eq!(sent, reply == true);
+            hub.close();
+            assert_eq!(fixture.server.await.unwrap(), ["SendFriendRequest"]);
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn profile_add_friend_survives_leave_once_but_original_session_logout_cancels_acceptance() {
+    timeout(Duration::from_secs(15), async {
+        for logout in [false, true] {
+            let fixture = fixture("SendFriendRequest").await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+                .await
+                .unwrap();
+            let intents = Arc::new(CriticalIntents::default());
+            let query = peer_query(&intents);
+            let original = query.clone();
+            let controls = intents.clone();
+            let connection = hub.clone();
+            let task = tokio::spawn(async move {
+                let stop = CancellationToken::new();
+                let audio = audio(&stop);
+                let generation = AtomicU64::new(0);
+                let update = |_| {};
+                let work = SessionWork::new(&controls, query.ticket, &stop, &update);
+                drive(
+                    &work,
+                    query.ticket,
+                    &audio,
+                    &generation,
+                    Some(&connection),
+                    main_session::compute(
+                        Command::ProfileAddFriend(query),
+                        &AuthClient::new(connection.clone()),
+                        &connection,
+                        Some(user()),
+                    ),
+                )
+                .await
+            });
+            fixture.held.notified().await;
+            intents.request(if logout {
+                CriticalAction::Logout
+            } else {
+                CriticalAction::Leave
+            });
+            if logout {
+                assert!(timeout(Duration::from_secs(2), task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .is_none());
+                assert!(!original.alive());
+                assert!(UiEvent::ProfileFriendResult(original, true)
+                    .for_current(&intents)
+                    .is_none());
+                fixture.release.notify_one();
+                fixture.answered.notified().await;
+            } else {
+                assert!(original.alive());
+                fixture.release.notify_one();
+                let Some(Ok(MainResult::Event(UiEvent::ProfileFriendResult(query, true)))) =
+                    task.await.unwrap()
+                else {
+                    panic!("Leave lost original friend result")
+                };
+                assert!(query.same(&original));
+            }
+            hub.close();
+            assert_eq!(
+                fixture
+                    .server
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter(|method| method.as_str() == "SendFriendRequest")
+                    .count(),
+                1
+            );
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn peer_lookup_null_or_malformed_reply_does_not_fabricate_a_selected_user() {
+    timeout(Duration::from_secs(10), async {
+        for reply in [Value::Null, json!(false), json!({"id":"fixture-peer"})] {
+            let fixture =
+                fixture_with_response("GetUserByUsername", json!(user()), Some(reply.clone()))
+                    .await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+                .await
+                .unwrap();
+            let query = peer_query(&CriticalIntents::default());
+            let connection = hub.clone();
+            let task = tokio::spawn(async move {
+                main_session::compute(
+                    Command::LookupProfile(query),
+                    &AuthClient::new(connection.clone()),
+                    &connection,
+                    Some(user()),
+                )
+                .await
+            });
+            fixture.held.notified().await;
+            fixture.release.notify_one();
+            let MainResult::Event(UiEvent::ProfileLookup(_, result)) = task.await.unwrap().unwrap()
+            else {
+                panic!("lookup reply changed result kind")
+            };
+            if reply.is_null() {
+                assert!(matches!(result, Ok(None)));
+            } else {
+                assert!(result.is_err());
+            }
+            hub.close();
+            assert_eq!(fixture.server.await.unwrap(), ["GetUserByUsername"]);
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn cancelled_or_foreign_profile_queries_never_dispatch_from_the_original_queue() {
+    timeout(Duration::from_secs(10), async {
+        let fixture = fixture("GetUserByUsername").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let intents = CriticalIntents::default();
+        for cancelled in [false, true] {
+            for lookup in [false, true] {
+                let query = peer_query(&intents);
+                if cancelled {
+                    query.stop.cancel();
+                }
+                let mut owner = user();
+                if !cancelled {
+                    owner.id = "other-owner".into();
+                }
+                let command = if lookup {
+                    Command::LookupProfile(query)
+                } else {
+                    Command::ProfileAddFriend(query)
+                };
+                let MainResult::Event(event) = main_session::compute(
+                    command,
+                    &AuthClient::new(hub.clone()),
+                    &hub,
+                    Some(owner),
+                )
+                .await
+                .unwrap() else {
+                    panic!("profile rejection changed result kind")
+                };
+                if cancelled {
+                    assert!(event.for_current(&intents).is_none());
+                } else {
+                    assert!(matches!(
+                        event,
+                        UiEvent::ProfileLookup(_, Err(_)) | UiEvent::ProfileFriendResult(_, false)
+                    ));
+                }
+            }
+        }
+        hub.close();
+        assert!(fixture.server.await.unwrap().is_empty());
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

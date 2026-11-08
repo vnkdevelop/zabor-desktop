@@ -1,3 +1,4 @@
+use super::profile_lookup::{Cache as ProfileCache, Lookup, Request as ProfileRequest};
 use super::{color, show_error, Bootstrap, Command, CommandQueue, NativeApp, UiEvent};
 use sha2::{Digest, Sha256};
 use slint::{ComponentHandle, Model, Timer, TimerMode};
@@ -83,6 +84,10 @@ pub(super) struct AvatarUi {
     source_born: Instant,
     source_index: Option<usize>,
     profile: Option<User>,
+    profile_fresh: bool,
+    profile_cache: ProfileCache,
+    lookup: Option<ProfileRequest>,
+    friend_sending: Option<ProfileRequest>,
     draft: Option<String>,
     slots: BTreeMap<String, Key>,
     wires: BTreeMap<Key, String>,
@@ -107,6 +112,10 @@ impl AvatarUi {
             source_born: Instant::now(),
             source_index: None,
             profile: None,
+            profile_fresh: false,
+            profile_cache: ProfileCache::new(),
+            lookup: None,
+            friend_sending: None,
             draft: None,
             slots: BTreeMap::new(),
             wires: BTreeMap::new(),
@@ -161,6 +170,21 @@ impl AvatarUi {
     fn context_changed(&mut self, ui: &NativeApp) {
         let context = Self::context(ui);
         if self
+            .lookup
+            .as_ref()
+            .is_some_and(|query| !profile_context(ui, query))
+        {
+            self.lookup = None;
+        }
+        if self
+            .friend_sending
+            .as_ref()
+            .is_some_and(|query| !profile_context(ui, query))
+        {
+            self.friend_sending.take().unwrap().stop.cancel();
+            ui.set_profile_request_status(0);
+        }
+        if self
             .query
             .as_ref()
             .is_some_and(|query| Some(&query.context) != context.as_ref())
@@ -178,6 +202,7 @@ impl AvatarUi {
         if ui.get_modal() != 9 || !ui.get_authenticated() {
             self.draft = None;
             self.profile = None;
+            self.profile_fresh = false;
         }
     }
 
@@ -338,7 +363,7 @@ impl AvatarUi {
         self.cache_ticket = Some(intents.ticket());
         if let Some(profile) = self.profile.as_mut() {
             ui.set_profile_friend(data.friends.iter().any(|user| user.id == profile.id));
-            if !ui.get_profile_editing() {
+            if !ui.get_profile_editing() && !self.profile_fresh {
                 if let Some(user) = find_user(data, &profile.id) {
                     *profile = user.clone();
                     apply_profile(ui, user);
@@ -404,6 +429,15 @@ impl AvatarUi {
         if stop.is_cancelled() {
             return;
         }
+        let owner = ui.get_user_id();
+        self.profile_cache.sync(
+            if ui.get_authenticated() {
+                owner.as_str()
+            } else {
+                ""
+            },
+            intents,
+        );
         self.context_changed(ui);
         if self
             .cache_ticket
@@ -525,6 +559,11 @@ impl AvatarUi {
 
     pub(super) fn take_jobs(&mut self, ui: &NativeApp) -> (Vec<JoinHandle<()>>, bool) {
         self.cancel(ui);
+        self.profile_cache.clear();
+        self.lookup = None;
+        if let Some(query) = self.friend_sending.take() {
+            query.stop.cancel();
+        }
         if let Some(stop) = self.decode_stop.take() {
             stop.cancel();
         }
@@ -556,6 +595,80 @@ impl AvatarUi {
             ui.set_profile_saving(false);
             ui.set_profile_editing(false);
             self.needs_refresh = true;
+        }
+    }
+
+    pub(super) fn user_event(&mut self, ui: &NativeApp, event: &zabor_native::hub::HubEvent) {
+        self.profile_cache.observe(event);
+        if let Some(user) = &mut self.profile {
+            let local = user.id == ui.get_user_id().as_str();
+            if zabor_native::roster::apply_user_event(user, event, local)
+                && !ui.get_profile_editing()
+            {
+                apply_profile(ui, user);
+                self.needs_refresh = true;
+            }
+        }
+    }
+
+    pub(super) fn profile_lookup(
+        &mut self,
+        ui: &NativeApp,
+        query: &ProfileRequest,
+        result: Result<Option<User>, AuthError>,
+        intents: &CriticalIntents,
+    ) {
+        let user = self
+            .profile_cache
+            .finish(query, result, intents, Instant::now());
+        if !profile_context(ui, query)
+            || !self
+                .lookup
+                .as_ref()
+                .is_some_and(|current| current.same(query))
+        {
+            return;
+        }
+        self.lookup = None;
+        let Some(user) = user else { return };
+        if intents
+            .commit(query.ticket, IntentScope::Session, || {
+                self.profile = Some((*user).clone());
+                self.profile_fresh = true;
+                self.needs_refresh = true;
+            })
+            .is_some()
+        {
+            apply_profile(ui, &user);
+            if self.friend_sending.is_none() {
+                ui.set_profile_request_status(if outgoing(&user, &query.owner) { 2 } else { 0 });
+            }
+        }
+    }
+
+    pub(super) fn friend_result(
+        &mut self,
+        ui: &NativeApp,
+        query: &ProfileRequest,
+        sent: bool,
+        intents: &CriticalIntents,
+    ) {
+        if !query.alive()
+            || !profile_context(ui, query)
+            || !self
+                .friend_sending
+                .as_ref()
+                .is_some_and(|current| current.same(query))
+        {
+            return;
+        }
+        if intents
+            .commit(query.ticket, IntentScope::Session, || {
+                self.friend_sending = None
+            })
+            .is_some()
+        {
+            ui.set_profile_request_status(if sent { 2 } else { 0 });
         }
     }
 
@@ -659,6 +772,8 @@ pub(super) fn bind(
     let weak = ui.as_weak();
     let profiles = state.clone();
     let data = latest.clone();
+    let profile_commands = commands.clone();
+    let profile_intents = intents.clone();
     ui.on_open_profile(move |id| {
         let Some(ui) = weak
             .upgrade()
@@ -675,15 +790,95 @@ pub(super) fn bind(
         if let Some(query) = state.saving.take() {
             query.stop.cancel();
         }
+        if let Some(query) = state.friend_sending.take() {
+            query.stop.cancel();
+        }
+        state.lookup = None;
         state.draft = None;
         state.profile = Some(user.clone());
+        state.profile_fresh = false;
         state.needs_refresh = true;
         ui.set_profile_friend(data.friends.iter().any(|friend| friend.id == user.id));
         apply_profile(&ui, user);
         ui.set_profile_editing(false);
         ui.set_profile_saving(false);
+        ui.set_profile_request_status(if outgoing(user, &data.user.id) { 2 } else { 0 });
         ui.set_error("".into());
         ui.set_modal(9);
+        match state
+            .profile_cache
+            .prepare(&data.user.id, user, &profile_intents, Instant::now())
+        {
+            Some(Lookup::Cached(user)) => {
+                state.profile = Some((*user).clone());
+                state.profile_fresh = true;
+                apply_profile(&ui, &user);
+                ui.set_profile_request_status(if outgoing(&user, &data.user.id) { 2 } else { 0 });
+            }
+            Some(Lookup::Pending(query)) => state.lookup = Some(query),
+            Some(Lookup::Start(query)) => {
+                if queue_request(
+                    &profile_commands,
+                    Command::LookupProfile(query.clone()),
+                    query.ticket,
+                ) {
+                    state.lookup = Some(query);
+                } else {
+                    state.profile_cache.finish(
+                        &query,
+                        Err(AuthError::Network),
+                        &profile_intents,
+                        Instant::now(),
+                    );
+                }
+            }
+            None => {}
+        }
+    });
+    let weak = ui.as_weak();
+    let profiles = state.clone();
+    let data = latest.clone();
+    let friend_commands = commands.clone();
+    let friend_intents = intents.clone();
+    ui.on_add_profile_friend(move || {
+        let Some(ui) = weak.upgrade().filter(|ui| {
+            ui.get_authenticated()
+                && ui.get_connected()
+                && !ui.get_busy()
+                && ui.get_modal() == 9
+                && !ui.get_profile_editing()
+                && ui.get_profile_request_status() == 0
+        }) else {
+            return;
+        };
+        let mut state = profiles.borrow_mut();
+        let Some(user) = state.profile.as_ref() else {
+            return;
+        };
+        let data = data.borrow();
+        if user.id == data.user.id
+            || data.friends.iter().any(|friend| friend.id == user.id)
+            || outgoing(user, &data.user.id)
+            || state.friend_sending.is_some()
+        {
+            return;
+        }
+        let Some(query) =
+            ProfileRequest::new(&data.user.id, &user.id, &user.username, &friend_intents)
+        else {
+            return;
+        };
+        if !profile_context(&ui, &query) {
+            return;
+        }
+        if queue_request(
+            &friend_commands,
+            Command::ProfileAddFriend(query.clone()),
+            query.ticket,
+        ) {
+            state.friend_sending = Some(query);
+            ui.set_profile_request_status(1);
+        }
     });
     let weak = ui.as_weak();
     let profiles = state.clone();
@@ -802,6 +997,28 @@ fn find_user<'a>(data: &'a Bootstrap, id: &str) -> Option<&'a User> {
         .chain(data.channel_users.values().flatten())
         .chain(data.call_user.iter())
         .find(|user| user.id == id)
+}
+
+fn profile_context(ui: &NativeApp, query: &ProfileRequest) -> bool {
+    ui.get_authenticated()
+        && ui.get_modal() == 9
+        && !ui.get_profile_editing()
+        && query.matches_profile(
+            ui.get_user_id().as_str(),
+            ui.get_profile_id().as_str(),
+            ui.get_profile_login().as_str(),
+        )
+}
+
+fn outgoing(user: &User, owner: &str) -> bool {
+    user.friend_requests_received.iter().any(|id| id == owner)
+}
+
+fn queue_request(queue: &CommandQueue, command: Command, ticket: IntentTicket) -> bool {
+    queue
+        .sender
+        .try_send(super::QueuedCommand { command, ticket })
+        .is_ok()
 }
 
 fn key(wire: &str) -> Key {
@@ -939,9 +1156,144 @@ pub(super) fn check_guards(ui: &NativeApp) -> Result<(), &'static str> {
     if state.draft.is_none() || *setup.borrow() != original || ui.get_crop_active() {
         return Err("Profile crop leaked into setup state");
     }
+    check_peer_profiles(ui)?;
     ui.set_modal(0);
     ui.set_authenticated(false);
     ui.set_auth_step(0);
+    Ok(())
+}
+
+fn check_peer_profiles(ui: &NativeApp) -> Result<(), &'static str> {
+    let intents = CriticalIntents::default();
+    let mut state = AvatarUi::new();
+    let peer = User {
+        id: "lookup-peer".into(),
+        username: "lookup-peer".into(),
+        display_name: "Old Peer".into(),
+        ..Default::default()
+    };
+    let data = Bootstrap {
+        user: User {
+            id: "lookup-owner".into(),
+            ..Default::default()
+        },
+        friends: vec![peer.clone()],
+        ..Default::default()
+    };
+    ui.set_authenticated(true);
+    ui.set_profile_editing(false);
+    ui.set_user_id("lookup-owner".into());
+    ui.set_modal(9);
+    apply_profile(ui, &peer);
+    state.profile = Some(peer.clone());
+    let Some(Lookup::Start(query)) =
+        state
+            .profile_cache
+            .prepare("lookup-owner", &peer, &intents, Instant::now())
+    else {
+        return Err("Peer guard did not start original lookup");
+    };
+    state.lookup = Some(query.clone());
+    let mut fresh = peer.clone();
+    fresh.display_name = "Fresh Peer".into();
+    fresh.about_me = Some("fresh details".into());
+    fresh.friend_requests_received = vec!["lookup-owner".into()];
+    state.profile_lookup(ui, &query, Ok(Some(fresh.clone())), &intents);
+    state.refresh(ui, &data, None, &intents);
+    if ui.get_profile_name() != "Fresh Peer"
+        || ui.get_profile_about() != "fresh details"
+        || ui.get_profile_request_status() != 2
+        || !state.profile_fresh
+    {
+        return Err("Fresh selected profile was overwritten by stale roster refresh");
+    }
+    fresh.display_name = "Event Peer".into();
+    state.user_event(
+        ui,
+        &zabor_native::hub::HubEvent {
+            target: "UserUpdated".into(),
+            arguments: vec![serde_json::json!(fresh)],
+        },
+    );
+    state.refresh(ui, &data, None, &intents);
+    if ui.get_profile_name() != "Event Peer" {
+        return Err("Current user event did not replace the selected fresh profile");
+    }
+    let next = User {
+        id: "next-peer".into(),
+        username: "next-peer".into(),
+        display_name: "Next Peer".into(),
+        ..Default::default()
+    };
+    let Some(Lookup::Start(query)) =
+        state
+            .profile_cache
+            .prepare("lookup-owner", &next, &intents, Instant::now())
+    else {
+        return Err("Next peer guard did not start lookup");
+    };
+    state.lookup = Some(query.clone());
+    ui.set_modal(0);
+    state.context_changed(ui);
+    apply_profile(ui, &peer);
+    ui.set_modal(9);
+    state.profile = Some(peer.clone());
+    state.profile_lookup(ui, &query, Ok(Some(next.clone())), &intents);
+    if ui.get_profile_id() != "lookup-peer"
+        || !matches!(
+            state
+                .profile_cache
+                .prepare("lookup-owner", &next, &intents, Instant::now()),
+            Some(Lookup::Cached(_))
+        )
+    {
+        return Err(
+            "Closed/replaced selection accepted an earlier peer result or lost Session cache",
+        );
+    }
+    let query = ProfileRequest::new("lookup-owner", &peer.id, &peer.username, &intents)
+        .ok_or("Friend guard request invalid")?;
+    let imposter = ProfileRequest::new("lookup-owner", &peer.id, &peer.username, &intents)
+        .ok_or("Friend replacement request invalid")?;
+    state.friend_sending = Some(query.clone());
+    ui.set_profile_request_status(1);
+    state.friend_result(ui, &imposter, true, &intents);
+    if ui.get_profile_request_status() != 1 {
+        return Err("Replaced profile action accepted earlier completion");
+    }
+    state.friend_result(ui, &query, true, &intents);
+    if ui.get_profile_request_status() != 2 || ui.get_modal() != 9 {
+        return Err("Successful add-friend did not retain selected profile and sent state");
+    }
+    let query = ProfileRequest::new("lookup-owner", &peer.id, &peer.username, &intents)
+        .ok_or("Friend retry request invalid")?;
+    state.friend_sending = Some(query.clone());
+    ui.set_profile_request_status(1);
+    state.friend_result(ui, &query, false, &intents);
+    if ui.get_profile_request_status() != 0 || ui.get_modal() != 9 {
+        return Err("Rejected add-friend did not retain profile and restore idle state");
+    }
+    state.friend_sending = Some(query.clone());
+    ui.set_modal(0);
+    state.context_changed(ui);
+    if query.alive() || state.friend_sending.is_some() {
+        return Err("Closed profile did not revoke its original friend-action query");
+    }
+    let request = state
+        .profile_cache
+        .prepare("lookup-owner", &peer, &intents, Instant::now());
+    if let Some(Lookup::Start(query)) = request {
+        apply_profile(ui, &peer);
+        ui.set_modal(9);
+        state.lookup = Some(query.clone());
+        intents.request(zabor_native::critical_intents::CriticalAction::Logout);
+        state.profile_lookup(ui, &query, Ok(Some(next)), &intents);
+        if ui.get_profile_id() != "lookup-peer" || query.alive() {
+            return Err("Logout accepted an original peer result");
+        }
+    } else {
+        return Err("Logout peer guard did not start its original query");
+    }
     Ok(())
 }
 
@@ -949,6 +1301,42 @@ pub(super) fn check_guards(ui: &NativeApp) -> Result<(), &'static str> {
 mod tests {
     use super::*;
     use zabor_native::critical_intents::CriticalAction;
+
+    #[tokio::test]
+    async fn lookup_and_friend_queues_preserve_original_ticket_and_full_queue_can_retry() {
+        let intents = Arc::new(CriticalIntents::default());
+        let query = ProfileRequest::new("owner", "peer", "peer", &intents).unwrap();
+        let original = query.ticket;
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let queue = CommandQueue {
+            sender,
+            intents: intents.clone(),
+        };
+        intents.request(CriticalAction::Leave);
+        assert_ne!(original, intents.ticket());
+        assert!(queue_request(
+            &queue,
+            Command::LookupProfile(query.clone()),
+            original
+        ));
+        assert!(!queue_request(
+            &queue,
+            Command::ProfileAddFriend(query.clone()),
+            original
+        ));
+        let queued = receiver.recv().await.unwrap();
+        assert_eq!(queued.ticket, original);
+        assert_eq!(queued.command.scope(), IntentScope::Session);
+        assert!(queue_request(
+            &queue,
+            Command::ProfileAddFriend(query),
+            original
+        ));
+        let queued = receiver.recv().await.unwrap();
+        assert_eq!(queued.ticket, original);
+        intents.request(CriticalAction::Logout);
+        assert!(!intents.is_current(queued.ticket, queued.command.scope()));
+    }
 
     #[tokio::test]
     async fn original_avatar_query_survives_leave_but_never_logout_or_same_context_replacement() {

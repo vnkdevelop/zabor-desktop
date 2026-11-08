@@ -42,6 +42,12 @@ pub struct User {
     pub stream_quality: Option<String>,
     #[serde(default)]
     pub allow_remote_control: bool,
+    #[serde(
+        default,
+        alias = "FriendRequestsReceived",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub friend_requests_received: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -212,6 +218,26 @@ pub struct AuthClient {
 impl AuthClient {
     pub fn new(hub: HubConnection) -> Self {
         Self { hub }
+    }
+
+    pub async fn get_user_by_username(&self, username: &str) -> Result<Option<User>, AuthError> {
+        if username.is_empty() || username.encode_utf16().count() > 25 {
+            return Err(AuthError::Validation("validation.maxChars"));
+        }
+        let value = self
+            .hub
+            .invoke(
+                "GetUserByUsername",
+                vec![json!(username)],
+                Duration::from_secs(20),
+            )
+            .await?;
+        if value.is_null() {
+            return Ok(None);
+        }
+        serde_json::from_value(value)
+            .map(Some)
+            .map_err(|_| AuthError::Network)
     }
 
     pub async fn update_profile(
@@ -490,5 +516,28 @@ mod tests {
         invalid = update;
         invalid.avatar = Some("x".repeat(crate::avatar::MAX_WIRE_BYTES + 1));
         assert!(invalid.validate(&user).is_err());
+    }
+
+    #[test]
+    fn profile_friend_request_indicator_accepts_reference_names_without_changing_empty_wire() {
+        for name in ["friendRequestsReceived", "FriendRequestsReceived"] {
+            let mut value = json!({"id":"peer","username":"peer","displayName":"Peer"});
+            value[name] = json!(["owner"]);
+            let user: User = serde_json::from_value(value).unwrap();
+            assert_eq!(user.friend_requests_received, ["owner"]);
+            assert_eq!(
+                serde_json::to_value(user).unwrap()["friendRequestsReceived"],
+                json!(["owner"])
+            );
+        }
+        let user = User {
+            id: "peer".into(),
+            ..Default::default()
+        };
+        assert!(serde_json::to_value(user)
+            .unwrap()
+            .get("friendRequestsReceived")
+            .is_none());
+        assert!(serde_json::from_value::<User>(json!({"id":"peer","username":"peer","displayName":"Peer","friendRequestsReceived":"owner"})).is_err());
     }
 }

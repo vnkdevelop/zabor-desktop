@@ -53,6 +53,7 @@ mod avatar_ui;
 #[cfg(test)]
 mod critical_tests;
 mod leave_work;
+mod profile_lookup;
 use leave_work::{close_logout_connection, VoiceLeave};
 #[cfg(test)]
 mod leave_tests;
@@ -87,6 +88,8 @@ enum Command {
         value: String,
     },
     UpdateProfile(zabor_native::auth::ProfileUpdate, avatar_ui::Query),
+    LookupProfile(profile_lookup::Request),
+    ProfileAddFriend(profile_lookup::Request),
     Logout,
     Join(String),
     Leave,
@@ -240,6 +243,11 @@ enum UiEvent {
     Avatar(avatar_ui::Event),
     ProfileSaved(zabor_native::auth::User, avatar_ui::Query),
     ProfileError(avatar_ui::Query, AuthError),
+    ProfileLookup(
+        profile_lookup::Request,
+        Result<Option<zabor_native::auth::User>, AuthError>,
+    ),
+    ProfileFriendResult(profile_lookup::Request, bool),
     Voice(String, Vec<zabor_native::auth::User>),
     VoiceEnded,
     Toast(&'static str),
@@ -299,6 +307,14 @@ impl UiEvent {
                 }
                 Self::ProfileError(query, error) => {
                     return query.alive().then_some(Self::ProfileError(query, error))
+                }
+                Self::ProfileLookup(query, result) => {
+                    return query.alive().then_some(Self::ProfileLookup(query, result))
+                }
+                Self::ProfileFriendResult(query, sent) => {
+                    return query
+                        .alive()
+                        .then_some(Self::ProfileFriendResult(query, sent))
                 }
                 event => return Some(event),
             }
@@ -1119,8 +1135,37 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let _ = delete_commands.try_send(Command::ChatDelete(peer.to_string(), id.to_string()));
     });
     let call_commands = commands.clone();
+    let weak = ui.as_weak();
+    let call_state = latest.clone();
     ui.on_call_friend(move |peer| {
-        let _ = call_commands.try_send(Command::Call(peer.to_string()));
+        let Some(ui) = weak
+            .upgrade()
+            .filter(|ui| ui.get_authenticated() && ui.get_connected() && !ui.get_busy())
+        else {
+            return;
+        };
+        let data = call_state.borrow();
+        let Some(friend) = data
+            .friends
+            .iter()
+            .find(|friend| friend.id == peer.as_str())
+        else {
+            return;
+        };
+        let online = if ui.get_modal() == 9 && ui.get_profile_id() == peer {
+            ui.get_profile_online()
+        } else {
+            friend.is_online
+        };
+        if !online {
+            return;
+        }
+        if call_commands
+            .try_send(Command::Call(peer.to_string()))
+            .is_ok()
+        {
+            ui.set_busy(true);
+        }
     });
     let answer_commands = commands.clone();
     ui.on_answer_call(move |peer, accept| {
@@ -1588,7 +1633,10 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_modal(0);
                     ui.set_busy(false);
                 }
-                UiEvent::Hub(event) => apply_hub_event(&ui, &mut latest.borrow_mut(), event),
+                UiEvent::Hub(event) => {
+                    updated_avatars.borrow_mut().user_event(&ui, &event);
+                    apply_hub_event(&ui, &mut latest.borrow_mut(), event);
+                }
                 UiEvent::Disconnected => {
                     ui.set_connected(false);
                     ui.set_busy(false);
@@ -1641,6 +1689,12 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 UiEvent::ProfileError(query, error) => updated_avatars
                     .borrow_mut()
                     .profile_error(&ui, error, &query),
+                UiEvent::ProfileLookup(query, result) => updated_avatars
+                    .borrow_mut()
+                    .profile_lookup(&ui, &query, result, &update_intents),
+                UiEvent::ProfileFriendResult(query, sent) => updated_avatars
+                    .borrow_mut()
+                    .friend_result(&ui, &query, sent, &update_intents),
                 UiEvent::Voice(channel, users) => {
                     {
                         let mut data = latest.borrow_mut();
@@ -3515,6 +3569,12 @@ async fn worker(
         }
         if main_session::is_session_command(&command) {
             let work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            if let Command::ProfileAddFriend(query) = &command {
+                if friends.contains(&query.id) {
+                    work.publish(UiEvent::ProfileFriendResult(query.clone(), false));
+                    continue;
+                }
+            }
             let profile_query = if let Command::UpdateProfile(_, query) = &command {
                 Some(query.clone())
             } else {
@@ -3672,6 +3732,8 @@ async fn worker(
                 | Command::Captcha
                 | Command::Modal { .. }
                 | Command::UpdateProfile(..)
+                | Command::LookupProfile(..)
+                | Command::ProfileAddFriend(..)
                 | Command::Audio => unreachable!(),
                 Command::Notification(kind, id, accept) => {
                     if !respond_notification(&connection, kind, &id, accept)
