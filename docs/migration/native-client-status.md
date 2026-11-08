@@ -998,9 +998,39 @@ Exact source reconstruction/gate/original-ticket/owned disposal order audited ag
 Executable SHA-256:
 `b466d6892dc902784b063c6e77903b8853a3b74561651fad2caa11a175a74229`.
 voiceResourceExtractionChecked=true is narrow four-site extraction acceptance;
-save/post-save Graphify/guard/compact next. Temporary helpers deleted.
+saved2e5921295b30b78840ceb0901b766bd6ccf1122d/post-save Graphify/438/3/24/
+current+frozen executable+ONNX/dependency/proof/clean-tree guard passed.
+Temporary helpers deleted.
 Acquisition/install/peer/shared/video gates and native/worker/UI deadlines remain
 open;no generalized off-thread teardown or complete-client acceptance.
+
+### Prepared Voice installation: components checked locally
+
+install_voice uses unchanged original VoiceWork.commit and inside-gate window stop.
+Prepared/replaced VoiceSession/media receiver and FnMut captures stay outside its
+closure through rejection/unwind;previous resources returned for outside-gate
+Voice-before-receiver disposal. Join/Call/AnswerCall installation and existing
+CallRecovery begin/connected/call_connected metadata are accepted atomically.
+Acquisition/prepare_call/protocol/server predicates,prior4extraction sites and
+normal Logout/Leave/Voice/peer/RTP/shared-audio/DSP/UI sources remain unchanged.
+Three local-only configured-native tests cover54ready resource/slot/priority cases,
+5callback-capture Drop/unwind cases and3priority/window-held-gate cases;61native-bin
+tests/source audit/Graphify passed. Final `native-calls/voice-installation-final-2026-11-08/`
+passed294default/284neural-disabled tests,both Clippy/fmt/pinned/9HTTP/neural/freshbuild/
+8inert RUEN/four-DPI interactions;protected neural metrics unchanged. Independent
+438primary/3reference/24evidence/current+frozen executable+ONNX/3SDK audit passed
+0mismatches;all prior291/281names/multiplicity retained,new3tests/main25/VoiceWork8/
+Leave10/SessionIo6/preferences10/Profile10/runtime23/playback3/device13/native1/
+MicTest4/VoiceSession1 suites and62new/93prior markers verified in both modes.
+Exact source/gate/ownership/drop-order reconstruction passed;only3existing sources
+changed,no new sources. Raw diagnostic interleave normalized only for full-name
+parsing;local filesystem diagnostic independently retained,not a relaxed test.
+Executable SHA-256:
+`df3466c5f8ce94e1714a9c34f8d1c4e36b1f4f324ae3c0befeacbafe30474aee`.
+voiceResourceInstallationChecked=true is narrow3site resource installation;
+save/post-save Graphify/guard/compact next. Temporary helpers deleted.
+Active native audio/actual calls/peer/shared/video/
+acquisition/destructor/worker/UI deadlines remain open;full readiness=false.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

@@ -66,6 +66,26 @@ impl<'a> VoiceWork<'a> {
         taken.filter(|taken| *taken).and(resources)
     }
 
+    pub(super) fn install_voice(
+        &self,
+        voice: &mut Option<VoiceSession>,
+        events: &mut Option<mpsc::Receiver<MediaEvent>>,
+        resource_ticket: &mut Option<IntentTicket>,
+        prepared: (VoiceSession, mpsc::Receiver<MediaEvent>),
+        mut accepted: impl FnMut(),
+    ) -> Option<VoiceResources> {
+        let mut prepared = Some(prepared);
+        let mut replaced = None;
+        let installed = self.commit(|| {
+            let (session, receiver) = prepared.take().unwrap();
+            replaced = Some((voice.replace(session), events.replace(receiver)));
+            *resource_ticket = Some(self.ticket);
+            accepted();
+            true
+        });
+        installed.filter(|installed| *installed).and(replaced)
+    }
+
     pub(super) fn publish(&self, event: UiEvent) {
         if self.is_current() {
             (self.update)(event.guarded(self.ticket, IntentScope::Voice));

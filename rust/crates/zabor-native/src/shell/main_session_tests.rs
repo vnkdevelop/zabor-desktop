@@ -1520,6 +1520,260 @@ async fn native_voice_extraction_releases_intent_gate_before_rejected_callback_d
     }).await.unwrap();
 }
 
+#[tokio::test]
+async fn native_voice_installation_rechecks_ready_resources_and_atomically_replaces_original_ticket_slots(
+) {
+    timeout(Duration::from_secs(20), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        let mut requests = 0;
+        for kind in ["join", "call", "answer"] {
+            for slots in ["empty", "voice", "receiver"] {
+                for mode in ["live", "leave-pending", "leave-consumed", "logout-pending", "logout-consumed", "window"] {
+                    let intents = CriticalIntents::default();
+                    let old_ticket = intents.ticket();
+                    intents.request(CriticalAction::Leave);
+                    assert_eq!(intents.next().await, CriticalAction::Leave);
+                    let ticket = intents.ticket();
+                    let stop = CancellationToken::new();
+                    let controls = AudioPreferences::new(&json!({})).controls.clone();
+                    let audio = SharedAudio::new(controls.clone(), stop.child_token(), |_, _, _| {
+                        Box::pin(async { panic!("Voice installation fixture must not start physical audio") })
+                    });
+                    let generation = audio.demand.reserve().unwrap();
+                    assert!(audio.demand.activate(generation));
+                    let monitor = audio.monitor(true);
+                    let (mut voice, mut events) = if slots == "empty" { (None, None) } else {
+                        let (mut old, events) = VoiceSession::new(&hub, &user(), false, controls.clone(), audio.clone()).await.unwrap();
+                        requests += 1;
+                        old.channel = Some("old-channel".into());
+                        if slots == "receiver" { drop(old); (None, Some(events)) } else { (Some(old), Some(events)) }
+                    };
+                    let mut resource_ticket = (slots != "empty").then_some(old_ticket);
+                    let original_resource_ticket = resource_ticket;
+                    let update = |_| panic!("Voice installation must not publish inside the gate");
+                    let work = VoiceWork::new(&intents, ticket, &stop, &update);
+                    let prepared = VoiceSession::new(&hub, &user(), false, controls.clone(), audio.clone()).await.unwrap();
+                    requests += 1;
+                    let mut prepared = work.run(async { prepared }).await.unwrap();
+                    if kind != "join" { prepared.0.call_peer = Some("prepared-peer".into()); }
+                    match mode {
+                        "leave-pending" | "leave-consumed" => intents.request(CriticalAction::Leave),
+                        "logout-pending" | "logout-consumed" => intents.request(CriticalAction::Logout),
+                        "window" => stop.cancel(),
+                        _ => {}
+                    }
+                    if mode.ends_with("consumed") { intents.next().await; }
+                    let monitor_current = monitor.is_current();
+                    controls.speaking.store(true, Ordering::Release);
+                    controls.mic_db.store((-17.0_f32).to_bits(), Ordering::Release);
+                    let epoch = controls.capture_epoch.load(Ordering::Acquire);
+                    let snapshot = audio.mic_test.snapshot(Instant::now());
+                    let mut accepted = 0;
+                    let mut connected = false;
+                    let mut recovery = CallRecovery::default();
+                    let replaced = work.install_voice(&mut voice, &mut events, &mut resource_ticket, prepared, || {
+                        accepted += 1;
+                        if kind != "join" { recovery.begin("prepared-peer"); }
+                        if kind == "answer" { recovery.connected("prepared-peer"); connected = true; }
+                    });
+                    let installed = mode == "live";
+                    assert_eq!(replaced.is_some(), installed);
+                    assert_eq!(accepted, usize::from(installed));
+                    assert_eq!(connected, installed && kind == "answer");
+                    assert_eq!(recovery.set_session(RESUME_SESSION), installed && kind == "answer");
+                    if let Some(replaced) = replaced {
+                        assert_eq!(resource_ticket, Some(ticket));
+                        assert_ne!(resource_ticket, original_resource_ticket);
+                        assert_eq!(voice.as_ref().unwrap().channel, None);
+                        assert_eq!(voice.as_ref().unwrap().call_peer.as_deref(), (kind != "join").then_some("prepared-peer"));
+                        assert!(!events.as_ref().unwrap().is_closed());
+                        assert_eq!(replaced.0.as_ref().map(|old| old.channel.as_deref()), (slots == "voice").then_some(Some("old-channel")));
+                        assert_eq!(replaced.1.is_some(), slots != "empty");
+                        if let Some(receiver) = replaced.1.as_ref() { assert_eq!(receiver.is_closed(), slots == "receiver"); }
+                        drop(replaced);
+                        assert!(!events.as_ref().unwrap().is_closed());
+                    } else {
+                        assert_eq!(resource_ticket, original_resource_ticket);
+                        assert_eq!(voice.as_ref().map(|old| old.channel.as_deref()), (slots == "voice").then_some(Some("old-channel")));
+                        assert_eq!(events.is_some(), slots != "empty");
+                        if let Some(receiver) = events.as_ref() { assert_eq!(receiver.is_closed(), slots == "receiver"); }
+                    }
+                    drop(voice);
+                    drop(events);
+                    assert_eq!(audio.demand.active(), generation);
+                    assert!(audio.demand.is_reserved(generation));
+                    assert_eq!(monitor.is_current(), monitor_current);
+                    assert!(controls.speaking.load(Ordering::Acquire));
+                    assert_eq!(f32::from_bits(controls.mic_db.load(Ordering::Acquire)), -17.0);
+                    assert_eq!(controls.capture_epoch.load(Ordering::Acquire), epoch);
+                    assert_eq!(audio.mic_test.snapshot(Instant::now()), snapshot);
+                    audio.wait_for_cleanup().await.unwrap();
+                    println!("voice installation kind={kind} slots={slots} mode={mode} accepted={installed} original_ticket=true ready_result_rechecked=true old_resources_returned=true monitor_unchanged=true physical_audio=false");
+                }
+            }
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; requests]);
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_voice_installation_keeps_rejected_and_replaced_resources_and_callback_unwind_outside_gate(
+) {
+    timeout(Duration::from_secs(15), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        for mode in ["live", "leave", "logout", "window", "panic"] {
+            let intents = Arc::new(CriticalIntents::default());
+            let old_ticket = intents.ticket();
+            intents.request(CriticalAction::Leave);
+            assert_eq!(intents.next().await, CriticalAction::Leave);
+            let ticket = intents.ticket();
+            let stop = CancellationToken::new();
+            let controls = AudioPreferences::new(&json!({})).controls.clone();
+            let audio = SharedAudio::new(controls.clone(), stop.child_token(), |_, _, _| {
+                Box::pin(async { panic!("Voice installation unwind fixture must not start physical audio") })
+            });
+            let generation = audio.demand.reserve().unwrap();
+            assert!(audio.demand.activate(generation));
+            let monitor = audio.monitor(true);
+            let (mut old, receiver) = VoiceSession::new(&hub, &user(), false, controls.clone(), audio.clone()).await.unwrap();
+            old.channel = Some("old-channel".into());
+            let mut voice = Some(old);
+            let mut events = Some(receiver);
+            let mut resource_ticket = Some(old_ticket);
+            let mut prepared = VoiceSession::new(&hub, &user(), false, controls, audio.clone()).await.unwrap();
+            prepared.0.call_peer = Some("prepared-peer".into());
+            match mode {
+                "leave" => intents.request(CriticalAction::Leave),
+                "logout" => intents.request(CriticalAction::Logout),
+                "window" => stop.cancel(),
+                _ => {}
+            }
+            let monitor_current = monitor.is_current();
+            let drops = Arc::new(AtomicUsize::new(0));
+            let probe = VoiceExtractionDropCheck { intents: intents.clone(), drops: drops.clone() };
+            let update = |_| {};
+            let work = VoiceWork::new(&intents, ticket, &stop, &update);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                work.install_voice(&mut voice, &mut events, &mut resource_ticket, prepared, move || {
+                    let _ = &probe;
+                    assert_ne!(mode, "panic", "Expected accepted Voice installation callback panic");
+                })
+            }));
+            assert_eq!(drops.load(Ordering::Acquire), 1);
+            assert_eq!(result.is_err(), mode == "panic");
+            let installed = matches!(mode, "live" | "panic");
+            assert_eq!(resource_ticket, Some(if installed { ticket } else { old_ticket }));
+            assert_eq!(voice.as_ref().unwrap().call_peer.as_deref(), installed.then_some("prepared-peer"));
+            assert_eq!(voice.as_ref().unwrap().channel.as_deref(), (!installed).then_some("old-channel"));
+            assert!(!events.as_ref().unwrap().is_closed());
+            if mode == "panic" { assert_eq!(work.commit(|| 42), Some(42)); }
+            if let Ok(Some(replaced)) = &result {
+                assert_eq!(replaced.0.as_ref().unwrap().channel.as_deref(), Some("old-channel"));
+                assert!(!replaced.1.as_ref().unwrap().is_closed());
+            }
+            drop(result);
+            assert!(!events.as_ref().unwrap().is_closed());
+            drop(voice);
+            drop(events);
+            assert_eq!(monitor.is_current(), monitor_current);
+            assert_eq!(audio.demand.active(), generation);
+            audio.wait_for_cleanup().await.unwrap();
+            println!("voice installation callback_drop={mode} gate_reentry=true native_resources_outside_gate=true original_ticket=true physical_audio=false");
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; 10]);
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_voice_installation_linearizes_priority_and_rechecks_stop_after_waiting_for_intent_gate(
+) {
+    timeout(Duration::from_secs(15), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        for mode in ["leave", "logout", "window"] {
+            let intents = CriticalIntents::default();
+            let ticket = intents.ticket();
+            let stop = CancellationToken::new();
+            let audio = audio(&stop);
+            let monitor = audio.monitor(true);
+            let prepared = VoiceSession::new(&hub, &user(), false, AudioPreferences::new(&json!({})).controls.clone(), audio.clone()).await.unwrap();
+            let update = |_| {};
+            let work = VoiceWork::new(&intents, ticket, &stop, &update);
+            let (entered, waiting) = std::sync::mpsc::channel();
+            let (release, held) = std::sync::mpsc::channel();
+            let (started, starting) = std::sync::mpsc::channel();
+            let (done, finished) = std::sync::mpsc::channel();
+            let metadata = AtomicUsize::new(0);
+            let (voice, events, resource_ticket, replaced) = std::thread::scope(|scope| {
+                let (intents, work, metadata) = (&intents, &work, &metadata);
+                if mode == "window" {
+                    let holder = scope.spawn(move || intents.commit(ticket, IntentScope::Session, || {
+                        entered.send(()).unwrap();
+                        held.recv_timeout(Duration::from_secs(3)).unwrap();
+                    }));
+                    waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    let installer = scope.spawn(move || {
+                        let (mut voice, mut events, mut resource_ticket) = (None, None, None);
+                        started.send(()).unwrap();
+                        let replaced = work.install_voice(&mut voice, &mut events, &mut resource_ticket, prepared, || panic!("Stopped installer must not mutate slots"));
+                        done.send(()).unwrap();
+                        (voice, events, resource_ticket, replaced)
+                    });
+                    starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                    stop.cancel();
+                    release.send(()).unwrap();
+                    holder.join().unwrap().unwrap();
+                    finished.recv_timeout(Duration::from_secs(1)).unwrap();
+                    installer.join().unwrap()
+                } else {
+                    let installer = scope.spawn(move || {
+                        let (mut voice, mut events, mut resource_ticket) = (None, None, None);
+                        let replaced = work.install_voice(&mut voice, &mut events, &mut resource_ticket, prepared, || {
+                            entered.send(()).unwrap();
+                            held.recv_timeout(Duration::from_secs(3)).unwrap();
+                            metadata.store(1, Ordering::Release);
+                        });
+                        (voice, events, resource_ticket, replaced)
+                    });
+                    waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    let requester = scope.spawn(move || {
+                        started.send(()).unwrap();
+                        intents.request(if mode == "leave" { CriticalAction::Leave } else { CriticalAction::Logout });
+                        assert_eq!(metadata.load(Ordering::Acquire), 1);
+                        done.send(()).unwrap();
+                    });
+                    starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                    release.send(()).unwrap();
+                    finished.recv_timeout(Duration::from_secs(1)).unwrap();
+                    requester.join().unwrap();
+                    installer.join().unwrap()
+                }
+            });
+            assert_eq!(voice.is_some(), mode != "window");
+            assert_eq!(events.is_some(), mode != "window");
+            assert_eq!(resource_ticket, (mode != "window").then_some(ticket));
+            assert_eq!(replaced.is_some(), mode != "window");
+            assert_eq!(metadata.load(Ordering::Acquire), usize::from(mode != "window"));
+            assert!(work.commit(|| panic!("Revoked installation ticket must not revive")).is_none());
+            drop(replaced);
+            drop(voice);
+            drop(events);
+            assert_eq!(monitor.is_current(), mode != "window");
+            assert_eq!(audio.demand.active(), 1);
+            audio.wait_for_cleanup().await.unwrap();
+            println!("voice installation gate={mode} strict_linearization=true stop_after_gate_wait_rechecked=true original_ticket=true physical_audio=false");
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; 3]);
+    }).await.unwrap();
+}
+
 async fn hold_logout_preferences(
     preferences: Arc<AudioPreferences>,
 ) -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>) {

@@ -2953,6 +2953,7 @@ async fn worker(
         }
         let operation_scope = command.scope();
         let starting_call = matches!(command, Command::Call(_) | Command::AnswerCall(_, true));
+        let voice_work = VoiceWork::new(&intents, command_ticket, &stop, update.as_ref());
         let operation = async {
             match command {
                 Command::Authenticate { .. }
@@ -3012,9 +3013,16 @@ async fn worker(
                         )
                         .await
                         .map_err(|_| AuthError::Network)?;
-                        voice = Some(session);
-                        voice_ticket = Some(command_ticket);
-                        media_events = Some(receiver);
+                        let Some(replaced) = voice_work.install_voice(
+                            &mut voice,
+                            &mut media_events,
+                            &mut voice_ticket,
+                            (session, receiver),
+                            || {},
+                        ) else {
+                            return Err(AuthError::Network);
+                        };
+                        drop(replaced);
                     }
                     sent_audio_state = None;
                     sent_speaking = false;
@@ -3078,10 +3086,16 @@ async fn worker(
                     if accepted != true {
                         return Ok(UiEvent::VoiceEnded);
                     }
-                    call_recovery.begin(&peer);
-                    voice = Some(session);
-                    voice_ticket = Some(command_ticket);
-                    media_events = Some(receiver);
+                    let Some(replaced) = voice_work.install_voice(
+                        &mut voice,
+                        &mut media_events,
+                        &mut voice_ticket,
+                        (session, receiver),
+                        || call_recovery.begin(&peer),
+                    ) else {
+                        return Err(AuthError::Network);
+                    };
+                    drop(replaced);
                     Ok(UiEvent::Calling(peer))
                 }
                 Command::ListScreens => {
@@ -3169,12 +3183,20 @@ async fn worker(
                     if accepted == false {
                         return Ok(UiEvent::VoiceEnded);
                     }
-                    call_recovery.begin(&peer);
-                    call_recovery.connected(&peer);
-                    voice = Some(session);
-                    voice_ticket = Some(command_ticket);
-                    media_events = Some(receiver);
-                    call_connected = true;
+                    let Some(replaced) = voice_work.install_voice(
+                        &mut voice,
+                        &mut media_events,
+                        &mut voice_ticket,
+                        (session, receiver),
+                        || {
+                            call_recovery.begin(&peer);
+                            call_recovery.connected(&peer);
+                            call_connected = true;
+                        },
+                    ) else {
+                        return Err(AuthError::Network);
+                    };
+                    drop(replaced);
                     Ok(UiEvent::Calling(peer))
                 }
                 Command::CheckAudio => Ok(UiEvent::Connected),
