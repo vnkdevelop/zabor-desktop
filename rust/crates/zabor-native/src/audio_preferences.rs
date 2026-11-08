@@ -3,7 +3,8 @@ use crate::audio_settings::AudioSettings;
 use crate::hub::{HubConnection, HubError};
 use crate::profile::Profile;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -35,6 +36,70 @@ struct SaveTicket {
     revision: u64,
     epoch: u64,
     payload: String,
+}
+
+pub struct AudioSessionRestore<'a> {
+    preferences: &'a AudioPreferences,
+    state: Option<MutexGuard<'a, State>>,
+    controls: Option<MutexGuard<'a, AudioSettings>>,
+    next: State,
+    next_controls: AudioSettings,
+    input_changed: bool,
+    output_changed: bool,
+    controls_changed: bool,
+    applied: bool,
+}
+
+impl AudioSessionRestore<'_> {
+    pub fn apply(&mut self) {
+        if self.applied {
+            return;
+        }
+        if self.controls_changed {
+            if self.input_changed {
+                self.preferences
+                    .controls
+                    .input_device_epoch
+                    .fetch_add(1, Ordering::AcqRel);
+                self.preferences.controls.capture_restarting();
+            }
+            if self.output_changed {
+                self.preferences
+                    .controls
+                    .output_device_epoch
+                    .fetch_add(1, Ordering::AcqRel);
+                self.preferences
+                    .controls
+                    .playback_epoch
+                    .fetch_add(1, Ordering::AcqRel);
+            }
+            std::mem::swap(
+                &mut **self.controls.as_mut().unwrap(),
+                &mut self.next_controls,
+            );
+            self.preferences
+                .controls
+                .settings_revision
+                .fetch_add(1, Ordering::Release);
+        }
+        std::mem::swap(&mut **self.state.as_mut().unwrap(), &mut self.next);
+        self.applied = true;
+    }
+}
+
+impl Drop for AudioSessionRestore<'_> {
+    fn drop(&mut self) {
+        if self.applied {
+            self.preferences
+                .changed
+                .send_replace(self.state.as_ref().unwrap().serial);
+        }
+        drop(self.controls.take());
+        drop(self.state.take());
+        if self.applied {
+            self.next.session_stop.cancel();
+        }
+    }
 }
 
 impl AudioPreferences {
@@ -149,13 +214,33 @@ impl AudioPreferences {
         state.session_stop = CancellationToken::new();
         state.epoch = state.epoch.wrapping_add(1);
         let same_owner = state.owner.as_deref() == Some(owner);
+        let Some(settings) = Self::session_settings(&state, owner, server) else {
+            return false;
+        };
+        state.dirty &= same_owner;
+        state.owner = Some(owner.into());
+        state.editable = true;
+        state.session = Some(hub);
+        if !self.apply(&mut state, settings, false) {
+            state.session = None;
+            state.session_stop.cancel();
+            return false;
+        }
+        self.notify(&mut state);
+        true
+    }
+
+    fn session_settings(
+        state: &State,
+        owner: &str,
+        server: Option<&Value>,
+    ) -> Option<AudioSettings> {
+        let same_owner = state.owner.as_deref() == Some(owner);
         let mut local = state.settings.clone();
         if state.owner.is_some() && !same_owner {
             local.user_volumes.clear();
         }
-        let Ok(local) = serde_json::to_value(&local) else {
-            return false;
-        };
+        let local = serde_json::to_value(&local).ok()?;
         let server = server.map(|server| {
             let mut raw = server.as_object().cloned().unwrap_or_default();
             raw.remove(LOCAL_SYNC_KEY);
@@ -178,17 +263,60 @@ impl AudioPreferences {
         } else {
             AudioSettings::restore(&local, server.as_ref())
         };
-        state.dirty &= same_owner;
-        state.owner = Some(owner.into());
-        state.editable = true;
-        state.session = Some(hub);
-        if !self.apply(&mut state, settings, false) {
-            state.session = None;
-            state.session_stop.cancel();
-            return false;
+        Some(settings)
+    }
+
+    pub fn try_prepare_session(
+        &self,
+        owner: &str,
+        hub: HubConnection,
+        server: Option<&Value>,
+    ) -> Result<Option<AudioSessionRestore<'_>>, &'static str> {
+        if owner.is_empty() || owner.len() > 4096 {
+            return Err("invalid audio session owner");
         }
-        self.notify(&mut state);
-        true
+        let state = match self.state.try_lock() {
+            Ok(state) => state,
+            Err(TryLockError::WouldBlock) => return Ok(None),
+            Err(TryLockError::Poisoned(_)) => return Err("audio preferences unavailable"),
+        };
+        let controls = match self.controls.settings.try_lock() {
+            Ok(controls) => controls,
+            Err(TryLockError::WouldBlock) => return Ok(None),
+            Err(TryLockError::Poisoned(_)) => return Err("audio controls unavailable"),
+        };
+        let settings =
+            Self::session_settings(&state, owner, server).ok_or("audio settings unavailable")?;
+        if settings != state.settings
+            && serde_json::to_vec(&settings)
+                .ok()
+                .is_none_or(|bytes| bytes.len() > MAX_SETTINGS_BYTES)
+        {
+            return Err("audio settings too large");
+        }
+        let changed = settings != state.settings;
+        let next = State {
+            settings: settings.clone(),
+            owner: Some(owner.into()),
+            editable: true,
+            dirty: state.dirty && state.owner.as_deref() == Some(owner),
+            revision: state.revision.wrapping_add(u64::from(changed)),
+            serial: state.serial.wrapping_add(1 + u64::from(changed)),
+            epoch: state.epoch.wrapping_add(1),
+            session: Some(hub),
+            session_stop: CancellationToken::new(),
+        };
+        Ok(Some(AudioSessionRestore {
+            preferences: self,
+            input_changed: controls.selected_input != settings.selected_input,
+            output_changed: controls.selected_output != settings.selected_output,
+            controls_changed: changed && *controls != settings,
+            state: Some(state),
+            controls: Some(controls),
+            next,
+            next_controls: settings,
+            applied: false,
+        }))
     }
 
     pub fn disconnect(&self) {

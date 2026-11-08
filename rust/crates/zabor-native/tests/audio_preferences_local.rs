@@ -12,6 +12,7 @@ use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 use zabor_native::audio_preferences::{save_audio_settings, AudioPreferences};
+use zabor_native::critical_intents::{CriticalAction, CriticalIntents, IntentScope};
 use zabor_native::hub::{HubConnection, HubError};
 use zabor_native::profile::Profile;
 use zabor_native::protocol::{encode, Decoder};
@@ -342,6 +343,177 @@ async fn server_fields_cannot_inject_local_sync_metadata_or_overwrite_local_lang
     );
     assert!(preferences.edit("alice", "relayOnly", json!(true)));
     assert!(preferences.relay_only());
+}
+
+#[tokio::test]
+async fn prepared_audio_restore_preserves_legacy_merge_dirty_owner_and_device_epochs() {
+    let fixture = Fixture::new().await;
+    let original = json!({"language":"en","futureLocal":true,"selectedInput":"retained-device"});
+    let legacy = AudioPreferences::new(&original);
+    let guarded = AudioPreferences::new(&original);
+    for preferences in [&legacy, &guarded] {
+        assert!(preferences.begin_session("alice", fixture.hub.clone(), None));
+        assert!(preferences.edit("alice", "inputVolume", json!(175)));
+        assert!(preferences.peer_volume("alice", "old-peer", 180.0));
+    }
+    for (owner, server) in [
+        (
+            "alice",
+            json!({"language":"ru","inputVolume":30,"selectedInput":"default","futureServer":true}),
+        ),
+        (
+            "bob",
+            json!({"inputVolume":45,"selectedInput":"next-device","selectedOutput":"next-output","userVolumes":{"new-peer":90},"nativeAudioSync":{"owner":"injected","pending":true}}),
+        ),
+    ] {
+        assert!(legacy.begin_session(owner, fixture.hub.clone(), Some(&server)));
+        {
+            let mut prepared = guarded
+                .try_prepare_session(owner, fixture.hub.clone(), Some(&server))
+                .unwrap()
+                .unwrap();
+            prepared.apply();
+            prepared.apply();
+        }
+        assert_eq!(guarded.settings(), legacy.settings());
+        let expected = &legacy.controls;
+        let actual = &guarded.controls;
+        for (actual, expected) in [
+            (&actual.settings_revision, &expected.settings_revision),
+            (&actual.input_device_epoch, &expected.input_device_epoch),
+            (&actual.output_device_epoch, &expected.output_device_epoch),
+            (&actual.capture_epoch, &expected.capture_epoch),
+            (&actual.playback_epoch, &expected.playback_epoch),
+        ] {
+            assert_eq!(
+                actual.load(Ordering::Acquire),
+                expected.load(Ordering::Acquire)
+            );
+        }
+    }
+    for preferences in [&legacy, &guarded] {
+        let mut controls_only = preferences.settings().unwrap();
+        controls_only.input_volume = 7.0;
+        assert!(preferences.controls.apply_settings(controls_only));
+    }
+    assert!(legacy.begin_session("bob", fixture.hub.clone(), None));
+    {
+        let mut prepared = guarded
+            .try_prepare_session("bob", fixture.hub.clone(), None)
+            .unwrap()
+            .unwrap();
+        prepared.apply();
+    }
+    assert_eq!(
+        guarded.controls.settings.lock().unwrap().input_volume,
+        legacy.controls.settings.lock().unwrap().input_volume
+    );
+    assert_eq!(
+        guarded.controls.settings_revision.load(Ordering::Acquire),
+        legacy.controls.settings_revision.load(Ordering::Acquire)
+    );
+    assert!(!guarded.edit("alice", "outputVolume", json!(150)));
+    assert!(guarded.edit("bob", "outputVolume", json!(150)));
+    assert_eq!(guarded.settings().unwrap().language, "en");
+    assert!(!guarded
+        .settings()
+        .unwrap()
+        .user_volumes
+        .contains_key("old-peer"));
+    assert!(!guarded
+        .settings()
+        .unwrap()
+        .extra
+        .contains_key("nativeAudioSync"));
+}
+
+#[tokio::test]
+async fn discarded_or_revoked_prepared_restore_does_not_cancel_or_acknowledge_previous_save() {
+    timeout(Duration::from_secs(8), async {
+        let mut fixture = Fixture::new().await;
+        let preferences = AudioPreferences::new(&json!({"language":"en"}));
+        assert!(preferences.begin_session("alice", fixture.hub.clone(), None));
+        assert!(preferences.edit("alice", "inputVolume", json!(175)));
+        let stop = CancellationToken::new();
+        let remote = tokio::spawn(preferences.clone().run_remote(stop.clone(), no_failure()));
+        let pending = fixture.request().await;
+        let original = preferences.settings().unwrap();
+        let revision = preferences
+            .controls
+            .settings_revision
+            .load(Ordering::Acquire);
+        for revoked in [false, true] {
+            let intents = CriticalIntents::default();
+            let ticket = intents.ticket();
+            let mut prepared = preferences
+                .try_prepare_session("bob", fixture.hub.clone(), Some(&json!({"inputVolume":30})))
+                .unwrap()
+                .unwrap();
+            if revoked {
+                intents.request(CriticalAction::Logout);
+                assert!(intents
+                    .commit(ticket, IntentScope::Session, || prepared.apply())
+                    .is_none());
+            }
+            drop(prepared);
+            assert_eq!(preferences.settings().unwrap(), original);
+            assert_eq!(
+                preferences
+                    .controls
+                    .settings_revision
+                    .load(Ordering::Acquire),
+                revision
+            );
+        }
+        pending.reply.send(Value::Null).unwrap();
+        assert!(timeout(Duration::from_millis(650), fixture.requests.recv())
+            .await
+            .is_err());
+        assert!(preferences.edit("alice", "outputVolume", json!(140)));
+        let latest = fixture.request().await;
+        assert_eq!(latest.settings["inputVolume"], json!(175.0));
+        assert_eq!(latest.settings["outputVolume"], json!(140.0));
+        latest.reply.send(Value::Null).unwrap();
+        stop.cancel();
+        remote.await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn prepared_restore_resource_locks_never_hold_priority_intent_gate() {
+    let fixture = Fixture::new().await;
+    let preferences = AudioPreferences::new(&json!({}));
+    let intents = Arc::new(CriticalIntents::default());
+    {
+        let controls = preferences.controls.settings.lock().unwrap();
+        assert!(preferences
+            .try_prepare_session("alice", fixture.hub.clone(), None)
+            .unwrap()
+            .is_none());
+        assert!(preferences.settings().is_some());
+        drop(controls);
+    }
+    let prepared = preferences
+        .try_prepare_session("alice", fixture.hub.clone(), None)
+        .unwrap()
+        .unwrap();
+    assert!(preferences
+        .try_prepare_session("bob", fixture.hub.clone(), None)
+        .unwrap()
+        .is_none());
+    let (sent, received) = std::sync::mpsc::channel();
+    let requesting = intents.clone();
+    let task = std::thread::spawn(move || {
+        requesting.request(CriticalAction::Logout);
+        sent.send(()).unwrap();
+    });
+    let prompt = received.recv_timeout(Duration::from_millis(1500));
+    drop(prepared);
+    task.join().unwrap();
+    prompt.unwrap();
+    assert!(!preferences.edit("alice", "outputVolume", json!(175)));
 }
 
 #[tokio::test]

@@ -659,12 +659,12 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let logout_audio = audio_runtime.clone();
     let logout_ui = ui.as_weak();
     ui.on_logout(move || {
+        let _ = logout_commands.try_send(Command::Logout);
         logout_test.borrow_mut().close();
         logout_audio.reset();
         if let Some(ui) = logout_ui.upgrade() {
             ui.set_modal(0);
         }
-        let _ = logout_commands.try_send(Command::Logout);
     });
     let language_preferences = audio_preferences.clone();
     let language_errors = send_update.clone();
@@ -2625,34 +2625,42 @@ async fn worker(
             };
             match outcome {
                 Ok(LoginOutcome::SignedIn(data)) => {
-                    let Some(restored) = auth_work.commit(|| {
-                        let restored = restore_audio(&audio_preferences, &connection, &data);
-                        sent_audio_state = None;
-                        sent_speaking = false;
-                        speaking_release = None;
-                        session_ready = true;
-                        retry_attempt = 0;
-                        retry_at = None;
-                        current_user = Some(data.user.clone());
-                        chat_ice = data
-                            .ice_config
-                            .as_ref()
-                            .and_then(|value| {
-                                serde_json::from_value(value["iceServers"].clone()).ok()
-                            })
-                            .unwrap_or_default();
-                        friends = data
-                            .friends
-                            .iter()
-                            .map(|friend| friend.id.clone())
-                            .collect();
-                        if let Some(chat) = chat.as_mut() {
-                            chat.set_friends(friends.iter().cloned());
-                        }
-                        restored
-                    }) else {
+                    let restored = run_session!(
+                        auth_work,
+                        restore_audio_session(&auth_work, &audio_preferences, &connection, &data)
+                    );
+                    let Some(Some(restored)) = restored else {
                         continue;
                     };
+                    if auth_work
+                        .commit(|| {
+                            sent_audio_state = None;
+                            sent_speaking = false;
+                            speaking_release = None;
+                            session_ready = true;
+                            retry_attempt = 0;
+                            retry_at = None;
+                            current_user = Some(data.user.clone());
+                            chat_ice = data
+                                .ice_config
+                                .as_ref()
+                                .and_then(|value| {
+                                    serde_json::from_value(value["iceServers"].clone()).ok()
+                                })
+                                .unwrap_or_default();
+                            friends = data
+                                .friends
+                                .iter()
+                                .map(|friend| friend.id.clone())
+                                .collect();
+                            if let Some(chat) = chat.as_mut() {
+                                chat.set_friends(friends.iter().cloned());
+                            }
+                        })
+                        .is_none()
+                    {
+                        continue;
+                    }
                     if !restored {
                         auth_work.publish(UiEvent::Toast("validation.sessionSaveError"));
                     }
@@ -2793,32 +2801,40 @@ async fn worker(
                             None => continue,
                         }
                     }
-                    let Some(restored) = work.commit(|| {
-                        let restored = restore_audio(&audio_preferences, &connection, &data);
-                        sent_audio_state = None;
-                        sent_speaking = false;
-                        speaking_release = None;
-                        current_user = Some(data.user.clone());
-                        chat_ice = data
-                            .ice_config
-                            .as_ref()
-                            .and_then(|value| {
-                                serde_json::from_value(value["iceServers"].clone()).ok()
-                            })
-                            .unwrap_or_default();
-                        friends = data
-                            .friends
-                            .iter()
-                            .map(|friend| friend.id.clone())
-                            .collect();
-                        saved_credentials = Some(credentials);
-                        session_ready = true;
-                        retry_attempt = 0;
-                        retry_at = None;
-                        restored
-                    }) else {
+                    let restored = run_session!(
+                        work,
+                        restore_audio_session(&work, &audio_preferences, &connection, &data)
+                    );
+                    let Some(Some(restored)) = restored else {
                         continue;
                     };
+                    if work
+                        .commit(|| {
+                            sent_audio_state = None;
+                            sent_speaking = false;
+                            speaking_release = None;
+                            current_user = Some(data.user.clone());
+                            chat_ice = data
+                                .ice_config
+                                .as_ref()
+                                .and_then(|value| {
+                                    serde_json::from_value(value["iceServers"].clone()).ok()
+                                })
+                                .unwrap_or_default();
+                            friends = data
+                                .friends
+                                .iter()
+                                .map(|friend| friend.id.clone())
+                                .collect();
+                            saved_credentials = Some(credentials);
+                            session_ready = true;
+                            retry_attempt = 0;
+                            retry_at = None;
+                        })
+                        .is_none()
+                    {
+                        continue;
+                    }
                     if !restored {
                         work.publish(UiEvent::Toast("validation.sessionSaveError"));
                     }
@@ -3261,6 +3277,53 @@ fn reconcile_volume_modal(ui: &NativeApp) {
     }
 }
 
+async fn restore_audio_session(
+    work: &SessionWork<'_>,
+    preferences: &AudioPreferences,
+    hub: &HubConnection,
+    data: &Bootstrap,
+) -> Option<bool> {
+    loop {
+        if !work.is_current() {
+            return None;
+        }
+        if let Some(result) = try_restore_audio_session(work, preferences, hub, data) {
+            return result;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+fn try_restore_audio_session(
+    work: &SessionWork<'_>,
+    preferences: &AudioPreferences,
+    hub: &HubConnection,
+    data: &Bootstrap,
+) -> Option<Option<bool>> {
+    let mut prepared = match preferences.try_prepare_session(
+        &data.user.id,
+        hub.clone(),
+        data.audio_settings.as_ref(),
+    ) {
+        Ok(None) => return None,
+        Ok(prepared) => prepared,
+        Err(_) => None,
+    };
+    Some(work.commit(|| {
+        if let Some(prepared) = &mut prepared {
+            prepared.apply();
+        }
+        preferences
+            .controls
+            .set_user_state(data.user.is_muted, data.user.is_deafened);
+        preferences
+            .controls
+            .set_server_state(data.user.is_server_muted, data.user.is_server_deafened);
+        prepared.is_some()
+    }))
+}
+
+#[cfg(test)]
 fn restore_audio(preferences: &AudioPreferences, hub: &HubConnection, data: &Bootstrap) -> bool {
     let restored =
         preferences.begin_session(&data.user.id, hub.clone(), data.audio_settings.as_ref());

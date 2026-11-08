@@ -699,9 +699,42 @@ Final `native-calls/session-filesystem-final-2026-11-08/` passed238default/
 Actual/frozen executable SHA-256:
 `407bcd45195fc919fcaaf4d60d76d43f69d9e64990f6d104c442610db0ae195f`.
 sessionFilesystemWorkChecked=true is narrow component acceptance only.
-Save milestone/post-save Graphify/guard and compact; no push/release/shutdown.
+Saved `03b151364b1d94f420fe6d971736cd07a3a69948`; post-save Graphify/
+438-source/3reference/24evidence/binary/clean-tree guard passed, compact completed;
+no push/release/shutdown.
 Final native syscall/resource-lock duration, audio restoration gate and whole
 worker/audio/call/client readiness remainunaccepted.
+
+### Audio restoration resource admission: components checked locally
+
+Preference/control settings preparation now tries both resource mutexes before
+the strict owner commit; same legacy merge/dirty-owner/device semantics retained.
+Prepared application uses swaps/atomics with no new resource acquisition under
+the intent gate. Notifications, replaced-token cancellation and destructors run
+after gate exit. Both production login/resume paths wait cooperatively with the
+original Session ticket; repeated Leave does not restart, Logout/window abandons
+without detached restoration. UI Logout submits priority before existing cleanup.
+Initial development stopped on callback/VoiceLeave mutable-borrow conflicts.
+Restoration now commits preferences/controls only; downstream bootstrap acceptance
+separately rechecks the same original ticket after both resource guards release.
+Added explicit between-stage Logout/next-owner regression; no check-then-mutate
+or stale reticketing.438-source v2development103tests/fmt/Clippy passed;
+independent438/3/freeze/exact suite counts match.13main/9preferences include6new
+restoration/resource/owner/cancellation/legacy-save regressions.
+Final `native-calls/audio-restore-final-2026-11-08/` passed244default/
+234neural-disabled tests, both Clippy modes/fmt/pinned/9HTTP/neural/freshbuild/
+8inert RUEN/four-DPI interactions; protected neural metrics unchanged.
+Independent438primary+3reference/all24evidence/current+frozen executable+ONNX
+audit found0mismatches and exactly4existing changes/no added modules.
+Verified13main/9preferences/10profile/6SessionIo proof suites and all retained
+13stalled protocol/late-resume/original-ticket RTP/voice/Leave controls both modes.
+Actual/frozen executable SHA-256:
+`561f80f11e6d21bb134ef145d9170f99904710b299a4e0c24ef35116b5d5e217`.
+audioRestorationWorkChecked=true is narrow component acceptance only;
+source save/post-save Graphify/guard/compact next, no push/release/shutdown.
+Failed-auth/runtime cleanup and resume
+ChatEngine::set_friends storage work still have external waits under intent gate;
+actual UI/OS/worker/client bounds and readiness remainfalse. No new acceptance.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

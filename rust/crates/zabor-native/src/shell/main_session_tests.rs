@@ -1,6 +1,6 @@
 use super::{
-    main_session, restore_audio, AuthClient, Command, CommandQueue, MainResult, SessionWork,
-    UiEvent, VoiceLeave, VoiceSession, VoiceWork,
+    main_session, restore_audio, restore_audio_session, AuthClient, Command, CommandQueue,
+    MainResult, SessionWork, UiEvent, VoiceLeave, VoiceSession, VoiceWork,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -965,4 +965,216 @@ fn main_session_routing_preserves_channel_accept_voice_scope_and_guarded_commits
         .is_none());
     stop.cancel();
     assert!(work.commit(|| panic!("Stopped commit ran")).is_none());
+}
+
+#[tokio::test]
+async fn held_audio_settings_restore_services_leave_and_cancels_logout_or_window_without_late_owner_commit(
+) {
+    timeout(Duration::from_secs(15), async {
+        for action in ["leave", "logout", "window"] {
+            let fixture = fixture("unused").await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+            let preferences = AudioPreferences::new(&json!({"language":"en","inputVolume":99}));
+            assert!(preferences.begin_session("original-owner", hub.clone(), None));
+            let original = preferences.settings().unwrap();
+            let held = Arc::new(Notify::new());
+            let (release, blocked) = std::sync::mpsc::channel();
+            let holder = {
+                let preferences = preferences.clone();
+                let held = held.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _settings = preferences.controls.settings.lock().unwrap();
+                    held.notify_one();
+                    blocked.recv().unwrap();
+                })
+            };
+            held.notified().await;
+            let intents = Arc::new(CriticalIntents::default());
+            let ticket = intents.ticket();
+            let stop = CancellationToken::new();
+            let audio = audio(&stop);
+            let monitor = audio.monitor(true);
+            let generation = Arc::new(AtomicU64::new(1));
+            let started = Arc::new(Notify::new());
+            let commits = Arc::new(AtomicUsize::new(0));
+            let (sender, mut published) = mpsc::unbounded_channel();
+            let (commands, mut queued) = mpsc::channel(16);
+            let queue = CommandQueue { sender: commands, intents: intents.clone() };
+            for _ in 0..16 { queue.try_send(Command::Join("old-channel".into())).unwrap_or_else(|_| panic!("Voice FIFO fixture failed")); }
+            let task = {
+                let preferences = preferences.clone();
+                let hub = hub.clone();
+                let intents = intents.clone();
+                let stop = stop.clone();
+                let audio = audio.clone();
+                let generation = generation.clone();
+                let started = started.clone();
+                let commits = commits.clone();
+                tokio::spawn(async move {
+                    let update = |event| { let _ = sender.send(event); };
+                    let work = SessionWork::new(&intents, ticket, &stop, &update);
+                    let data = zabor_native::auth::Bootstrap {
+                        user: User { id: "restored-owner".into(), is_muted: true, is_server_deafened: true, ..Default::default() },
+                        audio_settings: Some(json!({"inputVolume":73,"selectedInput":"retained-external-device"})),
+                        ..Default::default()
+                    };
+                    let future = restore_audio_session(&work, &preferences, &hub, &data);
+                    tokio::pin!(future);
+                    let mut first = true;
+                    let started_future = std::future::poll_fn(|cx| {
+                        let result = future.as_mut().poll(cx);
+                        if first { first = false; started.notify_one(); }
+                        result
+                    });
+                    let result = drive(&work, ticket, &audio, &generation, None, started_future).await;
+                    if let Some(Some(true)) = result {
+                        assert!(work.commit(|| commits.fetch_add(1, Ordering::AcqRel)).is_some());
+                    }
+                    result
+                })
+            };
+            started.notified().await;
+            assert_eq!(commits.load(Ordering::Acquire), 0);
+            let measured = Instant::now();
+            match action {
+                "leave" => {
+                    for _ in 0..2 {
+                        queue.try_send(Command::Leave).unwrap_or_else(|_| panic!("Priority Leave failed"));
+                        assert!(matches!(timeout(Duration::from_millis(1500), published.recv()).await.unwrap().unwrap().for_current(&intents), Some(UiEvent::VoiceEnded)));
+                        assert_eq!(audio.demand.active(), 0);
+                        assert!(monitor.is_current());
+                        monitor.configure(false);
+                        monitor.configure(true);
+                        assert!(!task.is_finished());
+                        assert_eq!(preferences.settings().unwrap(), original);
+                    }
+                    release.send(()).unwrap();
+                    holder.await.unwrap();
+                    assert_eq!(task.await.unwrap(), Some(Some(true)));
+                    assert_eq!(commits.load(Ordering::Acquire), 1);
+                    assert_eq!(preferences.settings().unwrap().input_volume, 73.0);
+                    assert_eq!(preferences.settings().unwrap().selected_input, "retained-external-device");
+                    assert_eq!(preferences.controls.user_state(), (true, false));
+                    assert_eq!(preferences.controls.server_state(), (false, true));
+                    for _ in 0..16 { let command = queued.try_recv().unwrap(); assert!(!intents.is_current(command.ticket, command.command.scope())); }
+                }
+                "logout" | "window" => {
+                    if action == "logout" { queue.try_send(Command::Logout).unwrap_or_else(|_| panic!("Priority Logout failed")); } else { stop.cancel(); }
+                    assert!(timeout(Duration::from_millis(1500), task).await.unwrap().unwrap().is_none());
+                    assert_eq!(commits.load(Ordering::Acquire), 0);
+                    assert_eq!(preferences.settings().unwrap(), original);
+                    release.send(()).unwrap();
+                    holder.await.unwrap();
+                    assert_eq!(preferences.controls.user_state(), (false, false));
+                    assert_eq!(preferences.controls.server_state(), (false, false));
+                    if action == "logout" {
+                        assert_eq!(intents.next().await, CriticalAction::Logout);
+                        let update = |_| {};
+                        let fresh = SessionWork::new(&intents, intents.ticket(), &stop, &update);
+                        let data = zabor_native::auth::Bootstrap { user: User { id: "next-owner".into(), ..Default::default() }, audio_settings: Some(json!({"inputVolume":31})), ..Default::default() };
+                        assert_eq!(restore_audio_session(&fresh, &preferences, &hub, &data).await, Some(true));
+                        assert_eq!(preferences.settings().unwrap().input_volume, 31.0);
+                        assert_eq!(commits.load(Ordering::Acquire), 0);
+                    }
+                }
+                _ => unreachable!(),
+            }
+            println!("audio restore held=settings-lock action={action} fixture_ms={} original_ticket=true detached_jobs=0 physical_audio=false", measured.elapsed().as_millis());
+            hub.close();
+            fixture.server.await.unwrap();
+        }
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn guarded_audio_restore_failure_keeps_existing_settings_and_stopped_work_never_applies_user_state(
+) {
+    let fixture = fixture("unused").await;
+    let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+        .await
+        .unwrap();
+    let preferences = AudioPreferences::new(&json!({"inputVolume":99}));
+    let original = preferences.settings().unwrap();
+    let intents = CriticalIntents::default();
+    let ticket = intents.ticket();
+    let stop = CancellationToken::new();
+    let update = |_| {};
+    let work = SessionWork::new(&intents, ticket, &stop, &update);
+    let data = zabor_native::auth::Bootstrap {
+        user: User {
+            is_muted: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert_eq!(
+        restore_audio_session(&work, &preferences, &hub, &data).await,
+        Some(false)
+    );
+    assert_eq!(preferences.settings().unwrap(), original);
+    assert_eq!(preferences.controls.user_state(), (true, false));
+    preferences.controls.set_user_state(false, false);
+    stop.cancel();
+    assert!(restore_audio_session(&work, &preferences, &hub, &data)
+        .await
+        .is_none());
+    assert_eq!(preferences.controls.user_state(), (false, false));
+    hub.close();
+    fixture.server.await.unwrap();
+}
+
+#[tokio::test]
+async fn logout_between_audio_acceptance_and_worker_acceptance_rejects_original_ticket_and_releases_resource_guards(
+) {
+    let fixture = fixture("unused").await;
+    let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+        .await
+        .unwrap();
+    let preferences = AudioPreferences::new(&json!({"inputVolume":99}));
+    let intents = CriticalIntents::default();
+    let ticket = intents.ticket();
+    let stop = CancellationToken::new();
+    let update = |_| {};
+    let work = SessionWork::new(&intents, ticket, &stop, &update);
+    let data = zabor_native::auth::Bootstrap {
+        user: User {
+            id: "original-owner".into(),
+            ..Default::default()
+        },
+        audio_settings: Some(json!({"inputVolume":73})),
+        ..Default::default()
+    };
+    assert_eq!(
+        restore_audio_session(&work, &preferences, &hub, &data).await,
+        Some(true)
+    );
+    assert!(preferences.controls.settings.try_lock().is_ok());
+    assert!(preferences
+        .try_prepare_session("probe-owner", hub.clone(), None)
+        .unwrap()
+        .is_some());
+    intents.request(CriticalAction::Logout);
+    assert!(work
+        .commit(|| panic!("Stale downstream worker acceptance ran"))
+        .is_none());
+    assert_eq!(intents.next().await, CriticalAction::Logout);
+    let fresh = SessionWork::new(&intents, intents.ticket(), &stop, &update);
+    let next = zabor_native::auth::Bootstrap {
+        user: User {
+            id: "next-owner".into(),
+            ..Default::default()
+        },
+        audio_settings: Some(json!({"inputVolume":31})),
+        ..Default::default()
+    };
+    assert_eq!(
+        restore_audio_session(&fresh, &preferences, &hub, &next).await,
+        Some(true)
+    );
+    assert!(restore_audio_session(&work, &preferences, &hub, &data)
+        .await
+        .is_none());
+    assert_eq!(preferences.settings().unwrap().input_volume, 31.0);
+    hub.close();
+    fixture.server.await.unwrap();
 }
