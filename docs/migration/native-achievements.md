@@ -267,3 +267,27 @@ operation. Unrelated source/extractor changes, force/shrink overrides, primary
 map replacement, HTML/model/API/network operations and physical/full-client
 acceptance were not performed. Temporary local graph scripts are removed after
 the final graph verification.
+
+## Checked primary library integration
+
+Source01ed463 was imported as05034dd; primary library module wiring is saved as
+`de2347dcb5c1a93bdfa6ee2099dcffe327ace416`. Both pure modules now compile as part
+of zabor-native with unchanged Cargo/dependency/reference/locale pins. Graph-only
+doc65e02ad was imported as36fe295 after the source check; Rust/Slint stayed exact.
+
+Primary group `sh_1bc0be6a1001tiQL8xrgtQ8p2r` passed24newtests (16achievements/
+8presence), fmt, both native-media all-targets Clippy modes, normal native build
+and Graphify. Eleven files were frozen during the group; immutable verification
+retains all their hashes. Save guard separately retains ten code/pin hashes to
+permit later documented doc-only updates without changing the checked code.
+Evidence: `migration-artifacts/native-data/achievements-presence-integration-2026-11-08/`.
+Main graph7521nodes/19103edges/311communities;7priorzero-nodewarnings/HTML5000limit.
+Normal executable SHA-256:
+`f00cf622850daf01b96eadc3059138645a70da0d303a84e143848bc1aa1f4e71`.
+Temporary runner removed; no primary library verification job remains.
+
+This proves module integration only. Registered primary Session worker commands,
+actual profile/modal/navigation/focus binding of AchievementsPanel, owner-bound
+durable hidden preparation/atomic acceptance and ISO/local-time/clock OS binding
+remain mandatory. The child synthetic Slint test is not an integrated app test.
+Physical/raster/motion/screen-reader/full-client/release acceptance stays false.

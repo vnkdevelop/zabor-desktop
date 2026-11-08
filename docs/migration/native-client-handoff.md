@@ -10,10 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest checked source — **66e3b169448771359b0aa72f3c382843680bca37**:
-original decoded P2P frame/input provenance,155 unique affected tests/fmt/both
-Clippy/native build/RUEN/Graphify passed. Updater46/peer138/integration94/profile134
-proofs retained. Normal executable3675cf73… is component evidence,
+сборкой. Latest checked source — **de2347dcb5c1a93bdfa6ee2099dcffe327ace416**:
+achievements/presence library integration,24 new tests/fmt/both Clippy/native build/
+Graphify passed. RC155/RUEN/updater46/peer138/integration94/profile134 proofs retained.
+Normal executablef00cf622… is component evidence,
 not full-client acceptance. RC2108f86, SFU2d254a2 and original peer/capture/mic retained.
 Picker **0dcfef7**,audio **5b8d656** and camera **df43be2** retained;physical camera/audio/
 complete client readiness=false. Metadata-only continuation save follows this source.
@@ -450,6 +450,62 @@ push/merge/release/shutdown не выполнялись. После каждог
   age/host helper/callback quiescence/full-client acceptance still open. Next main
   integration may take saved01ed463 after continuation save; do not take unfinished
   child graph/helper phases or claim imported UI/durable/OS binding accepted.
+- RC continuation saved as `7830de02c08399be1aae7ad90a67d293938c9a3f`, clean
+  tree/source guard and post-save Graphify passed. Saved achievements source01ed463
+  imported as05034dd. Primary now exposes achievements/presence library modules;
+  no registered app command/modal/durable/OS date binding has been added yet.
+- Library integration `sh_1bc0be6a1001tiQL8xrgtQ8p2r` passed24newtests (16achievements/
+  8presence), fmt/both native-media all-targets Clippy/normal build/Graphify. Source
+  wiring saved as `de2347dcb5c1a93bdfa6ee2099dcffe327ace416`; normal binary
+  `f00cf622850daf01b96eadc3059138645a70da0d303a84e143848bc1aa1f4e71`.
+  Main graph7521nodes/19103edges/311communities,7priorwarnings/HTML5000limit remain.
+  Eleven verification files were frozen during the group; save proof retains all
+  original verification hashes plus separate10code/pin hashes for later doc-only
+  changes. Temporary runner removed. No current primary check job remains.
+- Achievements child completed graph/report/attribution as doc-only65e02ad,
+  imported as36fe295. Original raw14168nodes/32877records preserved,539communities
+  in explicit directed/multigraph output; focused6filemap147nodes/279edges/7groups.
+  Root healthy_graph=false:1951dangling (1938baseline/13authored lexical imports),
+  1baseline self-loop/49baseline parallel groups/9zero-node files. Focused map has
+  no dangling/self/parallel extras but20explicit unresolved lexical boundaries and
+  requires_binding edges. Source Rust/Slint unchanged; four own temp scripts
+  removed. Do not hide unresolved resolver problems or patch external Graphify.
+  This child phase is finished. App worker/modal/focus, actual native hidden-store
+  preparation/atomic acceptance and trusted ISO/local-time/clock binding remain next.
+- Updater redirect follow-up could not start in the old long session because of
+  pre-consume API quota; completed88f3 source was not affected. As expressly allowed
+  by the owner, a fresh compact General restart `ses_e43e7cdf2ffe1lSpsf2DYPu9Gu`
+  now owns only child update_io/URL-policy/tests/own docs/harness in
+  native-release-packaging. GitHub release302toCDN must be handled by bounded,
+  explicitly validated redirects while retaining signed final digest/length,
+  operation/token/deadline/joins and no credential/SAS logging. Loopback/pure policy
+  tests only; no real GitHub requests/downloads, trust invention or installation.
+  Do not poll/duplicate this new task or integrate unfinished work.
+- Fresh redirect child returned checked source
+  `0096695dcff98d5ea222512e90fd7e52f3431694` on88f3cd4, clean tree,5authorized
+  files.59tests passed/1ignored, including21IO/policy tests; existing API preserved,
+  manual4redirect/5request and8192byte URL/Location limits, exact signed GitHub
+  route/fixedHTTPSCDN allowlist, same-loopback-origin sandbox, no secret-header/SAS
+  logging, one overall deadline and original join/admission/drain maintained.
+ 194existingdependencyversions,fmt/all-targetClippy/Python/diff checks and temp
+  cleanup passed. Own graph13968nodes/30247edges/536communities,9warnings/HTML5000.
+  This phase is finished. Main integration of0096695 is pending after saving this
+  continuation; no app-host/health/drain/trust/install/whole-native acceptance.
+- User explicitly asked to compact agent sessions without deleting needed context.
+  New continuation work must first write a SHORT scoped handoff with branch/head,
+  WIP versus checked sources, exact pending jobs, original owners/joins, constraints,
+  evidence and next action, then use OpenCode V2 session.compact. Preserve source,
+  needed live fixtures/jobs/logs, permanent proof/Graphify/user files/settings; only
+  completed owned temporary checks are cleanup candidates. No service restart,
+  session deletion/revert or wiping history/config as a compaction shortcut.
+  Active import-helper ses_e44a7ac4cffeI1oF29tnNf75s2 and RC desktop
+  ses_e44a7ab1cffe4T8WKFIaW7g0ef received this compatible steering, not new work or
+  status polling. Compaction requests were durably admitted (delivery=steer) for
+  completed achievements/graph ses_e441da897ffezpJCWS3jbyqKUX and redirect
+  ses_e43e7cdf2ffe1lSpsf2DYPu9Gu; admission is not a completed-compaction proof.
+  Main will compact after saving current source/evidence/continuation. Keep future
+  task prompts/readbacks bounded and use targeted Graphify/source reads, not full
+  file dumps/repeated full matrices; no required engineering constraints lost.
 
 ### Verified native RC components after b4b52bc
 

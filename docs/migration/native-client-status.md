@@ -101,6 +101,16 @@ Clippy режима, normal build, RU/EN inert и Graphify. Graph7406nodes/18793
 IME/UIPI, continuous frame age, host helper, callback/native teardown и все
 whole-client/two-device/visual/release gates ещё не закрыты. Готовность=false.
 
+В native library подключены достижения и RU/EN presence:
+**`de2347dcb5c1a93bdfa6ee2099dcffe327ace416`** после импорта05034dd.24новых теста
+(16achievement/8presence), fmt, оба Clippy режима, normal build и Graphify прошли.
+Main graph7521nodes/19103edges/311communities;7priorwarnings/HTML5000limit.
+Источник/локализации/Cargo pins не менялись. [native-achievements.md](native-achievements.md)
+описывает API и graph-audit с честными unresolved boundaries. Native app worker,
+modal/focus/presentation, durable hidden store и actual OS ISO/local-time binding
+ещё не подключены; синтетический Slint child test не заменяет app acceptance.
+Full readiness, публикация и выключение по-прежнему false.
+
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
 
 Рабочая ветка: `rust/native-client`. Checkpoint рабочего Electron/WASM-клиента перед переносом: `d088795`. Нативный код находится в `rust/crates/zabor-native`; состояние этой ветки не означает перенос в основную пользовательскую папку или публикацию релиза.
