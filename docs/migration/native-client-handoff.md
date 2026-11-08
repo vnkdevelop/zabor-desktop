@@ -2,6 +2,69 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
+## Current parallel continuation — 2026-11-08
+
+Owner explicitly requested several agents to accelerate full migration and removal
+of old client code. Six disjoint functional workstreams plus a read-only legacy
+cutover audit are now assigned; exact sessions/paths/scopes and original pending
+primary job are in [native-parallel-plan.md](native-parallel-plan.md). This supersedes
+older historical statements about agents not yet launched. Preserve the working
+React/Electron reference until native acceptance and final comparison; deletion
+applies only to audited legacy client paths in the native branch, not backend .NET,
+SFU Go, user source/profile, required native libraries/assets/locales or evidence.
+
+Checked primary source a6f8e1f0efc1d3897ac3517cbb53db63facb63a4 integrates0096695.
+Original check sh_1bc35f16d001fGYJhcFNc7Bzcf automatically passed59unique tests,
+fmt/bothClippy/build/ownstaticCRT-C++helper/Graphify. Frozen14hashes unchanged;
+four source/script blobs exact; only five candidate paths saved. IO doc conflict
+preserved both receipts; coordination excluded. Temp helper/sandboxes/runners
+removed. Graph7563/19202/310;7priorwarnings/HTML5000limit. Normal binary662d4232…
+is scoped component evidence, not full-native readiness. Primary job completed.
+RC own compact completed; e3f6a38source/4bbbca4doc are saved candidates, main
+desktop/viewport binding still absent. Import WIP/resources remain untouched;
+original helper agent quota-failed,not polled or duplicated. Final gates remain.
+
+Automatic provider results: new UI/data/media/RC/update-host/cutover launches failed
+pre-consume quota; no verified new source returned. Their file assignments remain
+a backlog, not running/completed code proof. Read-only legacy audit completed:
+[native-legacy-cutover.md](native-legacy-cutover.md). node_modules is a verified
+junction into the ORIGINAL user project: no recursive cleanup/npm install/rebuild
+or legacy launcher fallback. Bounded short fresh data retry ses_e43c0da25ffeNPUfvdY3E1N8Qj
+also failed quota. Original import-helper then returned its own automatic quota
+error; preserve its WIP/original joins/process/pipe resources, do not infer cleanup
+or duplicate the unfinished work. No more repeated launch attempts scheduled.
+Read-only status found uncommitted app/data/media/RC/update-host WIP; preserve it
+rather than interpreting provider failure as clean trees. Exact ownership is in
+the plan. Primary took over isolated app WIP only: preserve bindings,format,root
+AchievementItem export corrected. compile-v1 diff/fmt passed but MSVC discovery
+stopped before compilation;checked-v2 also failed discovery before compilation.
+Targeted query proved scrubbed env needs ProgramData/ALLUSERSPROFILE and installed
+prerelease discovery. Failed runners/temp fixtures removed,zero tests passed;
+no app source acceptance. Worker-held-response/app-interaction/storage/DST gates
+remain open. Do not overwrite other worktree WIP or duplicate original jobs.
+
+App group sh_1bc500b45001ey4u6qGi61OgC9 automatically completed:all-target compile
+and20unique affected tests passed;Clippy failed on fixture type complexity/manual
+leap divisibility. Both corrected without suppression. Temp fixtures/runner removed.
+App group sh_1bca38491001fsctL46gfpYEm2 automatically stopped at fmt on newly
+discovered actual-worker main_session_tests WIP;zero tests/build/Clippy in checked-v4.
+Temp fixtures/runner removed. All app WIP preserved,including root type export,
+Fixture alias and leap-year fixes. No primary app job remains pending; its original
+owner alone resumes source to avoid overlapping edits. Untouched achievements/store
+19-test proof retained. Actual worker/UI/persistence/DST acceptance remains next.
+
+Owner again explicitly requested subagents:four short fresh sessions resume data,
+media,RC and updater;original app and import owners resume their own WIP after
+short handoff/compact. Six current IDs in native-parallel-plan.md. Primary retains
+common integration/final app acceptance but no concurrent child source edits.
+No checked result yet from those launches;
+do not infer acceptance from scheduling,overwrite WIP or duplicate import resources.
+
+Primary final Graphify resync sh_1bc50c8dd001hgnOOeYAAM6HUD automatically completed:
+no topology change,outputs retained,7priorzero-nodewarnings remain. Earlier source-
+group Graphify still describes unchanged saved source. No primary shell job remains
+pending; preserve child WIP/owners/requests/joins/resources and six session IDs across compact.
+
 Ранее функционально проверенный этап после `2ccbc75`: video task join;
 регистрация до native acquisition,наблюдаемый исходный JoinHandle,общий app drain.
 Прошли7video/92shell-Voice-Leave/3localRTP tests,fmt и Clippy(native-media/all-targets).
@@ -10,10 +73,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest checked source — **de2347dcb5c1a93bdfa6ee2099dcffe327ace416**:
-achievements/presence library integration,24 new tests/fmt/both Clippy/native build/
-Graphify passed. RC155/RUEN/updater46/peer138/integration94/profile134 proofs retained.
-Normal executablef00cf622… is component evidence,
+сборкой. Latest checked source — **a6f8e1f0efc1d3897ac3517cbb53db63facb63a4**:
+redirect integration59tests/fmt/bothClippy/nativebuild/Graphify passed. Prior
+de2347d achievements/presence library24tests and RC155/RUEN/updater46/peer138/
+integration94/profile134 proofs retained. Normal executable662d4232… is component evidence,
 not full-client acceptance. RC2108f86, SFU2d254a2 and original peer/capture/mic retained.
 Picker **0dcfef7**,audio **5b8d656** and camera **df43be2** retained;physical camera/audio/
 complete client readiness=false. Metadata-only continuation save follows this source.

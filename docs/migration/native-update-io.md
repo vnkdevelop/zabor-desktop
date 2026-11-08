@@ -325,3 +325,24 @@ SHA-256 of the checked working-tree bytes:
   `GEMINI_API_KEY` or `GOOGLE_API_KEY` for semantic extraction. No key was requested,
   printed or provisioned here. No Rust/Clippy warning was suppressed. Git's
   LF-to-CRLF checkout-normalization notices do not indicate a diff/fmt failure.
+
+## Checked primary redirect integration
+
+Source0096695 is integrated as `a6f8e1f0efc1d3897ac3517cbb53db63facb63a4` on
+rust/native-client,based onfd8783f. Original grouped job
+`sh_1bc35f16d001fGYJhcFNc7Bzcf` completed automatically:59unique tests (release4,
+update15,helper19,IO/policy21),fmt,bothnative-media/all-targetsClippy,normalbuild,
+ownstaticCRT/W4WXhelper and Graphify passed. No full neural/UI matrix repeated.
+Fourteen source/pin hashes stayed fixed; four imported Rust/script Git blobs
+exactly match the candidate. The saved commit includes only five candidate paths;
+the IO document preserves both primary helper integration and child redirect
+receipts. Coordination/audit WIP was excluded from the source commit.
+
+Evidence: `migration-artifacts/native-data/update-redirect-integration-2026-11-08/checked-v1/`,
+including verification.json and save-verification.json. Original owned helper,
+sandboxes and temporary check/save runners were removed. Native executable hash:
+`662d423256f818d2c4c93a24414a1f45554409c802ab585c60bc75fcbd686871`.
+Main graph7563nodes/19202edges/310communities;7priorzero-nodewarnings/HTML5000limit
+remain. This is component evidence,not host/process/health/bootstrap/full-drain,
+trust/certification/legal/live-installation/whole-native acceptance. No push,
+publication,main merge or shutdown was performed.

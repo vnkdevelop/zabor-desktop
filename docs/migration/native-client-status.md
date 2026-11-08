@@ -12,6 +12,47 @@ Owner decisions confirmed on 2026-11-06: target Windows 10/11 x64; a native Rust
 
 Compaction/continuation context: [native-client-handoff.md](native-client-handoff.md). It preserves constraints, checkpoints, blockers and the complete remaining plan; compaction does not imply migration completion.
 
+## Ускорение и очистка legacy — 2026-11-08
+
+По прямому запросу владельца выделены шесть независимых функциональных направлений:
+app UI/actions, chat/file durability, media lifecycle, RC desktop integration,
+update host/bootstrap и действующий copy-import helper. Отдельный read-only агент
+составляет точный список удаления старого клиента. Сессии, file ownership и pending
+primary redirect check сохранены в [native-parallel-plan.md](native-parallel-plan.md).
+Это назначения работ, не новые пройденные проверки. Старый React/Electron пока
+сохраняется как эталон; очистка его runtime/build/source в native-ветке выполняется
+после замены функций и итоговой приёмки. Backend .NET/SFU Go, оригинальные профиль/
+проект пользователя, нужные native библиотеки/ресурсы/RUEN и доказательства не
+удаляются. Реальные подписи/лицензии/physical/two-device/full-client gates открыты.
+
+Новые функциональные запуски, один короткий fresh-context data retry и затем
+действующий import-helper вернули автоматические pre-consume quota errors.
+Проверенного нового кода от этих запусков нет; назначения сохранены как backlog,
+а не как работающие/готовые этапы. Read-only аудит очистки завершён и сохранён в
+[native-legacy-cutover.md](native-legacy-cutover.md). Основной scoped redirect прогон
+автоматически завершился:59unique tests/fmt/bothClippy/build/staticCRT-helper/
+Graphify passed;source save a6f8e1f,14hashes unchanged,temporary fixtures removed.
+Граф7563nodes/19202edges/310communities;7priorwarnings/HTML5000limit сохранены. WIP/
+оригинальные owners/joins/pipe/helper ресурсы импорта не удалялись и не заменялись.
+
+После quota errors обнаружены uncommitted WIP в app/data/media/RC/update-host:
+их нельзя сбрасывать или считать проверенными. Primary продолжает только app WIP
+в отдельном worktree. Форматирование/diff check прошли; root AchievementItem export
+исправлен. Два локальных запуска остановились до Rust-компиляции из-за MSVC
+discovery; targeted query установил необходимые не секретные OS environment пути.
+App compile и20unique affected tests прошли в original group sh_1bc500b45001ey4u6qGi61OgC9;
+Clippy остановился на type-complexity тестового fixture и manual leap divisibility.
+Оба дефекта исправлены без suppression; исходные temporary fixtures удалены.
+Новый affected group sh_1bca38491001fsctL46gfpYEm2 автоматически остановился на fmt
+нового actual-worker main_session_tests WIP;temp fixtures/runner удалены. Primary
+app job завершён,весь WIP сохранён;actual worker/durable/DST/physical/full-client gates открыты.
+
+По повторному прямому запросу пользователя запущены4короткие fresh-context сессии
+для data/media/RC/update-host и возобновлены original app/import owners;6IDs в
+parallel-plan. Проверенных новых commits от этих запусков пока нет. App source
+правит только его original owner,primary отвечает за общую интеграцию/приёмку.
+Legacy deletion,push,publication и shutdown не выполняются.
+
 ## Где остановилась исходная сессия
 
 Сохранённый этап **`0dcfef75fa2dfcd35cac38b0724c27b412682445`** после `5b8d656`/`e3cc8cd`: миниатюры desktop/window/camera,
