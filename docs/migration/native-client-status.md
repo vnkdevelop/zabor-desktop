@@ -14,6 +14,15 @@ Compaction/continuation context: [native-client-handoff.md](native-client-handof
 
 ## Ускорение и очистка legacy — 2026-11-08
 
+Latest checked native source `cba6f348c08fd01b1cebf1d919d298db8d4d1c78` сохраняет
+exact-byte RU/EN catalogs и DFN3/Silero в native assets,17affected tests/fmt/Clippy/
+neuraltypes/nativebuild/Graphify passed. Guarded save содержит12scopedpaths,Git
+bytesexact;CR-at-EOL attribute correction не меняет checked code/resource bytes.
+Renderer/updater dictionaries и все model/dependency pins сохранены. Binaryd4b0af5f…
+— component proof;whole readiness=false. Primary source/check jobs завершены;
+coordination/finalgraphresync следует отдельно. Import43adbcd+checkedP2e3a3ff5 ожидают integration,
+другие functional owners остаются изолированными,publication/shutdown не разрешены.
+
 По прямому запросу владельца выделены шесть независимых функциональных направлений:
 app UI/actions, chat/file durability, media lifecycle, RC desktop integration,
 update host/bootstrap и действующий copy-import helper. Отдельный read-only агент
@@ -52,6 +61,69 @@ app job завершён,весь WIP сохранён;actual worker/durable/DST
 parallel-plan. Проверенных новых commits от этих запусков пока нет. App source
 правит только его original owner,primary отвечает за общую интеграцию/приёмку.
 Legacy deletion,push,publication и shutdown не выполняются.
+
+Primary отдельно готовит exact-byte native RU/EN catalogs и DFN3/Silero models,
+сохраняя renderer-эталон и native updater-only dictionaries без изменения байтов.
+Новые native include paths/manifest/verifier проверяются original group
+sh_1bcb14ce4001SwW5xvISJjCDIN;результат ожидается автоматически,source/pins frozen.
+Ожидаются17affected tests/fmt/Clippy/neuraltypes/build/Graphify,не full neural/visual
+матрица. Packaging/launcher/CI/reference-removal/full-native gates этим не закрываются.
+Данные и RC вернули partial handoff с pending original checks,не checked commits;
+parent их source не правит и проверки не дублирует.
+
+App owner подтвердил P1:fs::rename hidden history всё ещё под acceptance-gate,
+что может задержать Leave/Logout. План original-worker transaction/ack/rollback
+не является исправлением. После original pending check разрешён только native
+test-only headless Slint renderer/dev-dependency seam;production renderer/версии/
+React-эталон не меняются. Проверки callback пока не объявляются пройденными.
+Update-host partial имеет8of9Rust-tests и pending affected timeout/4packaging check;
+live app-drain attestation остаётся закрыт,checked commit/real trust отсутствуют.
+
+Original resource group sh_1bcb14ce4001SwW5xvISJjCDIN завершился частично:
+11Python+4Rust tests/exactbytes/fmt/normalClippy passed;neuraltypes остановился
+до проверки кода из-за отсутствующего pinned ONNX1.31.1 cache. RNNoise archive
+также отсутствует;старые версии/оригинальная пользовательская папка не используются.
+Raw receipt имеет4test-count из-за CRLF parser;complete11test log сохранён отдельно.
+Original temp fixtures/runner удалены. Новый original sh_1bcca308a0010Aom5EoONz9INY
+готовит absent hash-verified caches и выполняет только незавершённую часть,сохраняя
+15passed tests при точном source hash guard. Результат ожидается автоматически;
+native source/pins frozen,никаких npm install/production/user-folder writes.
+
+Resource v2 подготовил и hash-verified ONNX1.31.1/RNNoise;neuraltypes дальше
+остановился в bindgen из-за absentlibclang18.1.1. Code/resource/pins не меняются.
+Current original sh_1bccce238001GGtIeujvpvjpth,checked-v3,готовит только build-only
+pinnedlibclang и завершает остаток;15passed tests сохраняются,sourcefreeze остаётся.
+Tempv2fixtures/runner удалены,никаких повторных full матриц или source acceptance.
+
+Import-helper checked43adbcd,51tests/helper+nativeClippy/fmtsyntax/harness доставлен,
+но пока не integrated. Final read-only review ses_e433220b9ffe9l6biMuLRS3Sfy pending;
+rootworkspace/native dependency/originaloperation/consent/accountkey/UI/recovery
+hooks впереди. Chromium roundtrip не запускался:Electron44.4.3 не прошёл offline
+WinVerifyTrust,наблюдённыйhash не являетсяapproval. Realtrust/wholeclient gatesfalse.
+
+Finalimportstaticreview завершён:одинP2cmd.exe argument-injection в Python runner,
+других actionableownership/zeroization/sourceinventory findingsнет. Importowner
+исправляет только этот harness+mockedprelaunch tests;43adbcdintegration закрыта
+до checkedfollowup. Никаких trustapproval/реальногоChromium/fullacceptance claims.
+
+Resource v3 original завершился passed:17uniquetests/fmt/normalClippy/neuraltypes/
+2model-loadreset/nativebuild/Graphify;23source-reference-pinhashes exact. Renderer/
+updatercatalogs/modelpins сохранены. Binaryd4b0af5f… — scoped component proof,
+не fullclient acceptance. Graph7563/19202/315,10zero-nodewarnings/HTML5000skip.
+Original primary prep/checks завершены,tempfixtures/runners удалены,pinnedcaches
+сохранены. Resource source готов к guarded scoped save;publication/shutdownfalse.
+
+Resource source сохранён какcba6f348c08fd01b1cebf1d919d298db8d4d1c78,12scopedpaths,
+nativeGitbytesexact;22hashesunchanged+catalog-onlyCR-at-EOLattribute correction.
+Final Graphifysh_1bcddd22500132wibJCN0qK57D завершён,no topology changes,10warnings,
+outputsuntouched. Primary shell/check/graph jobs отсутствуют;coordination сохраняется
+отдельно передcompact. Child WIP/jobs/owners не очищаются и не считаются accepted.
+
+ImportP2 закрыт checkedfollowupe3a3ff56e22bd4b5994a9b5817cc2e4d4a7f50d1,parent43adbcd
+сохранён.7mockedPython tests/AST/stageddiff passed,51native/helper/exporttests
+source-guarded без повторного прогона. Primary прочиталactualcmd boundary/tests;
+unsafe args отвергаются до subprocess/fixture. Candidate pair ожидает guarded
+integration;realChromium/account/key/consent/main UI/worker gates этим не открываются.
 
 ## Где остановилась исходная сессия
 

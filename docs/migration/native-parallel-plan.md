@@ -124,6 +124,20 @@ checks that source integration; this does not duplicate the new host phase.
 
 ## Primary checkpoint and current original job
 
+Latest source checkpoint `cba6f348c08fd01b1cebf1d919d298db8d4d1c78` saved the12scoped
+native resource paths after17affected proofs,exact staging/Git-byte checks. Existing
+redirect source a6f8e1f below remains retained. The final catalog-only `cr-at-eol`
+attribute corrects Git EOL recognition without changing checked resource/code bytes;
+22prior hashes remain exact. Coordination was excluded and is saved separately.
+Normal binaryd4b0af5f7f2349913f73a207e6fa989afaba3f8b4aaba1ca6137acbb1b59ccd0.
+No primary source/check job remains pending;final graph resync/coordination follows.
+Import43adbcd plus checkedP2followupe3a3ff5 await guarded integration;other child source is not overwritten.
+Original final Graphify resync `sh_1bcddd22500132wibJCN0qK57D` automatically completed:
+no topology changes,outputs untouched,10zero-node warnings retained. The earlier
+code graph7563/19202/315 remains;no semantic documentation refresh is claimed.
+No primary shell/check/graph job remains pending. Checked source cba6f34 is saved;
+only3coordination docs remain unsaved and are guarded/saved before compact.
+
 Checked primary source is `a6f8e1f0efc1d3897ac3517cbb53db63facb63a4`, integrating
 `0096695dcff98d5ea222512e90fd7e52f3431694` from basefd8783f. The only merge conflict
 was the update IO document tail; both primary integration proof and child redirect
@@ -153,6 +167,149 @@ Final primary Graphify resync `sh_1bc50c8dd001hgnOOeYAAM6HUD` automatically comp
 after the documentation update: no topology change,outputs retained;7prior
 zero-nodewarnings remain. The source-group graph proof above still describes the
 unchanged saved source. No primary graph job remains pending.
+
+## Current independent primary resource group
+
+Primary continues only an independent native-owned resource cutover. Read the
+existing graph/report and targeted resource/reference paths before editing. The
+pre-existing native `assets/locales/` is updater-only and remains unchanged;
+the full RU/EN copies are added under `assets/catalogs/`. DFN3 and Silero copies
+are under `assets/models/`. Original renderer files and native updater dictionaries
+remain in place, with exact working bytes preserved. Original RU/EN Git blobs
+differ only by LF/CRLF checkout conversion, recorded separately in the manifest.
+
+Only primary owns `.gitattributes`, resource manifest/verifier/tests, the two narrow
+`strings.rs`/`neural.rs` include paths, notices and its scoped resource handoff.
+App/media owners received a scope clarification; media confirmed no overlap and
+was told to continue its original implementation task, not end at the clarification.
+Packaging is still exclusively update-host-owned until its checked delivery.
+
+Original primary group `sh_1bcb14ce4001SwW5xvISJjCDIN` completed partly; evidence:
+`migration-artifacts/native-data/resource-cutover-2026-11-08/checked-v1/`.
+The approved-temp runner `native-resource-check-v1.py` creates the four copies
+exclusively after byte preflight, uses primary's own mutable `rust/target` (children
+use separate targets), read-only pinned inputs, -j2 and scrubbed nonsecret OS env.
+It self-cleans after original completion. Resource/code/pin sources are frozen;
+no edit, poll, duplicate job, shared child-target use or commit before its result.
+Group: exact native/reference bytes,11Python verifier tests,fmt,normal all-targets
+Clippy,4strings/updater-catalog tests,neural library types and2in-memory model load/
+reset tests,normalbuild,Graphify. No full neural/WASM/visual/physical matrix repeated.
+Packaging/reference-test/launcher/CI/default-member/complete-native cutover is not
+claimed. Details and exact packaging hook: [native-resource-cutover.md](native-resource-cutover.md).
+
+Automatic v1 result:exact resource/reference bytes,11Python+4Rust tests,fmt/normal
+Clippy passed;ort-sys failed before neural types because ONNX1.31.1 cache was absent.
+RNNoise pinned cache is also absent in primary and the checked original-project
+location. No fallback to ONNX1.17.1 or original-folder writes. Temp fixtures/runner
+removed. Raw receipt counted4Rust tests because Python CRLF lines missed its regex;
+the complete11-test/OK log is retained,not rewritten to mark the group successful.
+
+Current original primary resource job `sh_1bcca308a0010Aom5EoONz9INY` is pending,
+checked-v2 evidence. It verifies unchanged v1 source hashes and inherits15passed
+tests with a separate count-correction receipt. Own approved-temp runner
+native-resource-check-v2.py prepares only absent pinned caches using existing
+hash-verified public-upstream scripts,observes both original subprocess outcomes,
+then runs unfinished neuraltypes/2memorymodel-loadreset/normalbuild/Graphify.
+No npm install,older runtime,source-pin edits,user-project writes or production
+requests. Primary own rust/target,-j2,scrubbedenv;sourcefreeze remains,no polling,
+duplicate jobs or commits before automatic completion. Final aggregate expected17,
+not a repeated unaffected/default/neural/visual matrix. Runner self-cleans.
+
+V2 original completed partly:both absent ONNX1.31.1/RNNoise caches prepared and
+hash-verified;neuraltypes stopped in rnnoise bindgen because build-only pinned
+libclang18.1.1 was also absent. Its fixtures/runner were removed;15inherited tests
+remain valid,no neural success is claimed. Current original resource continuation
+`sh_1bccce238001GGtIeujvpvjpth`,checked-v3,is pending. Own approved-temp runner
+native-resource-check-v3.py prepares only missing libclang with the existing pinned
+script,thenunfinishedneuraltypes/2model-loadreset/normalbuild/Graphify. Prior sources
+remain frozen and exact;no source/pin change,unaffected rerun,polling or duplicate
+jobs. All prep is in primary cache,never original-user folder or dependency junction.
+
+Resource v3 original automatically completed passed:17unique affected tests total,
+15inherited+2model-load/reset,fmt/normalClippy/neuraltypes/normalnativebuild/Graphify.
+23source/reference/pin hashes stayed exact;4native copies and original catalogs/
+models/updater-only dictionaries preserved. Normal executable SHA256
+d4b0af5f7f2349913f73a207e6fa989afaba3f8b4aaba1ca6137acbb1b59ccd0.
+Graph7563nodes/19202edges/315communities;10zero-node warnings/HTML5000skip explicit.
+All primary preparation/check subprocesses completed;fixtures/runners removed,
+required pinned caches retained. No primary resource job remains pending. Source
+save is now permitted only for its12scoped resource/code/notices/verification/doc
+paths;coordination remains a separate save. No whole-native or packaging cutover.
+
+Partial child deliveries are not checked commits: data reported original checks
+`sh_1bca8dc40001WcMI384E6oJqrL` and Graphify `sh_1bcac0d07001FVX3mCHGFEtoIK` pending;
+RC reported original check `sh_1bcac8f4d001Ly6QerM9nns9c4` pending. Both preserve
+their WIP/joins/resources and finish in their own sessions after automatic results.
+No parent checks, polling or integration against their changing source are scheduled.
+
+Latest app delivery confirms P1: final hidden-history `fs::rename` still executes
+inside a CriticalIntents acceptance gate and can delay Leave/Logout. Its required
+original-worker transaction/previous-byte journal/proposal/ack/rollback fix is not
+implemented or accepted yet. App original `sh_1bcb7739d001Hf54uoyPKOa0Kp` remains
+pending; no app source edits before its automatic completion.
+
+Primary explicitly permits a native-only test renderer seam after that original
+app check: the isolated app owner may narrowly add pinned Slint1.18.1 software
+renderer via dev-dependencies and cfg(test) headless Platform/MinimalSoftwareWindow.
+This extends only that child's manifest/dev-only ownership; primary does not edit
+the manifest/lock in parallel. Normal dependency/rendering/backend/version/default
+feature choices, React reference and physical windows remain unchanged. Missing
+offline optional dependencies are a blocker, not permission to install/bump pins.
+Return checked test-only diff/normal feature-tree proof for primary integration.
+The app owner confirmed pinned Slint1.18.1 exposes `renderer-software` and its crate
+already exists in Cargo.lock/local source cache. This resolves feature-name/cache
+discovery only; locked offline resolution,build and callback acceptance remain pending.
+
+Update-host partial delivery retains `sh_1bcb86707001vvLh6D9E8sz9yt` pending after
+8of9Rust tests passed in its prior failed timeout-fixture group;staticCRT/W4WX/fmt/
+all-target Clippy passed. The original affected retry covers the failed timeout
+and4helper-packaging tests,not a repeat of unchanged redirect/full matrices.
+Own Graphify14614nodes/32158edges/541communities with9priorzero-node warnings;
+primary graph unchanged. No checked commit,real certification or main live-drain
+readiness is inferred. Main hooks and still-closed live attestation are in its
+scoped `native-update-host.md`; preserve the guard until actual owners are bound.
+
+Checked import-helper delivery43adbcd99126d995b39a3edafc1be8bc3e08bc9c is a candidate,
+not yet integrated. Exact commit13paths contain only profile-import source/tests,
+standalone native helper crate and its own manifest/lock,seed/export/roundtrip/verifier
+and scoped handoff. Existing primary profile-import/export source exactly matches
+the candidate parent on the three common source paths. Owner reports51distinct
+tests (32profile+13helper+6mocks),strict helper/native Clippy,fmtsyntax and realAPI
+harness compile;own targets/fixtures cleaned,no pending jobs. Own graph13871nodes/
+30213edges/541communities;8zero-node warnings/HTMLlimit retained.
+
+Independent read-only final-candidate review `ses_e433220b9ffe9l6biMuLRS3Sfy` is pending;
+no tests/process launches/source edits delegated. Main rootworkspace/native dependency
+registration,original blocking operation/consent/account-key proof/UI/recovery/drain
+binding stay deferred until current primary source freeze ends and review completes.
+The app's narrow native dev-dependency seam remains app-owned and must be preserved
+when later adding the helper production dependency. No helper test-source in shipped
+build. Chromium roundtrip remains blocked by independently approved runtime and
+seed/export provenance:offline WinVerifyTrust did not verify Electron44.4.3,observed
+hash is NOT approval. Preserve closed gates;do not infer account proof from exported
+userId/JWK or ImportOwner::verified. Exact glue:child native-profile-helper.md.
+
+Final import static review ses_e433220b9ffe9l6biMuLRS3Sfy completed on all13candidate
+paths,without tests/processes/edits. One actionableP2:verify-profile-helper.py:54
+passes a list through cmd.exe /c;runtime paths containing unquoted & can split the
+command and execute a fragment before runtime approval refusal. Candidate integration
+is blocked pending a narrow checked followup. Original import owner
+ses_e44a7ac4cffeI1oF29tnNf75s2 resumed solely for cmd argument admission/quoting and
+mocked before-launch regressions. Library51tests may be inherited with exact source
+guard;no Rust/helper/fullmatrix rerun or malicious-fragment/Chromium execution.
+Reviewer found no other actionable ownership/zeroization/inventory defects;static
+review is not runtime/whole-native acceptance and does not open provenance gates.
+
+P2 is now resolved by checkedfollowup `e3a3ff56e22bd4b5994a9b5817cc2e4d4a7f50d1`,
+direct parent43adbcd preserved. Only3paths changed:verifier,newPythonregressiontest,
+scopedhelperdoc.7mockedtests cover36runtime/mode prelaunch cases,54sharedboundary
+cases,chained-fragment/derivedCargo rejection,spaces and trailingbackslashes.
+Zero subprocess/fixture on invalid paths;no malicious commands/Chromium/Cargo launched.
+Primary read the actual final26line boundary and133line tests.51prior tests remain
+with exact source guard;AST/stageddiff/ownGraphify passed,own treeclean/no pendingjobs.
+The candidate pair may now enter guarded source integration;no provenance/account/
+key/consent/UI/runtime gate is opened. Root/native dependency glue must preserve
+the app-owner's still-isolated dev-only Slint seam;no concurrent manifest overwrite.
 
 ## Build, compact and integration discipline
 

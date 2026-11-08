@@ -4,6 +4,35 @@
 
 ## Current parallel continuation — 2026-11-08
 
+Latest checked source is `cba6f348c08fd01b1cebf1d919d298db8d4d1c78`: exact-byte native
+catalog/model ownership,17affected tests/fmt/normalClippy/neuraltypes/build/Graphify.
+Only12scoped source/resource/notices/verifier/doc paths saved;native Git bytes exact.
+The final catalog-only CR-at-EOL attribute correction preserved all checked code
+and resource bytes (22unchanged hashes+one Git-attribute-only correction). Existing
+renderer/updater dictionaries/model/dependency pins remain unchanged. Normal binary
+`d4b0af5f7f2349913f73a207e6fa989afaba3f8b4aaba1ca6137acbb1b59ccd0` is component proof.
+No primary resource/check job remains pending;coordination/final graph resync follows.
+Import candidate43adbcd plus checkedP2followupe3a3ff5 await guarded integration;other functional child deliveries
+remain governed by their original jobs/ownership in native-parallel-plan.md.
+Whole-native readiness=false;no push/publication/legacy removal/shutdown.
+Final primary Graphify job `sh_1bcddd22500132wibJCN0qK57D` automatically completed:
+no topology changes,outputs left untouched,10zero-node warnings remain. The earlier
+code graph7563/19202/315 is retained;semantic doc refresh is not claimed. No primary
+shell/check/graph job remains pending. Source cba6f34 is guarded and saved;save the
+three owned coordination documents with exact source guards,then compact/continue.
+
+Import P2 followup `e3a3ff56e22bd4b5994a9b5817cc2e4d4a7f50d1` is checked;parent43adbcd
+preserved. Exact3paths are verifier Python,new7mockedtestfile and scoped helper doc.
+Primary read the actual wrapper/test source:every payload part is validated/quoted,
+cmd.exe /d /v:off /s /c with shell=False;unsafe runtime/derived paths fail before
+subprocess/fixture,spaces/trailingbackslashes covered.51native/helper/export tests
+source-guarded and inherited,not rerun.7mockedregressions+AST/stageddiff passed.
+No processes/Chromium/Cargo ran in these regressions;own treeclean/Graphify done.
+P2 blocks are historical and now resolved;provenance/account/key/consent/main UI
+and original registered worker integration remain closed gates. Next source step
+is guarded43adbcd+e3a3ff5 integration after coordination save;preserve the separate
+app-owner native dev-dependency seam when later wiring the helper dependency.
+
 Owner explicitly requested several agents to accelerate full migration and removal
 of old client code. Six disjoint functional workstreams plus a read-only legacy
 cutover audit are now assigned; exact sessions/paths/scopes and original pending
@@ -64,6 +93,98 @@ Primary final Graphify resync sh_1bc50c8dd001hgnOOeYAAM6HUD automatically comple
 no topology change,outputs retained,7priorzero-nodewarnings remain. Earlier source-
 group Graphify still describes unchanged saved source. No primary shell job remains
 pending; preserve child WIP/owners/requests/joins/resources and six session IDs across compact.
+
+### Independent primary resource cutover continuation
+
+Primary now prepares byte-identical full RU/EN under native `assets/catalogs/` and
+DFN3/Silero under `assets/models/`, preserving renderer originals and existing native
+updater-only `assets/locales/`. A narrow -text rule freezes native CRLF catalogs;
+manifest separates working-copy hashes from original LF Git blobs. Strings/neural
+logic is unchanged apart from include paths. Native/reference verifier and11synthetic
+tests added; packaging remains update-host-owned and receives a later exact path hook.
+See [native-resource-cutover.md](native-resource-cutover.md).
+
+Original primary resource group sh_1bcb14ce4001SwW5xvISJjCDIN is pending; sources/pins
+frozen,own primary rust/target,-j2,read-only pins,scrubbed OS env. Approved-temp
+native-resource-check-v1.py self-cleans after original completion. Expected17unique
+affected tests:11Python,4strings/updatercatalog,2in-memoryneural-load/reset;fmt/normal
+Clippy/neuraltypes/normalbuild/Graphify. No unchanged full matrix repeated. Do not
+poll, duplicate, commit or edit these sources before the automatic result.
+
+Data and RC partial deliveries retain original pending checks/Graphify in their
+sessions,not checked commits; exact jobs in parallel-plan. Media confirmed no resource
+overlap and continues the original implementation task. Other source/resource owners
+remain unchanged; no parent compile against moving child source. Native readiness=false.
+
+Primary resource v1 automatically completed partly:15tests passed (11Python log+
+4Rust),exact copies/reference bytes/fmt/normalClippy passed. Neural types failed in
+ort-sys because ONNX1.31.1 configured cache was absent;RNNoise cache is also absent
+in primary and checked original-source location. No old-runtime/user-folder fallback.
+V1rawreceipt's4test count is a CRLF parser issue,not absent Python tests;retain its
+failed receipt/logs unchanged. Original runner/temp fixtures removed.
+
+Current original resource job sh_1bcca308a0010Aom5EoONz9INY,checked-v2,is pending.
+It guards exact unchanged v1sources,records separate15test count correction,prepares
+only absent pinned caches via existing verified public-upstream scripts,observes
+both original preparation subprocesses,thenunfinishedneuraltypes/2model-loadreset/
+normalbuild/Graphify. Own primary rust/target,-j2,scrubbedenv,sourcefreeze,no poll/
+duplicate/commit;approved-temp native-resource-check-v2.py self-cleans. No npm
+install/source-pin change/older runtime/production request/original-project write.
+Expected17aggregate tests;15inherited rather than rerun. Whole readiness remainsfalse.
+
+Resource v2 completed partly:ONNX1.31.1/RNNoise pinned preparation/hash checks passed;
+rnnoise bindgen next failed on absent libclang18.1.1. No code/resource/pin defect;
+v2fixtures/runner removed,15passed tests inherited. Current original primary resource
+jobsh_1bccce238001GGtIeujvpvjpth,checked-v3,is pending;native-resource-check-v3.py
+prepares only missing pinnedlibclang,thenunfinishedneuraltypes/2model-loadreset/
+normalbuild/Graphify. Sourcesfrozen,own primary rust/target,-j2,no polls/duplicates/
+unaffected reruns;selfcleanup afteroriginalexit. Notyet sourceaccepted/committed.
+
+Import owner delivered checked43adbcd99126d995b39a3edafc1be8bc3e08bc9c,13scopedpaths,
+51distincttests/helper+nativeClippy/fmtsyntax/realAPIharness;own treeclean,targets/
+fixturesremoved,no pendingjobs. Common profile-import/export source is byte-equivalent
+to candidateparent at Git level. Independent read-only finalreview
+ses_e433220b9ffe9l6biMuLRS3Sfy pending;no new tests/processes/source edits delegated.
+Integrate only after primaryresourcefreeze+review;rootworkspace/helperdependency and
+originaloperation/consent/authaccount-key/UI/recovery/drain hooks remain MAIN-owned.
+Preserve app-owned native devseam;never ship helper test-source. Exactchildrecipe
+native-profile-helper.md. Chromiumroundtrip blocked:Electron44.4.3 failed offline
+WinVerifyTrust;observedhash/mocks/process success!=approval or independentaccountproof.
+Three approved runtime/seed/export digest gates and fullbundleprovenance remain.
+
+Import finalstaticreview completedall13paths;oneP2atverify-profile-helper.py:54:
+cmd.exe /c listargs do not prevent ampersandcommand splitting before trust refusal.
+43adbcdintegrationblockeduntilcheckedfollowup. Original importowner resumed for
+onlycmdargumentquoting/admission+mockedprelaunchregressions,unchanged51librarytests
+sourceguard;no malicious/Chromiumexecution or fullRustmatrix. Otherownership/
+zeroizing/sourceinventory actionable defects not found,not fullruntimeacceptance.
+
+Resource v3 automatically passed17unique affectedtests/fmt/normalClippy/neuraltypes/
+model-loadreset/normalbuild/Graphify;15inherited+2newnotrerunmatrix.23source/pin/
+referencehashesexact,originals/updaterdicts unchanged. Normalbinaryd4b0af5f7f2349913f73a207e6fa989afaba3f8b4aaba1ca6137acbb1b59ccd0.
+Graph7563/19202/315,10zero-nodewarnings/HTML5000skip. Originalprep/checkscompleted,
+fixtures/runnersremoved,pinnedcaches retained. No primaryresourcejobpending;save
+12scopedpaths afterstage/nativeGitbyteguards,coordinationseparately. Candidateimport
+43adbcd still blockedpendingP2followup,othersourceownersunchanged;fullreadyfalse.
+
+Latest app handoff confirms P1 filesystem rename under CriticalIntents gate;
+worker-owned serialized provisional/journal/ack/rollback fix is pending,not accepted.
+Original app check sh_1bcb7739d001Hf54uoyPKOa0Kp still pending. Primary authorized
+only native cfg(test) headless software renderer/pinned Slint1.18.1 dev-dependency
+after original completion;child narrowly owns that isolated test manifest seam,
+primary does not edit manifest/lock concurrently. No production renderer/default/
+version changes,physical windows or React-reference edits. Missing offline optional
+deps remain a blocker. Approval does not itself make failing callback tests pass.
+App owner subsequently confirmed the pinned software-renderer feature and existing
+lock/source-cache crate. No locked offline resolution/build is yet proven;original
+app source freeze remains until sh_1bcb7739d001Hf54uoyPKOa0Kp completes automatically.
+
+Update-host partial delivery:previous group8of9Rust tests passed,staticCRT/W4WX/fmt/
+Clippy passed but timeout fixture failed; original affected sh_1bcb86707001vvLh6D9E8sz9yt
+is pending for failed timeout and4packaging tests. Own graph14614/32158/541,9warnings;
+no checked commit/certification/live-drain claim. Exact primary host/health/bootstrap
+hooks are in child native-update-host.md;live attest_app_drain remains fail-closed
+until actual Session/file/socket/Voice/capture/input/profile joins are integrated.
 
 Ранее функционально проверенный этап после `2ccbc75`: video task join;
 регистрация до native acquisition,наблюдаемый исходный JoinHandle,общий app drain.
