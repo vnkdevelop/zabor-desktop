@@ -2,6 +2,35 @@
 
 Updated: 2026-11-09. Coordination plan, not complete-native acceptance.
 
+## Latest primary data source4ee243e
+
+Checked data chainbc84383 -> scopedreceipt docs -> be6476f ->944f3d8 is integrated
+as `4ee243e7eebb42c44519c80dc747429587f4fa46`,8scopedpaths/exactfinalcandidate Gitblobs.
+45unique affectedtests/fmt/bothnative-mediaClippy/normalfeaturetree/build/Graphify
+passed;172source/pinhashesunchanged. Native/root manifests and app renderer seam
+remain untouched by this integration;normaltree excludes test-source. Normalbinary
+2714e8422f52d9e121080b919438b62ee16916c2f7edbca061d8e25d9dbff6a0.
+Graph7725nodes/19781edges/306communities;post-build integrity zero missing/dangling/
+self-loop/duplicate/collapsed edges,10zero-node warnings/HTML5000skip retained.
+Raw producer suppression loss and semantic documentation refresh not measured.
+Originalprimarysh_1bd0d1cfa001FwcvL9LIR4VFch done;ownedTemp/runnerremoved,pinsretained.
+Source and clean-tree save proof: data-integration-2026-11-09/checked-v1/save-verification.json.
+No primary job pending. Common shell split-revocation/storage,observed original
+FileJobs drains and final original-worker publication authority remain required.
+
+Update casingfollowup `2b3b4e82fb92075822c6616d5f14bcc722375ca5` delivered,3paths,parent99b8b79;
+22test union includes1newred/green mixedcase/collision test+21source-guarded prior.
+Primary readactualone-lineeq_ignore_ascii_case lookup and102line regression;prior
+fiveboundaryfixes remainstaticallyverified and no newcasefinding identified. Casing
+P2resolved,not realtrust/baseline/main acceptance. Nextguardedupdate chain41e0fec/
+86aca29/6015bb4/99b8b79/2b3b4e includes13originalpaths plusfollowups;afterchecks expose
+windowsupdate_host module and merge only packaging modeldigest inputs to native
+assets,preserving helper/certification/inventory changes. Liveattest_app_drain stays
+failclosed untilactualprimaryoriginalowners;mainstartup/health/baseline/legal remainfalse.
+RCoriginalsh_1bcfe3947001Yu38Ee1wnubJFH pending,sourcefrozen17hashes,no checkedfollowup.
+Freshapp andmedia remainsole-owned;preserve WIP/originaljobs/joins,do notparentcompile
+movingchildsource or overwrite app manifest. Native helperproductiondependency stilldeferred.
+
 ## Checked workspace registration after636db12
 
 Originalprimary `sh_1bd044f3f001WeZF53SAsFQgd0` completedpassed:13helper tests,

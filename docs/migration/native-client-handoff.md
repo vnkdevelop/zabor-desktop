@@ -2,6 +2,26 @@
 
 Редакция: 2026-11-09. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
+## Latest data source4ee243e
+
+Checked4ee243e7eebb42c44519c80dc747429587f4fa46 integratesbc84383+be6476f+3receipt docs
+in8exactcandidateGitpaths;45affectedtests/fmt/bothClippy/normalfeaturetree/build/
+Graphify,172hashesstable. Binary2714e8422f52d9e121080b919438b62ee16916c2f7edbca061d8e25d9dbff6a0.
+Graph7725/19781/306,post-buildintegrityzero;10warnings/HTML5000skip/rawproducerloss/
+docsemantics limits explicit. Originalsh_1bd0d1cfa001FwcvL9LIR4VFch completed,Temp/
+runnerremoved. Primarysourcechecked/treecleanbeforecoordupdate,no pendingprimaryjob.
+Native/app manifests/appseam intact;sharedshell revocation IO/drains/publication
+hooks notyetapplied. Sourceproof data-integration-2026-11-09/checked-v1/save-verification.json.
+
+Updatecheckedcasefix2b3b4e82fb92075822c6616d5f14bcc722375ca5+22test union delivered;
+primaryreadactualsingleline+mixedcase/collisionregression,no newfinding. Prior5fixes
+reviewed,caseP2resolved. Nextguardedupdate41e0fec/86aca29/6015bb4/99b8b79/2b3b4e;
+retainfailclosedliveattest_app_drain,originalhosthealth/startup/baseline/legal gates,
+mergeonlynative modeldigestinputs withcertified-helper packagechanges. RC17hash
+originalchecksh_1bcfe3947001Yu38Ee1wnubJFH pending;app/mediaWIP/jobs preserved. No
+movingchildcompile/manifestoverwrite. Save3coorddocs beforecompaction/nextsourcegroup.
+Whole-readyfalse,push/publish/legacydelete/install/shutdownclosed.
+
 ## Workspace registration checked after636db12
 
 Originalsh_1bd044f3f001WeZF53SAsFQgd0 passed13helper tests/lockedoffline metadata/

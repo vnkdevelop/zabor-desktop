@@ -2,6 +2,13 @@
 
 Редакция / updated: 2026-11-09.
 
+Latest checkedsource4ee243e7eebb42c44519c80dc747429587f4fa46 integratesdataP2/original
+jobs/finalization in8exactGitpaths;45tests/fmt/bothClippy/normalbuild/Graphify passed,
+172stablehashes. Mainsharedshell revocation/storage/drain/publication hooksnotapplied.
+Updatecasefix2b3b4e8 delivered/primaryread,22test union;prior5reviewfixes confirmed,
+newcaseP2resolved. Updateintegration/module/package modelhooks next,liveguardfalse.
+RCoriginalaffectedcheckpending,app/mediaWIPpreserved. Whole-native/readinessfalse.
+
 Importhelper rootworkspace group passed13tests/metadata/fmt/strictClippy/featuretree/
 nativetypes/Graphify.778oldlockrecords/defaultmembers unchanged;onlyrootmembership/
 onepackage record/standalone-workspace removal. Native/appmanifest unchanged,test-source
