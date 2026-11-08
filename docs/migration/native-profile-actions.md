@@ -72,6 +72,33 @@ localized date, with year only when different. Preserve server redaction.
 
 ## Acceptance plan
 
+### Checked primary subset after64319fa
+
+Checked and saved as `5d4a540e2132465ac1501627aafb415d1e39a57e`: original Session-owned
+GetUserByUsername/cache, typed profile-specific true-only SendFriendRequest,
+camel/Pascal received-request indicator, fresh selected profile retention against
+stale roster snapshots and explicit user-event updates. Cache15sTTL/100FIFOentries
+also enforces64MiB retained serialized user bytes and8 pending operations.
+Invalidated pending replies cannot repopulate the cache; no automatic retry or
+extra ViewProfile RPC is introduced. Both requests use the existing observed
+primary Session worker and preserve original tickets through Leave.
+
+UI add-friend retains the profile and loading/sent suppression. Profile chat
+switches to friends without ending Voice. Offline profile calls are disabled;
+native callback rechecks friendship/auth/connection/busy and selected presence.
+Source/member return, clipboard feedback, exact last-online text, achievements,
+channel actions/removal and call-failure3s toast remain outside this subset.
+
+Passed affected evidence:
+`migration-artifacts/native-ui/peer-profile-functional-2026-11-08/checked-v1/`.
+138 unique tests, both native-media all-targets Clippy modes, fmt, normal build,
+strict RU/EN pointer/keyboard/native query guards and Graphify passed. Saved8native
+paths/12source+pinhashes. Normal binary SHA-256:
+`2c389b1f29662c06411f598064bcf8e8fbfe20553b940bc29babc3ae0d2621df`.
+Graph7195nodes/18135edges/307communities;7priorwarnings/HTML5000limit remain.
+No source changes during that group; the temporary runner is removed. This is not
+a physical/full-native or complete UI/release acceptance proof.
+
 Reuse original SessionWork/run_session for non-voice commands so priority Leave
 does not restart them and Logout cancels/rejects late results. Retain operation,
 owner, selection/view generation and channel permission checks at dispatch and UI

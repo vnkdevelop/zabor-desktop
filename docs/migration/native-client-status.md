@@ -69,6 +69,17 @@ Graphify7135nodes/17914edges/306communities; прежние7warnings/HTML5000lim
 durable whole-app update/drain, лицензии/подпись издателя или готовность установщика.
 Публикация/выключение по-прежнему запрещены до полной приёмки.
 
+Сохранён следующий peer-profile этап **`5d4a540e2132465ac1501627aafb415d1e39a57e`**:
+GetUserByUsername/cache15s/100entries/64MiB/8pending, исходные Session/query tickets,
+fresh selected profile без перезаписи старым roster, typed true-only add-friend
+без закрытия профиля, запрет offline-call и переход в чат без Leave. Прошли138
+разных тестов, fmt, оба Clippy режима, normal build и строгие RU/EN взаимодействия.
+Graph7195nodes/18135edges/307communities;7priorwarnings/HTML5000limit остаются.
+Список оставшихся действий: [native-profile-actions.md](native-profile-actions.md).
+Source/member navigation, clipboard/presence text, achievements, channel actions/
+remove-friend, call-failure feedback и все helper/ownership/full-client gates ещё
+открыты. Публикация и выключение не выполнялись; whole-native readiness=false.
+
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
 
 Рабочая ветка: `rust/native-client`. Checkpoint рабочего Electron/WASM-клиента перед переносом: `d088795`. Нативный код находится в `rust/crates/zabor-native`; состояние этой ветки не означает перенос в основную пользовательскую папку или публикацию релиза.

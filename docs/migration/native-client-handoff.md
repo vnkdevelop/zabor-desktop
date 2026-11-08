@@ -10,10 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest checked integrated source — **f27950ea21d6c5f5efd5a1999402ea90cc58e897**:
-profile/avatar/GIF plus fail-closed packaging/copy-import,94 unique integration
-tests/fmt/both Clippy/native build/Graphify passed. Profile134tests/RUEN proofs retained.
-Normal executableaa5703e3… is integrated component evidence,
+сборкой. Latest checked source — **5d4a540e2132465ac1501627aafb415d1e39a57e**:
+fresh peer profiles/typed add-friend/offline-call/chat,138 unique affected tests/
+fmt/both Clippy/native build/RUEN/Graphify passed. Prior integration94/profile134
+proofs retained. Normal executable2c389b1f… is component evidence,
 not full-client acceptance. RC2108f86, SFU2d254a2 and original peer/capture/mic retained.
 Picker **0dcfef7**,audio **5b8d656** and camera **df43be2** retained;physical camera/audio/
 complete client readiness=false. Metadata-only continuation save follows this source.
@@ -309,6 +309,46 @@ push/merge/release/shutdown не выполнялись. После каждог
   or whole-native readiness. No current primary verification job remains.
   Next: guarded fresh non-own profile lookup and existing profile friend/chat/call
   behavior, then remaining profile/member/achievements and RC provenance wiring.
+- Integration continuation saved as `64319fa6d7de45d85e8a4bd2b0af5d2eb10cc0d4`,
+  clean tree/source hashes and post-save Graphify passed. Its source HEAD remains
+  `f27950e`; no new installer/helper acceptance was added.
+- Active primary group after64319fa: `shell/profile_lookup.rs` Session-owned cache
+  and pending identity, GetUserByUsername, typed true-only profile add-friend and
+  received-request payload indicator, retained fresh selected profile versus stale
+  roster refresh, explicit peer events and original selection/owner guards. Cache
+  has15sTTL/100FIFOentries/64MiB serialized retained bytes/8 pending queries. Keys
+  use ECMAScript trim/lowercase; own profile never issues a lookup. Older pending
+  replies invalidated by user events do not repopulate cache. Shared pending lookup
+  survives modal close/Leave, not Logout; mutative friend query cancels on selection
+  close/replacement. Both use the observed original primary worker, not new detached
+  jobs or reminted tickets. Worker friend membership remains server-authoritative.
+  UI add-friend stays open with idle/loading/sent status; profile chat selects the
+  friends tab without ending Voice; offline profile call is disabled and callback
+  admission checks current friend/auth/connection/online/busy state.
+- Preliminary all-target compile found only a new temporary SharedString borrow
+  lifetime error in cache sync; fixed by retaining the original owner value, no
+  lint suppression or adjacent settings changes. Current grouped affected check
+  `sh_1bbd2a87c0016Bhjhs15U7SZaj` is pending, immutable evidence
+  `migration-artifacts/native-ui/peer-profile-functional-2026-11-08/checked-v1/`:
+  fmt, both native-media all-targets Clippy modes, shell/auth/protocol/hub/roster
+  tests including actual held loopback lookup/add responses with Leave/Logout,
+  normal build, strict RU/EN pointer/keyboard/native query guards and Graphify.
+  Frozen12 source/pin hashes; do not edit sources/poll/duplicate while running.
+  No full neural/visual matrix, physical clipboard/input, production or release.
+  Remaining source/member navigation, copy/presence text, achievements, channel
+  invite/kick/remove-friend, complete call-failure toast and original helper/RC/
+  app-drain/data/full-native acceptance remain open. Do not save unverified source.
+- Peer-profile V1 `sh_1bbd2a87c0016Bhjhs15U7SZaj` completed successfully:117
+  shell/4auth/5protocol/2hub/4actualhub/6roster tests, union138, both Clippy modes,
+  fmt/normal build/strict RUEN native interactions and Graphify. Saved source
+  `5d4a540e2132465ac1501627aafb415d1e39a57e`:8nativepaths/12source+pinhashes.
+  Normal binary `2c389b1f29662c06411f598064bcf8e8fbfe20553b940bc29babc3ae0d2621df`.
+  Main graph7195nodes/18135edges/307communities,7priorzero-nodewarnings/HTML5000
+  limit remain. Temporary runner removed. No current primary check job remains.
+  Late modal/selection/Logout rejection, repeated pending identity, cache bounds,
+  exact true/false/null add results, no bootstrap reload, priority Leave and
+  offline/online/add-button pointer and independent Voice/chat checks passed.
+  These are component proofs, not physical/full-native or release acceptance.
 
 ### Verified native RC components after b4b52bc
 
