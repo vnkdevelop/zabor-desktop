@@ -2826,7 +2826,7 @@ async fn worker(
                     auth_work.publish(UiEvent::SignedIn(data));
                     let restore_work = voice_ticket
                         .map(|ticket| VoiceWork::new(&intents, ticket, &stop, update.as_ref()));
-                    if let Some(session) = voice.as_mut() {
+                    if let Some(session) = voice.as_ref() {
                         if let Some(channel) = session.channel.clone() {
                             let Some(work) = &restore_work else {
                                 continue;
@@ -2834,35 +2834,48 @@ async fn worker(
                             if !work.is_current() {
                                 continue;
                             }
-                            video_generation.fetch_add(1, Ordering::AcqRel);
-                            for peer in video_jobs.keys() {
-                                if let Some(work) = &restore_work {
-                                    work.publish(UiEvent::RemoveVideo(peer.clone()));
-                                }
+                            let Some(mut previous) = work.take_previous_media(
+                                &mut voice,
+                                &mut media_events,
+                                &mut video_jobs,
+                                voice_ticket,
+                                false,
+                                |_| {
+                                    video_generation.fetch_add(1, Ordering::AcqRel);
+                                    paused_video.clear();
+                                    stream_drops.clear();
+                                },
+                            ) else {
+                                continue;
+                            };
+                            for (peer, receiver) in &mut previous.2 {
+                                work.publish(UiEvent::RemoveVideo(peer.clone()));
+                                receiver.stop();
                             }
-                            video_jobs.clear();
-                            paused_video.clear();
-                            stream_drops.clear();
-                            let result = work.run(session.rejoin(&connection)).await;
+                            let result = work
+                                .run(previous.0.as_mut().unwrap().rejoin(&connection))
+                                .await;
                             let Some(result) = result else {
                                 continue;
                             };
                             match result {
                                 Ok(users) => {
+                                    let Some(retired) = work.install_previous_media(
+                                        &mut voice,
+                                        &mut media_events,
+                                        voice_ticket,
+                                        previous,
+                                        || {},
+                                    ) else {
+                                        continue;
+                                    };
+                                    drop(retired);
                                     if let Some(work) = &restore_work {
                                         work.publish(UiEvent::Voice(channel, users));
                                     }
                                 }
                                 Err(_) => {
-                                    let Some(disposed) = work.take_voice(
-                                        &mut voice,
-                                        &mut media_events,
-                                        voice_ticket,
-                                        |_| {},
-                                    ) else {
-                                        continue;
-                                    };
-                                    drop(disposed);
+                                    drop(previous);
                                     if let Some(work) = &restore_work {
                                         work.publish(UiEvent::VoiceEnded);
                                         work.publish(UiEvent::Toast("toasts.channelJoinFailed"));
@@ -3097,14 +3110,18 @@ async fn worker(
                         .as_ref()
                         .is_some_and(|voice| voice.call_peer.is_some())
                     {
-                        let Some(mut previous) = previous_voice_work.take_previous_voice(
+                        let Some(mut previous) = previous_voice_work.take_previous_media(
                             &mut voice,
                             &mut media_events,
+                            &mut video_jobs,
                             voice_ticket,
                             false,
                             |_| {
                                 call_recovery.clear();
                                 abandoned_call = true;
+                                video_generation.fetch_add(1, Ordering::AcqRel);
+                                paused_video.clear();
+                                stream_drops.clear();
                             },
                         ) else {
                             return Err(AuthError::Network);
@@ -3119,10 +3136,6 @@ async fn worker(
                             }
                         }
                         drop(previous);
-                        video_generation.fetch_add(1, Ordering::AcqRel);
-                        video_jobs.clear();
-                        paused_video.clear();
-                        stream_drops.clear();
                         update(UiEvent::VoiceEnded.guarded(command_ticket, IntentScope::Voice));
                     }
                     let Some(user) = current_user.as_ref() else {
@@ -3324,19 +3337,23 @@ async fn worker(
                         let _ = connection.send("DeclineCall", vec![json!(peer)]).await;
                         return Ok(UiEvent::IncomingDismissed);
                     }
-                    video_generation.fetch_add(1, Ordering::AcqRel);
-                    video_jobs.clear();
-                    paused_video.clear();
-                    stream_drops.clear();
-                    let Some(mut previous) = previous_voice_work.take_previous_voice(
+                    let Some(mut previous) = previous_voice_work.take_previous_media(
                         &mut voice,
                         &mut media_events,
+                        &mut video_jobs,
                         voice_ticket,
                         true,
-                        |_| {},
+                        |_| {
+                            video_generation.fetch_add(1, Ordering::AcqRel);
+                            paused_video.clear();
+                            stream_drops.clear();
+                        },
                     ) else {
                         return Err(AuthError::Network);
                     };
+                    for receiver in previous.2.values_mut() {
+                        receiver.stop();
+                    }
                     if let Some(session) = previous.0.as_mut() {
                         session.leave(&connection).await;
                     }

@@ -1148,10 +1148,37 @@ Three existing sources changed,no sources added;previous strict gates/Voice/Peer
 audio/native video/incoming-track runtime unchanged. Tested executable SHA-256:
 `2418139faf5cf14f7d5780491edb70d619d762fde007da2621757dbaa7f63682`.
 videoTransitionResourceAcceptanceChecked=true/videoRetirementResourceAcceptanceChecked
-=true are narrow4take/3install/3retirement site acceptance;save/post-saveGraphify/guard/
-compact next,all temporary helpers removed. Native subscription task join/remove_sink/
+=true are narrow4take/3install/3retirement site acceptance;Saved82f4d95/post-save
+Graphify/438/3/24/current-frozen binary+ONNX/3SDK/proofs/clean-tree guard passed.
+All previous temporary helpers removed. Native subscription task join/remove_sink/
 native timing/shared/runtime/full-client acceptance remain false;no native teardown
 deadline/generalized off-thread Drop claim.
+
+### Whole Voice/media bundle transfer: components checked locally
+
+Three takes only:authenticated reconnect,Join from call,accepted AnswerCall. Outer
+Voice/events/video tuple preserves native owner-before-receiver Drop across waits and
+unwind. Original Voice ticket required for any occupied native slot;orphan-live/poison
+video maps refused without Voice owner. One reconnect restore requires monotonic-dead
+original map and original ticket,preserves exact optional events without recreation or
+reticketing. FnMut captures/native operations/Drop/UI remain outside gates. Existing
+Call/Leave/Logout/idle/worker-end/native video/PeerLifetime/strict intent/audio methods
+unchanged. Three existing sources/two helpers/four tests+fixture/source438/3/3SDK audit
+passed. Revised162case filtered tests passed4;Graphify passed5992nodes/14777edges.
+Full `native-calls/voice-media-bundle-final-2026-11-08/` passed319default/309neural-disabled,
+bothClippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI/Graphify;protected
+neural metrics unchanged. Independent438/3/24/current-frozen exe+ONNX/3SDK/proofs
+matched0mismatches. All315/305previous full test names/multiplicity/diagnostics and
+main36/Voice19/media3/all previous suites checked in both modes.162new/628prior
+component-video markers retained;separate audit verifies each162case exactly once
+per mode. Existing strict helpers/native implementations and other worker branches
+exactly equal saved82f4d95. Tested executable SHA-256:
+`803c9ea2dda86f07a48199429888585e40c111b7d23db55be988896b64230e34`.
+voiceMediaBundleExtractionChecked=true/voiceMediaBundleRestoreChecked=true are narrow
+three owner-transfer takes/one same-original-ticket optional-events restore only;
+save/post-saveGraphify/guard/compact next,temporary launcher removed immediately.
+Native subscriptions/task join/remove_sink/callback/syscall/physical/full readiness
+remain false;this is owner transfer,not generalized native off-thread teardown.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

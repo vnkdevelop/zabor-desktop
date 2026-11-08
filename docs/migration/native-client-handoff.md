@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `f2c5340`: original-resource video
-transition/retirement admission;native start/stop/Drop остаются вне acceptance gates.
-Final `video-transition-final-2026-11-08` прошёл315default/305neural-disabled tests
+Последний проверенный компонентный этап после `82f4d95`: whole Voice/media owner
+transfer в reconnect/Join/Answer;native stop/leave/rejoin/Drop остаются вне gates.
+Final `voice-media-bundle-final-2026-11-08` прошёл319default/309neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`2418139faf5cf14f7d5780491edb70d619d762fde007da2621757dbaa7f63682`.
+`803c9ea2dda86f07a48199429888585e40c111b7d23db55be988896b64230e34`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
 compact;actual saved commit брать из Git и
-`native-calls/video-transition-post-save-2026-11-08/saved-boundary.json`.
+`native-calls/voice-media-bundle-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Исторический3a2b502b… peer-acceptance binary не заменяет
+visual/physical gates. Исторический2418139f… video-transition binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,83 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Whole Voice/media owner transfer — checked locally 2026-11-08
+
+- Saved82f4d95/post-save **sh_1b9d804010018zOHXPy5hY6A6v completed/passed**:
+  clean tree,438/3/24/current-frozen exe+ONNX/3SDK/final-independent-source-parser+
+  predecessor proofs matched. No release/push/merge/shutdown.
+- New take_previous_media stages one outer tuple `(Voice,events,video map)` under
+  unchanged strict Voice intent. Any occupied Voice/events/video slot requires stored
+  original Voice ticket. Empty slots retain prior missing-ticket/fresh-epoch behavior.
+  Without Voice owner,live or live-poisoned video receivers are refused;only monotonic
+  dead maps may transfer without a native owner. With Voice owner,the transfer is
+  whole-owner retirement,not individual live-peer mutation/start/stop/admission renewal.
+  Voice-before-events-before-receiver ownership survives cancellation/unwind through
+  native waits;borrowed FnMut captures and native resource Drop stay outside gates.
+- New install_previous_media restores exact original Voice/optional events via swaps
+  under original resource ticket;all original retired receivers must already be dead.
+  This covers absent events without unwrap/recreating the event receiver. No ticket
+  rewrite and no reticket to current work. Dead poisoned original peer may retire;
+  live poisoned original cannot authorize restore. Original map goes back only as an
+  outside-gate retirement bundle. Callback unwind retains inserted Voice/events while
+  replaced old owner and retired map destroy outside;no rollback/health success claim.
+- Three production takes only:authenticated channel reconnect,Join from previous
+  call,accepted AnswerCall. Reconnect extracts full owner before native stop/rejoin;
+  stops receivers and publishes RemoveVideo outside the gate,retains tuple through
+  rejoin,then installs original Voice/events only after original-map invalidation.
+  Join retains full tuple through original leave/post-wait abandonment acceptance;
+  Answer retains original media-events slot (`retain_events=true`) and original ticket,
+  stops subscriptions outside gate before leave,then disposes tuple in Voice-first
+  order. Existing AcceptCall/native preparation/install/protocol unchanged.
+- Source audit `native-calls/voice-media-bundle-source-audit-2026-11-08.json` passed:
+  438primary/3reference/3SDK,three existing sources,no new sources. Outside alias/
+  two helpers/four tests+VoiceMediaVideoFixture/three worker branches exactly equals
+  saved82f4d95. Existing strict intent/Session/Voice/PeerLifetime/audio/video transition/
+  incoming-track/native lifecycle functions and Call/Leave/Logout/idle/worker-end
+  scopes unchanged. Call clear remains separate to preserve invalid-peer rejection
+  without dropping still-current Voice;do not merge that path into unconditional take.
+- Initial four filtered tests **sh_1b9dfe604001eZfV2y3l5ZwUUH passed4**. Revision
+  explicitly refuses orphan-live/orphan-poison ownership and adds36cases;revised
+  **sh_1b9e2f6fe0010sh39MmN46rQlH completed/passed4**:126extract/22restore/6held gate/
+  8active local native video+exact empty-argument EndCall invoke/wait-cancellation
+  cases,162unique markers independently counted in development cases.json.
+  Voice-controls Arc counts prove configured/active receiver sink
+  Drop happens after native Voice owner disposal;retained event slot/ticket and
+  Voice/MicTest monitor/demand/capture epoch unchanged. Active sink Drop observed by
+  Notify,not proof that NativeVideoStream callbacks or JoinHandle finished.
+- Development Graphify **sh_1b9e399b30015WJtL97sXjOWjW completed/passed**:
+  5992nodes/14777edges/256communities;existing7metadata warnings/HTML5000limit retained.
+- Full **sh_1b9e4bcd6001p1BaInZth2tMUh completed/passed**:
+  `native-calls/voice-media-bundle-final-2026-11-08/`;319default/309neural-disabled,
+  bothClippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI auth/roster/audio/
+  MicTest/Graphify. Protected neural metrics unchanged. Independent
+  `native-calls/voice-media-bundle-final-independent-2026-11-08.json` passed:
+  438primary/3reference/24evidence/current-frozen exe+ONNX/3SDK/predecessor proofs
+  matched0mismatches. All315/305previous full test names/multiplicity and diagnostic
+  signatures/multiplicity retained;four new tests/main36/Voice19/media3/all previous
+  suites checked in both modes. Each mode162new/628previous component-video markers;
+  prior13protocol waits/normal Logout/partial poison/original Voice Leave-Logout
+  tail_runs=0 unchanged. Source reconstruction outside alias/2helpers/4tests+fixture/
+  3worker branches exactly equals saved82f4d95;all previous strict methods/native
+  implementations/Call/Leave/Logout/idle/worker-end scopes unchanged.
+- Separate exact-case audit `native-calls/voice-media-bundle-cases-independent-
+  2026-11-08.json` passed:126extract/22restore/6held gate/8active local native wait
+  markers verified individually exactly once in each default/neural-disabled log,
+  not only aggregate count;all previous Checked flags retained. Binary/runtime/proof/
+  sources/evidence rehashed independently;no raw logs/source/count/deadline changes.
+- Executable **803c9ea2dda86f07a48199429888585e40c111b7d23db55be988896b64230e34**.
+  FinalProof **6cd2b4c0e57c136ec65d1833a01520a6409ef1373776c4a6dec73b5b2a46e6d9**.
+  IndependentProof82007912…;SourceScopeProof24a5d449…;ExactCasesProof56247c4a….
+  Temporary source/final/independent launcher deleted immediately,no helper/profile
+  cleanup debt. Save narrow voiceMediaBundleExtractionChecked/voiceMediaBundleRestoreChecked,
+  then post-saveGraphify/current-frozen sources+evidence/exe+ONNX/3SDK/proof+exactcase/
+  predecessor-chain/clean-tree guard/compact. No next source patch before guard.
+- Next:Call/Leave/idle/worker-end map cleanup and video subscription/native sink/task
+  ownership;then shared runtime/monitor acquisition/maintenance/reset/start/factory.
+  Native task join/remove_sink/callback/destructor/syscall bounds/physical/driver/
+  journal/filesystem/chat-final-save/media-SFU-control/UI-profile-import-packaging/
+  visual/two-device/full-client gates remain false. No generalized off-thread teardown.
 
 ## Video transition and retirement admission — checked locally 2026-11-08
 

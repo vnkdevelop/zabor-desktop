@@ -9,6 +9,11 @@ use zabor_native::hub::HubError;
 use zabor_native::media::PeerLifetime;
 
 type VoiceResources = (Option<VoiceSession>, Option<mpsc::Receiver<MediaEvent>>);
+type VoiceMediaResources = (
+    Option<VoiceSession>,
+    Option<mpsc::Receiver<MediaEvent>>,
+    BTreeMap<String, VideoReceiver>,
+);
 
 pub(super) struct VoiceWork<'a> {
     intents: &'a CriticalIntents,
@@ -195,6 +200,60 @@ impl<'a> VoiceWork<'a> {
             true
         });
         taken.filter(|taken| *taken).and(resources)
+    }
+
+    pub(super) fn take_previous_media(
+        &self,
+        voice: &mut Option<VoiceSession>,
+        events: &mut Option<mpsc::Receiver<MediaEvent>>,
+        videos: &mut BTreeMap<String, VideoReceiver>,
+        resource_ticket: Option<IntentTicket>,
+        retain_events: bool,
+        mut accepted: impl FnMut(Option<&VoiceSession>),
+    ) -> Option<VoiceMediaResources> {
+        let mut resources = None;
+        let taken = self.commit(|| {
+            if (voice.is_some() || events.is_some() || !videos.is_empty())
+                && resource_ticket != Some(self.ticket)
+            {
+                return false;
+            }
+            if voice.is_none() && videos.values().any(VideoReceiver::is_alive) {
+                return false;
+            }
+            resources = Some((
+                voice.take(),
+                if retain_events { None } else { events.take() },
+                std::mem::take(videos),
+            ));
+            accepted(
+                resources
+                    .as_ref()
+                    .and_then(|resources| resources.0.as_ref()),
+            );
+            true
+        });
+        taken.filter(|taken| *taken).and(resources)
+    }
+
+    pub(super) fn install_previous_media(
+        &self,
+        voice: &mut Option<VoiceSession>,
+        events: &mut Option<mpsc::Receiver<MediaEvent>>,
+        resource_ticket: Option<IntentTicket>,
+        mut prepared: VoiceMediaResources,
+        mut accepted: impl FnMut(),
+    ) -> Option<VoiceMediaResources> {
+        let installed = self.commit_resource(resource_ticket, || {
+            if prepared.2.values().any(VideoReceiver::is_alive) {
+                return false;
+            }
+            std::mem::swap(voice, &mut prepared.0);
+            std::mem::swap(events, &mut prepared.1);
+            accepted();
+            true
+        });
+        installed.filter(|installed| *installed).map(|_| prepared)
     }
 
     pub(super) fn install_voice(
