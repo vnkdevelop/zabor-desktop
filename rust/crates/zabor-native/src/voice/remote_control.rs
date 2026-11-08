@@ -11,6 +11,7 @@ pub struct RemoteControlView {
     pub controller: String,
     pub viewer: String,
     pub viewer_ready: bool,
+    pub viewer_accepted_at: Option<std::time::Instant>,
     pub host_active: bool,
     pub revoked: bool,
     pub notice: Option<&'static str>,
@@ -22,9 +23,26 @@ pub struct ControlTarget {
     pub lifetime: PeerLifetime,
     pub channel: ChannelLease,
     wire: libwebrtc::data_channel::DataChannel,
+    frame: Option<(
+        crate::video::VideoFrameStamp,
+        crate::critical_intents::IntentTicket,
+    )>,
 }
 
 impl ControlTarget {
+    pub fn with_frame(
+        mut self,
+        frame: crate::video::VideoFrameStamp,
+        ticket: crate::critical_intents::IntentTicket,
+    ) -> Self {
+        self.frame = Some((frame, ticket));
+        self
+    }
+
+    pub fn input_ticket(&self) -> Option<crate::critical_intents::IntentTicket> {
+        self.frame.as_ref().map(|(_, ticket)| *ticket)
+    }
+
     pub fn send_stop(&self) {
         if self.lifetime.is_alive() && self.channel.is_alive() {
             let _ = self.wire.send(&Packet::Signal(Signal::Stop).encode(), true);
@@ -41,6 +59,7 @@ struct Viewer {
     lifetime: PeerLifetime,
     channel: ChannelLease,
     accepted: bool,
+    accepted_at: Option<std::time::Instant>,
     requested: std::time::Instant,
     ping: std::time::Instant,
     host_active: bool,
@@ -84,6 +103,7 @@ impl VoiceSession {
             viewer: viewer.map(|viewer| viewer.peer.clone()).unwrap_or_default(),
             viewer_ready: viewer
                 .is_some_and(|viewer| viewer.accepted && self.control_p2p_ready(&viewer.peer)),
+            viewer_accepted_at: viewer.and_then(|viewer| viewer.accepted_at),
             host_active: host.is_some_and(|host| host.input.state() == InputState::HostActive)
                 || viewer.is_some_and(|viewer| viewer.host_active),
             revoked: self.remote.revoked,
@@ -105,6 +125,7 @@ impl VoiceSession {
                     lifetime,
                     channel,
                     wire: self.engine.remote_control_wire(peer)?,
+                    frame: None,
                 })
             })
             .collect()
@@ -230,6 +251,7 @@ impl VoiceSession {
             lifetime,
             channel,
             accepted: false,
+            accepted_at: None,
             requested: std::time::Instant::now(),
             ping: std::time::Instant::now(),
             host_active: false,
@@ -286,6 +308,31 @@ impl VoiceSession {
             return Err(MediaError::Backend);
         }
         Ok(())
+    }
+
+    pub fn send_control_target_input(
+        &mut self,
+        target: &ControlTarget,
+        packet: Packet,
+    ) -> Result<(), MediaError> {
+        if !self.control_target_current(target) {
+            return Err(MediaError::UnauthorizedPeer);
+        }
+        let current = self.remote.viewer.as_ref().is_some_and(|viewer| {
+            viewer.peer == target.peer
+                && viewer.accepted
+                && viewer.accepted_at.is_some_and(|since| {
+                    target
+                        .frame
+                        .as_ref()
+                        .is_some_and(|(frame, _)| frame.is_current_since(&viewer.lifetime, since))
+                })
+        });
+        if !packet.is_release() && !current {
+            self.reset_remote_control();
+            return Err(MediaError::UnauthorizedPeer);
+        }
+        self.send_control_input(&target.peer, packet)
     }
 
     pub async fn handle_remote_control(
@@ -363,6 +410,7 @@ impl VoiceSession {
                     }
                     if let Some(viewer) = self.remote.viewer.as_mut() {
                         viewer.accepted = true;
+                        viewer.accepted_at = Some(std::time::Instant::now());
                     }
                     self.set_control_stream(Some(peer.into()));
                     self.control_to_p2p(hub, peer).await;
@@ -681,6 +729,67 @@ mod tests {
             hub.close();
             fixture.server.await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn queued_target_input_requires_original_decoded_frame_after_ack_and_retains_its_ticket()
+    {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let fixture = fixture([]).await;
+            let (hub, _hub_events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+            let (engine, mut events, _remote, _received) = connected().await;
+            let mut session = session();
+            session.engine = engine;
+            session.engine.test_remote_metadata("peer", true, 2);
+            session.handle(&hub, "UserStartedStreaming", &[json!("peer")]).await.unwrap();
+            session.set_stream_focus(&hub, Some("peer".into())).await.unwrap();
+            let old = crate::video::decode_frame(VideoFrame::new(VideoRotation::VideoRotation0,
+                Box::new(I420Buffer::new_black(160, 96)) as libwebrtc::video_frame::BoxVideoBuffer)).unwrap();
+            session.toggle_remote_control(&hub, "peer").await.unwrap();
+            let (lifetime, channel, _, _, _) = session.engine.remote_control_info("peer").unwrap();
+            session.handle_remote_control(&hub, "peer", RemoteControlEvent::Packet(Packet::Signal(Signal::Accept)), lifetime.clone(), channel.clone(), CancellationToken::new()).await.unwrap();
+            let since = session.remote_control_view().viewer_accepted_at.unwrap();
+            assert!(old.decoded_at() < since);
+            let source = NativeVideoSource::new(VideoResolution { width: 160, height: 96 }, true);
+            let track = PeerConnectionFactory::default().create_video_track("original-control-frame", source.clone());
+            session.prepare_p2p_video("peer", track.clone(), lifetime.clone());
+            let mut ticker = tokio::time::interval(Duration::from_millis(33));
+            let ready = loop {
+                tokio::select! {
+                    _ = ticker.tick() => { source.capture_frame(&VideoFrame::new(VideoRotation::VideoRotation0, I420Buffer::new_black(160, 96))); },
+                    event = events.recv() => if let Some(MediaEvent::StreamVideoReady { lease, .. }) = event { break lease; },
+                }
+            };
+            assert!(session.accept_stream_video_ready(&hub, "peer", None, &lifetime, &ready).await);
+            assert!(!ready.is_alive());
+            let (send, mut frames) = tokio::sync::mpsc::channel(1);
+            let mut receiver = crate::video::VideoReceiver::with_audio_runtime(track, lifetime.clone(), Arc::new(move |frame| { let _ = send.try_send(frame); }), session.audio_runtime.as_ref());
+            receiver.start();
+            let delivery = loop {
+                tokio::select! {
+                    _ = ticker.tick() => { source.capture_frame(&VideoFrame::new(VideoRotation::VideoRotation0, I420Buffer::new_black(160, 96))); },
+                    frame = frames.recv() => break frame.unwrap(),
+                }
+            };
+            let target = session.control_targets().into_iter().find(|target| target.peer == "peer").unwrap();
+            let ticket = crate::critical_intents::CriticalIntents::default().ticket();
+            let current = target.clone().with_frame(delivery.frame.stamp(&delivery.lease), ticket);
+            assert_eq!(current.input_ticket(), Some(ticket));
+            assert!(session.send_control_target_input(&current, Packet::Move { x: 0.5, y: 0.5 }).is_ok());
+            session.handle_remote_control(&hub, "peer", RemoteControlEvent::Packet(Packet::Signal(Signal::Accept)), lifetime.clone(), channel, CancellationToken::new()).await.unwrap();
+            assert_eq!(session.remote_control_view().viewer_accepted_at, Some(since));
+            let stale = target.with_frame(old.stamp(&delivery.lease), ticket);
+            assert!(session.send_control_target_input(&stale, Packet::Move { x: 0.5, y: 0.5 }).is_err());
+            assert!(session.remote_control_view().viewer.is_empty());
+            receiver.stop();
+            assert!(!delivery.lease.is_alive());
+            let cleanup = session.audio_runtime.cleanup_tracker();
+            drop(receiver);
+            drop(session);
+            cleanup.wait().await.unwrap();
+            hub.close();
+            fixture.server.await.unwrap();
+        }).await.unwrap();
     }
 
     #[tokio::test]

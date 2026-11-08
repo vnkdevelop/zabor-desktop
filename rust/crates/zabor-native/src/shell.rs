@@ -7,7 +7,7 @@ use libwebrtc::media_stream_track::MediaStreamTrack;
 use serde_json::{json, Value};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, Timer, TimerMode, VecModel};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -16,7 +16,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Mutex,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use zabor_native::attestation::Attestation;
@@ -44,7 +44,9 @@ use zabor_native::profile::Profile;
 use zabor_native::roster::{respond_notification, NotificationKind};
 use zabor_native::screen::{ScreenCapture, ScreenSource, SourceKind};
 use zabor_native::strings::Strings;
-use zabor_native::video::{DecodedVideo, StreamDropGrace, VideoFrameLease, VideoReceiver};
+use zabor_native::video::{
+    DecodedVideo, StreamDropGrace, VideoFrameLease, VideoFrameStamp, VideoReceiver,
+};
 use zabor_native::voice::VoiceSession;
 use zeroize::Zeroizing;
 
@@ -201,7 +203,20 @@ impl CommandQueue {
 }
 
 fn queue_control_command(queue: &CommandQueue, runtime: &tokio::runtime::Handle, command: Command) {
-    if let Err(error) = queue.try_send(command) {
+    let ticket = if let Command::ControlInput(target, _) = &command {
+        target.input_ticket()
+    } else {
+        None
+    };
+    let result = if let Some(ticket) = ticket {
+        queue
+            .sender
+            .try_send(QueuedCommand { command, ticket })
+            .map_err(Box::new)
+    } else {
+        queue.try_send(command)
+    };
+    if let Err(error) = result {
         if let mpsc::error::TrySendError::Full(queued) = *error {
             if let Command::ControlInput(target, packet) = &queued.command {
                 if !matches!(packet, zabor_input::Packet::Move { .. }) {
@@ -328,6 +343,53 @@ struct FrameUpdate {
     generation: u64,
     lease: VideoFrameLease,
     frame: DecodedVideo,
+    source_epoch: Option<u64>,
+}
+
+#[derive(Clone)]
+struct DisplayedFrame {
+    ticket: IntentTicket,
+    generation: u64,
+    stamp: VideoFrameStamp,
+    source_epoch: Option<u64>,
+}
+
+impl DisplayedFrame {
+    fn from_update(update: &FrameUpdate) -> Self {
+        Self {
+            ticket: update.ticket,
+            generation: update.generation,
+            stamp: update.frame.stamp(&update.lease),
+            source_epoch: update.source_epoch,
+        }
+    }
+
+    fn is_current(
+        &self,
+        intents: &CriticalIntents,
+        generation: &AtomicU64,
+        stop: &CancellationToken,
+    ) -> bool {
+        !stop.is_cancelled()
+            && intents.is_current(self.ticket, IntentScope::Voice)
+            && self.generation == generation.load(Ordering::Acquire)
+            && self.stamp.is_alive()
+    }
+
+    fn is_p2p_since(&self, target: &zabor_native::voice::ControlTarget, since: Instant) -> bool {
+        target.channel.is_alive() && self.matches_p2p(&target.lifetime, since)
+    }
+
+    fn matches_p2p(&self, lifetime: &zabor_native::media::PeerLifetime, since: Instant) -> bool {
+        self.source_epoch.is_none() && self.stamp.is_current_since(lifetime, since)
+    }
+
+    fn attach(
+        &self,
+        target: zabor_native::voice::ControlTarget,
+    ) -> zabor_native::voice::ControlTarget {
+        target.with_frame(self.stamp.clone(), self.ticket)
+    }
 }
 
 impl FrameUpdate {
@@ -478,6 +540,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let control_targets = Rc::new(RefCell::new(
         Vec::<zabor_native::voice::ControlTarget>::new(),
     ));
+    let control_frames = Rc::new(RefCell::new(BTreeMap::<String, DisplayedFrame>::new()));
+    let control_authorized = Rc::new(Cell::new(false));
+    let control_since = Rc::new(RefCell::new(None::<Instant>));
     let local_settings = match profile
         .as_ref()
         .map(|profile| profile.read_settings())
@@ -581,6 +646,10 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let expected_video_generation = video_generation.clone();
     let frame_intents = intents.clone();
     let frame_stop = stop.clone();
+    let displayed_frames = control_frames.clone();
+    let displayed_targets = control_targets.clone();
+    let displayed_authorized = control_authorized.clone();
+    let displayed_since = control_since.clone();
     ui.on_process_video(move || {
         scheduled.store(false, Ordering::Release);
         let frames = mailbox
@@ -605,22 +674,51 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 frame.frame.width,
                 frame.frame.height,
             );
+            let displayed = DisplayedFrame::from_update(&frame);
             let video = VideoItem {
                 id: peer.into(),
                 title: user.name,
                 frame: slint::Image::from_rgba8(pixels),
             };
+            let id = video.id.to_string();
+            let mut admitted = false;
             let model = ui.get_video_frames();
             if let Some(index) = model.iter().position(|entry| entry.id == video.id) {
                 model.set_row_data(index, video);
+                admitted = true;
             } else {
                 let mut entries = model.iter().collect::<Vec<_>>();
                 if entries.len() < 3 {
                     entries.push(video);
                     ui.set_video_frames(Rc::new(VecModel::from(entries)).into());
+                    admitted = true;
                 }
             }
+            if admitted {
+                displayed_frames.borrow_mut().insert(id, displayed);
+            }
         }
+        let ready = displayed_authorized.get()
+            && displayed_since.borrow().is_some_and(|since| {
+                let peer = ui.get_control_viewer();
+                displayed_targets
+                    .borrow()
+                    .iter()
+                    .find(|target| target.peer == peer.as_str())
+                    .is_some_and(|target| {
+                        displayed_frames
+                            .borrow()
+                            .get(peer.as_str())
+                            .is_some_and(|frame| {
+                                frame.is_current(
+                                    &frame_intents,
+                                    &expected_video_generation,
+                                    &frame_stop,
+                                ) && frame.is_p2p_since(target, since)
+                            })
+                    })
+            });
+        ui.set_control_ready(ready);
     });
     let (updates, updates_rx) = std::sync::mpsc::sync_channel(128);
     let wake_ui = ui.as_weak();
@@ -651,7 +749,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         profile.clone(),
         WorkerMedia {
             video_sink,
-            video_generation,
+            video_generation: video_generation.clone(),
             audio_preferences: audio_preferences.clone(),
             audio_runtime: audio_runtime.clone(),
             intents: intents.clone(),
@@ -1394,7 +1492,11 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let control_runtime = runtime.handle().clone();
     let weak = ui.as_weak();
     let targets = control_targets.clone();
+    let released_authorization = control_authorized.clone();
+    let released_since = control_since.clone();
     ui.on_release_control(move || {
+        released_authorization.set(false);
+        *released_since.borrow_mut() = None;
         if let Some(ui) = weak.upgrade() {
             if let Some(target) = targets
                 .borrow()
@@ -1428,6 +1530,11 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let targets = control_targets.clone();
     let control_commands = commands.clone();
     let control_runtime = runtime.handle().clone();
+    let pointer_frames = control_frames.clone();
+    let pointer_since = control_since.clone();
+    let pointer_intents = intents.clone();
+    let pointer_generation = video_generation.clone();
+    let pointer_stop = stop.clone();
     ui.on_control_pointer(move |peer, x, y, width, height, kind, button| {
         let Some(ui) = weak.upgrade().filter(|ui| {
             ui.get_control_viewer() == peer && ui.get_control_ready() && ui.get_modal() == 0
@@ -1442,17 +1549,21 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         else {
             return;
         };
-        let Some(frame) = ui.get_video_frames().iter().find(|video| video.id == peer) else {
+        let Some(frame) = pointer_frames.borrow().get(peer.as_str()).cloned() else {
+            ui.invoke_release_control();
             return;
         };
-        let pixels = frame.frame.size();
-        let point = zabor_native::remote_viewer::normalized_point(
-            x,
-            y,
-            width,
-            height,
-            (pixels.width, pixels.height),
-        );
+        let current = frame.is_current(&pointer_intents, &pointer_generation, &pointer_stop)
+            && pointer_since
+                .borrow()
+                .is_some_and(|since| frame.is_p2p_since(&target, since));
+        if !current {
+            ui.invoke_release_control();
+            return;
+        }
+        let pixels = frame.stamp.pixels();
+        let target = frame.attach(target);
+        let point = zabor_native::remote_viewer::normalized_point(x, y, width, height, pixels);
         if let Some((x, y)) = point {
             queue_control_command(
                 &control_commands,
@@ -1477,16 +1588,40 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let targets = control_targets.clone();
     let control_commands = commands.clone();
     let control_runtime = runtime.handle().clone();
+    let weak = ui.as_weak();
+    let wheel_frames = control_frames.clone();
+    let wheel_since = control_since.clone();
+    let wheel_intents = intents.clone();
+    let wheel_generation = video_generation.clone();
+    let wheel_stop = stop.clone();
     ui.on_control_wheel(move |peer, vertical, horizontal| {
         if !vertical.is_finite() || !horizontal.is_finite() {
             return;
         }
+        let Some(ui) = weak.upgrade().filter(|ui| {
+            ui.get_control_viewer() == peer && ui.get_control_ready() && ui.get_modal() == 0
+        }) else {
+            return;
+        };
         if let Some(target) = targets
             .borrow()
             .iter()
             .find(|target| target.peer == peer.as_str())
             .cloned()
         {
+            let Some(frame) = wheel_frames.borrow().get(peer.as_str()).cloned() else {
+                ui.invoke_release_control();
+                return;
+            };
+            if !frame.is_current(&wheel_intents, &wheel_generation, &wheel_stop)
+                || !wheel_since
+                    .borrow()
+                    .is_some_and(|since| frame.is_p2p_since(&target, since))
+            {
+                ui.invoke_release_control();
+                return;
+            }
+            let target = frame.attach(target);
             queue_control_command(
                 &control_commands,
                 &control_runtime,
@@ -1503,7 +1638,18 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let targets = control_targets.clone();
     let control_commands = commands.clone();
     let control_runtime = runtime.handle().clone();
+    let weak = ui.as_weak();
+    let key_frames = control_frames.clone();
+    let key_since = control_since.clone();
+    let key_intents = intents.clone();
+    let key_generation = video_generation.clone();
+    let key_stop = stop.clone();
     ui.on_control_key(move |peer, text, down, modifiers| {
+        let Some(ui) = weak.upgrade().filter(|ui| {
+            ui.get_control_viewer() == peer && ui.get_control_ready() && ui.get_modal() == 0
+        }) else {
+            return;
+        };
         if let (Some(vk), Some(target)) = (
             zabor_native::remote_viewer::key_code(&text),
             targets
@@ -1512,6 +1658,19 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 .find(|target| target.peer == peer.as_str())
                 .cloned(),
         ) {
+            let Some(frame) = key_frames.borrow().get(peer.as_str()).cloned() else {
+                ui.invoke_release_control();
+                return;
+            };
+            if !frame.is_current(&key_intents, &key_generation, &key_stop)
+                || !key_since
+                    .borrow()
+                    .is_some_and(|since| frame.is_p2p_since(&target, since))
+            {
+                ui.invoke_release_control();
+                return;
+            }
+            let target = frame.attach(target);
             queue_control_command(
                 &control_commands,
                 &control_runtime,
@@ -1582,6 +1741,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let update_intents = intents.clone();
     let update_stop = stop.clone();
     let updated_avatars = avatars.clone();
+    let control_frame_generation = video_generation.clone();
+    let control_frame_stop = stop.clone();
     ui.on_process_updates(move || {
         if update_stop.is_cancelled() {
             return;
@@ -1642,6 +1803,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_busy(false);
                 }
                 UiEvent::SignedOut => {
+                    control_frames.borrow_mut().clear();
+                    control_authorized.set(false);
+                    *control_since.borrow_mut() = None;
                     updated_avatars.borrow_mut().cancel(&ui);
                     setup_avatar.borrow_mut().take();
                     ui.set_setup_avatar(slint::Image::default());
@@ -1726,6 +1890,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_busy(false);
                 }
                 UiEvent::VoiceEnded => {
+                    control_frames.borrow_mut().clear();
+                    control_authorized.set(false);
+                    *control_since.borrow_mut() = None;
                     control_targets.borrow_mut().clear();
                     ui.set_control_viewer("".into());
                     ui.set_control_ready(false);
@@ -1918,6 +2085,26 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     *control_targets.borrow_mut() = targets;
+                    control_authorized.set(state.viewer_ready);
+                    *control_since.borrow_mut() = state.viewer_accepted_at;
+                    let ready = state.viewer_ready
+                        && state.viewer_accepted_at.is_some_and(|since| {
+                            control_targets
+                                .borrow()
+                                .iter()
+                                .find(|target| target.peer == state.viewer)
+                                .is_some_and(|target| {
+                                    control_frames.borrow().get(&state.viewer).is_some_and(
+                                        |frame| {
+                                            frame.is_current(
+                                                &update_intents,
+                                                &control_frame_generation,
+                                                &control_frame_stop,
+                                            ) && frame.is_p2p_since(target, since)
+                                        },
+                                    )
+                                })
+                        });
                     ui.set_control_permitted(
                         Rc::new(VecModel::from(
                             state
@@ -1929,11 +2116,12 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         .into(),
                     );
                     ui.set_control_viewer(state.viewer.into());
-                    ui.set_control_ready(state.viewer_ready);
+                    ui.set_control_ready(ready);
                     ui.set_control_host_active(state.host_active);
                     ui.set_control_controller(state.controller.into());
                 }
                 UiEvent::RemoveVideo(peer) => {
+                    control_frames.borrow_mut().remove(&peer);
                     if ui.get_focused_video() == peer {
                         ui.set_focused_video("".into());
                     }
@@ -2721,7 +2909,7 @@ async fn worker(
                             let sink = video_sink.clone();
                             let generation = video_generation.load(Ordering::Acquire);
                             let id = peer.clone();
-                            let mut receiver = VideoReceiver::with_audio_runtime(track, lifetime.clone(), Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), ticket, generation, lease: delivery.lease, frame: delivery.frame }); }), audio_runtime.as_ref());
+                            let mut receiver = VideoReceiver::with_audio_runtime(track, lifetime.clone(), Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), ticket, generation, lease: delivery.lease, frame: delivery.frame, source_epoch: epoch }); }), audio_runtime.as_ref());
                             let mut retired_video = None;
                             let Some(watch) = work.commit_peer_resource(voice_ticket, &lifetime, || {
                                 retired_video = video_jobs.remove(&peer);
@@ -4096,10 +4284,13 @@ async fn worker(
                         .as_mut()
                         .filter(|session| session.control_target_current(&target))
                         .ok_or(AuthError::Network)?;
-                    session
-                        .send_control_input(&target.peer, packet)
-                        .map_err(|_| AuthError::Network)?;
-                    Ok(UiEvent::Connected)
+                    match session.send_control_target_input(&target, packet) {
+                        Ok(()) => Ok(UiEvent::Connected),
+                        Err(_) => Ok(UiEvent::RemoteControl(
+                            session.remote_control_view(),
+                            session.control_targets(),
+                        )),
+                    }
                 }
                 Command::ReleaseControl | Command::RevokeControl => {
                     if let Some(session) = voice.as_mut() {

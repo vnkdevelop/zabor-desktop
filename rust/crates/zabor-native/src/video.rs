@@ -50,6 +50,46 @@ pub struct DecodedVideo {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    decoded_at: Instant,
+}
+
+impl DecodedVideo {
+    pub fn decoded_at(&self) -> Instant {
+        self.decoded_at
+    }
+
+    pub fn stamp(&self, lease: &VideoFrameLease) -> VideoFrameStamp {
+        VideoFrameStamp {
+            decoded_at: self.decoded_at,
+            pixels: (self.width, self.height),
+            lease: lease.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct VideoFrameStamp {
+    decoded_at: Instant,
+    pixels: (u32, u32),
+    lease: VideoFrameLease,
+}
+
+impl VideoFrameStamp {
+    pub fn decoded_at(&self) -> Instant {
+        self.decoded_at
+    }
+
+    pub fn pixels(&self) -> (u32, u32) {
+        self.pixels
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.lease.is_alive()
+    }
+
+    pub fn is_current_since(&self, lifetime: &PeerLifetime, since: Instant) -> bool {
+        self.is_alive() && self.lease.lifetime.is_same(lifetime) && self.decoded_at >= since
+    }
 }
 
 #[derive(Clone)]
@@ -213,6 +253,7 @@ pub fn decode_frame(frame: BoxVideoFrame) -> Result<DecodedVideo, MediaError> {
             width,
             height,
             rgba,
+            decoded_at: Instant::now(),
         });
     }
     let source = image::RgbaImage::from_raw(width, height, rgba).ok_or(MediaError::Backend)?;
@@ -226,6 +267,7 @@ pub fn decode_frame(frame: BoxVideoFrame) -> Result<DecodedVideo, MediaError> {
         width: image.width(),
         height: image.height(),
         rgba: image.into_raw(),
+        decoded_at: Instant::now(),
     })
 }
 
@@ -279,6 +321,58 @@ mod tests {
             .unwrap();
         let lifetime = engine.peer_lifetime("remote").unwrap();
         (engine, lifetime, events)
+    }
+
+    #[test]
+    fn copied_frame_timestamp_is_immutable_through_rotated_display_and_cached_stamps() {
+        let (mut engine, lifetime, _events) = peer();
+        let lease = VideoFrameLease {
+            lifetime: lifetime.clone(),
+            active: Arc::new(AtomicBool::new(true)),
+        };
+        let before = Instant::now();
+        let frame = decode_frame(VideoFrame::new(
+            VideoRotation::VideoRotation90,
+            Box::new(I420Buffer::new_black(160, 96)) as libwebrtc::video_frame::BoxVideoBuffer,
+        ))
+        .unwrap();
+        let after = Instant::now();
+        let stamp = frame.stamp(&lease);
+        assert!((before..=after).contains(&frame.decoded_at()));
+        assert_eq!(stamp.pixels(), (96, 160));
+        assert_eq!(frame.rgba.len(), 96 * 160 * 4);
+        assert_eq!(stamp.decoded_at(), frame.decoded_at());
+        std::thread::sleep(Duration::from_millis(5));
+        let cached = stamp.clone();
+        assert_eq!(cached.decoded_at(), stamp.decoded_at());
+        assert!(cached.is_current_since(&lifetime, before));
+        assert!(!cached.is_current_since(&lifetime, frame.decoded_at() + Duration::from_nanos(1)));
+        engine.close();
+        assert!(!cached.is_alive());
+    }
+
+    #[test]
+    fn cached_stamp_rejects_other_original_peer_and_retired_subscription_with_same_peer() {
+        let (mut engine, lifetime, _events) = peer();
+        let (mut other, other_lifetime, _other_events) = peer();
+        let live = Arc::new(AtomicBool::new(true));
+        let lease = VideoFrameLease {
+            lifetime: lifetime.clone(),
+            active: live.clone(),
+        };
+        let frame = decode_frame(VideoFrame::new(
+            VideoRotation::VideoRotation0,
+            Box::new(I420Buffer::new_black(160, 96)) as libwebrtc::video_frame::BoxVideoBuffer,
+        ))
+        .unwrap();
+        let stamp = frame.stamp(&lease);
+        assert!(stamp.is_current_since(&lifetime, frame.decoded_at()));
+        assert!(!stamp.is_current_since(&other_lifetime, frame.decoded_at()));
+        live.store(false, Ordering::Release);
+        assert!(!stamp.is_current_since(&lifetime, frame.decoded_at()));
+        assert!(lifetime.is_alive());
+        engine.close();
+        other.close();
     }
 
     fn native_video() -> (PeerConnectionFactory, NativeVideoSource, RtcVideoTrack) {

@@ -1924,6 +1924,7 @@ fn frame_sink(
             generation,
             lease: delivery.lease,
             frame: delivery.frame,
+            source_epoch: None,
         });
     })
 }
@@ -1970,12 +1971,21 @@ async fn actual_rtp_mailbox_frames_reject_leave_before_teardown_and_accept_only_
             };
             assert_eq!((frame.frame.width, frame.frame.height), (160, 96));
             assert!(frame.is_current(&intents, &generation, &stop));
+            let displayed = super::DisplayedFrame::from_update(&frame);
+            assert_eq!(displayed.stamp.decoded_at(), frame.frame.decoded_at());
+            assert_eq!(displayed.stamp.pixels(), (160, 96));
+            assert!(displayed.matches_p2p(&lifetime, frame.frame.decoded_at()));
+            assert!(!displayed.matches_p2p(&lifetime, frame.frame.decoded_at() + Duration::from_nanos(1)));
+            let mut sfu = displayed.clone();
+            sfu.source_epoch = Some(101);
+            assert!(!sfu.matches_p2p(&lifetime, frame.frame.decoded_at()));
             if !fresh {
                 intents.request(CriticalAction::Leave);
                 assert!(frame.lease.is_alive());
                 assert!(receiver.is_playing());
                 assert_eq!(generation.load(Ordering::Acquire), 7);
                 assert!(!frame.is_current(&intents, &generation, &stop));
+                assert!(!displayed.is_current(&intents, &generation, &stop));
                 assert_eq!(intents.next().await, CriticalAction::Leave);
                 assert!(!frame.is_current(&intents, &generation, &stop));
                 receiver.stop();
@@ -1983,6 +1993,7 @@ async fn actual_rtp_mailbox_frames_reject_leave_before_teardown_and_accept_only_
             } else {
                 generation.store(8, Ordering::Release);
                 assert!(!frame.is_current(&intents, &generation, &stop));
+                assert!(!displayed.is_current(&intents, &generation, &stop));
                 generation.store(7, Ordering::Release);
                 stop.cancel();
                 assert!(!frame.is_current(&intents, &generation, &stop));
@@ -1992,6 +2003,7 @@ async fn actual_rtp_mailbox_frames_reject_leave_before_teardown_and_accept_only_
                 assert!(!frame.is_current(&intents, &generation, &live_stop));
                 receiver.stop();
                 assert!(!frame.lease.is_alive());
+                assert!(!displayed.stamp.is_alive());
             }
         }
         bob.disconnect_peer("alice");
