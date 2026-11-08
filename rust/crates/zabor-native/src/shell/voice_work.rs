@@ -66,6 +66,33 @@ impl<'a> VoiceWork<'a> {
         taken.filter(|taken| *taken).and(resources)
     }
 
+    pub(super) fn take_previous_voice(
+        &self,
+        voice: &mut Option<VoiceSession>,
+        events: &mut Option<mpsc::Receiver<MediaEvent>>,
+        resource_ticket: Option<IntentTicket>,
+        retain_events: bool,
+        mut accepted: impl FnMut(Option<&VoiceSession>),
+    ) -> Option<VoiceResources> {
+        let mut resources = None;
+        let taken = self.commit(|| {
+            if (voice.is_some() || events.is_some()) && resource_ticket != Some(self.ticket) {
+                return false;
+            }
+            resources = Some((
+                voice.take(),
+                if retain_events { None } else { events.take() },
+            ));
+            accepted(
+                resources
+                    .as_ref()
+                    .and_then(|resources| resources.0.as_ref()),
+            );
+            true
+        });
+        taken.filter(|taken| *taken).and(resources)
+    }
+
     pub(super) fn install_voice(
         &self,
         voice: &mut Option<VoiceSession>,

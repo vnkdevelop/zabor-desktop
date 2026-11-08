@@ -1028,9 +1028,41 @@ parsing;local filesystem diagnostic independently retained,not a relaxed test.
 Executable SHA-256:
 `df3466c5f8ce94e1714a9c34f8d1c4e36b1f4f324ae3c0befeacbafe30474aee`.
 voiceResourceInstallationChecked=true is narrow3site resource installation;
-save/post-save Graphify/guard/compact next. Temporary helpers deleted.
+saved25ca1673f2a48b887f94391fcf503909afeea6e8/post-save Graphify/438/3/24/
+current+frozen executable+ONNX/dependency/proof/clean-tree guard passed.
+Temporary helpers deleted.
 Active native audio/actual calls/peer/shared/video/
 acquisition/destructor/worker/UI deadlines remain open;full readiness=false.
+
+### Previous Voice extraction before preparation: components checked locally
+
+Original stored resource ticket gates Join/Call/AnswerCall previous Voice extraction;
+missing/mismatched/revoked nonempty ownership rejects,empty slots do not invent tickets.
+Owned previous tuple/FnMut captures stay outside unchanged strict intent mutex.
+Join/Call return Voice+receiver for outside-gate Voice-before-receiver disposal;
+AnswerCall retains old receiver in original slot/ticket until existing installation.
+Original EndCall send versus leave EndCall/LeaveChannel invoke arguments/order
+unchanged;Join abandoned clear after leave and Call/Answer sent/connected flags
+recheck original work after awaits. Native calls/Drop/cancel remain outside gate.
+Four configured-native local tests cover72ready/slot/ticket cases,14Drop/unwind,
+6held-gate priority/window cases and20hint/after-wait flag cases,no active native
+VoiceLease/physical calls.65native-bin tests/source audit passed. Initial new test
+fixture receiver-lifetime failure retained;fixed only new fixture. Final
+`native-calls/previous-voice-final-2026-11-08/` passed298default/288neural-disabled,
+both Clippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI interactions,
+protected neural metrics unchanged. Independent438primary/3reference/24evidence/
+current+frozen executable+ONNX/3SDK audit passed0mismatches;all294/284previous
+test names/multiplicity retained,4new tests/main29/VoiceWork8 and previous suites
+verified in both modes.112new/155prior markers and pre-existing diagnostic
+signatures/multiplicity verified;raw logs/source/deadlines unchanged. Exact source/
+gate/original-ticket/owned-tuple/Answer-receiver/hint/drop-order reconstruction passed,
+only3existing source changes,no new sources. Executable SHA-256:
+`a74128687159206326a5d9bc1879d78d0bf80ae9fa8288b5b9ead43f11a55e17`.
+previousVoiceResourceExtractionChecked=true is narrow3site old-resource extraction;
+save/post-save Graphify/guard/compact next. All temporary helpers deleted.
+Reused Voice/join errors/other
+call-audio-resume-video/peer/shared/acquisition/native-worker bounds still open;
+no full-client readiness,no generalized off-thread teardown.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

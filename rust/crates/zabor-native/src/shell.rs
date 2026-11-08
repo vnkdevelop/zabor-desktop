@@ -2954,6 +2954,12 @@ async fn worker(
         let operation_scope = command.scope();
         let starting_call = matches!(command, Command::Call(_) | Command::AnswerCall(_, true));
         let voice_work = VoiceWork::new(&intents, command_ticket, &stop, update.as_ref());
+        let previous_voice_work = VoiceWork::new(
+            &intents,
+            voice_ticket.unwrap_or(command_ticket),
+            &stop,
+            update.as_ref(),
+        );
         let operation = async {
             match command {
                 Command::Authenticate { .. }
@@ -2987,13 +2993,28 @@ async fn worker(
                         .as_ref()
                         .is_some_and(|voice| voice.call_peer.is_some())
                     {
-                        call_recovery.clear();
-                        if let Some(mut session) = voice.take() {
-                            abandoned_call = true;
+                        let Some(mut previous) = previous_voice_work.take_previous_voice(
+                            &mut voice,
+                            &mut media_events,
+                            voice_ticket,
+                            false,
+                            |_| {
+                                call_recovery.clear();
+                                abandoned_call = true;
+                            },
+                        ) else {
+                            return Err(AuthError::Network);
+                        };
+                        if let Some(session) = previous.0.as_mut() {
                             session.leave(&connection).await;
-                            abandoned_call = false;
+                            if previous_voice_work
+                                .commit(|| abandoned_call = false)
+                                .is_none()
+                            {
+                                return Err(AuthError::Network);
+                            }
                         }
-                        media_events = None;
+                        drop(previous);
                         video_generation.fetch_add(1, Ordering::AcqRel);
                         video_jobs.clear();
                         paused_video.clear();
@@ -3053,18 +3074,34 @@ async fn worker(
                     if !friends.contains(&peer) {
                         return Err(AuthError::Network);
                     }
-                    if let Some(mut session) = voice.take() {
+                    let Some(mut previous) = previous_voice_work.take_previous_voice(
+                        &mut voice,
+                        &mut media_events,
+                        voice_ticket,
+                        false,
+                        |_| {},
+                    ) else {
+                        return Err(AuthError::Network);
+                    };
+                    if let Some(session) = previous.0.as_mut() {
                         if session.call_peer.is_some() {
                             let _ = connection.send("EndCall", Vec::new()).await;
                         } else {
                             session.leave(&connection).await;
                         }
                     }
-                    media_events = None;
-                    call_connected = false;
-                    sent_speaking = false;
-                    speaking_release = None;
-                    sent_audio_state = None;
+                    drop(previous);
+                    if previous_voice_work
+                        .commit(|| {
+                            call_connected = false;
+                            sent_speaking = false;
+                            speaking_release = None;
+                            sent_audio_state = None;
+                        })
+                        .is_none()
+                    {
+                        return Err(AuthError::Network);
+                    }
                     let user = current_user.as_ref().ok_or(AuthError::Network)?;
                     let (mut session, receiver) = VoiceSession::new(
                         &connection,
@@ -3156,12 +3193,29 @@ async fn worker(
                     video_jobs.clear();
                     paused_video.clear();
                     stream_drops.clear();
-                    if let Some(mut session) = voice.take() {
+                    let Some(mut previous) = previous_voice_work.take_previous_voice(
+                        &mut voice,
+                        &mut media_events,
+                        voice_ticket,
+                        true,
+                        |_| {},
+                    ) else {
+                        return Err(AuthError::Network);
+                    };
+                    if let Some(session) = previous.0.as_mut() {
                         session.leave(&connection).await;
                     }
-                    sent_speaking = false;
-                    speaking_release = None;
-                    sent_audio_state = None;
+                    drop(previous);
+                    if previous_voice_work
+                        .commit(|| {
+                            sent_speaking = false;
+                            speaking_release = None;
+                            sent_audio_state = None;
+                        })
+                        .is_none()
+                    {
+                        return Err(AuthError::Network);
+                    }
                     let user = current_user.as_ref().ok_or(AuthError::Network)?;
                     let (mut session, receiver) = VoiceSession::new(
                         &connection,

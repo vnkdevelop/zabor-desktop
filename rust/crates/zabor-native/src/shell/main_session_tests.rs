@@ -1774,6 +1774,368 @@ async fn native_voice_installation_linearizes_priority_and_rechecks_stop_after_w
     }).await.unwrap();
 }
 
+#[tokio::test]
+async fn native_previous_voice_extraction_preserves_original_ticket_and_answer_receiver_after_ready_work(
+) {
+    timeout(Duration::from_secs(20), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        let mut requests = 0;
+        for kind in ["join", "call", "answer"] {
+            for slots in ["empty", "voice", "receiver"] {
+                for mode in ["live", "leave-pending", "leave-consumed", "logout-pending", "logout-consumed", "window", "missing", "reticket"] {
+                    let intents = CriticalIntents::default();
+                    let original = intents.ticket();
+                    let stop = CancellationToken::new();
+                    let controls = AudioPreferences::new(&json!({})).controls.clone();
+                    let audio = SharedAudio::new(controls.clone(), stop.child_token(), |_, _, _| {
+                        Box::pin(async { panic!("Previous Voice fixture must not start physical audio") })
+                    });
+                    let generation = audio.demand.reserve().unwrap();
+                    assert!(audio.demand.activate(generation));
+                    let monitor = audio.monitor(true);
+                    let (mut voice, mut events) = if slots == "empty" { (None, None) } else {
+                        let (mut session, events) = VoiceSession::new(&hub, &user(), false, controls.clone(), audio.clone()).await.unwrap();
+                        requests += 1;
+                        session.call_peer = Some("old-peer".into());
+                        if slots == "receiver" { drop(session); (None, Some(events)) } else { (Some(session), Some(events)) }
+                    };
+                    let resource_ticket = (mode != "missing").then_some(original);
+                    let update = |_| panic!("Previous Voice extraction must not publish inside the gate");
+                    let ready = VoiceWork::new(&intents, original, &stop, &update);
+                    assert_eq!(ready.run(async { 42 }).await, Some(42));
+                    match mode {
+                        "leave-pending" | "leave-consumed" | "reticket" => intents.request(CriticalAction::Leave),
+                        "logout-pending" | "logout-consumed" => intents.request(CriticalAction::Logout),
+                        "window" => stop.cancel(),
+                        _ => {}
+                    }
+                    if mode.ends_with("consumed") || mode == "reticket" { intents.next().await; }
+                    let ticket = if mode == "reticket" { intents.ticket() } else { original };
+                    let work = VoiceWork::new(&intents, ticket, &stop, &update);
+                    let monitor_current = monitor.is_current();
+                    controls.speaking.store(true, Ordering::Release);
+                    controls.mic_db.store((-17.0_f32).to_bits(), Ordering::Release);
+                    let epoch = controls.capture_epoch.load(Ordering::Acquire);
+                    let snapshot = audio.mic_test.snapshot(Instant::now());
+                    let mut callbacks = 0;
+                    let mut had_voice = false;
+                    let retain_events = kind == "answer";
+                    let previous = work.take_previous_voice(&mut voice, &mut events, resource_ticket, retain_events, |session| {
+                        callbacks += 1;
+                        had_voice = session.is_some_and(|session| session.call_peer.as_deref() == Some("old-peer"));
+                    });
+                    let accepted = mode == "live" || (slots == "empty" && matches!(mode, "missing" | "reticket"));
+                    assert_eq!(previous.is_some(), accepted);
+                    assert_eq!(callbacks, usize::from(accepted));
+                    assert_eq!(had_voice, accepted && slots == "voice");
+                    assert_eq!(resource_ticket, (mode != "missing").then_some(original));
+                    assert_eq!(voice.is_some(), !accepted && slots == "voice");
+                    assert_eq!(events.is_some(), slots != "empty" && (!accepted || retain_events));
+                    if let Some(previous) = previous.as_ref() {
+                        assert_eq!(previous.0.is_some(), slots == "voice");
+                        assert_eq!(previous.1.is_some(), slots != "empty" && !retain_events);
+                        if let Some(events) = previous.1.as_ref() { assert_eq!(events.is_closed(), slots == "receiver"); }
+                    }
+                    if let Some(events) = events.as_ref() { assert_eq!(events.is_closed(), slots == "receiver"); }
+                    drop(previous);
+                    if accepted && retain_events && slots != "empty" { assert!(events.as_ref().unwrap().is_closed()); }
+                    drop(voice);
+                    drop(events);
+                    assert_eq!(audio.demand.active(), generation);
+                    assert!(audio.demand.is_reserved(generation));
+                    assert_eq!(monitor.is_current(), monitor_current);
+                    assert!(controls.speaking.load(Ordering::Acquire));
+                    assert_eq!(f32::from_bits(controls.mic_db.load(Ordering::Acquire)), -17.0);
+                    assert_eq!(controls.capture_epoch.load(Ordering::Acquire), epoch);
+                    assert_eq!(audio.mic_test.snapshot(Instant::now()), snapshot);
+                    audio.wait_for_cleanup().await.unwrap();
+                    println!("previous voice kind={kind} slots={slots} mode={mode} accepted={accepted} original_ticket=true ready_work=true answer_receiver_retained={retain_events} monitor_unchanged=true physical_audio=false");
+                }
+            }
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; requests]);
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_previous_voice_extraction_keeps_callback_and_owned_resources_outside_gate_on_unwind(
+) {
+    timeout(Duration::from_secs(15), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        for retain_events in [false, true] {
+            for mode in ["live", "leave", "logout", "window", "missing", "reticket", "panic"] {
+                let intents = Arc::new(CriticalIntents::default());
+                let original = intents.ticket();
+                let stop = CancellationToken::new();
+                let audio = audio(&stop);
+                let monitor = audio.monitor(true);
+                let (session, receiver) = VoiceSession::new(&hub, &user(), false, AudioPreferences::new(&json!({})).controls.clone(), audio.clone()).await.unwrap();
+                let mut voice = Some(session);
+                let mut events = Some(receiver);
+                match mode {
+                    "leave" | "reticket" => intents.request(CriticalAction::Leave),
+                    "logout" => intents.request(CriticalAction::Logout),
+                    "window" => stop.cancel(),
+                    _ => {}
+                }
+                if mode == "reticket" { intents.next().await; }
+                let ticket = if mode == "reticket" { intents.ticket() } else { original };
+                let resource_ticket = (mode != "missing").then_some(original);
+                let monitor_current = monitor.is_current();
+                let drops = Arc::new(AtomicUsize::new(0));
+                let probe = VoiceExtractionDropCheck { intents: intents.clone(), drops: drops.clone() };
+                let update = |_| {};
+                let work = VoiceWork::new(&intents, ticket, &stop, &update);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    work.take_previous_voice(&mut voice, &mut events, resource_ticket, retain_events, move |_| {
+                        let _ = &probe;
+                        assert_ne!(mode, "panic", "Expected previous Voice extraction callback panic");
+                    })
+                }));
+                let accepted = matches!(mode, "live" | "panic");
+                assert_eq!(drops.load(Ordering::Acquire), 1);
+                assert_eq!(result.is_err(), mode == "panic");
+                assert_eq!(voice.is_none(), accepted);
+                assert_eq!(events.is_some(), !accepted || retain_events);
+                if mode == "panic" { assert_eq!(work.commit(|| 42), Some(42)); }
+                if let Ok(Some(previous)) = result.as_ref() {
+                    assert!(previous.0.is_some());
+                    assert_eq!(previous.1.is_some(), !retain_events);
+                }
+                drop(result);
+                if accepted && retain_events { assert!(events.as_ref().unwrap().is_closed()); }
+                drop(voice);
+                drop(events);
+                assert_eq!(monitor.is_current(), monitor_current);
+                assert_eq!(audio.demand.active(), 1);
+                audio.wait_for_cleanup().await.unwrap();
+                println!("previous voice callback_drop={mode} retain_events={retain_events} gate_reentry=true original_ticket=true owned_resources_outside_gate=true physical_audio=false");
+            }
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; 14]);
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_previous_voice_extraction_linearizes_priority_and_rechecks_window_stop_after_gate_wait(
+) {
+    timeout(Duration::from_secs(15), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        for retain_events in [false, true] {
+            for mode in ["leave", "logout", "window"] {
+                let intents = CriticalIntents::default();
+                let ticket = intents.ticket();
+                let stop = CancellationToken::new();
+                let audio = audio(&stop);
+                let monitor = audio.monitor(true);
+                let (session, receiver) = VoiceSession::new(&hub, &user(), false, AudioPreferences::new(&json!({})).controls.clone(), audio.clone()).await.unwrap();
+                let update = |_| {};
+                let work = VoiceWork::new(&intents, ticket, &stop, &update);
+                let (entered, waiting) = std::sync::mpsc::channel();
+                let (release, held) = std::sync::mpsc::channel();
+                let (started, starting) = std::sync::mpsc::channel();
+                let (done, finished) = std::sync::mpsc::channel();
+                let metadata = AtomicUsize::new(0);
+                let (voice, events, previous) = std::thread::scope(|scope| {
+                    let (intents, work, metadata) = (&intents, &work, &metadata);
+                    if mode == "window" {
+                        let holder = scope.spawn(move || intents.commit(ticket, IntentScope::Session, || {
+                            entered.send(()).unwrap();
+                            held.recv_timeout(Duration::from_secs(3)).unwrap();
+                        }));
+                        waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                        let extractor = scope.spawn(move || {
+                            let (mut voice, mut events) = (Some(session), Some(receiver));
+                            started.send(()).unwrap();
+                            let previous = work.take_previous_voice(&mut voice, &mut events, Some(ticket), retain_events, |_| panic!("Stopped extractor must not mutate resources"));
+                            done.send(()).unwrap();
+                            (voice, events, previous)
+                        });
+                        starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                        assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                        stop.cancel();
+                        release.send(()).unwrap();
+                        holder.join().unwrap().unwrap();
+                        finished.recv_timeout(Duration::from_secs(1)).unwrap();
+                        extractor.join().unwrap()
+                    } else {
+                        let extractor = scope.spawn(move || {
+                            let (mut voice, mut events) = (Some(session), Some(receiver));
+                            let previous = work.take_previous_voice(&mut voice, &mut events, Some(ticket), retain_events, |_| {
+                                entered.send(()).unwrap();
+                                held.recv_timeout(Duration::from_secs(3)).unwrap();
+                                metadata.store(1, Ordering::Release);
+                            });
+                            (voice, events, previous)
+                        });
+                        waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                        let requester = scope.spawn(move || {
+                            started.send(()).unwrap();
+                            intents.request(if mode == "leave" { CriticalAction::Leave } else { CriticalAction::Logout });
+                            assert_eq!(metadata.load(Ordering::Acquire), 1);
+                            done.send(()).unwrap();
+                        });
+                        starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                        assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                        release.send(()).unwrap();
+                        finished.recv_timeout(Duration::from_secs(1)).unwrap();
+                        requester.join().unwrap();
+                        extractor.join().unwrap()
+                    }
+                });
+                assert_eq!(voice.is_some(), mode == "window");
+                assert_eq!(events.is_some(), mode == "window" || retain_events);
+                assert_eq!(previous.is_some(), mode != "window");
+                assert_eq!(metadata.load(Ordering::Acquire), usize::from(mode != "window"));
+                assert!(work.commit(|| panic!("Revoked previous Voice metadata must not be accepted")).is_none());
+                drop(previous);
+                drop(voice);
+                drop(events);
+                assert_eq!(monitor.is_current(), mode != "window");
+                assert_eq!(audio.demand.active(), 1);
+                audio.wait_for_cleanup().await.unwrap();
+                println!("previous voice gate={mode} retain_events={retain_events} strict_linearization=true stop_after_gate_wait=true original_ticket=true physical_audio=false");
+            }
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; 6]);
+    }).await.unwrap();
+}
+
+struct PreviousVoiceProtocolFixture {
+    hub: HubConnection,
+    events: mpsc::Receiver<zabor_native::hub::HubEvent>,
+    server: tokio::task::JoinHandle<Vec<(String, bool)>>,
+}
+
+async fn previous_voice_protocol_fixture() -> PreviousVoiceProtocolFixture {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/zabor_v3", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut http, _) = listener.accept().await.unwrap();
+        let mut header = Vec::new();
+        while !header.ends_with(b"\r\n\r\n") {
+            header.push(http.read_u8().await.unwrap());
+            assert!(header.len() < 8192);
+        }
+        let body = json!({"connectionToken":"previous-voice-fixture","negotiateVersion":1,"availableTransports":[{"transport":"WebSockets","transferFormats":["Text"]}]}).to_string();
+        http.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        drop(http);
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        assert_eq!(
+            socket.next().await.unwrap().unwrap().into_text().unwrap(),
+            "{\"protocol\":\"json\",\"version\":1}\u{1e}"
+        );
+        socket.send(Message::text("{}\u{1e}")).await.unwrap();
+        let mut decoder = Decoder::default();
+        let mut methods = Vec::new();
+        while let Some(Ok(Message::Text(text))) = socket.next().await {
+            for request in decoder.push(text.as_bytes()).unwrap() {
+                if request["type"] == 6 {
+                    continue;
+                }
+                let target = request["target"].as_str().unwrap();
+                assert_eq!(request["arguments"], json!([]));
+                let invoke = request.get("invocationId").is_some();
+                let result = match target {
+                    "GetIceServers" => {
+                        assert!(invoke);
+                        json!({"iceServers":[]})
+                    }
+                    "EndCall" | "LeaveChannel" => json!(true),
+                    _ => panic!("Unexpected previous Voice protocol method"),
+                };
+                methods.push((target.into(), invoke));
+                if invoke {
+                    socket.send(Message::text(encode(&json!({"type":3,"invocationId":request["invocationId"],"result":result})).unwrap())).await.unwrap();
+                }
+            }
+        }
+        methods
+    });
+    let (hub, events) = HubConnection::connect(&endpoint, None).await.unwrap();
+    PreviousVoiceProtocolFixture {
+        hub,
+        events,
+        server,
+    }
+}
+
+#[tokio::test]
+async fn native_previous_voice_cleanup_preserves_hint_contract_and_rejects_revoked_post_wait_flags()
+{
+    timeout(Duration::from_secs(20), async {
+        let PreviousVoiceProtocolFixture { hub, events: _events, server } = previous_voice_protocol_fixture().await;
+        let mut expected = Vec::new();
+        for (kind, was_call) in [("join", true), ("call", true), ("call", false), ("answer", true), ("answer", false)] {
+            for mode in ["live", "leave", "logout", "window"] {
+                let intents = CriticalIntents::default();
+                let ticket = intents.ticket();
+                let stop = CancellationToken::new();
+                let audio = audio(&stop);
+                let monitor = audio.monitor(true);
+                let controls = AudioPreferences::new(&json!({})).controls.clone();
+                let (mut session, receiver) = VoiceSession::new(&hub, &user(), false, controls.clone(), audio.clone()).await.unwrap();
+                expected.push(("GetIceServers".into(), true));
+                if was_call { session.call_peer = Some("old-peer".into()); } else { session.channel = Some("old-channel".into()); }
+                let (mut voice, mut events) = (Some(session), Some(receiver));
+                let mut resource_ticket = Some(ticket);
+                let mut abandoned = false;
+                let mut flags = 1;
+                let update = |_| {};
+                let work = VoiceWork::new(&intents, ticket, &stop, &update);
+                let retain_events = kind == "answer";
+                let mut previous = work.take_previous_voice(&mut voice, &mut events, resource_ticket, retain_events, |_| { if kind == "join" { abandoned = true; } }).unwrap();
+                assert_eq!(events.is_some(), retain_events);
+                if kind == "call" && was_call {
+                    hub.send("EndCall", Vec::new()).await.unwrap();
+                    expected.push(("EndCall".into(), false));
+                } else {
+                    previous.0.as_mut().unwrap().leave(&hub).await;
+                    expected.push((if was_call { "EndCall" } else { "LeaveChannel" }.into(), true));
+                }
+                drop(previous);
+                if retain_events { assert!(events.as_ref().unwrap().is_closed()); }
+                match mode {
+                    "leave" => intents.request(CriticalAction::Leave),
+                    "logout" => intents.request(CriticalAction::Logout),
+                    "window" => stop.cancel(),
+                    _ => {}
+                }
+                let accepted = work.commit(|| { if kind == "join" { abandoned = false; } else { flags = 0; } });
+                assert_eq!(accepted.is_some(), mode == "live");
+                assert_eq!(abandoned, kind == "join" && mode != "live");
+                assert_eq!(flags, if kind == "join" || mode != "live" { 1 } else { 0 });
+                assert_eq!(resource_ticket, Some(ticket));
+                if accepted.is_some() {
+                    let prepared = VoiceSession::new(&hub, &user(), false, controls, audio.clone()).await.unwrap();
+                    expected.push(("GetIceServers".into(), true));
+                    let replaced = work.install_voice(&mut voice, &mut events, &mut resource_ticket, prepared, || {}).unwrap();
+                    assert!(replaced.0.is_none());
+                    assert_eq!(replaced.1.is_some(), retain_events);
+                    if retain_events { assert!(replaced.1.as_ref().unwrap().is_closed()); }
+                    drop(replaced);
+                    assert!(!events.as_ref().unwrap().is_closed());
+                }
+                drop(voice);
+                drop(events);
+                assert_eq!(monitor.is_current(), mode != "window");
+                assert_eq!(audio.demand.active(), 1);
+                audio.wait_for_cleanup().await.unwrap();
+                println!("previous voice cleanup kind={kind} was_call={was_call} mode={mode} hint_contract=true post_wait_accepted={} original_ticket=true answer_receiver_preserved={retain_events} physical_audio=false", mode == "live");
+            }
+        }
+        hub.close();
+        assert_eq!(server.await.unwrap(), expected);
+    }).await.unwrap();
+}
+
 async fn hold_logout_preferences(
     preferences: Arc<AudioPreferences>,
 ) -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>) {

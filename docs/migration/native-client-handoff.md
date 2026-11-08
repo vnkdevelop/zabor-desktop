@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `2e59212`: установка подготовленных
-VoiceSession/media receiver по исходному ticket в Join/Call/AnswerCall.
-Final `voice-installation-final-2026-11-08` прошёл294default/284neural-disabled tests
+Последний проверенный компонентный этап после `25ca167`: извлечение старого Voice
+по исходному ticket перед подготовкой Join/Call/AnswerCall.
+Final `previous-voice-final-2026-11-08` прошёл298default/288neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`df3466c5f8ce94e1714a9c34f8d1c4e36b1f4f324ae3c0befeacbafe30474aee`.
+`a74128687159206326a5d9bc1879d78d0bf80ae9fa8288b5b9ead43f11a55e17`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
 compact;actual saved commit брать из Git и
-`native-calls/voice-installation-post-save-2026-11-08/saved-boundary.json`.
+`native-calls/previous-voice-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Историческийb466d689… voice-extraction binary не заменяет
+visual/physical gates. Историческийdf3466c5… voice-installation binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,84 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Previous Voice extraction before preparation — checked locally 2026-11-08
+
+- Post-save **sh_1b98c7e56001Uj0PXBaGFkYOLI completed/passed**:saved
+  **25ca1673f2a48b887f94391fcf503909afeea6e8**,clean tree,438primary/3reference/
+  24evidence/current+frozen df3466c5… executable+ONNX/3SDK/proofs match.
+- Three existing source files only:shell.rs/shell/voice_work.rs/shell/main_session_tests.rs.
+  take_previous_voice uses unchanged original VoiceWork.commit/window-stop gate;
+  nonempty Voice/orphan receiver requires matching original resource ticket.
+  Empty slots can accept without inventing a resource ticket. Worker captures
+  previous work from stored voice_ticket,falling back to command ticket only if
+  absent;missing ticket with nonempty resources rejects,never retickets old resources.
+  Owned previous tuple and borrowed FnMut captures remain outside gate on rejection/
+  unwind. Join/Call extract Voice+receiver and dispose Voice before receiver outside
+  mutex;AnswerCall extracts Voice only and retains receiver in original slot/ticket
+  through leave/preparation/AcceptCall/rejection until existing guarded installation.
+- Three pre-prepare extraction sites only. Join clear CallRecovery/abandoned=true
+  accepted with extraction;post-leave abandoned=false guarded. Call/Answer old
+  EndCall-send versus leave EndCall/LeaveChannel invoke contracts/arguments/order
+  unchanged;post-hint sent/connected flags guarded before preparation. No native
+  calls,awaits,cancel,Drop or generalized off-thread teardown added inside gate.
+  Existing3prepared installations/4older extraction sites/VoiceWork commit/take_voice/
+  install/run/peer/UI/protocol/native Voice/audio/Peer/shared-cleanup/normal Leave/
+  Logout/DSP/UI sources and old tests unchanged. Video cleanup/reused Voice/join
+  error/other call-resume-audio flags remain separate acceptance work.
+- Four tests:72kind/empty-old-Voice-orphan-receiver/ready/pending-consumed Leave-
+  Logout/window/missing/reticket cases;14FnMut-capture Drop/unwind cases;6held-gate
+  priority/window cases;20local native-leave/hint/after-wait flags cases across Join,
+  Call old-call/channel,Answer old-call/channel with independent Voice/monitor lease.
+  No active native VoiceLease/physical endpoint used;not actual-call acceptance.
+- Initial dev **sh_1b990facd001m3I3RWN4DwR4k2**:64passed/1new protocol test failed.
+  New fixture accidentally dropped Hub event receiver before GetIceServers;backend
+  closes on events_rx drop. Corrected only new fixture to retain events for test
+  lifetime,production patch unchanged;raw failure retained. Fixed dev
+  **sh_1b992d0ad001ZOVm4Y1HSV0aKY passed65native-bin tests**. Development Graphify
+  **sh_1b9911846001L3pSKUFqE2FAZU passed** before fixture-only correction.
+  `native-calls/previous-voice-source-audit-verified-2026-11-08.json` passed:438primary/
+  3reference/3SDK,no new sources;exact existing source outside1helper/4new tests/
+  3pre-prepare sites equals saved25ca167. Original source audit retained as predecessor,
+  correction checked only inside new tests;temporary source helper deleted.
+- Full **sh_1b993a182001bhbsEKZZGplKH0 completed/passed**:298default/288neural-disabled,
+  both Clippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI auth/roster/audio/
+  MicTest interactions plus Graphify;protected neural metrics unchanged. Output
+  `native-calls/previous-voice-final-2026-11-08/`. Independent
+  `native-calls/previous-voice-final-independent-2026-11-08.json` passed0mismatches:
+  438primary/3reference/24evidence/current+frozen executable+ONNX/3SDK/proofs checked.
+  All294/284previous pass-names/multiplicity retained;4new tests/main29/VoiceWork8/
+  Leave10/SessionIo6/preferences10/Profile10/runtime23/playback3/device13/native1/
+  MicTest4/VoiceSession1 suites passed in both modes. Each mode verified112new and
+  155prior component markers and all pre-existing diagnostic signatures/multiplicity
+  (only measured `_ms` fields normalized);raw source/logs/deadlines unchanged.
+  Prior13protocol waits/3normal Logout/4partial-poison/2Voice Leave-Logout tail_runs=0
+  controls retained;full298/288names parsed after verified diagnostic normalization.
+  Independent source reconstruction repeated:outside1helper/4new tests/3old-resource
+  sites exactly equals saved25ca167;strict gate/original tickets/owned tuple/FnMut/
+  Answer receiver lifetime/native Voice-before-receiver disposal and hint order audited.
+  Actual/frozen executable **a74128687159206326a5d9bc1879d78d0bf80ae9fa8288b5b9ead43f11a55e17**.
+  FinalProof **7381990322f768c0e974eb3ff083f0cbba53f490d3f36ba6a8ef9c247409222e**.
+  IndependentProofaf79cec9…;SourceScopeProof18558321…;all temporary source/final/
+  independent helpers immediately deleted,no helper/profile cleanup debt.
+  Graphify5952nodes/14590edges/252communities,existing7metadata warnings/HTML5000limit.
+  Save narrow previousVoiceResourceExtractionChecked acceptance,then post-save
+  Graphify/frozen source-evidence/current-frozen binary-ONNX/dependency/proof/
+  clean-tree guard and compact;no next source patch before guard.
+- Read-only next map:CheckAudio still assigns sent_audio_state after work.run(mute),
+  local_speaking/current_user speaking and speaking_release/sent_speaking separately.
+  ResumeCall polls/mutates CallRecovery before work,then resumed/restored/retry metadata
+  after async resume with video remove/cancel/native receiver Drop mixed into it.
+  Gate metadata only with original Voice ticket;extract owned old video resources
+  into outer locals before disposal,never put receiver/native Drop or stream-drop
+  cancellation under intent mutex. Reused Join/new Join error cleanup and incoming/
+  CallSession/CallSuspended/CallResumed metadata remain open with peer shared gates.
+- Remaining acquisition/native health/destruction/resource locks/peer/shared acceptance,
+  generalized off-thread ownership,worker/UI/Leave/disconnect/syscall/socket bounds,
+  Windows journal/filesystem/SessionIo drain/chat-SQLite/file-final-save/media/SFU/
+  control/UI/profile/import/packaging/visual/physical/two-device/full-client gates open.
+  nativeClientReady/workerResponsiveness/audioIntegration/callIntegration=false;
+  no push/merge/release/shutdown.
 
 ## Prepared Voice installation — checked locally 2026-11-08
 
@@ -104,9 +182,8 @@ push/merge/release/shutdown не выполнялись. После каждог
   IndependentProof6304b017…;SourceScopeProof9be6ce43…;all temporary final/independent/
   source audit helpers immediately deleted,no helper/profile cleanup debt.
   Graphify5945nodes/14554edges/263communities,existing7metadata warnings/HTML5000limit.
-  All jobs complete;save narrow voiceResourceInstallationChecked acceptance,then
-  post-save Graphify/frozen source+evidence/current-frozen binary+ONNX/dependency/
-  proof/clean-tree guard and compact;do not begin next source patch before guard.
+  Saved25ca1673f2a48b887f94391fcf503909afeea6e8/post-save Graphify/frozen sources+
+  evidence/current-frozen binary+ONNX/dependency/proof/clean-tree guard passed.
 - Narrow installation only:old Join/Call/AnswerCall resources before new preparation
   still use prior synchronous extraction/leave;Join reused-session and post-join/error
   flags,CallResumed/ResumeCall/other audio/video metadata and VideoReceiver/PeerLifetime/
