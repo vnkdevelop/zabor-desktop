@@ -314,10 +314,17 @@ impl VoiceSession {
     }
 
     fn stop_audio(&mut self) {
-        self.controls.speaking.store(false, Ordering::Release);
-        self.controls
-            .mic_db
-            .store((-100.0_f32).to_bits(), Ordering::Release);
+        #[cfg(windows)]
+        if let Some(audio) = &self.audio {
+            audio.clear_network_status();
+        }
+        #[cfg(not(windows))]
+        {
+            self.controls.speaking.store(false, Ordering::Release);
+            self.controls
+                .mic_db
+                .store((-100.0_f32).to_bits(), Ordering::Release);
+        }
         self.playback = None;
         #[cfg(windows)]
         {
@@ -485,5 +492,57 @@ impl VoiceSession {
 impl Drop for VoiceSession {
     fn drop(&mut self) {
         self.stop_audio();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use crate::audio_settings::AudioSettings;
+    use std::time::Instant;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn unstarted_voice_stop_and_drop_cannot_clear_fresh_owner_network_controls() {
+        let controls = Arc::new(AudioControls::new(AudioSettings::default()));
+        let shared = SharedAudio::new(controls.clone(), CancellationToken::new(), |_, _, _| {
+            Box::pin(async { panic!("Voice cleanup fixture must not open physical audio") })
+        });
+        let monitor = shared.monitor(true);
+        let generation = shared.demand.reserve().unwrap();
+        assert!(shared.demand.activate(generation));
+        controls.speaking.store(true, Ordering::Release);
+        controls
+            .mic_db
+            .store((-17.0_f32).to_bits(), Ordering::Release);
+        let epoch = controls.capture_epoch.load(Ordering::Acquire);
+        let snapshot = shared.mic_test.snapshot(Instant::now());
+        let (engine, _events) = MediaEngine::new_data_only("old-owner".into());
+        let mut session = VoiceSession {
+            engine,
+            local_id: "old-owner".into(),
+            peers: BTreeSet::new(),
+            channel: None,
+            call_peer: None,
+            relay_only: false,
+            capture: None,
+            controls: controls.clone(),
+            audio_runtime: shared.clone(),
+            audio: None,
+            playback: None,
+        };
+        session.stop_audio();
+        drop(session);
+        assert_eq!(shared.demand.active(), generation);
+        assert!(shared.demand.is_reserved(generation));
+        assert_eq!(controls.capture_epoch.load(Ordering::Acquire), epoch);
+        assert!(controls.speaking.load(Ordering::Acquire));
+        assert_eq!(
+            f32::from_bits(controls.mic_db.load(Ordering::Acquire)),
+            -17.0
+        );
+        assert!(monitor.is_current());
+        assert_eq!(shared.mic_test.snapshot(Instant::now()), snapshot);
+        println!("voice session cleanup audio_lease=false actual_stop_and_drop=true current_generation=true controls_unchanged=true monitor_unchanged=true physical_audio=false");
     }
 }

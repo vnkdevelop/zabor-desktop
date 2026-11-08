@@ -61,13 +61,33 @@ impl AudioDemand {
     }
 
     pub fn revoke(&self, generation: u64) {
-        if let Ok(mut state) = self.voice.lock() {
-            if generation != 0 && state.reserved == generation {
-                state.reserved = 0;
-                state.active = 0;
-                self.active.store(0, Ordering::Release);
-                self.controls.capture_restarting();
-            }
+        let _ = self.revoke_if_current(generation);
+    }
+
+    fn revoke_if_current(&self, generation: u64) -> Option<bool> {
+        let mut state = self.voice.lock().ok()?;
+        if generation == 0 || state.reserved != generation {
+            return Some(false);
+        }
+        state.reserved = 0;
+        state.active = 0;
+        self.active.store(0, Ordering::Release);
+        self.controls.capture_restarting();
+        Some(true)
+    }
+
+    fn clear_network_status(&self, generation: u64) {
+        let state = self.voice.lock();
+        if generation != 0
+            && state.as_ref().map_or_else(
+                |_| self.active() == generation,
+                |state| state.reserved == generation,
+            )
+        {
+            self.controls.speaking.store(false, Ordering::Release);
+            self.controls
+                .mic_db
+                .store((-100.0_f32).to_bits(), Ordering::Release);
         }
     }
 
@@ -619,6 +639,10 @@ impl<D: SharedAudioDevice> VoiceLease<D> {
         self.device.as_ref()
     }
 
+    pub(crate) fn clear_network_status(&self) {
+        self.shared.demand.clear_network_status(self.generation);
+    }
+
     pub fn activate(&self) -> bool {
         !self.shared.stop.is_cancelled()
             && self.device.as_ref().is_some_and(|device| !device.failed())
@@ -634,9 +658,10 @@ impl<D: SharedAudioDevice> VoiceLease<D> {
 
 impl<D: SharedAudioDevice> Drop for VoiceLease<D> {
     fn drop(&mut self) {
-        self.shared.demand.revoke(self.generation);
-        self.shared.maintain(Instant::now());
-        self.shared.changed.notify_one();
+        if self.shared.demand.revoke_if_current(self.generation) != Some(false) {
+            self.shared.maintain(Instant::now());
+            self.shared.changed.notify_one();
+        }
     }
 }
 
@@ -1004,6 +1029,123 @@ mod tests {
             CancellationToken::new(),
             |_, _, _| Box::pin(async { panic!("No device should start in a reset fixture") }),
         )
+    }
+
+    #[test]
+    fn stale_voice_lease_clear_and_drop_do_not_enter_new_owner_resource_maintenance() {
+        for resource in ["mic-test", "runtime"] {
+            let shared = reset_runtime();
+            let old_generation = shared.demand.reserve().unwrap();
+            assert!(shared.demand.activate(old_generation));
+            let old = VoiceLease {
+                shared: shared.clone(),
+                generation: old_generation,
+                device: None,
+            };
+            shared.reset();
+            let monitor = shared.monitor(true);
+            let current = shared.demand.reserve().unwrap();
+            assert!(shared.demand.activate(current));
+            shared
+                .demand
+                .controls
+                .speaking
+                .store(true, Ordering::Release);
+            shared
+                .demand
+                .controls
+                .mic_db
+                .store((-17.0_f32).to_bits(), Ordering::Release);
+            let epoch = shared.demand.controls.capture_epoch.load(Ordering::Acquire);
+            let snapshot = shared.mic_test.snapshot(Instant::now());
+            let mic_test = (resource == "mic-test")
+                .then(|| shared.mic_test.try_prepare_dispose().unwrap().unwrap());
+            let runtime = (resource == "runtime").then(|| shared.state.lock().unwrap());
+            let (done, finished) = std::sync::mpsc::channel();
+            std::thread::scope(|scope| {
+                scope.spawn(move || {
+                    old.clear_network_status();
+                    drop(old);
+                    done.send(()).unwrap();
+                });
+                let result = finished.recv_timeout(Duration::from_millis(1500));
+                drop(mic_test);
+                drop(runtime);
+                result.unwrap();
+            });
+            assert_eq!(shared.demand.active(), current);
+            assert!(shared.demand.is_reserved(current));
+            assert!(monitor.is_current());
+            assert_eq!(shared.mic_test.snapshot(Instant::now()), snapshot);
+            assert_eq!(
+                shared.demand.controls.capture_epoch.load(Ordering::Acquire),
+                epoch
+            );
+            assert!(shared.demand.controls.speaking.load(Ordering::Acquire));
+            assert_eq!(
+                f32::from_bits(shared.demand.controls.mic_db.load(Ordering::Acquire)),
+                -17.0
+            );
+            println!("stale voice cleanup held={resource} current_generation=true controls_unchanged=true monitor_unchanged=true shared_maintenance_skipped=true physical_audio=false");
+        }
+    }
+
+    #[test]
+    fn current_voice_cleanup_preserves_status_order_monitor_and_poisoned_demand_behavior() {
+        for poisoned in [false, true] {
+            let shared = reset_runtime();
+            let monitor = shared.monitor(true);
+            let generation = shared.demand.reserve().unwrap();
+            assert!(shared.demand.activate(generation));
+            let lease = VoiceLease {
+                shared: shared.clone(),
+                generation,
+                device: None,
+            };
+            let epoch = shared.demand.controls.capture_epoch.load(Ordering::Acquire);
+            let snapshot = shared.mic_test.snapshot(Instant::now());
+            shared
+                .demand
+                .controls
+                .speaking
+                .store(true, Ordering::Release);
+            shared
+                .demand
+                .controls
+                .mic_db
+                .store((-17.0_f32).to_bits(), Ordering::Release);
+            if poisoned {
+                assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _held = shared.demand.voice.lock().unwrap();
+                    panic!("Expected voice cleanup demand fixture poison");
+                }))
+                .is_err());
+            }
+            lease.clear_network_status();
+            assert!(!shared.demand.controls.speaking.load(Ordering::Acquire));
+            assert_eq!(
+                f32::from_bits(shared.demand.controls.mic_db.load(Ordering::Acquire)),
+                -100.0
+            );
+            assert_eq!(shared.demand.active(), generation);
+            assert_eq!(
+                shared.demand.controls.capture_epoch.load(Ordering::Acquire),
+                epoch
+            );
+            drop(lease);
+            assert_eq!(
+                shared.demand.active(),
+                if poisoned { generation } else { 0 }
+            );
+            assert_eq!(
+                shared.demand.controls.capture_epoch.load(Ordering::Acquire),
+                epoch + u64::from(!poisoned)
+            );
+            assert_eq!(shared.demand.voice.is_poisoned(), poisoned);
+            assert!(monitor.is_current());
+            assert_eq!(shared.mic_test.snapshot(Instant::now()), snapshot);
+            println!("current voice cleanup poison={poisoned} status_before_revoke=true monitor_unchanged=true legacy_partial=true physical_audio=false");
+        }
     }
 
     #[test]

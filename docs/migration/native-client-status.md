@@ -832,10 +832,36 @@ Source-owner/strict extraction/guarded publications/legacy destructor order audi
 passed. Executable SHA-256:
 `14b0f8a9168042920eba9bd0ae08957ed7e2132cc815e5d99b570e1c3a439a82`.
 normalLogoutIntentWorkChecked=true is narrow component acceptance only;
-source save/post-save Graphify/guard/compact next, no push/release/shutdown.
+saved0315f56dbeb8bee7980eb57a75c12108f6922e32/post-save Graphify/438-source/
+3reference/24evidence/current+frozen binary/clean-tree guard passed, compact done;
+no push/release/shutdown.
 Shared Voice/lease destructor mutations
 must not be deferred onto a new owner's runtime without additional guards.
 Native/UI/worker/resource/syscall/drain/full-client bounds remainfalse.
+
+### Stale Voice audio cleanup: components checked locally
+
+Windows VoiceSession clears network status only through its original VoiceLease
+generation under the AudioDemand mutex; unstarted or stale objects cannot clear
+fresh-owner metrics. Known-stale VoiceLease drop skips shared maintain/Notify;
+current and unknown-poisoned cleanup retain synchronous legacy maintenance, public revoke API
+and status/playback/lease drop order. Three new tests cover fresh-owner held
+MicTest/runtime locks, current/poisoned cleanup and actual unstarted VoiceSession
+stop/drop. Final `native-calls/stale-voice-cleanup-final-2026-11-08/` passed
+264default/254neural-disabled tests,both Clippy modes/fmt/pinned/9HTTP/neural/
+freshbuild/8inert RUEN/four-DPI interactions; neural metrics unchanged.
+Independent438/3/24evidence/current+frozen executable+ONNX audit found0mismatches;
+2existing sources/zero new files, all prior261/251full test names retained and
+new3tests/runtime8+voice1/20main/10Leave/6SessionIo/10preferences/10Profile/3MicTest
+passed in both modes. Source text outside approved functions/tests unchanged;
+generation guard/poison/public revoke API/legacy drop order audited.
+Executable SHA-256:
+`86d91dfd719b3d5a579620bc2ecc1f171e93c25ff3fa0585154c476f5dee86a8`.
+staleVoiceAudioCleanupChecked=true is narrow known-stale component acceptance;
+source save/post-save Graphify/guard/compact next, no push/release/shutdown.
+Unknown poisoned ownership/current revoke-to-maintenance race and blocking voice/resource/native/
+notification/destructor cleanup still require prepared detachment and tracked
+completion. No off-thread cleanup introduced or native responsiveness claimed.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
