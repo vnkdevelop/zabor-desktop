@@ -2,11 +2,12 @@ import { FormButton, FormField, IconButton } from "controls.slint";
 import { ScrollView } from "std-widgets.slint";
 import { AudioSettingsPanel, AudioSettingsView, AudioDeviceItem, AudioSlider, RelaySetting, StreamAudioSetting } from "audio-settings.slint";
 import { MicTestPanel, MicTestView, MicButtonFeedback } from "mic-test.slint";
+import { StreamSource } from "stream-source.slint";
 
 export struct ChannelItem { id: string, name: string, count: int }
 export struct FriendItem { id: string, name: string, username: string, online: bool, color: color, avatar: image, speaking: bool, muted: bool, deafened: bool }
 export struct ChatLine { id: string, text: string, mine: bool, delivery: string, file: bool, size-text: string, size-unit: string, transfer: string, progress: int, cached: bool, saved: bool }
-export struct ScreenItem { id: string, title: string }
+export struct ScreenItem { id: string, title: string, thumbnail: image }
 export struct VideoItem { id: string, title: string, frame: image }
 export struct NotificationItem { id: string, kind: int, name: string, sender: string, color: color, avatar: image }
 
@@ -63,7 +64,7 @@ export component NativeApp inherits Window {
     in-out property <bool> camera-sources-loading;
     private property <[ScreenItem]> picker-sources: root.screen-source-kind == 2 ? root.camera-sources : root.screen-source-kind == 0 ? root.screen-sources : root.window-sources;
     private property <bool> picker-loading: root.screen-source-kind == 2 ? root.camera-sources-loading : root.screen-sources-loading;
-    changed screen-source-kind => { root.selected-screen = ""; root.cancel-camera-query(); if root.modal == 5 && root.screen-source-kind == 2 { root.list-cameras(); } }
+    changed screen-source-kind => { root.selected-screen = ""; root.cancel-picker-query(); if root.modal == 5 { if root.screen-source-kind == 2 { root.list-cameras(); } else { root.refresh-screens(); } } }
     in property <[VideoItem]> video-frames;
     in-out property <bool> sharing;
     in-out property <string> selected-screen;
@@ -132,8 +133,9 @@ export component NativeApp inherits Window {
     callback answer-call(string, bool);
     callback respond-notification(int, string, bool);
     callback list-screens;
+    callback refresh-screens;
     callback list-cameras;
-    callback cancel-camera-query;
+    callback cancel-picker-query;
     callback start-share(string, string, bool);
     callback focus-stream-audio(string);
     changed focused-video => { root.focus-stream-audio(root.focused-video); }
@@ -148,7 +150,8 @@ export component NativeApp inherits Window {
     callback mic-test-toggle;
     callback mic-test-seek(float);
     changed language => { root.language-changed(root.language); }
-    changed modal => { if root.modal == 3 { root.refresh-audio-devices(); } if root.modal != 5 { root.cancel-camera-query(); } root.mic-test-context-changed(); }
+    changed modal => { if root.modal == 3 { root.refresh-audio-devices(); } if root.modal != 5 { root.cancel-picker-query(); } root.mic-test-context-changed(); }
+    changed voice-active => { if !root.voice-active { root.cancel-picker-query(); } }
     changed settings-tab => { root.settings-scroll-y = 0px; root.mic-test-context-changed(); }
     changed authenticated => { root.mic-test-context-changed(); }
     changed user-id => { root.mic-test-context-changed(); }
@@ -454,11 +457,24 @@ export component NativeApp inherits Window {
                     FormButton { label: root.tr("stream.apps", root.language); primary: root.screen-source-kind == 1; disabled: root.busy; activated => { root.screen-source-kind = 1; } }
                     FormButton { label: root.tr("stream.cameras", root.language); primary: root.screen-source-kind == 2; disabled: root.busy; activated => { root.screen-source-kind = 2; } }
                 }
-                if root.modal == 5 : ScrollView { vertical-stretch: 1; min-height: 100px; VerticalLayout { spacing: 8px;
-                    if root.picker-loading : Text { text: root.tr("stream.loadingSources", root.language); color: #949ba4; font-size: 14px; horizontal-alignment: center; }
-                    if !root.picker-loading && root.picker-sources.length == 0 : Text { text: root.tr("stream.noSources", root.language); color: #949ba4; font-size: 14px; horizontal-alignment: center; }
-                    for source in root.picker-sources : FormButton { label: source.title; primary: root.selected-screen == source.id; disabled: root.busy || root.picker-loading; activated => { root.selected-screen = source.id; } }
-                } }
+                if root.modal == 5 : picker-scroll := ScrollView {
+                    vertical-stretch: 1; min-height: 100px;
+                    content-width: self.width;
+                    content-height: root.picker-loading || root.picker-sources.length == 0 ? 40px : ceil(root.picker-sources.length / 2) * ((self.width / 2 - 36px) * 9 / 16 + 72px);
+                    if root.picker-loading : Text { width: picker-scroll.width; height: 40px; text: root.tr("stream.loadingSources", root.language); color: #949ba4; font-size: 14px; horizontal-alignment: center; }
+                    if !root.picker-loading && root.picker-sources.length == 0 : Text { width: picker-scroll.width; height: 40px; text: root.tr("stream.noSources", root.language); color: #949ba4; font-size: 14px; horizontal-alignment: center; }
+                    for source[index] in root.picker-sources : StreamSource {
+                        width: (picker-scroll.width - 24px) / 2;
+                        x: mod(index, 2) * (self.width + 16px) + 4px;
+                        y: floor(index / 2) * (self.height + 16px) + 4px;
+                        label: source.title; thumbnail: source.thumbnail;
+                        fallback-icon: root.screen-source-kind == 2 ? @image-url("../assets/icons/camera.svg") : root.screen-source-kind == 0 ? @image-url("../assets/icons/desktop.svg") : @image-url("../assets/icons/window.svg");
+                        selected: root.selected-screen == source.id;
+                        disabled: root.busy || root.picker-loading;
+                        reduced-motion: root.reduced-motion;
+                        activated => { root.selected-screen = source.id; }
+                    }
+                }
                 if root.modal == 5 && root.screen-source-kind != 2 && root.selected-screen != "" : StreamAudioSetting { label: root.tr("stream.shareAudio", root.language); checked: root.screen-include-audio; disabled: root.busy || root.picker-loading; reduced-motion: root.reduced-motion; toggled(value) => { root.screen-include-audio = value; } }
                 if root.modal == 5 && root.screen-source-kind != 2 && root.selected-screen != "" : HorizontalLayout { spacing: 12px;
                     Text { text: root.tr("stream.quality", root.language); color: #949ba4; font-size: 14px; vertical-alignment: center; }

@@ -150,7 +150,7 @@ async fn camera_inventory_queue_and_late_ui_completion_keep_the_original_voice_t
         sender,
         intents: intents.clone(),
     };
-    let query = tokio_util::sync::CancellationToken::new();
+    let query = zabor_native::picker::PickerQuery::new(tokio_util::sync::CancellationToken::new());
     assert!(queue.try_send(Command::ListCameras(query.clone())).is_ok());
     let queued = receiver.recv().await.unwrap();
     assert_eq!(queued.ticket, ticket);
@@ -188,4 +188,66 @@ async fn stream_audio_selection_and_focus_commands_cannot_escape_the_original_vo
     intents.request(CriticalAction::Leave);
     assert!(!intents.is_current(start.ticket, start.command.scope()));
     assert!(!intents.is_current(focus.ticket, focus.command.scope()));
+}
+
+#[tokio::test]
+async fn desktop_inventory_and_preview_callbacks_keep_voice_and_picker_identity_without_renewal() {
+    use zabor_native::picker::{PickerImage, PickerQuery};
+    use zabor_native::screen::SourceKind;
+    let intents = Arc::new(CriticalIntents::default());
+    let original = intents.ticket();
+    let query = PickerQuery::new(intents.voice_token(original));
+    let (sender, mut receiver) = mpsc::channel(16);
+    let queue = CommandQueue {
+        sender,
+        intents: intents.clone(),
+    };
+    assert!(queue
+        .try_send(Command::ListScreens(query.clone(), 42, SourceKind::Window))
+        .is_ok());
+    let queued = receiver.recv().await.unwrap();
+    assert_eq!(queued.ticket, original);
+    assert_eq!(queued.command.scope(), IntentScope::Voice);
+    let image = PickerImage {
+        width: 1,
+        height: 1,
+        rgba: vec![0, 0, 0, 255],
+    };
+    let event = UiEvent::SourcePreview(query.clone(), "window:43".into(), Some(image.clone()))
+        .guarded(original, IntentScope::Voice);
+    query.cancel();
+    assert!(event.for_current(&intents).is_none());
+    assert!(intents.is_current(original, IntentScope::Voice));
+    let query = PickerQuery::new(intents.voice_token(original));
+    let inventory =
+        UiEvent::Screens(query.clone(), Some(Vec::new())).guarded(original, IntentScope::Voice);
+    let preview = UiEvent::SourcePreview(query.clone(), "screen:43".into(), Some(image))
+        .guarded(original, IntentScope::Voice);
+    intents.request(CriticalAction::Leave);
+    assert!(query.is_cancelled());
+    assert!(inventory.for_current(&intents).is_none());
+    assert!(preview.for_current(&intents).is_none());
+    assert!(intents.is_current(original, IntentScope::Session));
+}
+
+#[tokio::test]
+async fn independent_picker_work_stops_on_original_leave_or_logout_without_cancelling_session_on_leave(
+) {
+    for action in [CriticalAction::Leave, CriticalAction::Logout] {
+        let intents = CriticalIntents::default();
+        let original = intents.ticket();
+        let session = intents.session_token(original);
+        let voice = intents.voice_token(original);
+        assert!(!voice.is_cancelled());
+        let child = voice.child_token();
+        child.cancel();
+        assert!(!voice.is_cancelled());
+        intents.request(action);
+        assert!(voice.is_cancelled());
+        assert!(intents.voice_token(original).is_cancelled());
+        assert_eq!(session.is_cancelled(), action == CriticalAction::Logout);
+        assert_eq!(intents.next().await, action);
+        assert!(!intents.voice_token(intents.ticket()).is_cancelled());
+        assert!(intents.voice_token(original).is_cancelled());
+    }
 }

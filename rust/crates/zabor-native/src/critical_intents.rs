@@ -88,6 +88,22 @@ impl CriticalIntents {
         }
     }
 
+    pub fn voice_token(&self, ticket: IntentTicket) -> CancellationToken {
+        let state = self.state();
+        if state.owner == u64::MAX
+            || state.voice == u64::MAX
+            || ticket.owner != state.owner
+            || ticket.voice != state.voice
+            || state.pending.is_some()
+        {
+            let stop = CancellationToken::new();
+            stop.cancel();
+            stop
+        } else {
+            state.changed.child_token()
+        }
+    }
+
     pub fn voice_context(&self, ticket: IntentTicket) -> IntentTicket {
         IntentTicket {
             owner: ticket.owner,

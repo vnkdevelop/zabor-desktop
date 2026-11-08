@@ -41,6 +41,8 @@ pub mod motion;
 pub mod native_audio;
 #[cfg(feature = "neural-dsp")]
 pub mod neural;
+#[cfg(feature = "native-media")]
+pub mod picker;
 pub mod profile;
 pub mod protocol;
 pub mod release;

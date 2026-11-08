@@ -1,0 +1,53 @@
+export component StreamSource inherits Rectangle {
+    in property <string> label;
+    in property <image> thumbnail;
+    in property <image> fallback-icon;
+    in property <bool> selected;
+    in property <bool> disabled;
+    in property <bool> reduced-motion;
+    callback activated;
+    private property <bool> space-armed;
+    height: (root.width - 24px) * 9 / 16 + 56px;
+    background: #00000059;
+    border-radius: 16px;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? #c81e70e6 : touch.has-hover ? #c81e7099 : #303035b3;
+    opacity: root.disabled ? 0.5 : 1;
+    transform-scale-x: touch.pressed ? 0.98 : 1;
+    transform-scale-y: touch.pressed ? 0.98 : 1;
+    transform-origin: { x: root.width / 2, y: root.height / 2 };
+    animate border-color, opacity { duration: root.reduced-motion ? 0ms : 200ms; }
+    Rectangle {
+        x: 12px; y: 12px; width: parent.width - 24px; height: self.width * 9 / 16;
+        background: black; border-radius: 12px; border-width: 1px; border-color: #ffffff0f;
+        clip: true;
+        if root.thumbnail.width > 0 : Image { width: parent.width; height: parent.height; source: root.thumbnail; image-fit: cover; }
+        if root.thumbnail.width == 0 : Image { x: (parent.width - 28px) / 2; y: (parent.height - 28px) / 2; width: 28px; height: 28px; source: root.fallback-icon; colorize: #c81e70; }
+        if root.selected : Rectangle { x: parent.width - 28px; y: 8px; width: 20px; height: 20px; background: #c81e70e6; border-radius: 10px; Image { x: 4px; y: 4px; width: 12px; height: 12px; source: @image-url("../assets/icons/check.svg"); colorize: white; } }
+    }
+    Text { x: 12px; y: parent.height - 32px; width: parent.width - 24px; height: 20px; text: root.label; color: white; font-size: 12px; font-weight: 700; overflow: elide; vertical-alignment: center; }
+    forward-focus: keys;
+    keys := FocusScope {
+        enabled: !root.disabled;
+        changed has-focus => { if !self.has-focus { root.space-armed = false; } }
+        key-pressed(event) => {
+            if event.text == Key.Return { root.activated(); return accept; }
+            if event.text == Key.Space { root.space-armed = true; return accept; }
+            return reject;
+        }
+        key-released(event) => {
+            if event.text == Key.Space {
+                if root.space-armed { root.space-armed = false; root.activated(); }
+                return accept;
+            }
+            return reject;
+        }
+    }
+    changed disabled => { if root.disabled { root.space-armed = false; } }
+    touch := TouchArea { enabled: !root.disabled; clicked => { keys.focus(); root.activated(); } }
+    if keys.has-focus : Rectangle { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px; background: transparent; border-width: 2px; border-radius: 19px; border-color: #ee68a9; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: !root.disabled;
+    accessible-action-default => { if !root.disabled { root.activated(); } }
+}

@@ -1,4 +1,6 @@
+use crate::audio_runtime::{SharedAudio, SharedAudioDevice};
 use crate::media::MediaError;
+use crate::picker::{PickerImage, PickerQuery};
 use libwebrtc::desktop_capturer::{
     CaptureError, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
 };
@@ -10,7 +12,7 @@ use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceKind {
     Screen,
     Window,
@@ -24,6 +26,10 @@ pub struct ScreenSource {
 }
 
 impl ScreenSource {
+    pub fn is_allowed(&self, own_window: u64) -> bool {
+        own_window != 0 && !(matches!(self.kind, SourceKind::Window) && self.id == own_window)
+    }
+
     pub fn key(&self) -> String {
         let kind = match self.kind {
             SourceKind::Screen => "screen",
@@ -64,12 +70,15 @@ pub struct ScreenCapture {
 }
 
 impl ScreenCapture {
-    pub fn sources() -> Vec<ScreenSource> {
+    fn sources(own_window: u64, query: &PickerQuery) -> Vec<ScreenSource> {
         let mut sources = Vec::new();
         for (kind, source_type) in [
             (SourceKind::Screen, DesktopCaptureSourceType::Screen),
             (SourceKind::Window, DesktopCaptureSourceType::Window),
         ] {
+            if query.is_stopped() {
+                break;
+            }
             if let Some(capture) = DesktopCapturer::new(DesktopCapturerOptions::new(source_type)) {
                 sources.extend(
                     capture
@@ -79,11 +88,94 @@ impl ScreenCapture {
                             id: source.id(),
                             title: source.title(),
                             kind,
-                        }),
+                        })
+                        .filter(|source| source.is_allowed(own_window)),
                 );
             }
         }
         sources
+    }
+
+    pub async fn sources_with_audio_runtime<D: SharedAudioDevice>(
+        runtime: &SharedAudio<D>,
+        own_window: u64,
+        preview_kind: SourceKind,
+        query: PickerQuery,
+        sources_ready: impl FnOnce(Vec<ScreenSource>) + Send + 'static,
+        preview_ready: impl Fn(String, Option<PickerImage>) + Send + 'static,
+    ) -> Result<Vec<ScreenSource>, MediaError> {
+        if own_window == 0 {
+            return Err(MediaError::Backend);
+        }
+        query
+            .inventory(runtime.cleanup_tracker(), move |query, ready| {
+                let sources = Self::sources(own_window, &query);
+                if query.is_stopped() {
+                    return Ok(());
+                }
+                sources_ready(sources.clone());
+                if ready.send(sources.clone()).is_err() {
+                    query.cancel();
+                    return Ok(());
+                }
+                for source in sources {
+                    if query.is_stopped() {
+                        break;
+                    }
+                    if source.kind != preview_kind {
+                        continue;
+                    }
+                    let image = Self::preview(&source, &query);
+                    if !query.is_stopped() {
+                        preview_ready(source.key(), image);
+                    }
+                }
+                Ok(())
+            })
+            .await
+    }
+
+    fn preview(source: &ScreenSource, query: &PickerQuery) -> Option<PickerImage> {
+        let source_type = match source.kind {
+            SourceKind::Screen => DesktopCaptureSourceType::Screen,
+            SourceKind::Window => DesktopCaptureSourceType::Window,
+        };
+        let mut capturer = DesktopCapturer::new(DesktopCapturerOptions::new(source_type))?;
+        let selected = capturer
+            .get_source_list()
+            .into_iter()
+            .find(|candidate| candidate.id() == source.id)?;
+        if query.is_stopped() {
+            return None;
+        }
+        let (ready, received) = mpsc::sync_channel(1);
+        let callback_query = query.clone();
+        capturer.start_capture(Some(selected), move |result| {
+            if callback_query.is_stopped() {
+                return;
+            }
+            let image = match result {
+                Ok(frame) => PickerImage::from_bgra(
+                    frame.data(),
+                    frame.stride(),
+                    frame.width(),
+                    frame.height(),
+                )
+                .ok(),
+                Err(CaptureError::Permanent) => None,
+                Err(CaptureError::Temporary) => return,
+            };
+            let _ = ready.try_send(image);
+        });
+        let started = Instant::now();
+        while !query.is_stopped() && started.elapsed() < Duration::from_millis(600) {
+            capturer.capture_frame();
+            if let Ok(image) = received.try_recv() {
+                return image;
+            }
+            std::thread::park_timeout(Duration::from_millis(20));
+        }
+        None
     }
 
     pub fn start(
@@ -274,6 +366,30 @@ pub fn bgra_frame(
 mod tests {
     use super::*;
     use libwebrtc::video_frame::VideoBuffer;
+
+    #[test]
+    fn own_window_exclusion_is_exact_numeric_and_never_removes_the_same_screen_id() {
+        let own = ScreenSource {
+            id: 0x1234_5678_9abc,
+            title: "renamed native window".into(),
+            kind: SourceKind::Window,
+        };
+        assert!(!own.is_allowed(own.id));
+        assert!(own.is_allowed(own.id + 1));
+        let screen = ScreenSource {
+            kind: SourceKind::Screen,
+            ..own.clone()
+        };
+        assert!(screen.is_allowed(own.id));
+        let unrelated = ScreenSource {
+            id: own.id + 1,
+            title: "zabor".into(),
+            ..own.clone()
+        };
+        assert!(unrelated.is_allowed(own.id));
+        assert!(!screen.is_allowed(0));
+        assert!(!unrelated.is_allowed(0));
+    }
 
     #[test]
     fn source_keys_keep_screen_and_window_identity_distinct_and_titles_match_picker_rules() {

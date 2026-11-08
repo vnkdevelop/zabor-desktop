@@ -1,5 +1,6 @@
 use crate::audio_runtime::{AudioCleanup, AudioCleanupError, SharedAudio, SharedAudioDevice};
 use crate::media::MediaError;
+use crate::picker::{PickerImage, PickerQuery};
 use crate::screen::bgra_frame;
 use libwebrtc::video_frame::{VideoFrame, VideoRotation};
 use libwebrtc::video_source::{native::NativeVideoSource, VideoResolution};
@@ -77,6 +78,98 @@ impl Drop for NativeOwner {
 }
 
 impl CameraCapture {
+    pub async fn picker_with_audio_runtime<D: SharedAudioDevice>(
+        runtime: &SharedAudio<D>,
+        query: PickerQuery,
+        sources_ready: impl FnOnce(Vec<Device>) + Send + 'static,
+        preview_ready: impl Fn(String, Option<PickerImage>) + Send + 'static,
+    ) -> Result<Vec<Device>, MediaError> {
+        query
+            .inventory(runtime.cleanup_tracker(), move |query, ready| {
+                let camera = match Camera::enumerate() {
+                    Ok(camera) => camera,
+                    Err(_) => return Ok(()),
+                };
+                let mut owner = NativeOwner::new(camera);
+                let devices = loop {
+                    if query.is_stopped() {
+                        break None;
+                    }
+                    let camera = owner.camera.as_ref().unwrap();
+                    let status = camera.status();
+                    if status.failed || status.cleanup_failed {
+                        break None;
+                    }
+                    if status.ready {
+                        break Some(camera.take_devices());
+                    }
+                    if status.finished {
+                        break None;
+                    }
+                    std::thread::park_timeout(Duration::from_millis(10));
+                };
+                owner.finish()?;
+                let Some(devices) = devices.filter(|_| !query.is_stopped()) else {
+                    return Ok(());
+                };
+                sources_ready(devices.clone());
+                if ready.send(devices.clone()).is_err() {
+                    query.cancel();
+                    return Ok(());
+                }
+                for device in devices {
+                    if query.is_stopped() {
+                        break;
+                    }
+                    let camera = match Camera::open(&device.id) {
+                        Ok(camera) => camera,
+                        Err(_) => {
+                            if !query.is_stopped() {
+                                preview_ready(format!("camera:{}", device.id), None);
+                            }
+                            continue;
+                        }
+                    };
+                    let image = Self::preview(camera, &query)?;
+                    if !query.is_stopped() {
+                        preview_ready(format!("camera:{}", device.id), image);
+                    }
+                }
+                Ok(())
+            })
+            .await
+    }
+
+    fn preview(
+        camera: Camera,
+        query: &PickerQuery,
+    ) -> Result<Option<PickerImage>, AudioCleanupError> {
+        let mut owner = NativeOwner::new(camera);
+        let started = std::time::Instant::now();
+        let image = loop {
+            if query.is_stopped() || started.elapsed() >= Duration::from_secs(2) {
+                break None;
+            }
+            let camera = owner.camera.as_ref().unwrap();
+            let status = camera.status();
+            if status.failed || status.finished || status.cleanup_failed {
+                break None;
+            }
+            if let Some(frame) = camera.take_frame() {
+                break PickerImage::from_bgra(
+                    &frame.bgra,
+                    frame.width * 4,
+                    frame.width as i32,
+                    frame.height as i32,
+                )
+                .ok();
+            }
+            std::thread::park_timeout(Duration::from_millis(10));
+        };
+        owner.finish()?;
+        Ok(image.filter(|_| !query.is_stopped()))
+    }
+
     pub(crate) async fn start(
         device: String,
         cleanup: Arc<AudioCleanup>,
@@ -542,6 +635,98 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn picker_camera_preview_is_byte_only_and_waits_for_the_original_native_owner() {
+        timeout(Duration::from_secs(5), async {
+            let cleanup = Arc::new(AudioCleanup::default());
+            let query = PickerQuery::new(CancellationToken::new());
+            let started = Instant::now();
+            let image = query
+                .inventory(cleanup.clone(), |query, ready| {
+                    let camera = Camera::synthetic_video(2, 150).unwrap();
+                    let image = CameraCapture::preview(camera, &query)?.unwrap();
+                    ready.send(image).unwrap();
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            assert!(started.elapsed() >= Duration::from_millis(130));
+            assert_eq!((image.width, image.height), (160, 96));
+            assert_eq!(image.rgba, [71, 37, 19, 255].repeat(160 * 96));
+            assert!(!query.is_cancelled());
+            cleanup.wait().await.unwrap();
+            assert!(!query.is_running());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelled_picker_camera_preview_keeps_native_join_pending_and_never_delivers_an_image()
+    {
+        timeout(Duration::from_secs(5), async {
+            let cleanup = Arc::new(AudioCleanup::default());
+            let query = PickerQuery::new(CancellationToken::new());
+            let (entered, started) = oneshot::channel();
+            let (release, released) = mpsc::channel();
+            let worker_query = query.clone();
+            let worker_cleanup = cleanup.clone();
+            let task = tokio::spawn(async move {
+                worker_query
+                    .inventory(worker_cleanup, move |query, ready| {
+                        let camera = Camera::synthetic_video(2, 150).unwrap();
+                        while !camera.status().ready {
+                            std::thread::yield_now();
+                        }
+                        entered.send(()).unwrap();
+                        released.recv().unwrap();
+                        assert!(CameraCapture::preview(camera, &query)?.is_none());
+                        assert!(ready.send(()).is_err());
+                        Ok(())
+                    })
+                    .await
+            });
+            started.await.unwrap();
+            query.cancel();
+            assert!(task.await.unwrap().is_err());
+            release.send(()).unwrap();
+            assert!(timeout(Duration::from_millis(60), cleanup.wait())
+                .await
+                .is_err());
+            cleanup.wait().await.unwrap();
+            assert!(!query.is_running());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn picker_camera_acquisition_failure_keeps_fallback_but_cleanup_failure_blocks_acceptance(
+    ) {
+        let cleanup = Arc::new(AudioCleanup::default());
+        let query = PickerQuery::new(CancellationToken::new());
+        let image = query
+            .inventory(cleanup.clone(), |query, ready| {
+                let image = CameraCapture::preview(Camera::synthetic(3, 0).unwrap(), &query)?;
+                ready.send(image).unwrap();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(image.is_none());
+        cleanup.wait().await.unwrap();
+        let cleanup = Arc::new(AudioCleanup::default());
+        let query = PickerQuery::new(CancellationToken::new());
+        assert!(query
+            .inventory::<()>(cleanup.clone(), |query, _| {
+                CameraCapture::preview(Camera::synthetic_video(5, 0).unwrap(), &query)?;
+                Ok(())
+            })
+            .await
+            .is_err());
+        assert!(cleanup.wait().await.is_err());
     }
 
     struct Device;

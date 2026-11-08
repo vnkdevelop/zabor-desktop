@@ -39,6 +39,7 @@ use zabor_native::media::{MediaError, MediaEvent};
 use zabor_native::mic_test::{MicTestIssue, MicTestSnapshot, MicTestStage};
 use zabor_native::mic_test_ui::MicTestUi;
 use zabor_native::native_audio::NativeAudio;
+use zabor_native::picker::{PickerImage, PickerQuery};
 use zabor_native::profile::Profile;
 use zabor_native::roster::{respond_notification, NotificationKind};
 use zabor_native::screen::{ScreenCapture, ScreenSource, SourceKind};
@@ -96,8 +97,8 @@ enum Command {
     PruneChat,
     Call(String),
     AnswerCall(String, bool),
-    ListScreens,
-    ListCameras(CancellationToken),
+    ListScreens(PickerQuery, u64, SourceKind),
+    ListCameras(PickerQuery),
     StartShare(String, String, bool),
     FocusStreamAudio(String),
     StopShare,
@@ -120,7 +121,7 @@ impl Command {
             | Self::Call(_)
             | Self::AnswerCall(_, _)
             | Self::ResumeCall
-            | Self::ListScreens
+            | Self::ListScreens(_, _, _)
             | Self::ListCameras(_)
             | Self::StartShare(_, _, _)
             | Self::FocusStreamAudio(_)
@@ -211,8 +212,9 @@ enum UiEvent {
     IncomingCall(String, String),
     Calling(String),
     IncomingDismissed,
-    Screens(Vec<ScreenSource>),
-    Cameras(CancellationToken, Option<Vec<zabor_camera::Device>>),
+    Screens(PickerQuery, Option<Vec<ScreenSource>>),
+    Cameras(PickerQuery, Option<Vec<zabor_camera::Device>>),
+    SourcePreview(PickerQuery, String, Option<PickerImage>),
     Sharing(bool),
     RemoveVideo(String),
     NotificationResolved(NotificationKind, String, bool),
@@ -241,6 +243,16 @@ impl UiEvent {
                         return None;
                     }
                     self = *inner;
+                }
+                Self::Screens(query, sources) => {
+                    return (!query.is_cancelled()).then_some(Self::Screens(query, sources));
+                }
+                Self::Cameras(query, sources) => {
+                    return (!query.is_cancelled()).then_some(Self::Cameras(query, sources));
+                }
+                Self::SourcePreview(query, source, image) => {
+                    return (!query.is_cancelled())
+                        .then_some(Self::SourcePreview(query, source, image));
                 }
                 event => return Some(event),
             }
@@ -1127,8 +1139,21 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             show_error(&ui, AuthError::Network);
         }
     });
+    let picker_query = Rc::new(RefCell::new(None::<PickerQuery>));
+    let cancelled_query = picker_query.clone();
     let weak = ui.as_weak();
-    let screen_commands = commands.clone();
+    ui.on_cancel_picker_query(move || {
+        if let Some(query) = cancelled_query.borrow_mut().take() {
+            query.cancel();
+        }
+        if let Some(ui) = weak
+            .upgrade()
+            .filter(|ui| !ui.get_voice_active() || ui.get_modal() != 5)
+        {
+            clear_picker_rows(&ui);
+        }
+    });
+    let weak = ui.as_weak();
     ui.on_list_screens(move || {
         let Some(ui) = weak
             .upgrade()
@@ -1136,7 +1161,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         else {
             return;
         };
-        ui.invoke_cancel_camera_query();
+        ui.invoke_cancel_picker_query();
         ui.set_screen_sources(ModelRc::default());
         ui.set_window_sources(ModelRc::default());
         ui.set_camera_sources(ModelRc::default());
@@ -1147,19 +1172,50 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         ui.set_screen_sources_loading(true);
         ui.set_error("".into());
         ui.set_modal(5);
-        if screen_commands.try_send(Command::ListScreens).is_err() {
+        ui.invoke_refresh_screens();
+    });
+    let weak = ui.as_weak();
+    let screen_commands = commands.clone();
+    let screen_query = picker_query.clone();
+    ui.on_refresh_screens(move || {
+        let Some(ui) = weak.upgrade().filter(|ui| {
+            ui.get_voice_active()
+                && !ui.get_busy()
+                && ui.get_modal() == 5
+                && ui.get_screen_source_kind() != 2
+        }) else {
+            return;
+        };
+        let Some(own_window) = native_window_handle(&ui) else {
             ui.set_screen_sources_loading(false);
+            show_error(&ui, AuthError::Network);
+            return;
+        };
+        ui.invoke_cancel_picker_query();
+        let query = PickerQuery::new(
+            screen_commands
+                .intents
+                .voice_token(screen_commands.intents.ticket()),
+        );
+        *screen_query.borrow_mut() = Some(query.clone());
+        let kind = if ui.get_screen_source_kind() == 0 {
+            ui.set_screen_sources_loading(ui.get_screen_sources().row_count() == 0);
+            SourceKind::Screen
+        } else {
+            ui.set_screen_sources_loading(ui.get_window_sources().row_count() == 0);
+            SourceKind::Window
+        };
+        if screen_commands
+            .try_send(Command::ListScreens(query, own_window, kind))
+            .is_err()
+        {
+            ui.set_screen_sources_loading(false);
+            ui.invoke_cancel_picker_query();
             show_error(&ui, AuthError::Network);
         }
     });
     let weak = ui.as_weak();
-    let camera_query = Rc::new(RefCell::new(None::<CancellationToken>));
-    let cancelled_query = camera_query.clone();
-    ui.on_cancel_camera_query(move || {
-        if let Some(query) = cancelled_query.borrow_mut().take() {
-            query.cancel();
-        }
-    });
+    let camera_query = picker_query.clone();
     let camera_commands = commands.clone();
     ui.on_list_cameras(move || {
         let Some(ui) = weak.upgrade().filter(|ui| {
@@ -1170,22 +1226,49 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }) else {
             return;
         };
-        ui.invoke_cancel_camera_query();
-        let query = CancellationToken::new();
+        ui.invoke_cancel_picker_query();
+        let query = PickerQuery::new(
+            camera_commands
+                .intents
+                .voice_token(camera_commands.intents.ticket()),
+        );
         *camera_query.borrow_mut() = Some(query.clone());
-        ui.set_camera_sources(ModelRc::default());
-        ui.set_selected_screen("".into());
-        ui.set_camera_sources_loading(true);
+        ui.set_camera_sources_loading(ui.get_camera_sources().row_count() == 0);
         ui.set_error("".into());
         if camera_commands
             .try_send(Command::ListCameras(query))
             .is_err()
         {
             ui.set_camera_sources_loading(false);
-            ui.invoke_cancel_camera_query();
+            ui.invoke_cancel_picker_query();
             show_error(&ui, AuthError::Network);
         }
     });
+    let picker_refresh = Timer::default();
+    let weak = ui.as_weak();
+    let refresh_query = picker_query.clone();
+    if !preview_mode {
+        picker_refresh.start(TimerMode::Repeated, Duration::from_secs(5), move || {
+            let Some(ui) = weak
+                .upgrade()
+                .filter(|ui| ui.get_voice_active() && !ui.get_busy() && ui.get_modal() == 5)
+            else {
+                return;
+            };
+            if refresh_query
+                .borrow()
+                .as_ref()
+                .is_some_and(PickerQuery::is_running)
+            {
+                return;
+            }
+            if ui.get_screen_source_kind() == 2 {
+                ui.invoke_list_cameras();
+            } else {
+                ui.invoke_refresh_screens();
+            }
+        });
+    }
     let weak = ui.as_weak();
     let screen_commands = commands.clone();
     ui.on_start_share(move |source, quality, include_audio| {
@@ -1469,7 +1552,18 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     }
                     ui.set_incoming_call_id("".into());
                 }
-                UiEvent::Screens(sources) => {
+                UiEvent::Screens(query, sources) => {
+                    if query.is_cancelled()
+                        || ui.get_modal() != 5
+                        || ui.get_screen_source_kind() == 2
+                    {
+                        continue;
+                    }
+                    let Some(sources) = sources else {
+                        ui.set_screen_sources_loading(false);
+                        show_error(&ui, AuthError::Network);
+                        continue;
+                    };
                     let strings = Strings::new(ui.get_language().as_str()).ok();
                     let screen_label = strings
                         .as_ref()
@@ -1491,12 +1585,21 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                             title: source
                                 .display_title(target.len(), &screen_label, &window_label)
                                 .into(),
+                            thumbnail: match source.kind {
+                                SourceKind::Screen => ui.get_screen_sources(),
+                                SourceKind::Window => ui.get_window_sources(),
+                            }
+                            .iter()
+                            .find(|row| row.id == source.key())
+                            .map(|row| row.thumbnail)
+                            .unwrap_or_default(),
                         };
                         target.push(row);
                     }
                     ui.set_screen_sources(Rc::new(VecModel::from(screens)).into());
                     ui.set_window_sources(Rc::new(VecModel::from(windows)).into());
                     ui.set_screen_sources_loading(false);
+                    clear_missing_picker_selection(&ui);
                 }
                 UiEvent::Cameras(query, sources) => {
                     if !query.is_cancelled()
@@ -1522,10 +1625,22 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                                 } else {
                                     source.name.into()
                                 },
+                                thumbnail: ui
+                                    .get_camera_sources()
+                                    .iter()
+                                    .find(|row| row.id == format!("camera:{}", source.id))
+                                    .map(|row| row.thumbnail)
+                                    .unwrap_or_default(),
                             })
                             .collect::<Vec<_>>();
                         ui.set_camera_sources(Rc::new(VecModel::from(rows)).into());
                         ui.set_camera_sources_loading(false);
+                        clear_missing_picker_selection(&ui);
+                    }
+                }
+                UiEvent::SourcePreview(query, source, image) => {
+                    if !query.is_cancelled() && ui.get_modal() == 5 {
+                        apply_picker_preview(&ui, &source, image);
                     }
                 }
                 UiEvent::Sharing(active) => {
@@ -1812,6 +1927,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let ui_result = ui.run();
+    ui.invoke_cancel_picker_query();
+    clear_picker_rows(&ui);
     mic_test_ui.borrow_mut().close();
     stop.cancel();
     worker.abort();
@@ -3465,32 +3582,66 @@ async fn worker(
                     drop(replaced);
                     Ok(UiEvent::Calling(peer))
                 }
-                Command::ListScreens => {
-                    screen_sources = tokio::task::spawn_blocking(ScreenCapture::sources)
-                        .await
-                        .map_err(|_| AuthError::Network)?;
-                    Ok(UiEvent::Screens(screen_sources.clone()))
+                Command::ListScreens(query, own_window, kind) => {
+                    let inventory_update = update.clone();
+                    let inventory_query = query.clone();
+                    let preview_update = update.clone();
+                    let preview_query = query.clone();
+                    match ScreenCapture::sources_with_audio_runtime(
+                        &audio_runtime,
+                        own_window,
+                        kind,
+                        query.clone(),
+                        move |sources| {
+                            inventory_update(
+                                UiEvent::Screens(inventory_query, Some(sources))
+                                    .guarded(command_ticket, IntentScope::Voice),
+                            );
+                        },
+                        move |source, image| {
+                            preview_update(
+                                UiEvent::SourcePreview(preview_query.clone(), source, image)
+                                    .guarded(command_ticket, IntentScope::Voice),
+                            );
+                        },
+                    )
+                    .await
+                    {
+                        Ok(sources) => {
+                            screen_sources = sources;
+                            Ok(UiEvent::Connected)
+                        }
+                        Err(_) => Ok(UiEvent::Screens(query, None)),
+                    }
                 }
                 Command::ListCameras(query) => {
-                    tokio::select! {
-                        biased;
-                        _ = query.cancelled() => Ok(UiEvent::Connected),
-                        result = CameraCapture::devices_with_audio_runtime(&audio_runtime, query.clone()) => {
-                            if query.is_cancelled() {
-                                Ok(UiEvent::Connected)
-                            } else {
-                                match result {
-                                    Ok(sources) => {
-                                        camera_sources = sources;
-                                        Ok(UiEvent::Cameras(query, Some(camera_sources.clone())))
-                                    }
-                                    Err(_) => {
-                                        camera_sources.clear();
-                                        Ok(UiEvent::Cameras(query, None))
-                                    }
-                                }
-                            }
+                    let inventory_update = update.clone();
+                    let inventory_query = query.clone();
+                    let preview_update = update.clone();
+                    let preview_query = query.clone();
+                    match CameraCapture::picker_with_audio_runtime(
+                        &audio_runtime,
+                        query.clone(),
+                        move |sources| {
+                            inventory_update(
+                                UiEvent::Cameras(inventory_query, Some(sources))
+                                    .guarded(command_ticket, IntentScope::Voice),
+                            );
+                        },
+                        move |source, image| {
+                            preview_update(
+                                UiEvent::SourcePreview(preview_query.clone(), source, image)
+                                    .guarded(command_ticket, IntentScope::Voice),
+                            );
+                        },
+                    )
+                    .await
+                    {
+                        Ok(sources) => {
+                            camera_sources = sources;
+                            Ok(UiEvent::Connected)
                         }
+                        Err(_) => Ok(UiEvent::Cameras(query, None)),
                     }
                 }
                 Command::StartShare(id, quality, include_audio) => {
@@ -3995,9 +4146,86 @@ fn check_auth_interactions(ui: &NativeApp) -> Result<(), &'static str> {
     check_stream_picker_interactions(ui)?;
     println!(
         "{}",
-        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeAudioInteractionCheck":"passed","nativeMicTestInteractionCheck":"passed","nativeStreamPickerInteractionCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true,"physicalDevices":false})
+        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeAudioInteractionCheck":"passed","nativeMicTestInteractionCheck":"passed","nativeStreamPickerInteractionCheck":"passed","nativePickerThumbnailBindingCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true,"physicalDevices":false})
     );
     Ok(())
+}
+
+fn native_window_handle(ui: &NativeApp) -> Option<u64> {
+    use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    ui.window()
+        .with_winit_window(|window| match window.window_handle().ok()?.as_raw() {
+            RawWindowHandle::Win32(handle) => u64::try_from(handle.hwnd.get()).ok(),
+            _ => None,
+        })
+        .flatten()
+}
+
+fn clear_picker_rows(ui: &NativeApp) {
+    ui.set_screen_sources(ModelRc::default());
+    ui.set_window_sources(ModelRc::default());
+    ui.set_camera_sources(ModelRc::default());
+    ui.set_selected_screen("".into());
+    ui.set_screen_sources_loading(false);
+    ui.set_camera_sources_loading(false);
+}
+
+fn clear_missing_picker_selection(ui: &NativeApp) {
+    let sources = match ui.get_screen_source_kind() {
+        0 => ui.get_screen_sources(),
+        1 => ui.get_window_sources(),
+        _ => ui.get_camera_sources(),
+    };
+    if !sources.iter().any(|row| row.id == ui.get_selected_screen()) {
+        ui.set_selected_screen("".into());
+    }
+}
+
+fn apply_picker_preview(ui: &NativeApp, source: &str, image: Option<PickerImage>) {
+    if let Some(image) = &image {
+        if image.width == 0
+            || image.height == 0
+            || image.width > 320
+            || image.height > 180
+            || image.rgba.len() != image.width as usize * image.height as usize * 4
+        {
+            return;
+        }
+    }
+    let (kind, sources) = if source.starts_with("screen:") {
+        (0, ui.get_screen_sources())
+    } else if source.starts_with("window:") {
+        (1, ui.get_window_sources())
+    } else if source.starts_with("camera:") {
+        (2, ui.get_camera_sources())
+    } else {
+        return;
+    };
+    if kind != ui.get_screen_source_kind() || !sources.iter().any(|row| row.id == source) {
+        return;
+    }
+    let thumbnail = image.map_or_else(slint::Image::default, |image| {
+        slint::Image::from_rgba8(slint::SharedPixelBuffer::clone_from_slice(
+            &image.rgba,
+            image.width,
+            image.height,
+        ))
+    });
+    let rows = sources
+        .iter()
+        .map(|mut row| {
+            if row.id == source {
+                row.thumbnail = thumbnail.clone();
+            }
+            row
+        })
+        .collect::<Vec<_>>();
+    let rows = Rc::new(VecModel::from(rows)).into();
+    match kind {
+        0 => ui.set_screen_sources(rows),
+        1 => ui.set_window_sources(rows),
+        _ => ui.set_camera_sources(rows),
+    }
 }
 
 fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> {
@@ -4017,11 +4245,13 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     ui.on_list_cameras(move || *queries.borrow_mut() += 1);
     let camera_cancellations = Rc::new(RefCell::new(0));
     let cancellations = camera_cancellations.clone();
-    ui.on_cancel_camera_query(move || *cancellations.borrow_mut() += 1);
+    ui.on_cancel_picker_query(move || *cancellations.borrow_mut() += 1);
+    ui.on_refresh_screens(|| {});
     ui.set_screen_sources(
         Rc::new(VecModel::from(vec![ScreenItem {
             id: "screen:7".into(),
             title: "screen 1".into(),
+            thumbnail: slint::Image::default(),
         }]))
         .into(),
     );
@@ -4029,6 +4259,7 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
         Rc::new(VecModel::from(vec![ScreenItem {
             id: "window:9".into(),
             title: "editor".into(),
+            thumbnail: slint::Image::default(),
         }]))
         .into(),
     );
@@ -4036,6 +4267,7 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
         Rc::new(VecModel::from(vec![ScreenItem {
             id: "camera:exact-device-id:with:colons".into(),
             title: "camera 1".into(),
+            thumbnail: slint::Image::default(),
         }]))
         .into(),
     );
@@ -4067,6 +4299,87 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
             button: PointerEventButton::Left,
         });
     };
+    if native_window_handle(ui).is_none() {
+        return Err("Native picker own-window identity is unavailable");
+    }
+    let image = PickerImage::from_bgra(&[19, 37, 71, 255].repeat(8), 16, 4, 2)
+        .map_err(|_| "Synthetic picker image conversion failed")?;
+    apply_picker_preview(ui, "screen:7", Some(image.clone()));
+    let thumbnail_size = ui
+        .get_screen_sources()
+        .row_data(0)
+        .unwrap()
+        .thumbnail
+        .size();
+    if (thumbnail_size.width, thumbnail_size.height) != (4, 2) {
+        return Err("Picker thumbnail binding lost the source pixels");
+    }
+    apply_picker_preview(ui, "screen:unknown", Some(image.clone()));
+    apply_picker_preview(
+        ui,
+        "camera:exact-device-id:with:colons",
+        Some(image.clone()),
+    );
+    if ui.get_screen_sources().row_count() != 1
+        || ui
+            .get_camera_sources()
+            .row_data(0)
+            .unwrap()
+            .thumbnail
+            .size()
+            .width
+            != 0
+    {
+        return Err("Picker thumbnail entered an unknown source or the wrong tab");
+    }
+    apply_picker_preview(ui, "screen:7", None);
+    if ui
+        .get_screen_sources()
+        .row_data(0)
+        .unwrap()
+        .thumbnail
+        .size()
+        .width
+        != 0
+    {
+        return Err("Failed picker preview retained stale pixels");
+    }
+    apply_picker_preview(ui, "screen:7", Some(image));
+    let first = ui.get_screen_sources().row_data(0).unwrap();
+    ui.set_screen_sources(
+        Rc::new(VecModel::from(vec![
+            first.clone(),
+            ScreenItem {
+                id: "screen:8".into(),
+                title: "screen 2".into(),
+                thumbnail: slint::Image::default(),
+            },
+            ScreenItem {
+                id: "screen:10".into(),
+                title: "screen 3".into(),
+                thumbnail: slint::Image::default(),
+            },
+        ]))
+        .into(),
+    );
+    click(670.0, 318.0);
+    if ui.get_selected_screen() != "screen:8" {
+        return Err("Picker second-column source selection failed");
+    }
+    ui.set_selected_screen("".into());
+    click(450.0, 430.0);
+    if ui.get_selected_screen() != "screen:10" {
+        return Err("Picker odd last-row source selection failed");
+    }
+    clear_missing_picker_selection(ui);
+    if ui.get_selected_screen() != "screen:10" {
+        return Err("Picker refresh cleared a still-present source");
+    }
+    ui.set_screen_sources(Rc::new(VecModel::from(vec![first])).into());
+    clear_missing_picker_selection(ui);
+    if !ui.get_selected_screen().is_empty() {
+        return Err("Picker refresh retained a removed source");
+    }
     click(680.0, 582.0);
     if !starts.borrow().is_empty() {
         return Err("Stream picker started without a selected source");
@@ -4193,6 +4506,13 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     click(430.0, 582.0);
     if ui.get_modal() != 0 || *camera_cancellations.borrow() <= cancelled {
         return Err("Stream picker cancel failed");
+    }
+    clear_picker_rows(ui);
+    if ui.get_screen_sources().row_count() != 0
+        || ui.get_window_sources().row_count() != 0
+        || ui.get_camera_sources().row_count() != 0
+    {
+        return Err("Closed picker retained source previews");
     }
     Ok(())
 }
