@@ -103,6 +103,7 @@ enum Command {
     FocusStreamAudio(String),
     StopShare,
     CheckShare,
+    MaintainStreams,
     ExpireStreams,
     Notification(NotificationKind, String, bool),
     File {
@@ -127,6 +128,7 @@ impl Command {
             | Self::FocusStreamAudio(_)
             | Self::StopShare
             | Self::CheckShare
+            | Self::MaintainStreams
             | Self::Notification(NotificationKind::Channel, _, true) => IntentScope::Voice,
             _ => IntentScope::Session,
         }
@@ -2013,6 +2015,8 @@ async fn worker(
     let mut stream_drops = StreamDropGrace::default();
     let mut share_watch = tokio::time::interval(Duration::from_secs(1));
     share_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut stream_watch = tokio::time::interval(Duration::from_millis(250));
+    stream_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut screen_sources = Vec::<ScreenSource>::new();
     let mut camera_sources = Vec::<zabor_camera::Device>::new();
     let mut pending_join: Option<String> = None;
@@ -2195,6 +2199,7 @@ async fn worker(
             channel = async { match pending_join.take() { Some(channel) => channel, None => std::future::pending().await } } => Command::Join(channel),
             _ = async { if let Some(deadline) = stream_drops.next_deadline() { tokio::time::sleep_until(deadline.into()).await; } else { std::future::pending::<()>().await; } } => Command::ExpireStreams,
             _ = async { if voice.as_ref().is_some_and(VoiceSession::is_sharing) { share_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::CheckShare,
+            _ = async { if voice.is_some() && session_ready { stream_watch.tick().await; } else { std::future::pending::<()>().await; } } => Command::MaintainStreams,
             _ = tokio::time::sleep_until(prune_at) => { prune_at = tokio::time::Instant::now() + Duration::from_secs(3600); Command::PruneChat },
             _ = async { if let Some(deadline) = call_recovery.next_deadline() { tokio::time::sleep_until(deadline.into()).await; } else { std::future::pending::<()>().await; } } => Command::ResumeCall,
             _ = async { match retry_at { Some(deadline) => tokio::time::sleep_until(deadline).await, None => std::future::pending().await } } => { retry_at = None; Command::Reconnect },
@@ -2234,7 +2239,6 @@ async fn worker(
                                     stream_drops.cancel(peer);
                                     if let Some(mut receiver) = receiver {
                                         receiver.start();
-                                        if receiver.is_playing() { if let Some(hub) = &hub { let _ = work.send_peer(receiver.lifetime(), hub, "SendStreamViewState", vec![json!(peer), json!("watching")]).await; } }
                                         let replaced = work.install_video(&mut video_jobs, voice_ticket, lifetime.as_ref().unwrap(), (peer.into(), receiver), || {});
                                         drop(replaced);
                                     }
@@ -2364,7 +2368,7 @@ async fn worker(
                         }
                         if let Some(work) = voice_work.as_ref().filter(|work| work.is_current()) {
                             let Some(retired) = work.retire_videos(&mut video_jobs, voice_ticket, |_, receiver| !receiver.is_alive()) else { continue; };
-                            for (peer, receiver) in retired { stream_drops.cancel(&peer); work.publish(UiEvent::RemoveVideo(peer)); drop(receiver); }
+                            for (peer, receiver) in retired { stream_drops.cancel(&peer); if !voice.as_ref().is_some_and(|voice| voice.has_stream_snapshot(&peer)) { work.publish(UiEvent::RemoveVideo(peer)); } drop(receiver); }
                             if work.commit_resource(voice_ticket, || paused_video.retain(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)))).is_none() { continue; }
                             if event.target == "ForceLeaveVoice" || voice.as_ref().is_some_and(|voice| voice.channel.is_none() && voice.call_peer.is_none()) {
                                 let Some(disposed) = work.take_voice(&mut voice, &mut media_events, voice_ticket, |_| {}) else { continue; };
@@ -2404,6 +2408,14 @@ async fn worker(
                         if let Some(voice) = voice.as_mut() { if voice.receive_audio(&peer, track, lifetime.clone(), stream).is_err() { work.publish_peer(&lifetime, UiEvent::Toast("toasts.micUnknownError")); } }
                     },
                     MediaEvent::Track { peer, track: MediaStreamTrack::Video(track), lifetime, .. } => {
+                        if let Some(voice) = voice.as_mut() { voice.prepare_p2p_video(&peer, track, lifetime); }
+                    },
+                    event @ (MediaEvent::SfuConnection { .. } | MediaEvent::SfuTrack { .. }) => {
+                        if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) { let _ = voice.handle_sfu_event(hub, event).await; }
+                    },
+                    MediaEvent::StreamVideoReady { peer, epoch, track, lifetime, lease } => {
+                            let accepted = if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) { voice.accept_stream_video_ready(hub, &peer, epoch, &lifetime, &lease).await } else { false };
+                            if !accepted { return; }
                             let sink = video_sink.clone();
                             let generation = video_generation.load(Ordering::Acquire);
                             let id = peer.clone();
@@ -2416,7 +2428,6 @@ async fn worker(
                             drop(retired_video);
                             if watch {
                                 receiver.start();
-                                if let Some(hub) = &hub { let _ = work.send_peer(receiver.lifetime(), hub, "SendStreamViewState", vec![json!(peer), json!("watching")]).await; }
                             }
                             let replaced = work.install_video(&mut video_jobs, voice_ticket, &lifetime, (peer, receiver), || {});
                             drop(replaced);
@@ -3713,8 +3724,31 @@ async fn worker(
                     Ok(UiEvent::Sharing(true))
                 }
                 Command::FocusStreamAudio(peer) => {
-                    if let Some(session) = voice.as_ref() {
-                        session.focus_stream_audio((!peer.is_empty()).then_some(peer));
+                    if let Some(session) = voice.as_mut() {
+                        let _ = session
+                            .set_stream_focus(&connection, (!peer.is_empty()).then_some(peer))
+                            .await;
+                    }
+                    Ok(UiEvent::Connected)
+                }
+                Command::MaintainStreams => {
+                    if let Some(session) = voice.as_mut() {
+                        session.maintain_streams(&connection).await;
+                    }
+                    if let Some(retired) =
+                        voice_work.retire_videos(&mut video_jobs, voice_ticket, |_, receiver| {
+                            !receiver.is_alive()
+                        })
+                    {
+                        for (peer, receiver) in retired {
+                            if !voice
+                                .as_ref()
+                                .is_some_and(|voice| voice.has_stream_snapshot(&peer))
+                            {
+                                voice_work.publish(UiEvent::RemoveVideo(peer));
+                            }
+                            drop(receiver);
+                        }
                     }
                     Ok(UiEvent::Connected)
                 }

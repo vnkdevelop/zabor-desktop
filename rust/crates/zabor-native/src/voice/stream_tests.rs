@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 const CALL: &str = "0123456789abcdef0123456789abcdef";
 
-enum Reply {
+pub(super) enum Reply {
     Value(Value),
     Error,
     Hold,
@@ -25,14 +25,14 @@ enum Reply {
     Close,
 }
 
-struct Fixture {
-    endpoint: String,
+pub(super) struct Fixture {
+    pub(super) endpoint: String,
     seen: mpsc::UnboundedReceiver<Value>,
     release: Arc<Notify>,
-    server: tokio::task::JoinHandle<Vec<Value>>,
+    pub(super) server: tokio::task::JoinHandle<Vec<Value>>,
 }
 
-async fn fixture(replies: impl IntoIterator<Item = Reply>) -> Fixture {
+pub(super) async fn fixture(replies: impl IntoIterator<Item = Reply>) -> Fixture {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/zabor_v3", listener.local_addr().unwrap());
     let mut replies: VecDeque<_> = replies.into_iter().collect();
@@ -102,6 +102,9 @@ async fn fixture(replies: impl IntoIterator<Item = Reply>) -> Fixture {
                         assert_eq!(request["arguments"], json!([CALL]));
                         json!({"state":"resumed","peer":{"id":"peer","username":"fixture","displayName":"Fixture"}})
                     }
+                    "SfuPublish" | "SfuSubscribe" => {
+                        json!({"ok":false,"error":"local fixture refusal"})
+                    }
                     other => panic!("Unexpected invoke {other}"),
                 };
                 let response =
@@ -125,7 +128,7 @@ async fn fixture(replies: impl IntoIterator<Item = Reply>) -> Fixture {
     }
 }
 
-fn session() -> VoiceSession {
+pub(super) fn session() -> VoiceSession {
     let controls = Arc::new(AudioControls::new(AudioSettings::default()));
     let shared = SharedAudio::new(controls.clone(), CancellationToken::new(), |_, _, _| {
         Box::pin(async { panic!("Stream restore fixture must not open physical audio") })
@@ -143,10 +146,14 @@ fn session() -> VoiceSession {
         audio_runtime: shared,
         audio: None,
         playback: None,
+        streams: StreamRoutes::default(),
     }
 }
 
-fn share(session: &mut VoiceSession, quality: &str) -> (Arc<AtomicBool>, Arc<AtomicBool>) {
+pub(super) fn share(
+    session: &mut VoiceSession,
+    quality: &str,
+) -> (Arc<AtomicBool>, Arc<AtomicBool>) {
     let (capture, stop, failed) = ScreenCapture::synthetic();
     session
         .engine
@@ -160,7 +167,7 @@ fn share(session: &mut VoiceSession, quality: &str) -> (Arc<AtomicBool>, Arc<Ato
     (stop, failed)
 }
 
-fn peer(session: &mut VoiceSession) -> PeerLifetime {
+pub(super) fn peer(session: &mut VoiceSession) -> PeerLifetime {
     session.engine.authorize_peers(["peer".into()]);
     session
         .engine

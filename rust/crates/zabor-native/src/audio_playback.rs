@@ -15,6 +15,7 @@ struct Subscription {
     mixer: Arc<AudioMixer>,
     stop: CancellationToken,
     task: tokio::task::AbortHandle,
+    stream: bool,
 }
 
 impl Drop for Subscription {
@@ -59,6 +60,10 @@ impl AudioPlayback {
             return Err(MediaError::UnauthorizedPeer);
         }
         let key = (peer.to_owned(), track.id());
+        if stream {
+            self.subscriptions
+                .retain(|(id, _), subscription| id != peer || !subscription.stream);
+        }
         if self.subscriptions.len() >= 128 && !self.subscriptions.contains_key(&key) {
             return Err(MediaError::Backend);
         }
@@ -108,6 +113,7 @@ impl AudioPlayback {
                 mixer: self.mixer.clone(),
                 stop,
                 task,
+                stream,
             },
         );
         Ok(())
@@ -171,6 +177,41 @@ mod tests {
         (engine, lifetime)
     }
 
+    #[tokio::test]
+    async fn stream_route_audio_replaces_only_the_same_peers_stream_lane_and_keeps_voice() {
+        let controls = Arc::new(AudioControls::new(AudioSettings::default()));
+        let mixer = Arc::new(AudioMixer::new(controls));
+        let (engine, lifetime) = peer();
+        let factory = PeerConnectionFactory::default();
+        let voice = factory.create_audio_track("voice-fixture", audio_source());
+        let first = factory.create_audio_track("stream-p2p-fixture", audio_source());
+        let second = factory.create_audio_track("stream-sfu-fixture", audio_source());
+        let mut playback = AudioPlayback::new(mixer);
+        playback
+            .attach("remote", voice, lifetime.clone(), false)
+            .unwrap();
+        playback
+            .attach("remote", first, lifetime.clone(), true)
+            .unwrap();
+        playback
+            .attach("remote", second, lifetime.clone(), true)
+            .unwrap();
+        assert_eq!(playback.subscription_count(), 2);
+        assert!(playback
+            .subscriptions
+            .contains_key(&("remote".into(), "voice-fixture".into())));
+        assert!(playback
+            .subscriptions
+            .contains_key(&("remote".into(), "stream-sfu-fixture".into())));
+        assert!(!playback
+            .subscriptions
+            .contains_key(&("remote".into(), "stream-p2p-fixture".into())));
+        assert!(lifetime.is_alive());
+        playback.clear();
+        playback.wait_for_cleanup().await.unwrap();
+        drop(engine);
+    }
+
     struct HeldDrop {
         entered: std::sync::mpsc::Sender<()>,
         release: std::sync::mpsc::Receiver<()>,
@@ -223,6 +264,7 @@ mod tests {
             mixer: mixer.clone(),
             stop: stop.clone(),
             task,
+            stream: false,
         };
         started.acquire().await.unwrap().forget();
         let fresh = mixer

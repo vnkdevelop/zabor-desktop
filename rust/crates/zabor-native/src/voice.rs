@@ -21,6 +21,9 @@ use std::sync::{atomic::Ordering, Arc};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+mod stream_delivery;
+use stream_delivery::StreamRoutes;
+
 #[derive(Deserialize)]
 pub struct ChannelMembership {
     pub users: Vec<User>,
@@ -79,6 +82,7 @@ pub struct VoiceSession {
     #[cfg(windows)]
     audio: Option<VoiceLease<NativeAudio>>,
     playback: Option<AudioPlayback>,
+    streams: StreamRoutes,
 }
 
 impl VoiceSession {
@@ -124,6 +128,7 @@ impl VoiceSession {
                 #[cfg(windows)]
                 audio: None,
                 playback: None,
+                streams: StreamRoutes::default(),
             },
             events,
         ))
@@ -161,6 +166,7 @@ impl VoiceSession {
             .map(|user| user.id.clone())
             .collect();
         self.engine.authorize_peers(self.peers.iter().cloned());
+        self.stream_members(&membership.users);
         #[cfg(windows)]
         if let Some(audio) = &self.audio {
             if !audio.activate() {
@@ -182,6 +188,7 @@ impl VoiceSession {
         self.capture = None;
         self.stop_audio();
         self.engine.close();
+        self.streams = StreamRoutes::default();
         self.peers.clear();
         self.channel = None;
         if was_sharing {
@@ -205,6 +212,7 @@ impl VoiceSession {
         let servers = serde_json::from_value(settings["iceServers"].clone())
             .map_err(|_| MediaError::Backend)?;
         self.engine.configure_ice(servers, self.relay_only)?;
+        self.reset_stream_routes();
         self.peers.clear();
         self.engine.authorize_peers(Vec::<String>::new());
         self.join(hub, &channel).await
@@ -274,6 +282,7 @@ impl VoiceSession {
             return Err(MediaError::Backend);
         }
         self.engine.configure_ice(servers, self.relay_only)?;
+        self.reset_stream_routes();
         self.engine.disconnect_peer(peer);
         if let Some(playback) = self.playback.as_mut() {
             playback.retain_alive();
@@ -413,6 +422,7 @@ impl VoiceSession {
     }
 
     pub async fn stop_share(&mut self, hub: &HubConnection) {
+        self.stop_local_stream_route();
         self.capture = None;
         let _ = self.engine.set_stream_audio(None);
         let _ = self.engine.set_video(None);
@@ -440,6 +450,7 @@ impl VoiceSession {
                 .is_some_and(|audio| !audio.is_live() || !self.engine.has_live_stream_audio())
         }) {
             share.audio = None;
+            self.engine.remove_sfu_audio();
             let _ = self.engine.set_stream_audio(None);
         }
     }
@@ -508,6 +519,19 @@ impl VoiceSession {
         if !self.peers.contains(peer) {
             return Err(MediaError::UnauthorizedPeer);
         }
+        if stream
+            && self
+                .engine
+                .peer_lifetime(peer)
+                .is_some_and(|p2p| p2p.is_same(&lifetime))
+        {
+            self.streams
+                .p2p_audio
+                .insert(peer.into(), (track.clone(), lifetime.clone()));
+            if self.streams.selected.get(peer).is_some_and(Option::is_some) {
+                return Ok(());
+            }
+        }
         self.playback
             .as_mut()
             .ok_or(MediaError::Backend)?
@@ -547,6 +571,7 @@ impl VoiceSession {
         target: &str,
         args: &[Value],
     ) -> Result<(), MediaError> {
+        self.handle_stream_signal(hub, target, args).await?;
         let peer = args.first().and_then(Value::as_str);
         let payload = args.get(1).and_then(Value::as_str);
         match target {
@@ -701,6 +726,7 @@ mod tests {
             audio_runtime: shared.clone(),
             audio: None,
             playback: None,
+            streams: StreamRoutes::default(),
         };
         session.stop_audio();
         drop(session);

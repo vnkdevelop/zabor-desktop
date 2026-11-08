@@ -251,3 +251,21 @@ async fn independent_picker_work_stops_on_original_leave_or_logout_without_cance
         assert!(intents.voice_token(original).is_cancelled());
     }
 }
+
+#[tokio::test]
+async fn stream_maintenance_keeps_original_voice_admission_and_cannot_run_after_leave() {
+    let intents = Arc::new(CriticalIntents::default());
+    let original = intents.ticket();
+    let (sender, mut receiver) = mpsc::channel(16);
+    let queue = CommandQueue {
+        sender,
+        intents: intents.clone(),
+    };
+    assert!(queue.try_send(Command::MaintainStreams).is_ok());
+    let queued = receiver.recv().await.unwrap();
+    assert_eq!(queued.ticket, original);
+    assert_eq!(queued.command.scope(), IntentScope::Voice);
+    intents.request(CriticalAction::Leave);
+    assert!(!intents.is_current(queued.ticket, queued.command.scope()));
+    assert!(intents.is_current(original, IntentScope::Session));
+}

@@ -31,6 +31,11 @@ use tokio_util::sync::CancellationToken;
 
 static NEXT_OFFER_EPOCH: AtomicU64 = AtomicU64::new(1);
 
+pub mod adaptive;
+mod sfu;
+use adaptive::{AdaptiveVideo, VideoProfile, ViewerState};
+pub use sfu::{DeliveryMode, StreamDelivery};
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MediaError {
     #[error("peer is outside the active media session")]
@@ -117,6 +122,26 @@ pub enum MediaEvent {
         peer: String,
         lifetime: PeerLifetime,
     },
+    SfuConnection {
+        peer: String,
+        epoch: u64,
+        publisher: bool,
+        state: PeerConnectionState,
+        lifetime: PeerLifetime,
+    },
+    SfuTrack {
+        peer: String,
+        epoch: u64,
+        track: MediaStreamTrack,
+        lifetime: PeerLifetime,
+    },
+    StreamVideoReady {
+        peer: String,
+        epoch: Option<u64>,
+        track: RtcVideoTrack,
+        lifetime: PeerLifetime,
+        lease: crate::video::VideoFrameLease,
+    },
 }
 
 impl MediaEvent {
@@ -130,7 +155,10 @@ impl MediaEvent {
             | Self::Connection { lifetime, .. }
             | Self::Track { lifetime, .. }
             | Self::DataChannel { lifetime, .. }
-            | Self::Renegotiate { lifetime, .. } => lifetime,
+            | Self::Renegotiate { lifetime, .. }
+            | Self::SfuConnection { lifetime, .. }
+            | Self::SfuTrack { lifetime, .. }
+            | Self::StreamVideoReady { lifetime, .. } => lifetime,
         }
     }
 }
@@ -154,6 +182,7 @@ struct Peer {
     video_defaults: Option<VideoSendDefaults>,
     stream_sender: Option<RtpSender>,
     needs_offer: bool,
+    adaptive: AdaptiveVideo,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -210,6 +239,7 @@ struct VideoSendDefaults {
     max_framerate: Option<f64>,
     priority: Priority,
     degradation: DegradationPreference,
+    scale: Option<f64>,
 }
 
 impl VideoSendDefaults {
@@ -220,6 +250,7 @@ impl VideoSendDefaults {
             max_framerate: first.and_then(|encoding| encoding.max_framerate),
             priority: first.map_or(Priority::Low, |encoding| encoding.priority),
             degradation: parameters.degradation_preference().unwrap_or_default(),
+            scale: first.and_then(|encoding| encoding.scale_resolution_down_by),
         }
     }
 
@@ -228,6 +259,7 @@ impl VideoSendDefaults {
             first.max_bitrate = self.max_bitrate;
             first.max_framerate = self.max_framerate;
             first.priority = self.priority;
+            first.scale_resolution_down_by = self.scale;
         }
         parameters.set_degradation_preference(self.degradation);
     }
@@ -265,6 +297,8 @@ pub struct MediaEngine {
     data_only: bool,
     video: Option<RtcVideoTrack>,
     video_profile: Option<VideoSendProfile>,
+    viewers: BTreeMap<String, ViewerState>,
+    sfu: sfu::SfuMedia,
 }
 
 impl MediaEngine {
@@ -284,6 +318,8 @@ impl MediaEngine {
                 data_only: false,
                 video: None,
                 video_profile: None,
+                viewers: BTreeMap::new(),
+                sfu: sfu::SfuMedia::default(),
             },
             receiver,
         )
@@ -321,6 +357,11 @@ impl MediaEngine {
             .filter(|peer| peer != &self.local_id)
             .collect();
         self.peers.retain(|id, _| self.allowed.contains(id));
+        self.viewers.retain(|id, _| self.allowed.contains(id));
+        self.sfu
+            .subscribers
+            .retain(|id, _| self.allowed.contains(id));
+        self.retain_sfu_viewers();
     }
 
     pub fn new_data_only(local_id: String) -> (Self, mpsc::Receiver<MediaEvent>) {
@@ -331,6 +372,8 @@ impl MediaEngine {
 
     pub fn disconnect_peer(&mut self, peer: &str) {
         self.peers.remove(peer);
+        self.viewers.remove(peer);
+        self.sfu.subscribers.remove(peer);
     }
 
     pub fn peer_lifetime(&self, peer: &str) -> Option<PeerLifetime> {
@@ -393,11 +436,13 @@ impl MediaEngine {
         if self.data_only {
             return Err(MediaError::Backend);
         }
+        self.reset_sfu_publisher();
         if let Some(video) = self.video.take() {
             video.set_enabled(false);
         }
         let mut failed = false;
         for peer in self.peers.values_mut() {
+            peer.adaptive = AdaptiveVideo::default();
             if let Some(sender) = peer.video_sender.take() {
                 if let Some(defaults) = peer.video_defaults.take() {
                     failed |= defaults.restore(&sender).is_err();
@@ -677,6 +722,7 @@ impl MediaEngine {
                     video_defaults,
                     stream_sender,
                     needs_offer: false,
+                    adaptive: AdaptiveVideo::default(),
                 },
             );
         }
@@ -871,6 +917,8 @@ impl MediaEngine {
     }
 
     pub fn close(&mut self) {
+        self.sfu = sfu::SfuMedia::default();
+        self.viewers.clear();
         self.peers.clear();
         self.allowed.clear();
         if let Some(track) = self.microphone.take() {
