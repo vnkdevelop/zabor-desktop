@@ -73,5 +73,8 @@ neural-dsp = ["dep:df", "dep:ndarray", "dep:rnnoise2", "dep:ort", "dep:tract-cor
 [build-dependencies]
 slint-build = "=1.18.1"
 
+[dev-dependencies]
+slint = { version = "=1.18.1", default-features = false, features = ["renderer-software"] }
+
 [lints.rust]
 unsafe_code = "deny"
