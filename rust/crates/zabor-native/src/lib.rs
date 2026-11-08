@@ -59,6 +59,10 @@ pub mod smart_gate;
 pub mod stream_audio;
 pub mod strings;
 pub mod update;
+#[cfg(windows)]
+pub mod update_helper;
+#[cfg(windows)]
+pub mod update_io;
 #[cfg(feature = "native-media")]
 pub mod video;
 #[cfg(feature = "native-media")]

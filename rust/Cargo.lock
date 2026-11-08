@@ -7949,6 +7949,7 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "deep_filter",
+ "flate2",
  "fs2",
  "futures-util",
  "getrandom 0.3.4",
@@ -7992,6 +7993,7 @@ dependencies = [
  "zabor-input",
  "zabor-stream-audio",
  "zeroize",
+ "zip",
 ]
 
 [[package]]

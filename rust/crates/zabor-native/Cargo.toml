@@ -56,10 +56,12 @@ tract-pulse = { version = "=0.21.4", optional = true }
 tract-pulse-opl = { version = "=0.21.4", optional = true }
 
 [target.'cfg(windows)'.dependencies]
+flate2 = { version = "=1.1.10", features = ["rust_backend"] }
 windows-dpapi = "0.2"
 wasapi = "=0.26.0"
 zabor-camera = { path = "../zabor-camera", optional = true }
 zabor-stream-audio = { path = "../zabor-stream-audio", optional = true }
+zip = { version = "=9.4.1", default-features = false, features = ["deflate-flate2"] }
 
 [features]
 default = ["native-media", "neural-dsp"]
