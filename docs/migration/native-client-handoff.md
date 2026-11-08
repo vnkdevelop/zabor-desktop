@@ -10,9 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **f264f3cde6e5784f82a5fa16fa131af87475911d**:
-native profile/avatar/GIF,134 unique affected tests/fmt/both Clippy/native build/
-strict RUEN inert/Graphify passed. Normal executable9948b400… is component evidence,
+сборкой. Latest checked integrated source — **f27950ea21d6c5f5efd5a1999402ea90cc58e897**:
+profile/avatar/GIF plus fail-closed packaging/copy-import,94 unique integration
+tests/fmt/both Clippy/native build/Graphify passed. Profile134tests/RUEN proofs retained.
+Normal executableaa5703e3… is integrated component evidence,
 not full-client acceptance. RC2108f86, SFU2d254a2 and original peer/capture/mic retained.
 Picker **0dcfef7**,audio **5b8d656** and camera **df43be2** retained;physical camera/audio/
 complete client readiness=false. Metadata-only continuation save follows this source.
@@ -246,6 +247,68 @@ push/merge/release/shutdown не выполнялись. После каждог
   SDK available (V5 normal build passed), unlike the packaging child's interrupted
   cache. This does not certify new helper/app wiring or permit an installer.
   Do not include unfinished later child phases or fabricate trust/owner acceptance.
+- Avatar continuation saved as `6320d10fcdba37d20577f878292ca131f73f0ad9`, clean
+  tree and post-save Graphify passed. Base child commits are now integrated:
+  `3321ee4` -> `a014d4a`, `dfb735a` -> `ddbdbbc`, `07cb3bd` -> `f27950e` (current
+  source HEAD). No merge to main, push, installation or release. The later updater
+  and importer-helper phases remain isolated and unfinished; do not integrate them.
+- Current primary grouped integration check is
+  `sh_1bbbf22bb001l8Jg35cWVMvRsU`, immutable evidence under
+  `migration-artifacts/native-data/profile-packaging-integration-2026-11-08/checked-v1/`:
+  fmt, fixture/normal native-media all-targets Clippy `-D warnings`, import/profile,
+  original SessionIo/crypto/owner-store, release/update, offline Python package and
+  Node update/export tests, normal native build and final Graphify. Preserve frozen
+  code until automatic completion; no polling or duplicate runs. Normal cache is
+  available here, but do not predict successful integration from child tests.
+  On actual failure, repair only the affected integration and rerun that subset;
+  do not suppress assertions, copy no-default warnings or repeat neural/visual
+  matrices. Main helper/UI/account-proof/durable app-drain/release gates remain
+  false. After passing, save current-source evidence/continuation, then continue
+  missing profile actions/fresh lookup and RC decoder provenance/physical viewport
+  wiring with original owners. No publication or shutdown before full acceptance.
+- Integration V1 `sh_1bbbf22bb001l8Jg35cWVMvRsU` completed partially: fmt/fixture
+  Clippy,39 profile-related/6 SessionIo/2 crypto/1 store/4 release/15 update/17
+  Python tests passed. Node update tests also passed (7; Node24 default spec
+  reporter was not counted by the original TAP-only parser). Export tests did not
+  start because the runner omitted required `ZABOR_TEST_TEMP`; do not weaken the
+  exporter test's approved-temp guard. Normal Clippy/build/Graphify were not reached.
+  Source code remains unchanged. Affected continuation
+  `sh_1bbc466f7001nJXmbq4d4GEooC` uses a private approved-temp fixture directory,
+  explicit TAP export reporter, inherited V1 checks without rerunning them, normal
+  Clippy/build and final Graphify. Evidence `checked-v2/`; exact source/pin hashes
+  frozen before the continuation. Own temporary runner/fixtures are self-cleaning.
+  Wait for automatic completion without polling or source edits.
+- First V2 continuation launch `sh_1bbc466f7001nJXmbq4d4GEooC` stopped at its own
+  receipt-count guard (expected9 instead of actual10 successful V1 checks), before
+  fixtures/checks started. Corrected only the temporary runner guard; no native
+  source or assertion changed. Current V2 is `sh_1bbc51da40027UjOZ2FX2aUGRv`, same
+  checked-v2 evidence with honest runner-launch receipt. No polling or source edits.
+- Authorized read-only reference task `ses_e443d8cbeffenyW4It2sUIXmEV` maps remaining
+  profile actions/source navigation, existing locale/RPC/permission/state contracts
+  and minimum native wiring. It does not edit/build/update the graph or duplicate
+  the primary GetUserByUsername implementation or the active helper scopes.
+- Reference task returned its final read-only map, recorded in
+  `docs/migration/native-profile-actions.md`: exact source/member-return semantics,
+  copy/presence, achievements string envelopes, CallToChannel rather than ordinary
+  channel invite, KickFromChannel access confirmation, optimistic friend changes
+  versus authoritative worker membership, offline Voice call gates and typed
+  true-only add-friend completion that keeps the profile open. No files/builds or
+  live endpoints were changed by the child. The reference task is no longer active.
+- Integration V2 `sh_1bbc51da40027UjOZ2FX2aUGRv` completed successfully:6 mocked
+  export tests/normal all-targets Clippy/build/Graphify, with unchanged V1 checks.
+  Union94 distinct tests (64 Rust/17 Python/7 update JS/6 export JS); the broad
+  V1 profile filter also covered3 update tests, counted once in the union.
+  Current-source normal binary SHA-256:
+  `aa5703e364dda5c43a49d7a02c85a04480d8d2fb6979216489ea1b84481c5d97`.
+  Frozen20 source/pin hashes match after the continuation; own temporary script
+  and approved-temp fixtures were removed. Main Graphify7135nodes/17914edges/
+  306communities,7 existing zero-node warnings/HTML5000 limit remain. V1 partial
+  evidence and V2 runner-launch failures are retained unchanged, not hidden.
+  This establishes integration of the saved base components, not later helper/
+  app wiring, real Chromium/import, durable app-drain/installer/license approval
+  or whole-native readiness. No current primary verification job remains.
+  Next: guarded fresh non-own profile lookup and existing profile friend/chat/call
+  behavior, then remaining profile/member/achievements and RC provenance wiring.
 
 ### Verified native RC components after b4b52bc
 

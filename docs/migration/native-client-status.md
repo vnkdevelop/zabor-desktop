@@ -60,6 +60,15 @@ login-copy/full profile actions, интеграция copy-import/updater/RC hel
 отложенные physical/full-client/visual/release gates ещё впереди. Готовность полного
 клиента=false; публикация и выключение компьютера не выполнялись.
 
+В основной ветке проверена интеграция base упаковки/обновления и copy-import:
+**`f27950ea21d6c5f5efd5a1999402ea90cc58e897`**. Прошли94 разных локальных теста
+(64 Rust/17 Python/13 Node), fmt, оба native-media Clippy режима и normal build.
+Graphify7135nodes/17914edges/306communities; прежние7warnings/HTML5000limit остаются.
+Временные export fixtures/runner удалены. Source/pin hashes не менялись во время
+прогона. Это не подтверждает helper/UI/import account-proof, реальный Chromium,
+durable whole-app update/drain, лицензии/подпись издателя или готовность установщика.
+Публикация/выключение по-прежнему запрещены до полной приёмки.
+
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
 
 Рабочая ветка: `rust/native-client`. Checkpoint рабочего Electron/WASM-клиента перед переносом: `d088795`. Нативный код находится в `rust/crates/zabor-native`; состояние этой ветки не означает перенос в основную пользовательскую папку или публикацию релиза.
