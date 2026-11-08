@@ -130,7 +130,7 @@ impl AudioLane {
         controls: Arc<AudioControls>,
     ) -> Self {
         Self {
-            queue: Mutex::new(VecDeque::with_capacity(9600)),
+            queue: Mutex::new(VecDeque::with_capacity(if stream { 19200 } else { 9600 })),
             active: AtomicBool::new(true),
             lifetime,
             stream,
@@ -141,7 +141,18 @@ impl AudioLane {
         }
     }
     pub fn push(&self, samples: &[i16]) {
-        if !self.active.load(Ordering::Acquire) || !self.lifetime.is_alive() || samples.len() > 9600
+        self.push_channels(samples, 1);
+    }
+    pub fn push_stereo(&self, samples: &[i16]) {
+        if self.stream {
+            self.push_channels(samples, 2);
+        }
+    }
+    fn push_channels(&self, samples: &[i16], channels: usize) {
+        if !self.active.load(Ordering::Acquire)
+            || !self.lifetime.is_alive()
+            || samples.len() > 9600 * channels
+            || !samples.len().is_multiple_of(channels)
         {
             return;
         }
@@ -156,10 +167,18 @@ impl AudioLane {
             }
             let extra = queue
                 .len()
-                .saturating_add(samples.len())
-                .saturating_sub(9600);
+                .saturating_add(samples.len() * if self.stream && channels == 1 { 2 } else { 1 })
+                .saturating_sub(if self.stream { 19200 } else { 9600 });
             queue.drain(..extra);
-            queue.extend(samples.iter().map(|sample| f32::from(*sample) / 32768.0));
+            if self.stream && channels == 1 {
+                queue.extend(
+                    samples
+                        .iter()
+                        .flat_map(|sample| [f32::from(*sample) / 32768.0; 2]),
+                );
+            } else {
+                queue.extend(samples.iter().map(|sample| f32::from(*sample) / 32768.0));
+            }
         }
     }
     pub fn stop(&self) {
@@ -285,7 +304,11 @@ impl AudioMixer {
                     for frame in stereo.as_chunks_mut::<2>().0 {
                         let sample = samples.pop_front().unwrap_or(0.0) * gain;
                         frame[0] += sample;
-                        frame[1] += sample;
+                        frame[1] += if lane.stream {
+                            samples.pop_front().unwrap_or(0.0) * gain
+                        } else {
+                            sample
+                        };
                     }
                 }
             }

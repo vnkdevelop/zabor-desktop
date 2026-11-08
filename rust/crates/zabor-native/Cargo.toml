@@ -58,11 +58,13 @@ tract-pulse-opl = { version = "=0.21.4", optional = true }
 windows-dpapi = "0.2"
 wasapi = "=0.26.0"
 zabor-camera = { path = "../zabor-camera", optional = true }
+zabor-stream-audio = { path = "../zabor-stream-audio", optional = true }
 
 [features]
 default = ["native-media", "neural-dsp"]
-native-media = ["dep:libwebrtc", "dep:zabor-camera"]
+native-media = ["dep:libwebrtc", "dep:zabor-camera", "dep:zabor-stream-audio"]
 camera-test-source = ["native-media", "zabor-camera/test-source"]
+stream-audio-test-source = ["native-media", "zabor-stream-audio/test-source"]
 neural-dsp = ["dep:df", "dep:ndarray", "dep:rnnoise2", "dep:ort", "dep:tract-core", "dep:tract-data", "dep:tract-hir", "dep:tract-linalg", "dep:tract-nnef", "dep:tract-onnx", "dep:tract-onnx-opl", "dep:tract-pulse", "dep:tract-pulse-opl"]
 
 [build-dependencies]

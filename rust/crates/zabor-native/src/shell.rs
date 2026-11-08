@@ -98,7 +98,8 @@ enum Command {
     AnswerCall(String, bool),
     ListScreens,
     ListCameras(CancellationToken),
-    StartShare(String, String),
+    StartShare(String, String, bool),
+    FocusStreamAudio(String),
     StopShare,
     CheckShare,
     ExpireStreams,
@@ -121,7 +122,8 @@ impl Command {
             | Self::ResumeCall
             | Self::ListScreens
             | Self::ListCameras(_)
-            | Self::StartShare(_, _)
+            | Self::StartShare(_, _, _)
+            | Self::FocusStreamAudio(_)
             | Self::StopShare
             | Self::CheckShare
             | Self::Notification(NotificationKind::Channel, _, true) => IntentScope::Voice,
@@ -1141,6 +1143,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         ui.set_selected_screen("".into());
         ui.set_screen_source_kind(0);
         ui.set_screen_quality("low".into());
+        ui.set_screen_include_audio(true);
         ui.set_screen_sources_loading(true);
         ui.set_error("".into());
         ui.set_modal(5);
@@ -1185,7 +1188,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     });
     let weak = ui.as_weak();
     let screen_commands = commands.clone();
-    ui.on_start_share(move |source, quality| {
+    ui.on_start_share(move |source, quality, include_audio| {
         let Some(ui) = weak
             .upgrade()
             .filter(|ui| ui.get_voice_active() && !ui.get_busy())
@@ -1203,7 +1206,11 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
         ui.set_error("".into());
         if screen_commands
-            .try_send(Command::StartShare(source.to_string(), quality.to_string()))
+            .try_send(Command::StartShare(
+                source.to_string(),
+                quality.to_string(),
+                include_audio && !source.starts_with("camera:"),
+            ))
             .is_ok()
         {
             ui.set_busy(true);
@@ -1214,6 +1221,29 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let screen_commands = commands.clone();
     ui.on_stop_share(move || {
         let _ = screen_commands.try_send(Command::StopShare);
+    });
+    let weak = ui.as_weak();
+    let stream_commands = commands.clone();
+    let stream_runtime = runtime.handle().clone();
+    ui.on_focus_stream_audio(move |peer| {
+        let Some(ui) = weak.upgrade().filter(|ui| ui.get_voice_active()) else {
+            return;
+        };
+        if peer.is_empty() || ui.get_video_frames().iter().any(|video| video.id == peer) {
+            if let Err(error) =
+                stream_commands.try_send(Command::FocusStreamAudio(peer.to_string()))
+            {
+                if let mpsc::error::TrySendError::Full(queued) = *error {
+                    let sender = stream_commands.sender.clone();
+                    let intents = stream_commands.intents.clone();
+                    stream_runtime.spawn(async move {
+                        let _ = intents
+                            .run(queued.ticket, IntentScope::Voice, sender.send(queued))
+                            .await;
+                    });
+                }
+            }
+        }
     });
     let weak = ui.as_weak();
     let close_stop = stop.clone();
@@ -2253,10 +2283,10 @@ async fn worker(
                             let _ = voice.renegotiate(hub, &peer).await;
                         }
                     },
-                    MediaEvent::Track { peer, track: MediaStreamTrack::Audio(track), lifetime } => {
-                        if let Some(voice) = voice.as_mut() { if voice.receive_audio(&peer, track, lifetime.clone()).is_err() { work.publish_peer(&lifetime, UiEvent::Toast("toasts.micUnknownError")); } }
+                    MediaEvent::Track { peer, track: MediaStreamTrack::Audio(track), lifetime, stream } => {
+                        if let Some(voice) = voice.as_mut() { if voice.receive_audio(&peer, track, lifetime.clone(), stream).is_err() { work.publish_peer(&lifetime, UiEvent::Toast("toasts.micUnknownError")); } }
                     },
-                    MediaEvent::Track { peer, track: MediaStreamTrack::Video(track), lifetime } => {
+                    MediaEvent::Track { peer, track: MediaStreamTrack::Video(track), lifetime, .. } => {
                             let sink = video_sink.clone();
                             let generation = video_generation.load(Ordering::Acquire);
                             let id = peer.clone();
@@ -3463,7 +3493,7 @@ async fn worker(
                         }
                     }
                 }
-                Command::StartShare(id, quality) => {
+                Command::StartShare(id, quality, include_audio) => {
                     if let Some(device) = id.strip_prefix("camera:") {
                         if quality != "camera"
                             || device.is_empty()
@@ -3505,15 +3535,37 @@ async fn worker(
                         .find(|source| source.key() == id)
                         .cloned()
                         .ok_or(AuthError::Network)?;
-                    if let Some(session) = voice.as_mut() {
+                    let Some(mut resources) =
+                        voice_work.take_voice(&mut voice, &mut media_events, voice_ticket, |_| {})
+                    else {
+                        return Err(AuthError::Network);
+                    };
+                    let result = if let Some(session) = resources.0.as_mut() {
                         session
-                            .start_share(&connection, source, &quality)
+                            .start_share(&connection, source, &quality, include_audio)
                             .await
-                            .map_err(|_| AuthError::Network)?;
-                        Ok(UiEvent::Sharing(true))
+                            .map_err(|_| AuthError::Network)
                     } else {
                         Err(AuthError::Network)
+                    };
+                    let Some(replaced) = voice_work.install_previous_media(
+                        &mut voice,
+                        &mut media_events,
+                        voice_ticket,
+                        (resources.0, resources.1, BTreeMap::new()),
+                        || {},
+                    ) else {
+                        return Err(AuthError::Network);
+                    };
+                    drop(replaced);
+                    result?;
+                    Ok(UiEvent::Sharing(true))
+                }
+                Command::FocusStreamAudio(peer) => {
+                    if let Some(session) = voice.as_ref() {
+                        session.focus_stream_audio((!peer.is_empty()).then_some(peer));
                     }
+                    Ok(UiEvent::Connected)
                 }
                 Command::StopShare => {
                     if let Some(session) = voice.as_mut() {
@@ -3522,6 +3574,9 @@ async fn worker(
                     Ok(UiEvent::Sharing(false))
                 }
                 Command::CheckShare => {
+                    if let Some(session) = voice.as_mut() {
+                        session.check_share_audio();
+                    }
                     if let Some(session) = voice.as_mut().filter(|session| session.share_failed()) {
                         session.stop_share(&connection).await;
                         Ok(UiEvent::Sharing(false))
@@ -3949,7 +4004,10 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     use slint::platform::{PointerEventButton, WindowEvent};
     let starts = Rc::new(RefCell::new(Vec::new()));
     let recorded = starts.clone();
-    ui.on_start_share(move |source, quality| {
+    let audio_selections = Rc::new(RefCell::new(Vec::new()));
+    let audio_recorded = audio_selections.clone();
+    ui.on_start_share(move |source, quality, audio| {
+        audio_recorded.borrow_mut().push(audio);
         recorded
             .borrow_mut()
             .push((source.to_string(), quality.to_string()));
@@ -3987,10 +4045,18 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     ui.set_voice_active(true);
     ui.set_screen_source_kind(0);
     ui.set_screen_quality("low".into());
+    ui.set_screen_include_audio(true);
     ui.set_selected_screen("".into());
     ui.set_screen_sources_loading(false);
     ui.set_modal(5);
     let click = |x, y| {
+        let y = match y as i32 {
+            254 => 194.0,
+            318 => 258.0,
+            475 => 535.0,
+            582 => 642.0,
+            _ => y,
+        };
         let position = slint::LogicalPosition::new(x, y);
         ui.window().dispatch_event(WindowEvent::PointerPressed {
             position,
@@ -4019,7 +4085,18 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     if starts.borrow().as_slice() != [("screen:7".to_owned(), "low".to_owned())] {
         return Err("Stream picker did not forward low quality and exact source identity");
     }
+    if audio_selections.borrow().as_slice() != [true] {
+        return Err("Screen audio default was not forwarded");
+    }
+    click(730.0, 450.0);
+    if ui.get_screen_include_audio() {
+        return Err("Stream audio toggle did not disable capture");
+    }
     ui.set_busy(true);
+    click(730.0, 450.0);
+    if ui.get_screen_include_audio() {
+        return Err("Busy stream audio toggle changed selection");
+    }
     click(680.0, 582.0);
     if starts.borrow().len() != 1 {
         return Err("Busy stream picker started duplicate capture");
@@ -4044,6 +4121,9 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     if starts.borrow().last() != Some(&("screen:7".to_owned(), "high".to_owned())) {
         return Err("Stream picker did not forward high quality");
     }
+    if audio_selections.borrow().last() != Some(&false) {
+        return Err("Disabled stream audio selection was not preserved");
+    }
     click(550.0, 254.0);
     if ui.get_screen_source_kind() != 1 || !ui.get_selected_screen().is_empty() {
         return Err("Stream picker tab retained the previous source");
@@ -4055,6 +4135,13 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     click(680.0, 582.0);
     if starts.borrow().last() != Some(&("window:9".to_owned(), "high".to_owned())) {
         return Err("Stream picker window start changed quality or source identity");
+    }
+    if audio_selections.borrow().last() != Some(&false) {
+        return Err("Window tab reset explicit audio selection");
+    }
+    click(730.0, 450.0);
+    if !ui.get_screen_include_audio() {
+        return Err("Window audio toggle did not enable capture");
     }
     click(730.0, 254.0);
     if ui.get_screen_source_kind() != 2
@@ -4084,6 +4171,9 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
         ))
     {
         return Err("Camera picker forwarded desktop quality or changed device identity");
+    }
+    if audio_selections.borrow().last() != Some(&false) {
+        return Err("Camera started isolated desktop audio");
     }
     let started = starts.borrow().len();
     ui.set_busy(true);

@@ -51,7 +51,84 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
 
-## Camera/system audio — next functional stage 2026-11-08
+## Isolated stream audio — verified functional stage 2026-11-08
+
+- Resumed source **df43be2**,metadata HEAD **9985c45**,clean tree confirmed.
+- Added zabor-stream-audio boundary with pinned wasapi0.26/windows0.62.2:screen
+  excludes actual application process tree,window resolves exact HWND PID/includes
+  tree,no endpoint/system fallback. Native COM/client/buffer/event/Stop/Drop stay
+  on one registered blocking owner;native owner is !Send/!Sync. Activation wait
+  remains synchronous/uninterruptible;cancelled await is not cleanup success.
+- Published wasapi read helper dereferences packet pointer before SILENT handling;
+  dedicated bounded copy checks silence/pointer/count,zeroes silence,observes
+  ReleaseBuffer/Stop errors,keeps owned48kHzfloatstereo outside mic/DSP/MicTest.
+- StreamAudioCapture registers AudioCleanup.prepare_task before acquisition and
+  observes original spawn_blocking JoinHandle. Public Drop stop-only;native
+  retirement precedes retained WebRTC source disposal on normal exit/unwind.
+  Voice retains optional audio/track alongside desktop share,keeps video on audio
+  failure,restores original audio;camera audio stays absent. Second audio sender
+  64kbps/high priority is independent from microphone;remote SDP audio-mid
+  classification/stereo playback/focus wired. Original desktop Voice tuple is now
+  taken/reinstalled under its original ticket before async audio acquisition.
+- Picker has reference default-true shareAudio option/600px height,uses existing
+  checkbox style,busy/loading-disabled,camera hidden/forcedfalse;RUEN unchanged.
+  Not exact visual/Opus/physical acceptance. Details:native-isolated-stream-audio.md.
+- Initial backend compile failed pinned IsWindow needs Option<HWND>,corrected
+  without suppression. **sh_1baa6281b0017BxWLV0BMN5OqT passed**:6backend and6initial
+  native stream_audio integration tests,including native source stereo delivery
+  and cancelled-acquisition/original join/cleanup failure observation. Lock adds
+  only the new crate/native dependency reference,no existing dependency versions.
+- **sh_1baaacbb70018kS5CdD9a44s75 failed**:9expanded audio tests passed,then media
+  STATUS_ACCESS_VIOLATION. Pinned webrtc-sys0.3.53 RtpSender::set_track dereferences
+  null even though Rust acceptsNone. Isolated reproducer confirmed. No SDK changes:
+  skip empty initialization setter,detach via existing remove_track,readd viaAddTrack
+  to restore send direction/reuse secondslot;stream source requires existing mic
+  slot occupied,otherwisefails instead of replacing voice. Native crash corrected.
+- **sh_1baaf90d900115dcepvD9ithG4 failed**:6backendpassed/media9of11passed;two new
+  assertions mistakenly required local track label as transmittedopaqueMSID. SDK
+  retains senderopaqueMSID on replacement,corrected tests verify separate routing/
+  streammembership/stable secondslot,notinventedids. No assertion suppression.
+- **sh_1bab14d49001hQ3zgZXyWVJDmB** passed6backend/11media/9capture,then new3share
+  fixtures failed:their `_` discarded Hub events receiver/closed local transport.
+  Corrected test-only receiver retention to `_events` following original fixtures/
+  shell whole-tuple ownership;no client network logic changed to fit tests.
+- **sh_1bab3a7c3001s0mBqdnaB2gGZB pending**:6backend/11media/9capture/12share/playback,
+  affected existing mixer/media/audio-path/route/runtime tests,normal+fixtureClippy,
+  94shell/11camera/3screen regressions,normalbuild,RUEN loginfixture inertpicker/
+  audio-toggle checks. Do not poll/modify consumed source until notification.
+- Graphify initial **sh_1baab873e001i9SoPZM433Fzx5 passed**:6447nodes/15982edges/
+  276communities,existing7warnings/HTML5000limit. Final source sync
+  **sh_1bab43077001jmD35qX27Iqd4H passed**:6447nodes/15982edges/281communities,
+  existing7warnings/HTML5000limit. Only pending job sh_1bab3a7c3001s0mBqdnaB2gGZB;
+  do not poll. No physical/prod access. Save remains conditional on full targeted run.
+- **sh_1bab3a7c3001s0mBqdnaB2gGZB failed** later at old media_local SCTP/audio:
+  all6backend/11media/9capture/12share/3playback and27mixer/path/route/runtime tests
+  passed. Reserved empty stream sender SendRecv produced a phantom audio track
+  in old roundtrip. Empty slot nowRecvOnly untilactualAddTrack;oldtestunchanged.
+  New late-sender test first needed Option<MediaStreamTrack> matcher correction,
+  retainedcompilerdiagnostic;then4streamsender/3old media_local tests passed.
+- **sh_1babf14bc0010zh2dcAOjxjkuT passed** final-checked:180targetedtests,
+  normal+fixture(all-targets)Clippy,normalnativebuild,RUENloginfixturepicker
+  includingaudio toggle,consumedsourcehashes/normalbinaryfixturemarkerschecked.
+  Source21hashesunchanged and normalbinaryfixturemarkersabsent,SHA256
+  0fd77bc79320671cc24949bbf82c7b12b0fc98fd02f241aa3b8d42e63476a8de. Stage-only,
+  notnewwholeclientattestation. Temporaryrunner self-deleted;removalcheckedafter
+  completion. No pending jobs. Guarded scoped save next;nativeClientReady=false.
+- **sh_1babfdbe7001MN02dPdmnzDfBq passed** Graphifyreceive-slot sync:
+  6448nodes/15985edges/285communities,existing7warnings/HTML5000limit.
+  No pending jobs. Source/binary unchanged verified after run;save next.
+  No physical/prod/push/publication/shutdown;release/fullnativeacceptance=false.
+- Next picker/thumbnails stage also needs unchanged reference own-window exclusion:
+  current native ScreenCapture::sources maps SDK window list without explicit own
+  HWND filter. Do not claim full picker/privacy parity from synthetic include/exclude
+  audio tests. Address own-window filtering together with source thumbnails and
+  current-window identity before final physical/release acceptance.
+  Normal Clippy/RUEN inert audio-picker/normal executable fixture exclusion and
+  final scoped save follow successful complete targeted results.
+- No physical devices/production/push/merge/publication/shutdown;complete readiness
+  remains false. General native deadlines/whole-worker teardown remain final gates.
+
+## Camera/system audio — saved stage history 2026-11-08
 
 - Checked integration after saved99f59ca:CameraCapture registered blocking actor owns
   acquisition/source/frame conversion/native Completion join;stop-only public Drop

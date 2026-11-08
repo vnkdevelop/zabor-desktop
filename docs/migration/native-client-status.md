@@ -1444,6 +1444,41 @@ thumbnails/adaptive bitrate/SFU/RC and remaining full UI/profile/import/packagin
 ownership/data-integrity issues. No push/merge/publication/shutdown or whole-client
 acceptance. Camera hardware/hotplug/privacy/long-session/native deadlines remain open.
 
+### Isolated stream audio: functional WIP
+
+Baseline source df43be2/metadata9985c45;added separate registered blocking native
+process-loopback owner using unchanged wasapi0.26/windows0.62.2. Screen excludes
+the actual native app process tree/window includes exact HWND PID tree,no endpoint
+fallback.48kHzfloatstereo with silent-null/bounds/ReleaseBuffer/Stop handling stays
+outside mic/DSP/MicTest;owner teardown precedes WebRTC source disposal. Original
+blocking JoinHandle observed,public Drop stop-only,activation/driver waits unbounded
+and never accepted from an await cancellation. Optional desktop audio retained in
+Voice/original-ticket shell tuple,video continues on audiofailure,cameraaudiofalse.
+Second audio sender/remote SDP-mid classification/stereo focus playback and default
+true localized picker shareAudio option implemented,under expanded targeted checks.
+
+6backend/9expanded audio ownership tests passed. Sender test found pinned SDK's
+null set_track dereference;avoided via remove_track/readd and no empty-setter calls,
+no vendor/pin changes. Two follow-up tests assumed local track label as opaque
+senderMSID;corrected to real separate-routing/stable-slot contract. Pending
+sh_1bab14d49001hQ3zgZXyWVJDmB runs sender/share/playback/mixer/original-shell guards,
+normal+fixture Clippy/build and inert RUEN picker checks. No physical/production
+access,save/push/publication/shutdown;nativeClientReady=false. Initial Graphify
+6447nodes/15982edges/276communities passed,existingwarnings/HTMLlimit unchanged.
+
+Isolated stream audio final targeted result:180tests passed(6boundary/12media/
+9capture/12share/3playback/30existinglocalmedia-mixer-microphone-route-runtime/
+94shell/11camera/3screen),fmt,normal+fixture all-targets Clippy including boundary,
+normal native-media build and inert RUEN login-fixture picker/audio-toggle passed.
+21consumedsourcehashes unchanged;normal executable has no synthetic camera/audio
+markers,SHA2560fd77bc79320671c... is stage-only,notwholeclientattestation. Temporary
+runner removed and post-runsource/binary checked. Graphify6448nodes/15985edges/
+285communities passed,existing7warnings/HTML5000limit remain. No pendingjobs;
+guarded scoped save next. Physical/Opus/native-driver/long-session/exact/full
+regression acceptance remainsfalse,nextsourcepicker/thumbnails/own-windowfilter,
+adaptive bitrate/SFU/RC and remainingfullUI/profile/import/packaging/data-integrity.
+No push/merge/publication/shutdown,nativeClientReady=false.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final

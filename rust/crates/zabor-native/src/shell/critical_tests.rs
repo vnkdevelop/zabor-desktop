@@ -161,3 +161,31 @@ async fn camera_inventory_queue_and_late_ui_completion_keep_the_original_voice_t
     assert!(event.for_current(&intents).is_none());
     assert!(intents.is_current(ticket, IntentScope::Session));
 }
+
+#[tokio::test]
+async fn stream_audio_selection_and_focus_commands_cannot_escape_the_original_voice_epoch() {
+    let intents = Arc::new(CriticalIntents::default());
+    let (sender, mut receiver) = mpsc::channel(16);
+    let queue = CommandQueue {
+        sender,
+        intents: intents.clone(),
+    };
+    assert!(queue
+        .try_send(Command::StartShare(
+            "window:98765".into(),
+            "high".into(),
+            false
+        ))
+        .is_ok());
+    assert!(queue
+        .try_send(Command::FocusStreamAudio("peer".into()))
+        .is_ok());
+    let start = receiver.recv().await.unwrap();
+    let focus = receiver.recv().await.unwrap();
+    assert!(matches!(start.command, Command::StartShare(_, _, false)));
+    assert_eq!(start.command.scope(), IntentScope::Voice);
+    assert_eq!(focus.command.scope(), IntentScope::Voice);
+    intents.request(CriticalAction::Leave);
+    assert!(!intents.is_current(start.ticket, start.command.scope()));
+    assert!(!intents.is_current(focus.ticket, focus.command.scope()));
+}

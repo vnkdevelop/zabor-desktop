@@ -127,6 +127,78 @@ async fn playback_and_aec_reverse_queues_are_bounded() {
 }
 
 #[tokio::test]
+async fn focused_stream_pcm_preserves_stereo_and_local_mute_does_not_change_remote_music() {
+    let (_engine, lifetime) = peer().await;
+    let controls = Arc::new(AudioControls::new(AudioSettings::default()));
+    let mixer = AudioMixer::new(controls.clone());
+    let voice = mixer
+        .add(
+            "voice".into(),
+            "peer/with/separator",
+            lifetime.clone(),
+            false,
+        )
+        .unwrap();
+    let stream = mixer
+        .add("stereo".into(), "peer/with/separator", lifetime, true)
+        .unwrap();
+    mixer.focus(Some("peer/with/separator".into()));
+    controls.set_user_state(true, false);
+    voice.push(&[4096; 480]);
+    let pcm: Vec<i16> = (0..480).flat_map(|_| [-8192, 16384]).collect();
+    stream.push_stereo(&pcm);
+    let mut stereo = [0.0; 960];
+    mixer.render_pcm(&mut stereo);
+    assert!(stereo
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .all(|pair| *pair == [-0.125, 0.625]));
+    stream.push_stereo(&[123; 3]);
+    mixer.render_pcm(&mut stereo);
+    assert!(stereo.iter().all(|sample| *sample == 0.0));
+    stream.push_stereo(&pcm);
+    mixer.focus(None);
+    mixer.render_pcm(&mut stereo);
+    assert!(stereo.iter().all(|sample| *sample == 0.0));
+    mixer.focus(Some("peer/with/separator".into()));
+    mixer.render_pcm(&mut stereo);
+    assert!(stereo.iter().all(|sample| *sample == 0.0));
+}
+
+#[tokio::test]
+async fn stream_stereo_queue_is_frame_aligned_and_independent_of_voice_queue_capacity() {
+    let (_engine, lifetime) = peer().await;
+    let mixer = AudioMixer::new(Arc::new(AudioControls::new(AudioSettings::default())));
+    let voice = mixer
+        .add(
+            "voice".into(),
+            "peer/with/separator",
+            lifetime.clone(),
+            false,
+        )
+        .unwrap();
+    let stream = mixer
+        .add("stereo".into(), "peer/with/separator", lifetime, true)
+        .unwrap();
+    mixer.focus(Some("peer/with/separator".into()));
+    let pcm: Vec<i16> = (0..9600).flat_map(|_| [-4096, 4096]).collect();
+    for _ in 0..3 {
+        stream.push_stereo(&pcm);
+    }
+    voice.push_stereo(&pcm);
+    let mut stereo = [0.0; 19200];
+    mixer.render_pcm(&mut stereo);
+    assert!(stereo
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .all(|pair| *pair == [-0.125, 0.125]));
+    mixer.render_pcm(&mut stereo);
+    assert!(stereo.iter().all(|sample| *sample == 0.0));
+}
+
+#[tokio::test]
 async fn short_deafen_toggles_and_old_subscription_cleanup_cannot_replay_or_remove_new_audio() {
     let (_engine, lifetime) = peer().await;
     let controls = Arc::new(AudioControls::new(AudioSettings::default()));

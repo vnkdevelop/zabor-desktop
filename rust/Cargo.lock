@@ -7981,7 +7981,17 @@ dependencies = [
  "windows-dpapi",
  "zabor-camera",
  "zabor-dsp",
+ "zabor-stream-audio",
  "zeroize",
+]
+
+[[package]]
+name = "zabor-stream-audio"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "wasapi",
+ "windows",
 ]
 
 [[package]]

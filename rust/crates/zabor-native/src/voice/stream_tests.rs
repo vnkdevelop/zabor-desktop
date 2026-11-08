@@ -155,6 +155,7 @@ fn share(session: &mut VoiceSession, quality: &str) -> (Arc<AtomicBool>, Arc<Ato
     session.capture = Some(ScreenShare {
         capture: ShareCapture::Desktop(capture),
         quality: quality.into(),
+        audio: None,
     });
     (stop, failed)
 }
@@ -583,6 +584,178 @@ async fn camera_stream_refusal_preserves_membership_and_retained_camera_can_rean
             .iter()
             .all(|request| request["target"] == "StartStream"
                 && request["arguments"] == json!(["camera"])));
+    })
+    .await
+    .unwrap();
+}
+
+#[cfg(feature = "stream-audio-test-source")]
+#[tokio::test]
+async fn desktop_reannouncement_retains_original_audio_capture_track_and_membership_after_refusal()
+{
+    timeout(Duration::from_secs(10), async {
+        for call in [false, true] {
+            let fixture = fixture([
+                Reply::Value(json!(true)),
+                Reply::Value(json!(false)),
+                Reply::Value(json!(true)),
+            ])
+            .await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+                .await
+                .unwrap();
+            let mut session = session();
+            session.peers.clear();
+            session
+                .engine
+                .attach_audio_source(crate::microphone::audio_source())
+                .unwrap();
+            if call {
+                session.channel = None;
+                session.call_peer = Some("peer".into());
+            }
+            let runtime = session.audio_runtime.clone();
+            let audio = StreamAudioCapture::synthetic(runtime.cleanup_tracker(), 2, 150)
+                .await
+                .unwrap();
+            let (capture, _, _) = ScreenCapture::synthetic();
+            session
+                .announce_prepared_share(
+                    &hub,
+                    ScreenShare {
+                        capture: ShareCapture::Desktop(capture),
+                        quality: "low".into(),
+                        audio: Some(audio),
+                    },
+                )
+                .await
+                .unwrap();
+            let lifetime = peer(&mut session);
+            let track = session.engine.local_video().unwrap();
+            let audio_track = session.engine.local_stream_audio().unwrap();
+            let original_audio = &session.capture.as_ref().unwrap().audio;
+            assert!(session.restore_share(&hub).await.is_err());
+            assert!(audio_track.enabled());
+            assert_retained(&session, &track, &lifetime);
+            assert!(session.restore_share(&hub).await.unwrap());
+            assert!(std::ptr::eq(
+                original_audio,
+                &session.capture.as_ref().unwrap().audio
+            ));
+            assert!(session
+                .capture
+                .as_ref()
+                .unwrap()
+                .audio
+                .as_ref()
+                .unwrap()
+                .is_live());
+            session.stop_share(&hub).await;
+            assert!(!audio_track.enabled() && !session.engine.has_live_stream_audio());
+            assert!(lifetime.is_alive());
+            runtime.seal_cleanup().unwrap();
+            runtime.wait_for_cleanup().await.unwrap();
+            hub.close();
+            let requests = fixture.server.await.unwrap();
+            assert_eq!(
+                requests
+                    .iter()
+                    .filter(|request| request["target"] == "StartStream")
+                    .count(),
+                3
+            );
+            assert!(requests
+                .iter()
+                .filter(|request| request["target"] == "StartStream")
+                .all(|request| request["arguments"] == json!(["low"])));
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[cfg(feature = "stream-audio-test-source")]
+#[tokio::test]
+async fn unavailable_isolated_audio_continues_video_without_mutating_microphone_or_membership() {
+    timeout(Duration::from_secs(5), async {
+        let fixture = fixture([Reply::Value(json!(true))]).await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let mut session = session();
+        session.peers.clear();
+        let runtime = session.audio_runtime.clone();
+        session
+            .engine
+            .attach_audio_source(crate::microphone::audio_source())
+            .unwrap();
+        let audio = StreamAudioCapture::synthetic(runtime.cleanup_tracker(), 3, 0)
+            .await
+            .ok();
+        assert!(audio.is_none());
+        let (capture, _, _) = ScreenCapture::synthetic();
+        session
+            .announce_prepared_share(
+                &hub,
+                ScreenShare {
+                    capture: ShareCapture::Desktop(capture),
+                    quality: "high".into(),
+                    audio,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(session.is_sharing() && !session.engine.has_live_stream_audio());
+        assert_eq!(session.channel.as_deref(), Some("fixture-channel"));
+        session.check_share_audio();
+        assert!(session.is_sharing());
+        drop(session);
+        runtime.seal_cleanup().unwrap();
+        runtime.wait_for_cleanup().await.unwrap();
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap().len(), 1);
+    })
+    .await
+    .unwrap();
+}
+
+#[cfg(feature = "stream-audio-test-source")]
+#[tokio::test]
+async fn refused_desktop_stream_retires_prepared_audio_and_video_without_ending_membership() {
+    timeout(Duration::from_secs(5), async {
+        let fixture = fixture([Reply::Value(json!(false))]).await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let mut session = session();
+        session.peers.clear();
+        let runtime = session.audio_runtime.clone();
+        let audio = StreamAudioCapture::synthetic(runtime.cleanup_tracker(), 2, 150)
+            .await
+            .unwrap();
+        let (capture, stopped, _) = ScreenCapture::synthetic();
+        assert!(session
+            .announce_prepared_share(
+                &hub,
+                ScreenShare {
+                    capture: ShareCapture::Desktop(capture),
+                    quality: "low".into(),
+                    audio: Some(audio)
+                }
+            )
+            .await
+            .is_err());
+        assert!(!session.is_sharing() && !session.engine.has_live_stream_audio());
+        assert_eq!(session.channel.as_deref(), Some("fixture-channel"));
+        assert!(stopped.load(Ordering::Acquire));
+        assert!(
+            timeout(Duration::from_millis(80), runtime.wait_for_cleanup())
+                .await
+                .is_err()
+        );
+        runtime.wait_for_cleanup().await.unwrap();
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap().len(), 1);
     })
     .await
     .unwrap();

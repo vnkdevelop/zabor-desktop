@@ -71,7 +71,7 @@ impl AudioPlayback {
         let mut audio = NativeAudioStream::with_options(
             track,
             48000,
-            1,
+            if stream { 2 } else { 1 },
             NativeAudioStreamOptions {
                 queue_size_frames: Some(4),
             },
@@ -90,7 +90,10 @@ impl AudioPlayback {
                     frame = audio.next() => {
                         let Some(frame) = frame else { break; };
                         if !lifetime.is_alive() || cancel.is_cancelled() { break; }
-                        if frame.sample_rate == 48000 && frame.num_channels == 1 && frame.samples_per_channel as usize == frame.data.len() { output.push(&frame.data); }
+                        let channels = if stream { 2 } else { 1 };
+                        if frame.sample_rate == 48000 && frame.num_channels == channels && frame.samples_per_channel as usize * channels as usize == frame.data.len() {
+                            if stream { output.push_stereo(&frame.data); } else { output.push(&frame.data); }
+                        }
                     }
                 }
             }

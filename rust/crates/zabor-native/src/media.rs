@@ -52,6 +52,7 @@ struct PeerState {
     alive: AtomicBool,
     stop: CancellationToken,
     commit: Mutex<()>,
+    stream_audio_mids: Mutex<BTreeSet<String>>,
 }
 
 impl PeerLifetime {
@@ -60,6 +61,7 @@ impl PeerLifetime {
             alive: AtomicBool::new(true),
             stop: CancellationToken::new(),
             commit: Mutex::new(()),
+            stream_audio_mids: Mutex::new(BTreeSet::new()),
         }))
     }
     pub fn is_alive(&self) -> bool {
@@ -104,6 +106,7 @@ pub enum MediaEvent {
         peer: String,
         track: MediaStreamTrack,
         lifetime: PeerLifetime,
+        stream: bool,
     },
     DataChannel {
         peer: String,
@@ -149,6 +152,7 @@ struct Peer {
     pending_ice: VecDeque<IceCandidate>,
     video_sender: Option<RtpSender>,
     video_defaults: Option<VideoSendDefaults>,
+    stream_sender: Option<RtpSender>,
     needs_offer: bool,
 }
 
@@ -256,6 +260,7 @@ pub struct MediaEngine {
     config: RtcConfiguration,
     events: mpsc::Sender<MediaEvent>,
     microphone: Option<RtcAudioTrack>,
+    stream_audio: Option<RtcAudioTrack>,
     platform_audio: bool,
     data_only: bool,
     video: Option<RtcVideoTrack>,
@@ -274,6 +279,7 @@ impl MediaEngine {
                 config: RtcConfiguration::default(),
                 events,
                 microphone: None,
+                stream_audio: None,
                 platform_audio: false,
                 data_only: false,
                 video: None,
@@ -433,6 +439,58 @@ impl MediaEngine {
             track.set_enabled(!muted);
         }
     }
+    pub(crate) fn set_stream_audio(
+        &mut self,
+        source: Option<NativeAudioSource>,
+    ) -> Result<(), MediaError> {
+        if self.data_only || (source.is_some() && self.microphone.is_none()) {
+            return Err(MediaError::Backend);
+        }
+        let track = source.map(|source| {
+            self.factory
+                .create_audio_track("zabor-stream-audio", source)
+        });
+        if let Some(previous) = self.stream_audio.take() {
+            previous.set_enabled(false);
+        }
+        let mut failed = false;
+        for peer in self.peers.values_mut() {
+            if let Some(sender) = &peer.stream_sender {
+                if let Some(track) = &track {
+                    if sender.track().is_some() {
+                        failed |= sender.set_track(Some(track.clone().into())).is_err();
+                    } else {
+                        match peer
+                            .connection
+                            .add_track(track.clone().into(), &["zabor-screen"])
+                        {
+                            Ok(sender) => peer.stream_sender = Some(sender),
+                            Err(_) => failed = true,
+                        }
+                    }
+                } else if sender.track().is_some() {
+                    failed |= peer.connection.remove_track(sender.clone()).is_err();
+                }
+            }
+        }
+        self.stream_audio = track;
+        if failed {
+            Err(MediaError::Backend)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn has_live_stream_audio(&self) -> bool {
+        self.stream_audio.as_ref().is_some_and(|track| {
+            track.enabled() && track.state() == libwebrtc::media_stream_track::RtcTrackState::Live
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn local_stream_audio(&self) -> Option<RtcAudioTrack> {
+        self.stream_audio.clone()
+    }
     pub fn set_deafened(&self, deafened: bool) {
         if self.platform_audio {
             self.factory.set_adm_playout_enabled(!deafened);
@@ -517,6 +575,13 @@ impl MediaEngine {
                 }
                 let _ = events.try_send(MediaEvent::Track {
                     peer: peer_id.clone(),
+                    stream: matches!(event.track, MediaStreamTrack::Audio(_))
+                        && event.transceiver.mid().is_some_and(|mid| {
+                            live.0
+                                .stream_audio_mids
+                                .lock()
+                                .is_ok_and(|mids| mids.contains(&mid))
+                        }),
                     track: event.track,
                     lifetime: live.clone(),
                 });
@@ -542,6 +607,7 @@ impl MediaEngine {
             };
             let mut video_sender = None;
             let mut video_defaults = None;
+            let mut stream_sender = None;
             if !self.data_only {
                 if let Some(track) = &self.microphone {
                     connection
@@ -573,6 +639,31 @@ impl MediaEngine {
                         .add_transceiver_for_media(MediaType::Video, init)
                         .map_err(|_| MediaError::Backend)?;
                 }
+                let sender = connection
+                    .add_transceiver_for_media(
+                        MediaType::Audio,
+                        RtpTransceiverInit {
+                            direction: if self.stream_audio.is_some() {
+                                RtpTransceiverDirection::SendRecv
+                            } else {
+                                RtpTransceiverDirection::RecvOnly
+                            },
+                            stream_ids: vec!["zabor-screen".into()],
+                            send_encodings: vec![RtpEncodingParameters {
+                                max_bitrate: Some(64_000),
+                                priority: Priority::High,
+                                ..Default::default()
+                            }],
+                        },
+                    )
+                    .map_err(|_| MediaError::Backend)?
+                    .sender();
+                if let Some(track) = &self.stream_audio {
+                    sender
+                        .set_track(Some(track.clone().into()))
+                        .map_err(|_| MediaError::Backend)?;
+                }
+                stream_sender = Some(sender);
             }
             self.peers.insert(
                 id.to_owned(),
@@ -584,6 +675,7 @@ impl MediaEngine {
                     pending_ice: VecDeque::new(),
                     video_sender,
                     video_defaults,
+                    stream_sender,
                     needs_offer: false,
                 },
             );
@@ -676,6 +768,11 @@ impl MediaEngine {
             SdpType::Offer,
         )
         .map_err(|_| MediaError::InvalidSignal)?;
+        if let Ok(mut mids) = peer.lifetime.0.stream_audio_mids.lock() {
+            *mids = stream_audio_mids(value["sdp"].as_str().unwrap());
+        } else {
+            return Err(MediaError::Backend);
+        }
         peer.connection
             .set_remote_description(description)
             .await
@@ -716,6 +813,11 @@ impl MediaEngine {
             SdpType::Answer,
         )
         .map_err(|_| MediaError::InvalidSignal)?;
+        if let Ok(mut mids) = peer.lifetime.0.stream_audio_mids.lock() {
+            *mids = stream_audio_mids(value["sdp"].as_str().unwrap());
+        } else {
+            return Err(MediaError::Backend);
+        }
         peer.connection
             .set_remote_description(description)
             .await
@@ -777,6 +879,9 @@ impl MediaEngine {
         if let Some(video) = self.video.take() {
             video.set_enabled(false);
         }
+        if let Some(audio) = self.stream_audio.take() {
+            audio.set_enabled(false);
+        }
         self.video_profile = None;
         if self.platform_audio {
             self.factory.set_adm_recording_enabled(false);
@@ -803,6 +908,28 @@ async fn flush_candidates(peer: &mut Peer) -> Result<(), MediaError> {
     }
     Ok(())
 }
+
+fn stream_audio_mids(sdp: &str) -> BTreeSet<String> {
+    let mut audio_count = 0;
+    let mut stream = false;
+    let mut mids = BTreeSet::new();
+    for line in sdp.lines().map(str::trim) {
+        if line.starts_with("m=") {
+            stream = line.starts_with("m=audio ") && {
+                audio_count += 1;
+                audio_count > 1
+            };
+        } else if stream {
+            if let Some(mid) = line.strip_prefix("a=mid:") {
+                mids.insert(mid.to_owned());
+            }
+        }
+    }
+    mids
+}
+
+#[cfg(test)]
+mod stream_audio_tests;
 
 fn parse_signal(payload: &str) -> Result<Value, MediaError> {
     if payload.len() > 256 * 1024 {

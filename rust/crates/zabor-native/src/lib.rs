@@ -48,6 +48,8 @@ pub mod roster;
 #[cfg(feature = "native-media")]
 pub mod screen;
 pub mod smart_gate;
+#[cfg(all(windows, feature = "native-media"))]
+pub mod stream_audio;
 pub mod strings;
 pub mod update;
 #[cfg(feature = "native-media")]

@@ -11,6 +11,8 @@ use crate::media::{IceServerSettings, MediaEngine, MediaError, MediaEvent};
 #[cfg(windows)]
 use crate::native_audio::NativeAudio;
 use crate::screen::{capture_format, ScreenCapture, ScreenSource};
+#[cfg(windows)]
+use crate::stream_audio::StreamAudioCapture;
 use libwebrtc::audio_track::RtcAudioTrack;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -59,6 +61,8 @@ impl ShareCapture {
 struct ScreenShare {
     capture: ShareCapture,
     quality: String,
+    #[cfg(windows)]
+    audio: Option<StreamAudioCapture>,
 }
 
 pub struct VoiceSession {
@@ -285,15 +289,36 @@ impl VoiceSession {
         hub: &HubConnection,
         source: ScreenSource,
         quality: &str,
+        include_audio: bool,
     ) -> Result<(), MediaError> {
         let (width, height, fps) = capture_format(quality)?;
+        #[cfg(windows)]
+        let audio_source = source.clone();
         let capture = tokio::task::spawn_blocking(move || {
             ScreenCapture::start(source, width, height, fps, true)
         })
         .await
         .map_err(|_| MediaError::Backend)??;
-        self.announce_share(hub, ShareCapture::Desktop(capture), quality)
-            .await
+        #[cfg(windows)]
+        let audio = if include_audio {
+            StreamAudioCapture::start(&audio_source, self.audio_runtime.cleanup_tracker())
+                .await
+                .ok()
+        } else {
+            None
+        };
+        #[cfg(not(windows))]
+        let _ = include_audio;
+        self.announce_prepared_share(
+            hub,
+            ScreenShare {
+                capture: ShareCapture::Desktop(capture),
+                quality: quality.to_owned(),
+                #[cfg(windows)]
+                audio,
+            },
+        )
+        .await
     }
 
     #[cfg(windows)]
@@ -313,8 +338,29 @@ impl VoiceSession {
         capture: ShareCapture,
         quality: &str,
     ) -> Result<(), MediaError> {
+        self.announce_prepared_share(
+            hub,
+            ScreenShare {
+                capture,
+                quality: quality.to_owned(),
+                #[cfg(windows)]
+                audio: None,
+            },
+        )
+        .await
+    }
+
+    async fn announce_prepared_share(
+        &mut self,
+        hub: &HubConnection,
+        mut share: ScreenShare,
+    ) -> Result<(), MediaError> {
         let started = hub
-            .invoke("StartStream", vec![json!(quality)], Duration::from_secs(10))
+            .invoke(
+                "StartStream",
+                vec![json!(share.quality)],
+                Duration::from_secs(10),
+            )
             .await
             .map_err(|_| MediaError::Backend)?;
         if started != true {
@@ -322,16 +368,22 @@ impl VoiceSession {
         }
         if let Err(error) = self
             .engine
-            .set_video_with_quality(capture.source(), quality)
+            .set_video_with_quality(share.capture.source(), &share.quality)
         {
             let _ = self.engine.set_video(None);
             let _ = hub.send("StopStream", Vec::new()).await;
             return Err(error);
         }
-        self.capture = Some(ScreenShare {
-            capture,
-            quality: quality.to_owned(),
-        });
+        #[cfg(windows)]
+        if self
+            .engine
+            .set_stream_audio(share.audio.as_ref().map(|audio| audio.source.clone()))
+            .is_err()
+        {
+            let _ = self.engine.set_stream_audio(None);
+            share.audio = None;
+        }
+        self.capture = Some(share);
         for peer in self.peers.clone() {
             self.renegotiate(hub, &peer).await?;
         }
@@ -362,6 +414,7 @@ impl VoiceSession {
 
     pub async fn stop_share(&mut self, hub: &HubConnection) {
         self.capture = None;
+        let _ = self.engine.set_stream_audio(None);
         let _ = self.engine.set_video(None);
         let _ = hub.send("StopStream", Vec::new()).await;
         for peer in self.peers.clone() {
@@ -376,6 +429,30 @@ impl VoiceSession {
     }
     pub fn is_sharing(&self) -> bool {
         self.capture.is_some()
+    }
+
+    pub fn check_share_audio(&mut self) {
+        #[cfg(windows)]
+        if let Some(share) = self.capture.as_mut().filter(|share| {
+            share
+                .audio
+                .as_ref()
+                .is_some_and(|audio| !audio.is_live() || !self.engine.has_live_stream_audio())
+        }) {
+            share.audio = None;
+            let _ = self.engine.set_stream_audio(None);
+        }
+    }
+
+    pub fn focus_stream_audio(&self, peer: Option<String>) {
+        #[cfg(windows)]
+        if let Some(audio) = self.audio.as_ref().and_then(VoiceLease::device) {
+            audio
+                .mixer
+                .focus(peer.filter(|peer| self.peers.contains(peer)));
+        }
+        #[cfg(not(windows))]
+        let _ = peer;
     }
 
     pub fn has_peer(&self, peer: &str) -> bool {
@@ -426,6 +503,7 @@ impl VoiceSession {
         peer: &str,
         track: RtcAudioTrack,
         lifetime: PeerLifetime,
+        stream: bool,
     ) -> Result<(), MediaError> {
         if !self.peers.contains(peer) {
             return Err(MediaError::UnauthorizedPeer);
@@ -433,7 +511,7 @@ impl VoiceSession {
         self.playback
             .as_mut()
             .ok_or(MediaError::Backend)?
-            .attach(peer, track, lifetime, false)
+            .attach(peer, track, lifetime, stream)
     }
 
     pub fn audio_failed(&mut self) -> bool {
