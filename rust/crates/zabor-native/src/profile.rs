@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use zeroize::Zeroizing;
 
+#[path = "profile_import.rs"]
+pub mod import;
+
 const SESSION_JOURNAL: &str = ".session-commit.pending";
 
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +26,8 @@ pub struct Profile {
     root: PathBuf,
     _lock: File,
     session: Mutex<()>,
+    _import_lock: Option<File>,
+    _directory_lock: Option<File>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -46,8 +51,12 @@ impl Profile {
     }
 
     pub fn open(root: &Path) -> Result<Self, ProfileError> {
+        import::check_path(root, true).map_err(|_| ProfileError::Storage)?;
+        let import_lock = import::profile_gate(root).map_err(|_| ProfileError::Storage)?;
         std::fs::create_dir_all(root).map_err(|_| ProfileError::Storage)?;
         let root = root.canonicalize().map_err(|_| ProfileError::Storage)?;
+        let directory_lock = import::directory_guard(&root).map_err(|_| ProfileError::Storage)?;
+        import::check_path(&root.join("profile.lock"), true).map_err(|_| ProfileError::Storage)?;
         let lock = OpenOptions::new()
             .read(true)
             .write(true)
@@ -61,6 +70,8 @@ impl Profile {
             root,
             _lock: lock,
             session: Mutex::new(()),
+            _import_lock: import_lock,
+            _directory_lock: directory_lock,
         })
     }
 
@@ -296,6 +307,7 @@ impl Profile {
     }
 
     fn read_limited(&self, name: &str) -> Result<Option<Vec<u8>>, ProfileError> {
+        import::check_path(&self.root.join(name), true).map_err(|_| ProfileError::Storage)?;
         let file = match File::open(self.root.join(name)) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -312,6 +324,7 @@ impl Profile {
     }
 
     fn atomic_write(&self, name: &str, bytes: &[u8]) -> Result<(), ProfileError> {
+        import::check_path(&self.root.join(name), true).map_err(|_| ProfileError::Storage)?;
         let mut nonce = [0_u8; 8];
         getrandom::fill(&mut nonce).map_err(|_| ProfileError::Storage)?;
         let temporary = self
