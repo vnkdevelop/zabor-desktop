@@ -14,7 +14,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
-use zabor_input::desktop::{host_pill_bounds, physical_viewport, HostSurface, ViewerCursorLease};
+use zabor_input::desktop::{
+    host_pill_bounds, physical_viewport, HostSurface, PassiveHostWindow, ViewerCursorLease,
+};
 use zabor_input::{CaptureLease, InputError, Rect};
 
 pub use crate::remote_input::cursor::{CursorCompletion, CursorState};
@@ -25,6 +27,84 @@ pub struct ViewerBinding {
     pub target: ControlTarget,
     pub generation: Arc<AtomicU64>,
     pub voice: CancellationToken,
+    pub request: ViewerRequest,
+}
+
+#[derive(Clone)]
+pub struct ViewerRequest {
+    initiated: Instant,
+    identity: Arc<()>,
+}
+
+impl Default for ViewerRequest {
+    fn default() -> Self {
+        Self {
+            initiated: Instant::now(),
+            identity: Arc::new(()),
+        }
+    }
+}
+
+impl ViewerRequest {
+    fn accepts_ack(&self, request: &Self, accepted: Instant) -> bool {
+        Arc::ptr_eq(&self.identity, &request.identity)
+            && accepted >= self.initiated
+            && accepted <= Instant::now()
+    }
+}
+
+#[derive(Clone)]
+pub struct P2pFrameSource {
+    original: VideoFrameStamp,
+    identity: Arc<()>,
+}
+
+impl P2pFrameSource {
+    pub fn from_delivery(frame: VideoFrameStamp, source_epoch: Option<u64>) -> Option<Self> {
+        (source_epoch.is_none() && frame.is_alive()).then_some(Self {
+            original: frame,
+            identity: Arc::new(()),
+        })
+    }
+
+    fn is_same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.identity, &other.identity)
+    }
+}
+
+#[derive(Default)]
+struct FrameHistory {
+    source: Option<P2pFrameSource>,
+    latest: Option<VideoFrameStamp>,
+}
+
+impl FrameHistory {
+    fn source_current(&self, source: &P2pFrameSource) -> bool {
+        source.original.is_alive()
+            && self
+                .source
+                .as_ref()
+                .is_none_or(|original| original.original.is_alive() && original.is_same(source))
+    }
+}
+
+struct RequestRetirement {
+    retired: AtomicBool,
+    lease: Arc<ViewerCursorLease>,
+    permitted: Arc<AtomicBool>,
+    stop: CancellationToken,
+    send_stop: Box<dyn Fn() + Send + Sync>,
+}
+
+impl RequestRetirement {
+    fn retire(&self) {
+        self.permitted.store(false, Ordering::Release);
+        self.lease.revoke();
+        self.stop.cancel();
+        if !self.retired.swap(true, Ordering::AcqRel) {
+            (self.send_stop)();
+        }
+    }
 }
 
 fn same_target(original: &ControlTarget, current: &ControlTarget) -> bool {
@@ -55,9 +135,9 @@ pub struct ViewerDesktop {
     accepted_at: Option<Instant>,
     generation: u64,
     viewport: Option<Rect>,
-    frame: Arc<Mutex<Option<VideoFrameStamp>>>,
+    frame: Arc<Mutex<FrameHistory>>,
     permitted: Arc<AtomicBool>,
-    released: AtomicBool,
+    retirement: Arc<RequestRetirement>,
     actor: Option<CursorActor>,
     affinity: PhantomData<Rc<()>>,
 }
@@ -80,17 +160,27 @@ impl ViewerDesktop {
             return Err(MediaError::UnauthorizedPeer);
         }
         let generation = binding.generation.load(Ordering::Acquire);
+        let lease = ViewerCursorLease::new(window);
+        let permitted = Arc::new(AtomicBool::new(false));
+        let target = binding.target.clone();
+        let retirement = Arc::new(RequestRetirement {
+            retired: AtomicBool::new(false),
+            lease: lease.clone(),
+            permitted: permitted.clone(),
+            stop: voice.clone(),
+            send_stop: Box::new(move || target.send_stop()),
+        });
         Ok(Self {
             binding,
             cleanup: runtime.cleanup_tracker(),
             voice,
-            lease: ViewerCursorLease::new(window),
+            lease,
             accepted_at: None,
             generation,
             viewport: None,
-            frame: Arc::new(Mutex::new(None)),
-            permitted: Arc::new(AtomicBool::new(false)),
-            released: AtomicBool::new(false),
+            frame: Arc::new(Mutex::new(FrameHistory::default())),
+            permitted,
+            retirement,
             actor: None,
             affinity: PhantomData,
         })
@@ -102,6 +192,7 @@ impl ViewerDesktop {
         current: Option<&ControlTarget>,
         focused: bool,
         modal: bool,
+        request: &ViewerRequest,
     ) -> bool {
         if !self.lease.is_alive()
             || self.voice.is_cancelled()
@@ -130,6 +221,7 @@ impl ViewerDesktop {
             .accepted_at
             .is_some_and(|original| original != accepted_at)
             || (!view.viewer_ready && self.accepted_at.is_some())
+            || !self.binding.request.accepts_ack(request, accepted_at)
         {
             self.release();
             return false;
@@ -174,14 +266,15 @@ impl ViewerDesktop {
                 .is_current(self.binding.ticket, IntentScope::Voice)
             && self.binding.generation.load(Ordering::Acquire) == self.generation;
         let frame = match self.frame.lock() {
-            Ok(frame) => frame.clone(),
+            Ok(frame) => (frame.latest.clone(), frame.source.clone()),
             Err(_) => {
                 self.release();
                 return false;
             }
         };
         if !current
-            || frame.is_some_and(|frame| {
+            || frame.1.is_some_and(|source| !source.original.is_alive())
+            || frame.0.is_some_and(|frame| {
                 !self
                     .accepted_at
                     .is_some_and(|at| frame.is_current_since(&self.binding.target.lifetime, at))
@@ -199,6 +292,7 @@ impl ViewerDesktop {
         ticket: IntentTicket,
         generation: u64,
         source_epoch: Option<u64>,
+        source: &P2pFrameSource,
     ) -> Result<bool, MediaError> {
         let (Some(accepted_at), Some(viewport)) = (self.accepted_at, self.viewport) else {
             return Ok(false);
@@ -229,7 +323,13 @@ impl ViewerDesktop {
                 return Err(MediaError::Backend);
             }
         };
+        if !latest.source_current(source) {
+            drop(latest);
+            self.release();
+            return Ok(false);
+        }
         if latest
+            .latest
             .as_ref()
             .is_some_and(|previous| previous.decoded_at() > frame.decoded_at())
         {
@@ -237,31 +337,36 @@ impl ViewerDesktop {
         }
         self.lease
             .decoded_p2p_frame(viewport, frame.pixels(), frame.decoded_at());
-        let previous = latest.replace(frame);
+        if latest.source.is_none() {
+            latest.source = Some(source.clone());
+        }
+        let previous = latest.latest.replace(frame);
         drop(latest);
         drop(previous);
         if self.actor.is_none() && self.lease.is_ready() {
             let binding = &self.binding;
-            let target = binding.target.clone();
-            let lifetime = target.lifetime.clone();
-            let channel = target.channel.clone();
+            let lifetime = binding.target.lifetime.clone();
+            let channel = binding.target.channel.clone();
             let intents = binding.intents.clone();
             let ticket = binding.ticket;
             let generations = binding.generation.clone();
             let generation = self.generation;
             let permitted = self.permitted.clone();
             let frames = self.frame.clone();
+            let original_source = source.clone();
+            let retirement = self.retirement.clone();
             let actor = CursorActor::start(
                 self.cleanup.clone(),
                 self.lease.clone(),
                 self.voice.clone(),
                 move || {
-                    let frame = frames.lock().ok().and_then(|frame| frame.clone());
+                    let frame = frames.lock().ok().and_then(|frame| frame.latest.clone());
                     !permitted.load(Ordering::Acquire)
                         || !lifetime.is_alive()
                         || !channel.is_alive()
                         || !intents.is_current(ticket, IntentScope::Voice)
                         || generations.load(Ordering::Acquire) != generation
+                        || !original_source.original.is_alive()
                         || !frame.is_some_and(|frame| {
                             frame_admitted(
                                 None,
@@ -272,7 +377,7 @@ impl ViewerDesktop {
                             )
                         })
                 },
-                move || target.send_stop(),
+                Arc::new(move || retirement.retire()),
             );
             match actor {
                 Ok(actor) => self.actor = Some(actor),
@@ -302,12 +407,9 @@ impl ViewerDesktop {
     }
 
     pub fn release(&self) {
-        self.permitted.store(false, Ordering::Release);
-        self.lease.revoke();
+        self.retirement.retire();
         if let Some(actor) = &self.actor {
             actor.stop();
-        } else if !self.released.swap(true, Ordering::AcqRel) {
-            self.binding.target.send_stop();
         }
     }
 }
@@ -335,6 +437,7 @@ trait PillBackend {
 }
 
 struct SlintPill<C: ComponentHandle> {
+    passive: PassiveHostWindow,
     surface: HostSurface,
     pill: C,
 }
@@ -352,6 +455,7 @@ impl<C: ComponentHandle> PillBackend for SlintPill<C> {
         if !authorized() {
             return Err(InputError::Unavailable);
         }
+        self.passive.reassert()?;
         self.surface.present(bounds, authorized)?;
         self.pill
             .window()
@@ -360,18 +464,41 @@ impl<C: ComponentHandle> PillBackend for SlintPill<C> {
             .window()
             .set_size(PhysicalSize::new(bounds.width as u32, bounds.height as u32));
         self.pill.show().map_err(|_| InputError::Unavailable)?;
+        self.passive.reassert()?;
+        self.passive.verify()?;
         self.surface.present(bounds, authorized)
     }
 
     fn finish(&mut self) -> Result<(), InputError> {
-        let restored = self.surface.finish();
         let hidden = self.pill.hide();
-        if restored.is_err() || hidden.is_err() {
+        let detached = self.passive.finish();
+        let restored = if detached.is_ok() {
+            self.surface.finish()
+        } else {
+            Err(InputError::Cleanup)
+        };
+        if restored.is_err() || hidden.is_err() || detached.is_err() {
             Err(InputError::Cleanup)
         } else {
             Ok(())
         }
     }
+}
+
+fn failed_attachment<C>(
+    pill: C,
+    done: mpsc::Sender<Result<(), InputError>>,
+    error: InputError,
+    observation: &zabor_input::desktop::CleanupObservation,
+) {
+    drop(pill);
+    let failed = error == InputError::Cleanup
+        || observation.state() == zabor_input::desktop::CleanupState::Failed;
+    let _ = done.send(if failed {
+        Err(InputError::Cleanup)
+    } else {
+        Ok(())
+    });
 }
 
 struct PillSurface {
@@ -487,18 +614,32 @@ impl HostPill {
             .flatten()
             .ok_or(MediaError::Backend)?;
         let (done, completion) = register_surface(runtime.cleanup_tracker())?;
-        let surface = match HostSurface::attach_hidden(
+        let mut surface = match HostSurface::attach_hidden(
             window,
             binding.capture.clone(),
             completion.observation(),
         ) {
             Ok(surface) => surface,
             Err(error) => {
-                let _ = done.send(if error == InputError::Cleanup {
-                    Err(error)
-                } else {
-                    Ok(())
-                });
+                failed_attachment(pill, done, error, &completion.observation());
+                return Err(MediaError::Backend);
+            }
+        };
+        let passive = match PassiveHostWindow::attach_hidden(window, completion.observation()) {
+            Ok(passive) => passive,
+            Err(error) => {
+                let restored = surface.finish();
+                drop(surface);
+                failed_attachment(
+                    pill,
+                    done,
+                    if restored.is_err() {
+                        InputError::Cleanup
+                    } else {
+                        error
+                    },
+                    &completion.observation(),
+                );
                 return Err(MediaError::Backend);
             }
         };
@@ -510,7 +651,11 @@ impl HostPill {
         let ticket = binding.ticket;
         let authorized = binding.authorized.clone();
         let state = Rc::new(RefCell::new(PillSurface {
-            backend: Some(Box::new(SlintPill { surface, pill })),
+            backend: Some(Box::new(SlintPill {
+                passive,
+                surface,
+                pill,
+            })),
             capture: binding.capture.clone(),
             authorized: Box::new(move || {
                 permission.load(Ordering::Acquire)

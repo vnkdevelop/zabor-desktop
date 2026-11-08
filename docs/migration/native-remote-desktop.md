@@ -1,5 +1,74 @@
 # Native remote-control desktop primitives
 
+## Review follow-up from 6d7b4cf — 2026-11-09
+
+Readonly review `ses_e43154694ffezOCirYR8xEUzHl` found two P1 and three P2 defects
+in the saved candidate. Follow-up preserves that commit and its 54 proof receipts.
+Only the existing RC-owned paths and this handoff are changed; primary import,
+shell/app/lib/Cargo/assets/media/resources and immutable SDKs are not edited.
+
+- P1 retirement: one shared RequestRetirement flag sends original STOP immediately,
+  disables original activity and cancels only the original request child token.
+  Native retirement invokes the same hook before restoration, including stalls/
+  unwind; OnExit cannot send another old STOP after a same-channel replacement.
+- P1 passive surface: pinned Slint 1.18.1 set_visibility calls Winit set_visible;
+  Winit 0.30.13 apply_diff rewrites EXSTYLE from WindowFlags. A UI-thread-affine
+  same-HWND procedure guard filters WM_STYLECHANGING and WM_WINDOWPOSCHANGING
+  before application and rejects mouse activation; reassert/verify also surround
+  Slint show. Guard removal precedes original HostSurface style restoration.
+  Its trusted thread-local registry never dereferences an externally supplied
+  HWND property pointer. Detach failure is sticky and retains callback state,
+  rather than freeing state still reachable by an installed/replaced procedure.
+- P2 source: FrameHistory pins one P2pFrameSource identity and its immutable
+  original VideoFrameStamp/lease. Dead original subscription or a different source
+  is rejected before replacing latest pixels, even inside the 750-ms frame window.
+- P2 ACK: ViewerBinding carries the original ViewerRequest initiation instant and
+  local identity. update_control requires that same request handoff and rejects
+  an ACK older than initiation; the original Voice intent ticket is never reminted.
+- P2 attach failure: the original owned pill drops before its registered receipt
+  is sent; original cleanup failure remains sticky after that drop.
+
+Completed original affected job: `sh_1bcfe3947001Yu38Ee1wnubJFH`, evidence
+`migration-artifacts/native-rc/review-followup-2026-11-09/checked-v1/`. All 41
+affected tests passed (23 input desktop, 6 input worker, 12 remote-viewer), including
+the six new regressions. Fmt, native-media all-target compile, input/native
+all-target Clippy with -D warnings and Graphify passed. Seventeen source/pin/
+read-only dependency hashes stayed unchanged across verification and Graphify.
+Checks used two Cargo jobs, locked/offline and one private marker-owned target.
+Original target/fixtures and check runner were removed after completion; no RC
+job remains pending, and no other agent's target or fixture was cleaned. Baseline
+54 receipts remain unchanged; the nine original input, nine original video and
+inert UI proofs were not needlessly repeated. Own graph is 14,733 nodes / 32,545
+edges / 547 communities, zero API tokens; nine zero-node warnings and skipped
+HTML at the 5,000-node limit remain. Tests are synthetic/loopback, not physical
+HWND activation, ClipCursor/input/capture, IME/UIPI or two-device acceptance.
+The graph identifies pre-save HEAD 6d7b4cf. Subsequent six-path save uses those
+checked source hashes and exact Git blobs; receipt is checked-v1/save-verification.json.
+
+### Required primary hook deltas for this follow-up
+
+1. Before enqueueing the original ToggleControl, create one canonical
+   `Arc<ViewerRequest>` with ViewerRequest::default. Keep it in that original UI
+   and worker request record; ViewerBinding receives its clone. Carry the original
+   canonical Arc with ACK/control/activity/retirement events, not the currently
+   selected request at delivery. Queue admission/release uses Arc::ptr_eq against
+   the original worker record. update_control receives `request.as_ref()` as its
+   final argument. An old queued ACK must never be retagged for a replacement.
+2. The actual original decoder/subscription callback creates P2pFrameSource once
+   from its original immutable delivery stamp and source epoch. Preserve that
+   source identity across its frames; a retired/replaced subscription has a new
+   identity, never a rebuilt timestamp or a UI-cache-derived source. FrameUpdate/
+   DisplayedFrame handoff carries that original source clone; decoded_frame takes
+   `&source` after source_epoch. Retire old request/source before replacement.
+3. Retiring UI calls release immediately and queues the original request-qualified
+   worker release/PING retirement outside native cleanup gates. Do not defer STOP,
+   permit revocation or worker retirement until completion.wait/app drain, and do
+   not let a delayed old unqualified ReleaseControl reset a new same-channel request.
+4. HostPill owns the passive procedure guard together with the original surface
+   and Slint handle. Do not install a second input/capture owner or attach the guard
+   to the main/captured window. Finish while the original component is still alive;
+   observe sticky detach/restoration failure through the registered original join.
+
 ## Current adapter continuation — 2026-11-08
 
 Worktree `native-rc-integration`, base `4e7dd64`; inherited WIP was preserved,
@@ -89,7 +158,9 @@ Adapter contracts:
    original target, original command `IntentTicket`, its original Voice token,
    `video_generation` and the original `native_window_handle`. Create
    `ViewerDesktop::new(&audio_runtime, ViewerBinding { intents, ticket, target,
-   generation, voice }, hwnd)` on the UI thread. Use the existing runtime's
+   generation, voice, request: (*original_request).clone() }, hwnd)` on the UI thread.
+   `original_request` is the canonical Arc<ViewerRequest> from the follow-up recipe
+   above, created before that command was enqueued, not at ACK delivery. Use the existing runtime's
    `Handle::enter()` while registering the actor; do not create another runtime,
    input owner, capture or cleanup tracker. Replacement retires the old record.
 2. In `UiEvent::RemoteControl(state, targets)`, before consuming state strings,

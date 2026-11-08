@@ -46,6 +46,250 @@ fn original_frame_age_route_and_ack_are_fail_closed_without_restamping() {
     assert_ne!(original, replacement);
 }
 
+#[test]
+fn first_ack_requires_the_original_local_request_identity_and_initiation_time() {
+    let now = Instant::now();
+    let original = ViewerRequest {
+        initiated: now - Duration::from_millis(20),
+        identity: Arc::new(()),
+    };
+    let accepted = now - Duration::from_millis(10);
+    assert!(original.accepts_ack(&original.clone(), accepted));
+    let replacement = ViewerRequest {
+        initiated: now - Duration::from_millis(5),
+        identity: Arc::new(()),
+    };
+    assert!(!replacement.accepts_ack(&replacement, accepted));
+    assert!(!replacement.accepts_ack(&original, now));
+    assert!(!replacement.accepts_ack(&replacement, now + Duration::from_secs(1)));
+    let intents = CriticalIntents::default();
+    let ticket = intents.ticket();
+    assert!(intents.is_current(ticket, IntentScope::Voice));
+    assert_eq!(ticket, intents.ticket());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn original_stop_is_immediate_once_and_old_held_cleanup_cannot_stop_same_channel_replacement()
+{
+    use std::sync::atomic::AtomicUsize;
+    let cleanup = Arc::new(AudioCleanup::default());
+    let voice = CancellationToken::new();
+    let occupant = Arc::new(AtomicUsize::new(1));
+    let stops = Arc::new([AtomicUsize::new(0), AtomicUsize::new(0)]);
+    let make_request = || {
+        let current = occupant.clone();
+        let stops = stops.clone();
+        Arc::new(RequestRetirement {
+            retired: AtomicBool::new(false),
+            lease: ViewerCursorLease::new(123),
+            permitted: Arc::new(AtomicBool::new(true)),
+            stop: voice.child_token(),
+            send_stop: Box::new(move || {
+                stops[current.load(Ordering::Acquire) - 1].fetch_add(1, Ordering::AcqRel);
+            }),
+        })
+    };
+    let original = make_request();
+    let on_exit = original.clone();
+    let (entered, restoring) = mpsc::channel();
+    let (release, held) = mpsc::channel();
+    let actor = CursorActor::start_with(
+        cleanup.clone(),
+        original.lease.clone(),
+        original.stop.clone(),
+        move |_, stop, observation| {
+            while !stop.is_cancelled() {
+                std::thread::park_timeout(Duration::from_millis(1));
+            }
+            zabor_input::desktop::run_viewer_cursor_with_retirement(
+                ViewerCursorLease::new(0),
+                || true,
+                observation,
+                || on_exit.retire(),
+            )?;
+            entered.send(()).unwrap();
+            held.recv_timeout(Duration::from_secs(3)).unwrap();
+            on_exit.retire();
+            Ok(())
+        },
+    )
+    .unwrap();
+    let mut completion = actor.completion();
+    original.retire();
+    assert_eq!(stops[0].load(Ordering::Acquire), 1);
+    assert!(!original.permitted.load(Ordering::Acquire));
+    assert!(!voice.is_cancelled());
+    restoring.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), cleanup.wait())
+            .await
+            .is_err()
+    );
+    assert_eq!(completion.cleanup(), CleanupState::Pending);
+    occupant.store(2, Ordering::Release);
+    let replacement = make_request();
+    original.retire();
+    drop(actor);
+    release.send(()).unwrap();
+    cleanup.wait().await.unwrap();
+    completion.wait().await.unwrap();
+    assert_eq!(stops[0].load(Ordering::Acquire), 1);
+    assert_eq!(stops[1].load(Ordering::Acquire), 0);
+    assert!(!replacement.stop.is_cancelled());
+    replacement.retire();
+    replacement.retire();
+    assert_eq!(stops[1].load(Ordering::Acquire), 1);
+}
+
+struct HeldPillDrop {
+    entered: mpsc::Sender<()>,
+    release: mpsc::Receiver<()>,
+    destroyed: Arc<AtomicBool>,
+}
+
+impl Drop for HeldPillDrop {
+    fn drop(&mut self) {
+        self.entered.send(()).unwrap();
+        self.release.recv_timeout(Duration::from_secs(3)).unwrap();
+        self.destroyed.store(true, Ordering::Release);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_attachment_receipt_waits_for_the_original_pill_drop_and_keeps_cleanup_failure() {
+    for error in [InputError::Unavailable, InputError::Cleanup] {
+        let cleanup = Arc::new(AudioCleanup::default());
+        let (done, mut completion) = register_surface(cleanup.clone()).unwrap();
+        let observation = completion.observation();
+        zabor_input::desktop::run_viewer_cursor(
+            ViewerCursorLease::new(0),
+            || true,
+            observation.clone(),
+        )
+        .unwrap();
+        let (entered, dropping) = mpsc::channel();
+        let (release, held) = mpsc::channel();
+        let destroyed = Arc::new(AtomicBool::new(false));
+        let pill = HeldPillDrop {
+            entered,
+            release: held,
+            destroyed: destroyed.clone(),
+        };
+        let original =
+            tokio::task::spawn_blocking(move || failed_attachment(pill, done, error, &observation));
+        dropping.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(!destroyed.load(Ordering::Acquire));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), cleanup.wait())
+                .await
+                .is_err()
+        );
+        assert_eq!(completion.cleanup(), CleanupState::Pending);
+        release.send(()).unwrap();
+        original.await.unwrap();
+        assert!(destroyed.load(Ordering::Acquire));
+        if error == InputError::Cleanup {
+            assert!(cleanup.wait().await.is_err());
+            assert_eq!(completion.wait().await, Err(InputError::Cleanup));
+            assert_eq!(completion.cleanup(), CleanupState::Failed);
+        } else {
+            cleanup.wait().await.unwrap();
+            assert_eq!(completion.wait().await, Ok(CleanupState::Restored));
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fresh_same_peer_subscription_cannot_erase_the_retired_original_inside_frame_age() {
+    use crate::media::MediaEngine;
+    use crate::video::{VideoDelivery, VideoReceiver};
+    use libwebrtc::data_channel::DataChannelInit;
+    use libwebrtc::peer_connection_factory::{
+        native::PeerConnectionFactoryExt, PeerConnectionFactory,
+    };
+    use libwebrtc::video_frame::{I420Buffer, VideoFrame, VideoRotation};
+    use libwebrtc::video_source::{native::NativeVideoSource, VideoResolution};
+    let cleanup = Arc::new(AudioCleanup::default());
+    let (mut engine, _events) = MediaEngine::new_data_only("local".into());
+    engine.authorize_peers(["remote".into()]);
+    engine
+        .create_data_channel(
+            "remote",
+            "rc-frame-source-fixture",
+            DataChannelInit::default(),
+        )
+        .unwrap();
+    let lifetime = engine.peer_lifetime("remote").unwrap();
+    let factory = PeerConnectionFactory::default();
+    let source = NativeVideoSource::new(
+        VideoResolution {
+            width: 160,
+            height: 96,
+        },
+        true,
+    );
+    let track = factory.create_video_track("rc-frame-source", source.clone());
+    let (sender, mut frames) = tokio::sync::mpsc::unbounded_channel::<VideoDelivery>();
+    let mut receiver = VideoReceiver::with_cleanup(
+        track,
+        lifetime.clone(),
+        Arc::new(move |frame| {
+            let _ = sender.send(frame);
+        }),
+        cleanup.clone(),
+    );
+    let next = || {
+        source.capture_frame(&VideoFrame::new(
+            VideoRotation::VideoRotation0,
+            I420Buffer::new_black(160, 96),
+        ));
+    };
+    receiver.start();
+    let original = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            next();
+            tokio::select! { frame = frames.recv() => break frame.unwrap(), _ = tokio::time::sleep(Duration::from_millis(5)) => {} }
+        }
+    }).await.unwrap();
+    let stamp = original.frame.stamp(&original.lease);
+    let selected = P2pFrameSource::from_delivery(stamp.clone(), None).unwrap();
+    assert!(P2pFrameSource::from_delivery(stamp.clone(), Some(1)).is_none());
+    let history = FrameHistory {
+        source: Some(selected.clone()),
+        latest: Some(stamp.clone()),
+    };
+    assert!(history.source_current(&selected.clone()));
+    let other = P2pFrameSource::from_delivery(stamp.clone(), None).unwrap();
+    assert!(!history.source_current(&other));
+    receiver.stop();
+    receiver.start();
+    let fresh = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            next();
+            tokio::select! { frame = frames.recv() => {
+                let frame = frame.unwrap();
+                if frame.lease.is_alive() { break frame; }
+            }, _ = tokio::time::sleep(Duration::from_millis(5)) => {} }
+        }
+    })
+    .await
+    .unwrap();
+    let fresh_stamp = fresh.frame.stamp(&fresh.lease);
+    let replacement = P2pFrameSource::from_delivery(fresh_stamp.clone(), None).unwrap();
+    assert!(lifetime.is_alive());
+    assert!(!selected.original.is_alive());
+    assert!(fresh_stamp.is_current_since(&lifetime, stamp.decoded_at()));
+    assert!(
+        fresh_stamp.decoded_at().duration_since(stamp.decoded_at()) < Duration::from_millis(750)
+    );
+    assert!(!history.source_current(&replacement));
+    assert_eq!(history.latest.unwrap().decoded_at(), stamp.decoded_at());
+    receiver.stop();
+    drop(receiver);
+    cleanup.wait().await.unwrap();
+    engine.close();
+}
+
 struct FakePill {
     fail: Rc<Cell<bool>>,
     destroyed: Rc<Cell<bool>>,

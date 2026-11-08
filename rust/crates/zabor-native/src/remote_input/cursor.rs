@@ -126,14 +126,16 @@ impl CursorActor {
         lease: Arc<ViewerCursorLease>,
         voice: CancellationToken,
         cancelled: impl Fn() -> bool + Send + 'static,
-        ended: impl FnOnce() + Send + 'static,
+        retired: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Self, MediaError> {
         Self::start_with(cleanup, lease, voice, move |lease, stop, observation| {
-            let _ended = OnExit(Some(ended));
-            zabor_input::desktop::run_viewer_cursor(
+            let on_exit = retired.clone();
+            let _ended = OnExit(Some(move || on_exit()));
+            zabor_input::desktop::run_viewer_cursor_with_retirement(
                 lease,
                 || stop.is_cancelled() || cancelled(),
                 observation,
+                move || retired(),
             )
         })
     }

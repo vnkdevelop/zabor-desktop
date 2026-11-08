@@ -271,11 +271,21 @@ impl ViewerCursorLease {
     }
 }
 
-struct ViewerRetirement<'a>(&'a ViewerCursorLease);
+struct ViewerRetirement<'a> {
+    lease: &'a ViewerCursorLease,
+    retired: &'a dyn Fn(),
+}
+
+impl ViewerRetirement<'_> {
+    fn retire(&self) {
+        self.lease.revoke();
+        (self.retired)();
+    }
+}
 
 impl Drop for ViewerRetirement<'_> {
     fn drop(&mut self) {
-        self.0.revoke();
+        self.retire();
     }
 }
 
@@ -394,15 +404,27 @@ fn contains_rect(outer: Rect, inner: Rect) -> bool {
             <= i64::from(outer.top) + i64::from(outer.height)
 }
 
+#[cfg(test)]
 fn drive_cursor<B: CursorBackend>(
     backend: B,
     lease: &ViewerCursorLease,
     cancelled: impl Fn() -> bool,
     observation: CleanupObservation,
+    wait: impl FnMut(),
+) -> Result<(), InputError> {
+    drive_cursor_with_retirement(backend, lease, cancelled, observation, wait, &|| {})
+}
+
+fn drive_cursor_with_retirement<B: CursorBackend>(
+    backend: B,
+    lease: &ViewerCursorLease,
+    cancelled: impl Fn() -> bool,
+    observation: CleanupObservation,
     mut wait: impl FnMut(),
+    retired: &dyn Fn(),
 ) -> Result<(), InputError> {
     let mut owner = CursorOwner::acquire(backend, observation.clone())?;
-    let _retirement = ViewerRetirement(lease);
+    let retirement = ViewerRetirement { lease, retired };
     let result = (|| {
         while !cancelled() {
             let Some(rect) = lease.snapshot(Instant::now()) else {
@@ -415,7 +437,7 @@ fn drive_cursor<B: CursorBackend>(
         }
         Ok(())
     })();
-    lease.revoke();
+    retirement.retire();
     owner.finish()?;
     result
 }
@@ -425,7 +447,19 @@ pub fn run_viewer_cursor(
     cancelled: impl Fn() -> bool,
     observation: CleanupObservation,
 ) -> Result<(), InputError> {
-    let _retirement = ViewerRetirement(&lease);
+    run_viewer_cursor_with_retirement(lease, cancelled, observation, || {})
+}
+
+pub fn run_viewer_cursor_with_retirement(
+    lease: Arc<ViewerCursorLease>,
+    cancelled: impl Fn() -> bool,
+    observation: CleanupObservation,
+    retired: impl Fn(),
+) -> Result<(), InputError> {
+    let retirement = ViewerRetirement {
+        lease: &lease,
+        retired: &retired,
+    };
     let result = if cancelled() || !lease.live.load(Ordering::Acquire) {
         Ok(())
     } else if lease.snapshot(Instant::now()).flatten().is_none() {
@@ -434,9 +468,16 @@ pub fn run_viewer_cursor(
         #[cfg(windows)]
         {
             native::Cursor::open(lease.window, observation.clone()).and_then(|backend| {
-                drive_cursor(backend, &lease, cancelled, observation.clone(), || {
-                    std::thread::sleep(Duration::from_millis(5));
-                })
+                drive_cursor_with_retirement(
+                    backend,
+                    &lease,
+                    cancelled,
+                    observation.clone(),
+                    || {
+                        std::thread::sleep(Duration::from_millis(5));
+                    },
+                    &retired,
+                )
             })
         }
         #[cfg(not(windows))]
@@ -444,7 +485,7 @@ pub fn run_viewer_cursor(
             Err(InputError::Unavailable)
         }
     };
-    lease.revoke();
+    retirement.retire();
     let result = if observation.state() == CleanupState::Failed {
         Err(InputError::Cleanup)
     } else {
@@ -503,6 +544,271 @@ impl<B: SurfaceBackend> Drop for SurfaceOwner<B> {
         let _ = self.finish();
     }
 }
+
+#[cfg(windows)]
+pub fn passive_host_style(style: u32) -> u32 {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    };
+    (style | (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT).0) & !WS_EX_APPWINDOW.0
+}
+
+#[cfg(windows)]
+fn passive_position_flags(
+    flags: windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS,
+) -> windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS {
+    flags | windows::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE
+}
+
+#[cfg(windows)]
+mod passive {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+    use windows::core::w;
+    use windows::Win32::Foundation::{
+        GetLastError, SetLastError, HANDLE, HWND, LPARAM, LRESULT, WIN32_ERROR, WPARAM,
+    };
+    use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    thread_local! {
+        static WINDOWS: RefCell<BTreeMap<usize, Rc<State>>> = const { RefCell::new(BTreeMap::new()) };
+    }
+
+    fn identity(window: HWND) -> Option<(u32, u32)> {
+        if !unsafe { IsWindow(Some(window)) }.as_bool() {
+            return None;
+        }
+        let mut process = 0;
+        let thread = unsafe { GetWindowThreadProcessId(window, Some(&mut process)) };
+        (process == std::process::id() && thread == unsafe { GetCurrentThreadId() })
+            .then_some((process, thread))
+    }
+
+    struct State {
+        window: HWND,
+        identity: (u32, u32),
+        host_cookie: HANDLE,
+        original: WNDPROC,
+        installed: Cell<bool>,
+    }
+
+    impl State {
+        fn owned(&self) -> bool {
+            identity(self.window) == Some(self.identity)
+                && std::ptr::eq(
+                    unsafe { GetPropW(self.window, w!("Zabor.NativeRc.PassiveHandoff")) }
+                        .0
+                        .cast::<Self>(),
+                    self,
+                )
+        }
+
+        fn current(&self) -> bool {
+            self.owned()
+                && unsafe { GetPropW(self.window, w!("Zabor.NativeRc.HostSurfaceLease")) }
+                    == self.host_cookie
+        }
+    }
+
+    unsafe extern "system" fn procedure(
+        window: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        let state = WINDOWS.with(|windows| windows.borrow().get(&(window.0 as usize)).cloned());
+        let Some(state) = state else {
+            return unsafe { DefWindowProcW(window, message, wparam, lparam) };
+        };
+        if state.current() && message == WM_MOUSEACTIVATE {
+            return LRESULT(MA_NOACTIVATE as isize);
+        }
+        let result = unsafe { CallWindowProcW(state.original, window, message, wparam, lparam) };
+        if state.current() {
+            if message == WM_STYLECHANGING && wparam.0 as isize == GWL_EXSTYLE.0 as isize {
+                if let Some(style) = unsafe { (lparam.0 as *mut STYLESTRUCT).as_mut() } {
+                    style.styleNew = passive_host_style(style.styleNew);
+                }
+            } else if message == WM_WINDOWPOSCHANGING {
+                if let Some(position) = unsafe { (lparam.0 as *mut WINDOWPOS).as_mut() } {
+                    position.flags = passive_position_flags(position.flags);
+                }
+            }
+        }
+        if message == WM_NCDESTROY {
+            WINDOWS.with(|windows| {
+                windows.borrow_mut().remove(&(window.0 as usize));
+            });
+        }
+        result
+    }
+
+    fn set_long(
+        window: HWND,
+        index: WINDOW_LONG_PTR_INDEX,
+        value: isize,
+    ) -> Result<isize, InputError> {
+        unsafe { SetLastError(WIN32_ERROR(0)) };
+        let previous = unsafe { SetWindowLongPtrW(window, index, value) };
+        if previous == 0 && unsafe { GetLastError() }.0 != 0 {
+            Err(InputError::Cleanup)
+        } else {
+            Ok(previous)
+        }
+    }
+
+    pub struct PassiveHostWindow {
+        state: Option<Rc<State>>,
+        observation: CleanupObservation,
+        affinity: PhantomData<Rc<()>>,
+    }
+
+    impl PassiveHostWindow {
+        pub fn attach_hidden(
+            window: u64,
+            observation: CleanupObservation,
+        ) -> Result<Self, InputError> {
+            let window =
+                HWND(usize::try_from(window).map_err(|_| InputError::Unavailable)? as *mut _);
+            let identity = identity(window).ok_or(InputError::Unavailable)?;
+            let host_cookie = unsafe { GetPropW(window, w!("Zabor.NativeRc.HostSurfaceLease")) };
+            if host_cookie.0.is_null()
+                || unsafe { IsWindowVisible(window) }.as_bool()
+                || !unsafe { GetPropW(window, w!("Zabor.NativeRc.PassiveHandoff")) }
+                    .0
+                    .is_null()
+            {
+                return Err(InputError::Unavailable);
+            }
+            let original = unsafe { GetWindowLongPtrW(window, GWLP_WNDPROC) };
+            if original == 0 {
+                return Err(InputError::Unavailable);
+            }
+            let state = Rc::new(State {
+                window,
+                identity,
+                host_cookie,
+                original: unsafe { std::mem::transmute::<isize, WNDPROC>(original) },
+                installed: Cell::new(false),
+            });
+            unsafe {
+                SetPropW(
+                    window,
+                    w!("Zabor.NativeRc.PassiveHandoff"),
+                    Some(HANDLE((&*state as *const State).cast_mut().cast())),
+                )
+            }
+            .map_err(|_| InputError::Unavailable)?;
+            WINDOWS.with(|windows| {
+                windows
+                    .borrow_mut()
+                    .insert(window.0 as usize, state.clone());
+            });
+            let mut owner = Self {
+                state: Some(state),
+                observation,
+                affinity: PhantomData,
+            };
+            let state = owner.state.as_ref().unwrap();
+            let previous = set_long(window, GWLP_WNDPROC, procedure as *const () as isize)?;
+            state.installed.set(true);
+            if previous != original {
+                owner.observation.complete(Err(InputError::Cleanup));
+                return Err(InputError::Cleanup);
+            }
+            owner.reassert()?;
+            Ok(owner)
+        }
+
+        pub fn reassert(&mut self) -> Result<(), InputError> {
+            let state = self.state.as_ref().ok_or(InputError::Unavailable)?;
+            if !state.current()
+                || unsafe { GetWindowLongPtrW(state.window, GWLP_WNDPROC) }
+                    != procedure as *const () as isize
+            {
+                return Err(InputError::Unavailable);
+            }
+            let style = unsafe { GetWindowLongPtrW(state.window, GWL_EXSTYLE) } as u32;
+            set_long(
+                state.window,
+                GWL_EXSTYLE,
+                passive_host_style(style) as isize,
+            )?;
+            self.verify()
+        }
+
+        pub fn verify(&self) -> Result<(), InputError> {
+            let state = self.state.as_ref().ok_or(InputError::Unavailable)?;
+            let style = unsafe { GetWindowLongPtrW(state.window, GWL_EXSTYLE) } as u32;
+            if state.current()
+                && unsafe { GetWindowLongPtrW(state.window, GWLP_WNDPROC) }
+                    == procedure as *const () as isize
+                && style == passive_host_style(style)
+            {
+                Ok(())
+            } else {
+                Err(InputError::Unavailable)
+            }
+        }
+
+        pub fn finish(&mut self) -> Result<(), InputError> {
+            let Some(state) = &self.state else {
+                return Ok(());
+            };
+            let result = (|| {
+                if !unsafe { IsWindow(Some(state.window)) }.as_bool() {
+                    return Ok(());
+                }
+                if !state.owned() {
+                    return Err(InputError::Cleanup);
+                }
+                if state.installed.get() {
+                    if unsafe { GetWindowLongPtrW(state.window, GWLP_WNDPROC) }
+                        != procedure as *const () as isize
+                    {
+                        return Err(InputError::Cleanup);
+                    }
+                    let original = state
+                        .original
+                        .map_or(0, |original| original as *const () as isize);
+                    if set_long(state.window, GWLP_WNDPROC, original)?
+                        != procedure as *const () as isize
+                    {
+                        return Err(InputError::Cleanup);
+                    }
+                    state.installed.set(false);
+                }
+                let removed =
+                    unsafe { RemovePropW(state.window, w!("Zabor.NativeRc.PassiveHandoff")) }
+                        .map_err(|_| InputError::Cleanup)?;
+                if !std::ptr::eq(removed.0.cast::<State>(), Rc::as_ptr(state)) {
+                    return Err(InputError::Cleanup);
+                }
+                Ok(())
+            })();
+            self.observation.complete(result);
+            if result.is_ok() {
+                let window = state.window.0 as usize;
+                WINDOWS.with(|windows| {
+                    windows.borrow_mut().remove(&window);
+                });
+                self.state = None;
+            }
+            result
+        }
+    }
+
+    impl Drop for PassiveHostWindow {
+        fn drop(&mut self) {
+            let _ = self.finish();
+        }
+    }
+}
+
+#[cfg(windows)]
+pub use passive::PassiveHostWindow;
 
 #[cfg(windows)]
 mod native;

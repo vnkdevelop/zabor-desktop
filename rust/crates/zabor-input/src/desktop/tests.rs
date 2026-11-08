@@ -28,6 +28,7 @@ struct FakeCursor {
     poisoned: bool,
     calls: Vec<Option<Rect>>,
     finished: bool,
+    held_restore: Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>,
 }
 
 impl Default for FakeCursor {
@@ -42,6 +43,7 @@ impl Default for FakeCursor {
             poisoned: false,
             calls: Vec::new(),
             finished: false,
+            held_restore: None,
         }
     }
 }
@@ -82,6 +84,12 @@ impl CursorBackend for FakeCursor {
             "cancelled synthetic owner attempted clipping"
         );
         self.calls.push(rect);
+        if rect.is_none() {
+            if let Some((entered, release)) = self.held_restore.take() {
+                entered.send(()).unwrap();
+                release.recv_timeout(Duration::from_secs(3)).unwrap();
+            }
+        }
         if self.fail_restore && rect.is_none() {
             return Err(InputError::Unavailable);
         }
@@ -553,6 +561,66 @@ fn cancelled_original_actor_never_clips_and_retired_actor_ignores_late_frames() 
 }
 
 #[test]
+fn request_retirement_precedes_the_original_blocked_cursor_restore() {
+    use std::sync::atomic::AtomicUsize;
+    let lease = ready_lease();
+    let observation = CleanupObservation::default();
+    let (entered, restoring) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let stopped = Arc::new(AtomicUsize::new(0));
+    let worker_stopped = stopped.clone();
+    let worker_observation = observation.clone();
+    let thread = std::thread::spawn(move || {
+        drive_cursor_with_retirement(
+            FakeCursor {
+                held_restore: Some((entered, held)),
+                ..Default::default()
+            },
+            &lease,
+            || false,
+            worker_observation,
+            || lease.revoke(),
+            &|| {
+                worker_stopped.store(1, Ordering::Release);
+            },
+        )
+    });
+    restoring.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(stopped.load(Ordering::Acquire), 1);
+    assert_eq!(observation.state(), CleanupState::Pending);
+    release.send(()).unwrap();
+    thread.join().unwrap().unwrap();
+    assert_eq!(observation.state(), CleanupState::Restored);
+}
+
+#[cfg(windows)]
+#[test]
+fn framework_style_and_show_mutations_are_filtered_before_visibility_not_after_it() {
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    let native_passive = passive_host_style(WS_EX_APPWINDOW.0 | WS_EX_LAYERED.0);
+    assert_eq!(native_passive & WS_EX_APPWINDOW.0, 0);
+    for framework_style in [
+        WS_EX_APPWINDOW.0,
+        WS_EX_APPWINDOW.0 | WS_EX_TOPMOST.0,
+        WS_EX_ACCEPTFILES.0,
+    ] {
+        let style_before_show = passive_host_style(framework_style);
+        assert_eq!(style_before_show, passive_host_style(style_before_show));
+        assert_eq!(
+            style_before_show & (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT).0,
+            (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT).0
+        );
+        assert_eq!(style_before_show & WS_EX_APPWINDOW.0, 0);
+        let shown = passive_position_flags(SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+        assert!(shown.contains(SWP_NOACTIVATE | SWP_SHOWWINDOW));
+        assert_eq!(
+            style_before_show & WS_EX_TOPMOST.0,
+            framework_style & WS_EX_TOPMOST.0
+        );
+    }
+}
+
+#[test]
 fn drop_runs_cleanup_without_claiming_success_before_it_and_poison_survives() {
     let observation = CleanupObservation::default();
     {
@@ -612,6 +680,8 @@ fn desktop_owners_are_thread_confined_and_lease_observers_are_shareable() {
     {
         let _ = <HostSurface as AmbiguousIfSend<_>>::check;
         let _ = <HostSurface as AmbiguousIfSync<_>>::check;
+        let _ = <PassiveHostWindow as AmbiguousIfSend<_>>::check;
+        let _ = <PassiveHostWindow as AmbiguousIfSync<_>>::check;
     }
     fn shareable<T: Send + Sync>() {}
     shareable::<ViewerCursorLease>();
