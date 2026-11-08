@@ -1293,7 +1293,8 @@ launched. По уточнению владельца 2026-11-08 полный def
 переноса. По ходу сохраняются сборка/типы/тесты затронутой логики и проверки безопасности
 данных/авторизации/шифрования/native-владения. Неиспользованный временный full-verifier
 удалён;отложенные проверки не считаются пройденными. Initial Graphify passed before
-API correction;final update sh_1ba2a8a38001H8yZRrQdIbHyu4 pending.
+API correction;final update sh_1ba2a8a38001H8yZRrQdIbHyu4 passed6029nodes/14953edges/
+258communities,existing7warnings/HTML5000limit retained.
 Targeted fmt/Clippy(native-media,all-targets)/shell-Voice-Leave/local RTP job
 sh_1ba29c630001WoePMXEEBqhjKx passed92shell/3localRTP;with7video tests102targeted
 tests passed. videoTaskJoinChecked=true narrow registration/original task completion;
@@ -1301,6 +1302,21 @@ full/default/neural/visual acceptance still deferred. Initial outer cmd quoting 
 before Rust execution,not a test failure.
 Native acquisition/remove_sink/Drop/syscall/driver/lastArc/worker abort before terminal
 prefix/generalized off-thread teardown/shared runtime/physical/full-client remain open.
+Saved **4446514**,clean tree confirmed;no full333/323/default-neural/UI-matrix proof.
+
+### Stream picker: functional components checked
+
+Screen/window tabs,localized labels,tab selection reset,default low/low-high quality
+forwarding,loading/empty/busy/cancel connected to original-ticket Voice work and
+StartStream(quality). Low1280x720/30,high1920x1080/60,medium1280x720/60 preparation;
+no original locale edits. Late inventory no longer reopens cancelled picker.
+Affected run sh_1ba30e63d001MG8tDoeNm4fHww passed under native-streams/picker-
+functional-2026-11-08:fmt/3screen/92shell/3localRTP/Clippy/native-media build/two inert
+RUEN100% interactions. Physical camera/system audio/RC/thumbnails/native bitrate/
+SFU/restore still unfinished. Exact comparison/full regression remains final-stage
+work per owner;no complete-client acceptance/publication yet. Passed98tests and
+fmt/Clippy/build/two inert interactions. High quality forwarding checked with direct
+property assignment;pointer coverage of the quality controls remains to add.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

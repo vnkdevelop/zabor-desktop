@@ -96,7 +96,7 @@ enum Command {
     Call(String),
     AnswerCall(String, bool),
     ListScreens,
-    StartShare(String),
+    StartShare(String, String),
     StopShare,
     CheckShare,
     ExpireStreams,
@@ -118,7 +118,7 @@ impl Command {
             | Self::AnswerCall(_, _)
             | Self::ResumeCall
             | Self::ListScreens
-            | Self::StartShare(_)
+            | Self::StartShare(_, _)
             | Self::StopShare
             | Self::CheckShare
             | Self::Notification(NotificationKind::Channel, _, true) => IntentScope::Voice,
@@ -1121,13 +1121,49 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             show_error(&ui, AuthError::Network);
         }
     });
+    let weak = ui.as_weak();
     let screen_commands = commands.clone();
     ui.on_list_screens(move || {
-        let _ = screen_commands.try_send(Command::ListScreens);
+        let Some(ui) = weak
+            .upgrade()
+            .filter(|ui| ui.get_voice_active() && !ui.get_busy())
+        else {
+            return;
+        };
+        ui.set_screen_sources(ModelRc::default());
+        ui.set_window_sources(ModelRc::default());
+        ui.set_selected_screen("".into());
+        ui.set_screen_source_kind(0);
+        ui.set_screen_quality("low".into());
+        ui.set_screen_sources_loading(true);
+        ui.set_error("".into());
+        ui.set_modal(5);
+        if screen_commands.try_send(Command::ListScreens).is_err() {
+            ui.set_screen_sources_loading(false);
+            show_error(&ui, AuthError::Network);
+        }
     });
+    let weak = ui.as_weak();
     let screen_commands = commands.clone();
-    ui.on_start_share(move |source| {
-        let _ = screen_commands.try_send(Command::StartShare(source.to_string()));
+    ui.on_start_share(move |source, quality| {
+        let Some(ui) = weak
+            .upgrade()
+            .filter(|ui| ui.get_voice_active() && !ui.get_busy())
+        else {
+            return;
+        };
+        if source.is_empty() || !matches!(quality.as_str(), "low" | "high") {
+            return;
+        }
+        ui.set_error("".into());
+        if screen_commands
+            .try_send(Command::StartShare(source.to_string(), quality.to_string()))
+            .is_ok()
+        {
+            ui.set_busy(true);
+        } else {
+            show_error(&ui, AuthError::Network);
+        }
     });
     let screen_commands = commands.clone();
     ui.on_stop_share(move || {
@@ -1204,6 +1240,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 UiEvent::Error(error) => {
                     ui.set_busy(false);
                     ui.set_captcha_busy(false);
+                    ui.set_screen_sources_loading(false);
                     show_error(&ui, error);
                 }
                 UiEvent::Data(mut data) => {
@@ -1290,6 +1327,10 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_active_channel("".into());
                     ui.set_voice_users(ModelRc::default());
                     ui.set_busy(false);
+                    ui.set_screen_sources_loading(false);
+                    if ui.get_modal() == 5 {
+                        ui.set_modal(0);
+                    }
                 }
                 UiEvent::Toast(key) => {
                     ui.set_busy(false);
@@ -1353,32 +1394,32 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 UiEvent::Screens(sources) => {
                     let strings = Strings::new(ui.get_language().as_str()).ok();
-                    let rows = sources
-                        .into_iter()
-                        .map(|source| ScreenItem {
-                            id: format!(
-                                "{}:{}",
-                                match source.kind {
-                                    SourceKind::Screen => "screen",
-                                    SourceKind::Window => "window",
-                                },
-                                source.id
-                            )
-                            .into(),
-                            title: if source.title.is_empty() {
-                                strings
-                                    .as_ref()
-                                    .map(|strings| strings.text("stream.screen"))
-                                    .unwrap_or_default()
-                                    .into()
-                            } else {
-                                source.title.into()
-                            },
-                        })
-                        .collect::<Vec<_>>();
-                    ui.set_screen_sources(Rc::new(VecModel::from(rows)).into());
-                    ui.set_selected_screen("".into());
-                    ui.set_modal(5);
+                    let screen_label = strings
+                        .as_ref()
+                        .map(|s| s.text("stream.screen"))
+                        .unwrap_or_default();
+                    let window_label = strings
+                        .as_ref()
+                        .map(|s| s.text("stream.apps"))
+                        .unwrap_or_default();
+                    let mut screens = Vec::new();
+                    let mut windows = Vec::new();
+                    for source in sources {
+                        let target = match source.kind {
+                            SourceKind::Screen => &mut screens,
+                            SourceKind::Window => &mut windows,
+                        };
+                        let row = ScreenItem {
+                            id: source.key().into(),
+                            title: source
+                                .display_title(target.len(), &screen_label, &window_label)
+                                .into(),
+                        };
+                        target.push(row);
+                    }
+                    ui.set_screen_sources(Rc::new(VecModel::from(screens)).into());
+                    ui.set_window_sources(Rc::new(VecModel::from(windows)).into());
+                    ui.set_screen_sources_loading(false);
                 }
                 UiEvent::Sharing(active) => {
                     ui.set_sharing(active);
@@ -3303,24 +3344,15 @@ async fn worker(
                         .map_err(|_| AuthError::Network)?;
                     Ok(UiEvent::Screens(screen_sources.clone()))
                 }
-                Command::StartShare(id) => {
+                Command::StartShare(id, quality) => {
                     let source = screen_sources
                         .iter()
-                        .find(|source| {
-                            format!(
-                                "{}:{}",
-                                match source.kind {
-                                    SourceKind::Screen => "screen",
-                                    SourceKind::Window => "window",
-                                },
-                                source.id
-                            ) == id
-                        })
+                        .find(|source| source.key() == id)
                         .cloned()
                         .ok_or(AuthError::Network)?;
                     if let Some(session) = voice.as_mut() {
                         session
-                            .start_share(&connection, source, "high")
+                            .start_share(&connection, source, &quality)
                             .await
                             .map_err(|_| AuthError::Network)?;
                         Ok(UiEvent::Sharing(true))
@@ -3750,10 +3782,101 @@ fn check_auth_interactions(ui: &NativeApp) -> Result<(), &'static str> {
     check_roster_bindings(ui)?;
     check_audio_interactions(ui)?;
     check_mic_test_interactions(ui)?;
+    check_stream_picker_interactions(ui)?;
     println!(
         "{}",
-        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeAudioInteractionCheck":"passed","nativeMicTestInteractionCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true,"physicalDevices":false})
+        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeAudioInteractionCheck":"passed","nativeMicTestInteractionCheck":"passed","nativeStreamPickerInteractionCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true,"physicalDevices":false})
     );
+    Ok(())
+}
+
+fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let starts = Rc::new(RefCell::new(Vec::new()));
+    let recorded = starts.clone();
+    ui.on_start_share(move |source, quality| {
+        recorded
+            .borrow_mut()
+            .push((source.to_string(), quality.to_string()));
+    });
+    ui.set_screen_sources(
+        Rc::new(VecModel::from(vec![ScreenItem {
+            id: "screen:7".into(),
+            title: "screen 1".into(),
+        }]))
+        .into(),
+    );
+    ui.set_window_sources(
+        Rc::new(VecModel::from(vec![ScreenItem {
+            id: "window:9".into(),
+            title: "editor".into(),
+        }]))
+        .into(),
+    );
+    ui.set_error("".into());
+    ui.set_busy(false);
+    ui.set_voice_active(true);
+    ui.set_screen_source_kind(0);
+    ui.set_screen_quality("low".into());
+    ui.set_selected_screen("".into());
+    ui.set_screen_sources_loading(false);
+    ui.set_modal(5);
+    let click = |x, y| {
+        let position = slint::LogicalPosition::new(x, y);
+        ui.window().dispatch_event(WindowEvent::PointerPressed {
+            position,
+            button: PointerEventButton::Left,
+        });
+        ui.window().dispatch_event(WindowEvent::PointerReleased {
+            position,
+            button: PointerEventButton::Left,
+        });
+    };
+    click(680.0, 582.0);
+    if !starts.borrow().is_empty() {
+        return Err("Stream picker started without a selected source");
+    }
+    click(450.0, 318.0);
+    if ui.get_selected_screen() != "screen:7" {
+        return Err("Stream picker screen selection failed");
+    }
+    ui.set_screen_sources_loading(true);
+    click(680.0, 582.0);
+    if !starts.borrow().is_empty() {
+        return Err("Loading stream picker accepted a start");
+    }
+    ui.set_screen_sources_loading(false);
+    click(680.0, 582.0);
+    if starts.borrow().as_slice() != [("screen:7".to_owned(), "low".to_owned())] {
+        return Err("Stream picker did not forward low quality and exact source identity");
+    }
+    ui.set_busy(true);
+    click(680.0, 582.0);
+    if starts.borrow().len() != 1 {
+        return Err("Busy stream picker started duplicate capture");
+    }
+    ui.set_busy(false);
+    ui.set_screen_quality("high".into());
+    click(680.0, 582.0);
+    if starts.borrow().last() != Some(&("screen:7".to_owned(), "high".to_owned())) {
+        return Err("Stream picker did not forward high quality");
+    }
+    click(680.0, 254.0);
+    if ui.get_screen_source_kind() != 1 || !ui.get_selected_screen().is_empty() {
+        return Err("Stream picker tab retained the previous source");
+    }
+    click(450.0, 318.0);
+    if ui.get_selected_screen() != "window:9" {
+        return Err("Stream picker window selection failed");
+    }
+    click(680.0, 582.0);
+    if starts.borrow().last() != Some(&("window:9".to_owned(), "high".to_owned())) {
+        return Err("Stream picker window start changed quality or source identity");
+    }
+    click(430.0, 582.0);
+    if ui.get_modal() != 0 {
+        return Err("Stream picker cancel failed");
+    }
     Ok(())
 }
 

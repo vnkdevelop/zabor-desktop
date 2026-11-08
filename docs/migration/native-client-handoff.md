@@ -10,7 +10,8 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit брать из Git. Graphify pending ниже;
+сборкой. Latest saved source commit — **4446514**:102targeted tests и Graphify passed.
+Stream picker functional checks passed ниже;
 no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
@@ -48,6 +49,40 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
 
+## Stream picker — functional checks passed 2026-11-08
+
+- Saved4446514:video task join,102targeted tests/Clippy/fmt/Graphify,clean tree.
+- Native picker previously mixed screens/windows and always passed high to Voice.
+  Added separate tabs,tab selection reset,default low/low-high controls and exact
+  source+quality forwarding. Stable screen/window keys,localized numbered screens,
+  trimmed window app labels. Loading/empty/busy/cancel use original RUEN keys.
+  Late inventory does not reopen cancelled picker;VoiceEnded closes it.
+- capture_format preserves low1280x720/30/high1920x1080/60,adds compatible medium
+  1280x720/60 preparation. Original StartStream(quality)/Voice tickets/peer/frame
+  guards retained. Physical capture/camera/system audio/RC/thumbnails/native sender
+  bitrate/SFU/restore remain unfinished,not claimed working.
+- **sh_1ba30e63d001MG8tDoeNm4fHww completed/passed** under
+  `native-streams/picker-functional-2026-11-08`:fmt/3screen/92shell/3localRTP/Clippy/
+  native-media build/two inert RUEN100% interactions. New helper checks actual UI
+  source/quality forwarding,no-source/loading/busy refusal,tab reset/cancel.
+  Passed98tests (3screen/92shell/3localRTP),fmt/Clippy/native-media build and RUEN100%
+  inert interactions. No failure or physical capture. Quality buttons themselves
+  still need pointer coverage:helper sets high directly before checking forwarding.
+  Graphify/save next. Full DSP/default/precise comparison deferred.
+- Next camera implementation candidate researched without code/dependency/device
+  changes: nokhwa0.10.11 Apache-2.0,input-msmf+decoding only (no OpenCV/WebView),
+  Camera created/read/stopped on one owning thread,frames→RGB/I420→existing native
+  source. This preserves lib.rs forbid(unsafe_code);no public camera-sync-impl needed.
+  Docs https://docs.rs/nokhwa/0.10.11/nokhwa/ and crate feature page consulted.
+  Actual native backend/resource lifetime/compatibility/packaging still must be checked;
+  do not enable or claim a working camera before implementation and affected tests.
+- Published nokhwa-bindings-windows0.4.6 source inspected in memory:no install/edit/
+  device access. Enumeration count==0 is correct (unreleased master differs),but
+  process-global COM initialization skips other threads;ReadSample is synchronous,
+  stop_stream only clears state and Drop Flush can block. If used,one persistent
+  owner must perform query/create/read/stop/Drop;that alone does not prove bounded
+  cancellation or driver shutdown. Do not silently integrate it across tokio threads.
+
 ## Video task join — targeted checks passed 2026-11-08
 
 - Saved2ccbc75/post-save **sh_1ba1d489b001wXtev5MpGtZWwt completed/passed**:
@@ -81,7 +116,8 @@ push/merge/release/shutdown не выполнялись. После каждог
   Active original+replacement task observer remains pending until actual task Drop/
   held callback completion;no callback/native syscall deadline or universal quiescence.
 - Initial Graphify **sh_1ba21cf98001CATEngCdIOo4v2 passed** before constructor API
-  correction;final Graphify **sh_1ba2a8a38001H8yZRrQdIbHyu4 pending**.
+  correction;final Graphify **sh_1ba2a8a38001H8yZRrQdIbHyu4 completed/passed**:
+  6029nodes/14953edges/258communities,existing7warnings/HTML5000limit retained.
   По уточнению владельца полный333/323/
   neural/8inert RUEN/four-DPI/multi-hash audit отложен до общего финального этапа,
   не запускался. Незадействованный временный video-task-join-verify launcher удалён.
@@ -102,6 +138,7 @@ push/merge/release/shutdown не выполнялись. После каждог
   full-client gates remain open. videoTaskJoinChecked=true только для регистрации/
   наблюдаемого task completion в проверенных локальных сценариях;
   generalizedOffThreadVoicePeerTeardownAccepted and nativeClientReady remain false.
+  Saved **4446514**,clean tree confirmed;next functional picker stage above.
 
 ## Terminal media retirement — checked locally 2026-11-08
 

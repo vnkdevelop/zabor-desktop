@@ -23,6 +23,39 @@ pub struct ScreenSource {
     pub kind: SourceKind,
 }
 
+impl ScreenSource {
+    pub fn key(&self) -> String {
+        let kind = match self.kind {
+            SourceKind::Screen => "screen",
+            SourceKind::Window => "window",
+        };
+        format!("{kind}:{}", self.id)
+    }
+
+    pub fn display_title(&self, index: usize, screen_label: &str, window_label: &str) -> String {
+        match self.kind {
+            SourceKind::Screen => format!("{screen_label} {}", index + 1),
+            SourceKind::Window => {
+                let title = self.title.rsplit(" - ").next().unwrap_or_default().trim();
+                if title.is_empty() {
+                    window_label.to_owned()
+                } else {
+                    title.to_owned()
+                }
+            }
+        }
+    }
+}
+
+pub fn capture_format(quality: &str) -> Result<(u32, u32, u32), MediaError> {
+    match quality {
+        "low" => Ok((1280, 720, 30)),
+        "medium" => Ok((1280, 720, 60)),
+        "high" => Ok((1920, 1080, 60)),
+        _ => Err(MediaError::Backend),
+    }
+}
+
 pub struct ScreenCapture {
     pub source: NativeVideoSource,
     stop: Arc<AtomicBool>,
@@ -203,6 +236,40 @@ pub fn bgra_frame(
 mod tests {
     use super::*;
     use libwebrtc::video_frame::VideoBuffer;
+
+    #[test]
+    fn source_keys_keep_screen_and_window_identity_distinct_and_titles_match_picker_rules() {
+        let screen = ScreenSource {
+            id: 42,
+            title: "device-specific monitor name".into(),
+            kind: SourceKind::Screen,
+        };
+        let window = ScreenSource {
+            id: 42,
+            title: "document - editor - application ".into(),
+            kind: SourceKind::Window,
+        };
+        assert_eq!(screen.key(), "screen:42");
+        assert_eq!(window.key(), "window:42");
+        assert_eq!(screen.display_title(0, "экран", "приложения"), "экран 1");
+        assert_eq!(screen.display_title(1, "screen", "apps"), "screen 2");
+        assert_eq!(window.display_title(4, "screen", "apps"), "application");
+        let empty = ScreenSource {
+            title: "  ".into(),
+            ..window
+        };
+        assert_eq!(empty.display_title(0, "screen", "apps"), "apps");
+    }
+
+    #[test]
+    fn capture_quality_preserves_low_high_and_remote_control_medium_dimensions() {
+        assert_eq!(capture_format("low").unwrap(), (1280, 720, 30));
+        assert_eq!(capture_format("medium").unwrap(), (1280, 720, 60));
+        assert_eq!(capture_format("high").unwrap(), (1920, 1080, 60));
+        for invalid in ["", "camera", "HIGH", "unknown", "1920x1080"] {
+            assert!(capture_format(invalid).is_err());
+        }
+    }
 
     #[test]
     fn padded_desktop_pixels_preserve_aspect_ratio_and_validate_stride() {

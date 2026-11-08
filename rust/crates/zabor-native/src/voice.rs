@@ -8,7 +8,7 @@ use crate::media::PeerLifetime;
 use crate::media::{IceServerSettings, MediaEngine, MediaError, MediaEvent};
 #[cfg(windows)]
 use crate::native_audio::NativeAudio;
-use crate::screen::{ScreenCapture, ScreenSource};
+use crate::screen::{capture_format, ScreenCapture, ScreenSource};
 use libwebrtc::audio_track::RtcAudioTrack;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -247,11 +247,7 @@ impl VoiceSession {
         source: ScreenSource,
         quality: &str,
     ) -> Result<(), MediaError> {
-        let (width, height, fps) = match quality {
-            "low" => (1280, 720, 30),
-            "high" => (1920, 1080, 60),
-            _ => return Err(MediaError::Backend),
-        };
+        let (width, height, fps) = capture_format(quality)?;
         let capture = tokio::task::spawn_blocking(move || {
             ScreenCapture::start(source, width, height, fps, true)
         })
