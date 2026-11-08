@@ -1,0 +1,116 @@
+import { IconButton } from "controls.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct AchievementItem {
+    id: string,
+    title: string,
+    description: string,
+    icon: string,
+    hidden: bool,
+    unknown: bool,
+    unlocked: bool,
+    progress: float,
+    progress-text: string,
+}
+
+component AchievementLine inherits Rectangle {
+    in property <AchievementItem> item;
+    in property <string> hidden-label;
+    in property <string> unlocked-label;
+    in property <bool> reduced-motion;
+    height: 102px;
+    background: root.item.unlocked ? #c81e701a : #ffffff05;
+    border-width: 1px;
+    border-color: root.item.unlocked ? #c81e704d : transparent;
+    border-radius: 12px;
+    accessible-role: groupbox;
+    accessible-label: root.item.title + ". " + root.item.description + (root.item.hidden ? ". " + root.hidden-label : "") + (root.item.unlocked ? ". " + root.unlocked-label : "") + (root.item.unknown ? "" : ". " + root.item.progress-text);
+    HorizontalLayout {
+        padding: 16px;
+        spacing: 16px;
+        Text { text: root.item.icon; width: 36px; font-size: 30px; vertical-alignment: center; opacity: root.item.unknown ? 0.6 : 1; }
+        VerticalLayout {
+            spacing: 4px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: root.item.title; color: white; font-size: 16px; font-weight: 700; overflow: elide; }
+                if root.item.hidden : Rectangle {
+                    width: hidden-text.preferred-width + 16px; height: 18px; border-radius: 6px; background: #ffffff1a;
+                    hidden-text := Text { text: root.hidden-label; color: #ffffffcc; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                if root.item.unlocked : Rectangle {
+                    width: unlocked-text.preferred-width + 16px; height: 18px; border-radius: 6px; background: #c81e7033;
+                    unlocked-text := Text { text: root.unlocked-label; color: #ee68a9; font-size: 10px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+            Text { text: root.item.description; color: #949ba4; font-size: 14px; overflow: elide; }
+            if !root.item.unknown : HorizontalLayout {
+                spacing: 12px;
+                Rectangle {
+                    height: 6px; vertical-stretch: 0; border-radius: 3px; background: #0000004d;
+                    Rectangle {
+                        width: parent.width * max(0, min(1, root.item.progress)); height: parent.height; border-radius: 3px;
+                        background: root.item.unlocked ? #c81e70 : #555555;
+                        animate width { duration: root.reduced-motion ? 0ms : 500ms; }
+                    }
+                }
+                Text { text: root.item.progress-text; color: #949ba4; font-size: 12px; font-family: "Consolas"; horizontal-stretch: 0; }
+            }
+        }
+    }
+}
+
+export component AchievementsPanel inherits Rectangle {
+    in property <[AchievementItem]> items;
+    in property <bool> loading: true;
+    in property <bool> own-view: true;
+    in property <string> peer-name;
+    in property <string> summary;
+    in property <bool> reduced-motion;
+    in property <string> language: "ru";
+    pure callback tr(string, string) -> string;
+    callback close-requested;
+    public function focus-close() { close-button.focus(); }
+    width: 560px;
+    height: 620px;
+    background: #09090bf2;
+    border-width: 1px;
+    border-color: #303035b3;
+    border-radius: 24px;
+    accessible-role: groupbox;
+    accessible-label: root.tr(root.own-view ? "achievements.myTitle" : "achievements.title", root.language);
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.close-requested(); return accept; }
+            return reject;
+        }
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+            HorizontalLayout {
+                spacing: 16px;
+                Text { text: root.tr(root.own-view ? "achievements.myTitle" : "achievements.title", root.language); color: white; font-size: 24px; font-weight: 700; overflow: elide; vertical-alignment: center; }
+                close-button := IconButton {
+                    icon: @image-url("../assets/icons/window-close.svg"); label: root.tr("common.close", root.language);
+                    activated => { root.close-requested(); }
+                }
+            }
+            if !root.own-view && root.peer-name != "" : Text { text: root.peer-name; color: #949ba4; font-size: 14px; overflow: elide; }
+            if root.loading : Text { text: root.tr("common.loading", root.language); color: #949ba4; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+            if !root.loading && root.items.length == 0 : Text { text: root.tr("achievements.empty", root.language); color: #949ba4; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+            if !root.loading && root.items.length > 0 : ScrollView {
+                VerticalLayout {
+                    spacing: 12px;
+                    for item in root.items : AchievementLine {
+                        item: item;
+                        hidden-label: root.tr("achievements.hiddenBadge", root.language);
+                        unlocked-label: root.tr("achievements.unlocked", root.language);
+                        reduced-motion: root.reduced-motion;
+                    }
+                }
+            }
+            Text { text: root.summary; color: #949ba4; font-size: 12px; horizontal-alignment: center; vertical-stretch: 0; }
+        }
+    }
+}
