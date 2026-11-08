@@ -762,9 +762,42 @@ changes/no added modules.9new tests and16main/10preferences/6runtime/3MicTest/
 RTP/voice/Leave controls verified in both modes. Executable SHA-256:
 `c98d1f357c56568041318d68a35bd2362fa3303023efa61a79b6c7407e1c6ab3`.
 audioResetIntentWorkChecked=true is narrow component acceptance only;
-source save/post-save Graphify/guard/compact next, no push/release/shutdown.
+saved5aa25a0192a008cb2c50d7e69eca89e7c846265c/post-save Graphify/438-source/
+3reference/24evidence/current+frozen binary/clean-tree guard passed, compact done;
+no push/release/shutdown.
 Normal worker/
 UI/native synchronous cleanup, chat-storage/actualOS/fullclient bounds remainfalse.
+
+### Logout cleanup admission: components checked locally
+
+Normal Logout and failed-auth register original-ticket SessionIo.clear before
+resource reset/preparation/retry and old-object destruction. Registration stays
+synchronous/tracked, while Profile final-clear acceptance stays owner-guarded
+outside intent gate and durable across unpolled window exit; failure latch/drain
+unchanged. Captured old-connection StopStream/EndCall obligations survive missing
+live Voice, using250/750ms budgets and window cancellation. Dropped polled cleanup
+closes the captured connection including its live clones; no detached sends.
+Initial development fmt/Clippy/56prefix tests passed, main17passed/1failed on a
+new fixture's incorrect current-monitor assertion after global window stop.
+All10Leave tests and actual normal-worker clear-before-held-cleanup passed.
+Corrected only test expectation; window properly revokes monitor through shared
+stop, while canceled reset must preserve demand/MicTest state. Corrected438-source
+development116tests/fmt/Clippy passed; independent438/3/freeze/exact suite counts
+match, all6new actual-worker/admission/DPAPI/protocol/deadline/cancellation tests
+passed. Final `native-calls/logout-admission-final-2026-11-08/` passed259default/
+249neural-disabled tests,both Clippy modes/fmt/pinned/9HTTP/neural/freshbuild/8inert
+RUEN/four-DPI interactions; protected neural metrics unchanged. Independent438/
+3/all24evidence/current+frozen executable+ONNX audit found0mismatches,exact4existing
+source changes/zero added modules. All6new tests/10Leave+18main+6SessionIo+
+10preferences+10Profile+6runtime+3MicTest suites and previous253/243proof tests
+retained in both modes, including13stalled protocol/original-ticket controls.
+Executable SHA-256:
+`a26533a9a9c7b4844ffc7bb3e6db1f3b5f61f22fdec3a6b5c3d3c2595dd8b8c7`.
+logoutCleanupAdmissionChecked=true is narrow component acceptance only;
+source save/post-save Graphify/guard/compact next, no push/release/shutdown.
+Native synchronous cleanup can
+still block normal worker/UI and reaching hints; syscall/job-lock/drain/native
+endpoint/fullclient completion bounds remainfalse; no full-client acceptance.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

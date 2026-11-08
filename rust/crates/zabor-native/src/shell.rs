@@ -49,7 +49,7 @@ use zeroize::Zeroizing;
 #[cfg(test)]
 mod critical_tests;
 mod leave_work;
-use leave_work::VoiceLeave;
+use leave_work::{close_logout_connection, VoiceLeave};
 #[cfg(test)]
 mod leave_tests;
 mod main_session;
@@ -2328,10 +2328,13 @@ async fn worker(
             continue;
         }
         if matches!(command, Command::Logout) {
+            let clearing = session_io.clear(command_ticket);
             let end_call = abandoned_call
                 || voice
                     .as_ref()
                     .is_some_and(|session| session.call_peer.is_some());
+            let stop_stream =
+                pending_stop_stream || voice.as_ref().is_some_and(VoiceSession::is_sharing);
             abandoned_call = false;
             pending_stop_stream = false;
             audio_preferences.logout();
@@ -2363,15 +2366,8 @@ async fn worker(
             media_events = None;
             update(UiEvent::VoiceEnded);
             update(UiEvent::SignedOut);
-            let clearing = session_io.clear(command_ticket);
             if let Some(connection) = old_connection {
-                if end_call {
-                    tokio::select! {
-                        _ = stop.cancelled() => {},
-                        _ = connection.send("EndCall", Vec::new()) => {},
-                    }
-                }
-                connection.close();
+                close_logout_connection(connection, &stop, stop_stream, end_call).await;
             }
             let logout_work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
             if matches!(run_session!(logout_work, clearing), Some(Err(_))) {
@@ -2708,6 +2704,7 @@ async fn worker(
                 }
                 Ok(LoginOutcome::NeedsRegistration)
                 | Err(AuthError::InvalidPassword | AuthError::ClientRejected) => {
+                    let clearing = session_io.clear(command_ticket);
                     let reset = run_session!(
                         auth_work,
                         reset_audio_session(&auth_work, &audio_preferences, &audio_runtime)
@@ -2744,10 +2741,7 @@ async fn worker(
                     if !reset {
                         auth_work.publish(UiEvent::Toast("validation.sessionSaveError"));
                     }
-                    if matches!(
-                        run_session!(auth_work, session_io.clear(command_ticket)),
-                        Some(Err(_))
-                    ) {
+                    if matches!(run_session!(auth_work, clearing), Some(Err(_))) {
                         auth_work.publish(UiEvent::Toast("validation.sessionSaveError"));
                     }
                     continue;

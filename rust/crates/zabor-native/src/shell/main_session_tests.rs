@@ -1,7 +1,7 @@
 use super::{
     main_session, reset_audio_session, restore_audio, restore_audio_session,
-    try_reset_audio_session, AuthClient, Command, CommandQueue, MainResult, SessionWork, UiEvent,
-    VoiceLeave, VoiceSession, VoiceWork,
+    try_reset_audio_session, worker, AuthClient, Command, CommandQueue, MainResult, SessionIo,
+    SessionWork, UiEvent, VoiceLeave, VoiceSession, VoiceWork, WorkerMedia,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
@@ -78,6 +78,10 @@ fn answer(method: &str) -> Value {
 }
 
 async fn fixture(hold: &'static str) -> Fixture {
+    fixture_with_login(hold, json!(user())).await
+}
+
+async fn fixture_with_login(hold: &'static str, login_result: Value) -> Fixture {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/zabor_v3", listener.local_addr().unwrap());
     let held = Arc::new(Notify::new());
@@ -123,7 +127,8 @@ async fn fixture(hold: &'static str) -> Fixture {
             tokio::select! {
                 _ = server_release.notified(), if waiting.is_some() => {
                     let request = waiting.take().unwrap();
-                    let _ = socket.send(Message::text(encode(&json!({"type":3,"invocationId":request["invocationId"],"result":answer(hold)})).unwrap())).await;
+                     let result = if hold == "Login" { login_result.clone() } else { answer(hold) };
+                     let _ = socket.send(Message::text(encode(&json!({"type":3,"invocationId":request["invocationId"],"result":result})).unwrap())).await;
                     server_answered.notify_one();
                 },
                 message = socket.next() => {
@@ -1363,4 +1368,165 @@ async fn failed_auth_preference_poison_still_resets_runtime_and_reports_incomple
         .is_none());
     assert!(current.is_current());
     println!("audio reset poison=preferences legacy_partial=true poison_retained=true complete=false physical_audio=false");
+}
+
+async fn hold_logout_preferences(
+    preferences: Arc<AudioPreferences>,
+) -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>) {
+    let entered = Arc::new(Notify::new());
+    let (release, blocked) = std::sync::mpsc::channel();
+    let held = entered.clone();
+    let holder = tokio::task::spawn_blocking(move || {
+        let _held = preferences.try_prepare_logout().unwrap().unwrap();
+        held.notify_one();
+        blocked.recv_timeout(Duration::from_secs(4)).unwrap();
+    });
+    entered.notified().await;
+    (release, holder)
+}
+
+async fn wait_for_session_removal(profile: &Profile) {
+    timeout(Duration::from_millis(1500), async {
+        while profile.root().join("session.enc").exists() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actual_logout_worker_registers_durable_clear_before_blocked_resource_cleanup() {
+    let root = tempfile::tempdir().unwrap();
+    let profile = Arc::new(Profile::open(root.path()).unwrap());
+    profile
+        .save_session("original-owner", &credentials())
+        .unwrap();
+    let intents = Arc::new(CriticalIntents::default());
+    let stop = CancellationToken::new();
+    let session_io = SessionIo::new(Some(profile.clone()), intents.clone(), stop.clone());
+    let preferences = AudioPreferences::new(&json!({"inputVolume":99}));
+    let audio = audio(&stop);
+    let monitor = audio.monitor(true);
+    let (release, holder) = hold_logout_preferences(preferences.clone()).await;
+    let (sender, commands) = mpsc::channel(16);
+    let queue = CommandQueue {
+        sender,
+        intents: intents.clone(),
+    };
+    queue
+        .try_send(Command::Logout)
+        .unwrap_or_else(|_| panic!("Priority Logout failed"));
+    let (updates, mut published) = mpsc::unbounded_channel();
+    let task = tokio::spawn(worker(
+        "http://127.0.0.1:1/zabor_v3".into(),
+        commands,
+        Arc::new(move |event| {
+            let _ = updates.send(event);
+        }),
+        stop.clone(),
+        Some(profile.clone()),
+        WorkerMedia {
+            video_sink: Arc::new(|_| panic!("Logout fixture must not produce video")),
+            video_generation: Arc::new(AtomicU64::new(1)),
+            audio_preferences: preferences.clone(),
+            audio_runtime: audio.clone(),
+            intents: intents.clone(),
+            session_io: session_io.clone(),
+        },
+    ));
+    let measured = Instant::now();
+    wait_for_session_removal(&profile).await;
+    assert!(!task.is_finished());
+    assert!(monitor.is_current());
+    assert!(published.try_recv().is_err());
+    stop.cancel();
+    release.send(()).unwrap();
+    holder.await.unwrap();
+    timeout(Duration::from_millis(1500), task)
+        .await
+        .unwrap()
+        .unwrap();
+    session_io.finish().await.unwrap();
+    assert!(profile.load_session().unwrap().is_none());
+    assert!(!monitor.is_current());
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    println!("logout admission held=preferences-lock actual_worker=true clear_before_cleanup=true window_drain=true fixture_ms={} physical_audio=false", measured.elapsed().as_millis());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actual_failed_auth_worker_registers_durable_clear_before_reset_wait_and_window_exit() {
+    let fixture = fixture_with_login("Login", Value::Null).await;
+    let root = tempfile::tempdir().unwrap();
+    let profile = Arc::new(Profile::open(root.path()).unwrap());
+    profile
+        .save_session("original-owner", &credentials())
+        .unwrap();
+    let intents = Arc::new(CriticalIntents::default());
+    let stop = CancellationToken::new();
+    let session_io = SessionIo::new(Some(profile.clone()), intents.clone(), stop.clone());
+    let preferences = AudioPreferences::new(&json!({"inputVolume":99}));
+    let audio = audio(&stop);
+    let monitor = audio.monitor(true);
+    let (sender, commands) = mpsc::channel(16);
+    let queue = CommandQueue {
+        sender,
+        intents: intents.clone(),
+    };
+    let (updates, mut published) = mpsc::unbounded_channel();
+    let task = tokio::spawn(worker(
+        fixture.endpoint.clone(),
+        commands,
+        Arc::new(move |event| {
+            let _ = updates.send(event);
+        }),
+        stop.clone(),
+        Some(profile.clone()),
+        WorkerMedia {
+            video_sink: Arc::new(|_| panic!("Failed-auth fixture must not produce video")),
+            video_generation: Arc::new(AtomicU64::new(1)),
+            audio_preferences: preferences.clone(),
+            audio_runtime: audio.clone(),
+            intents: intents.clone(),
+            session_io: session_io.clone(),
+        },
+    ));
+    timeout(Duration::from_secs(3), fixture.held.notified())
+        .await
+        .unwrap();
+    assert!(matches!(
+        published.recv().await.unwrap().for_current(&intents),
+        Some(UiEvent::Connected)
+    ));
+    let (release, holder) = hold_logout_preferences(preferences.clone()).await;
+    fixture.release.notify_one();
+    let measured = Instant::now();
+    wait_for_session_removal(&profile).await;
+    assert!(!task.is_finished());
+    assert!(monitor.is_current());
+    assert!(published.try_recv().is_err());
+    let mic_state = audio.mic_test.snapshot(Instant::now());
+    stop.cancel();
+    timeout(Duration::from_millis(1500), task)
+        .await
+        .unwrap()
+        .unwrap();
+    release.send(()).unwrap();
+    holder.await.unwrap();
+    drop(queue);
+    session_io.finish().await.unwrap();
+    assert!(profile.load_session().unwrap().is_none());
+    assert!(!monitor.is_current());
+    assert!(audio.mic_test.has_demand());
+    assert_eq!(audio.demand.active(), 1);
+    assert_eq!(audio.mic_test.snapshot(Instant::now()), mic_state);
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    assert_eq!(
+        timeout(Duration::from_millis(1500), fixture.server)
+            .await
+            .unwrap()
+            .unwrap(),
+        vec!["CheckUserExists", "Login"]
+    );
+    println!("failed auth admission held=preferences-lock actual_worker=true clear_before_reset=true window_drain=true fixture_ms={} physical_audio=false", measured.elapsed().as_millis());
 }

@@ -86,6 +86,55 @@ pub(super) struct LeaveHintResult {
     pub left: bool,
 }
 
+struct LogoutConnection(HubConnection);
+
+impl Drop for LogoutConnection {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
+
+pub(super) async fn close_logout_connection(
+    connection: HubConnection,
+    stop: &CancellationToken,
+    was_sharing: bool,
+    was_call: bool,
+) -> LeaveHintResult {
+    let connection = LogoutConnection(connection);
+    send_logout_hints(stop, was_sharing, was_call, |target| {
+        let connection = &connection.0;
+        async move { connection.send(target, Vec::new()).await.is_ok() }
+    })
+    .await
+}
+
+pub(super) async fn send_logout_hints<F: Future<Output = bool>>(
+    stop: &CancellationToken,
+    was_sharing: bool,
+    was_call: bool,
+    mut send: impl FnMut(&'static str) -> F,
+) -> LeaveHintResult {
+    let mut result = LeaveHintResult {
+        stream_stopped: !was_sharing,
+        left: !was_call,
+    };
+    if was_sharing {
+        result.stream_stopped = tokio::select! {
+            biased;
+            _ = stop.cancelled() => false,
+            sent = tokio::time::timeout(Duration::from_millis(250), send("StopStream")) => matches!(sent, Ok(true)),
+        };
+    }
+    if was_call {
+        result.left = tokio::select! {
+            biased;
+            _ = stop.cancelled() => false,
+            sent = tokio::time::timeout(Duration::from_millis(750), send("EndCall")) => matches!(sent, Ok(true)),
+        };
+    }
+    result
+}
+
 pub(super) async fn send_leave_hints<F: Future<Output = bool>>(
     intents: &CriticalIntents,
     ticket: IntentTicket,

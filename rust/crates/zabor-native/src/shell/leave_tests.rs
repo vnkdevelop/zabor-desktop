@@ -467,3 +467,176 @@ async fn repeated_leave_revokes_stalled_cleanup_without_losing_pending_stream_an
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn logout_hint_deadlines_drop_stalled_sends_and_preserve_abandoned_end_call_attempt() {
+    use super::leave_work::send_logout_hints;
+    struct PendingHint<'a>(&'a AtomicUsize);
+    impl Drop for PendingHint<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    for (stream, call, stalled) in [
+        (true, true, "StopStream"),
+        (false, true, "EndCall"),
+        (true, true, "both"),
+        (false, false, "none"),
+    ] {
+        let stop = CancellationToken::new();
+        let attempted = Mutex::new(Vec::new());
+        let dropped = AtomicUsize::new(0);
+        let measured = Instant::now();
+        let result = timeout(
+            Duration::from_millis(1500),
+            send_logout_hints(&stop, stream, call, |target| {
+                let attempted = &attempted;
+                let dropped = &dropped;
+                async move {
+                    let _pending = PendingHint(dropped);
+                    attempted.lock().unwrap().push(target);
+                    if target == stalled || stalled == "both" {
+                        std::future::pending::<()>().await;
+                    }
+                    true
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        let mut expected = Vec::new();
+        if stream {
+            expected.push("StopStream");
+        }
+        if call {
+            expected.push("EndCall");
+        }
+        assert_eq!(*attempted.lock().unwrap(), expected);
+        assert_eq!(dropped.load(Ordering::Acquire), expected.len());
+        assert_eq!(
+            result.stream_stopped,
+            !stream || stalled != "StopStream" && stalled != "both"
+        );
+        assert_eq!(
+            result.left,
+            !call || stalled != "EndCall" && stalled != "both"
+        );
+        println!("logout hints stalled={stalled} fixture_ms={} stream_budget_ms=250 call_budget_ms=750 detached_jobs=0 physical_audio=false", measured.elapsed().as_millis());
+    }
+}
+
+#[tokio::test]
+async fn logout_hint_failures_and_window_cancellation_do_not_poll_or_restart_old_sends() {
+    use super::leave_work::send_logout_hints;
+    for cancelled in [false, true] {
+        let stop = CancellationToken::new();
+        if cancelled {
+            stop.cancel();
+        }
+        let attempted = Mutex::new(Vec::new());
+        let result = send_logout_hints(&stop, true, true, |target| {
+            let attempted = &attempted;
+            async move {
+                attempted.lock().unwrap().push(target);
+                false
+            }
+        })
+        .await;
+        assert!(!result.stream_stopped && !result.left);
+        assert_eq!(
+            *attempted.lock().unwrap(),
+            if cancelled {
+                vec![]
+            } else {
+                vec!["StopStream", "EndCall"]
+            }
+        );
+    }
+    for cancelling in ["StopStream", "EndCall"] {
+        let stop = CancellationToken::new();
+        let entered = Notify::new();
+        let attempted = Mutex::new(Vec::new());
+        let hints = send_logout_hints(&stop, true, true, |target| {
+            let stop = &stop;
+            let entered = &entered;
+            let attempted = &attempted;
+            async move {
+                attempted.lock().unwrap().push(target);
+                if target == cancelling {
+                    entered.notify_one();
+                    stop.cancelled().await;
+                    std::future::pending::<()>().await;
+                }
+                true
+            }
+        });
+        let cancelling = async {
+            entered.notified().await;
+            stop.cancel();
+        };
+        let (result, ()) = timeout(Duration::from_millis(1500), async {
+            tokio::join!(hints, cancelling)
+        })
+        .await
+        .unwrap();
+        assert!(!result.left);
+        assert_eq!(result.stream_stopped, attempted.lock().unwrap().len() == 2);
+    }
+}
+
+#[tokio::test]
+async fn logout_old_connection_sends_retained_stream_and_call_hints_without_a_live_voice() {
+    use super::leave_work::close_logout_connection;
+    let mut fixture = fixture().await;
+    let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+        .await
+        .unwrap();
+    let intents = CriticalIntents::default();
+    let old = intents.ticket();
+    let mut state = VoiceState::new(old);
+    state.pending_stop_stream = true;
+    assert!(state.voice.is_none());
+    intents.request(CriticalAction::Leave);
+    intents.request(CriticalAction::Logout);
+    assert_eq!(intents.next().await, CriticalAction::Logout);
+    let result = close_logout_connection(
+        hub.clone(),
+        &CancellationToken::new(),
+        state.pending_stop_stream,
+        state.abandoned_call,
+    )
+    .await;
+    assert!(result.stream_stopped && result.left);
+    assert!(!hub.is_connected());
+    for target in ["StopStream", "EndCall"] {
+        assert_eq!(
+            timeout(Duration::from_millis(1500), fixture.hints.recv())
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(target)
+        );
+    }
+    assert_eq!(fixture.server.await.unwrap(), vec!["StopStream", "EndCall"]);
+    println!("logout connection captured_old=true retained_stream=true abandoned_call=true live_voice=false protocol_checked=true physical_audio=false");
+}
+
+#[tokio::test]
+async fn abandoning_polled_logout_cleanup_closes_the_captured_connection_even_with_live_clones() {
+    use super::leave_work::close_logout_connection;
+    let fixture = fixture().await;
+    let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+        .await
+        .unwrap();
+    let stop = CancellationToken::new();
+    let mut cleanup = Box::pin(close_logout_connection(hub.clone(), &stop, true, true));
+    assert!(futures_util::poll!(cleanup.as_mut()).is_pending());
+    drop(cleanup);
+    assert!(!hub.is_connected());
+    assert!(timeout(Duration::from_millis(1500), fixture.server)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_empty());
+    println!("logout connection abandoned_polled=true old_clones_closed=true detached_jobs=0 physical_audio=false");
+}
