@@ -4,6 +4,7 @@ import { AudioSettingsPanel, AudioSettingsView, AudioDeviceItem, AudioSlider, Re
 import { MicTestPanel, MicTestView, MicButtonFeedback } from "mic-test.slint";
 import { StreamSource } from "stream-source.slint";
 import { RemoteViewer } from "remote-viewer.slint";
+import { AvatarCropper } from "avatar-cropper.slint";
 
 export struct ChannelItem { id: string, name: string, count: int }
 export struct FriendItem { id: string, name: string, username: string, online: bool, color: color, avatar: image, speaking: bool, muted: bool, deafened: bool }
@@ -33,6 +34,22 @@ export component NativeApp inherits Window {
     in property <image> captcha-image;
     in property <image> setup-avatar;
     in property <color> avatar-color: #c81e70;
+    in-out property <bool> avatar-loading;
+    in-out property <bool> crop-active;
+    in property <image> crop-image;
+    in-out property <float> crop-scale: 1;
+    in-out property <float> crop-x;
+    in-out property <float> crop-y;
+    in-out property <string> profile-id;
+    in-out property <string> profile-name;
+    in-out property <string> profile-login;
+    in-out property <string> profile-about;
+    in property <image> profile-avatar;
+    in property <color> profile-color: #c81e70;
+    in property <bool> profile-online;
+    in property <bool> profile-friend;
+    in-out property <bool> profile-editing;
+    in-out property <bool> profile-saving;
     in-out property <bool> authenticated;
     in-out property <bool> connected;
     in-out property <int> active-tab;
@@ -121,6 +138,13 @@ export component NativeApp inherits Window {
     callback submit-auth;
     callback load-captcha;
     callback choose-avatar;
+    callback avatar-context-changed;
+    callback cancel-crop;
+    callback apply-crop;
+    callback open-profile(string);
+    callback edit-profile;
+    callback cancel-profile-edit;
+    callback save-profile;
     callback submit-modal(int, string);
     callback choose-channel(string);
     callback confirm-channel-switch;
@@ -164,11 +188,15 @@ export component NativeApp inherits Window {
     callback mic-test-toggle;
     callback mic-test-seek(float);
     changed language => { root.language-changed(root.language); }
-    changed modal => { if root.modal == 3 { root.refresh-audio-devices(); } if root.modal != 5 { root.cancel-picker-query(); } if root.modal != 0 && root.control-viewer != "" { root.release-control(); } root.mic-test-context-changed(); }
+    changed modal => { if root.modal == 3 { root.refresh-audio-devices(); } if root.modal != 5 { root.cancel-picker-query(); } if root.modal != 0 && root.control-viewer != "" { root.release-control(); } root.mic-test-context-changed(); root.avatar-context-changed(); }
     changed voice-active => { if !root.voice-active { root.cancel-picker-query(); } }
     changed settings-tab => { root.settings-scroll-y = 0px; root.mic-test-context-changed(); }
-    changed authenticated => { root.mic-test-context-changed(); }
-    changed user-id => { root.mic-test-context-changed(); }
+    changed authenticated => { root.mic-test-context-changed(); root.avatar-context-changed(); }
+    changed user-id => { root.mic-test-context-changed(); root.avatar-context-changed(); }
+    changed auth-step => { root.avatar-context-changed(); }
+    changed login => { root.avatar-context-changed(); }
+    changed profile-id => { root.avatar-context-changed(); }
+    changed profile-editing => { root.avatar-context-changed(); }
     changed audio-settings => { root.mic-test-context-changed(); }
     changed mic-test-active => { root.mic-test-revealed = false; }
 
@@ -231,7 +259,7 @@ export component NativeApp inherits Window {
                     Rectangle { x: (parent.width - 88px) / 2; width: 88px; height: 88px; border-radius: 44px; background: root.avatar-color;
                         Image { width: 88px; height: 88px; source: root.setup-avatar; image-fit: cover; }
                         if root.setup-avatar.width == 0 : Image { x: 30px; y: 30px; width: 28px; height: 28px; source: @image-url("../assets/icons/camera.svg"); }
-                        TouchArea { clicked => { root.choose-avatar(); } }
+                        IconButton { width: parent.width; height: parent.height; corner-radius: 44px; label: root.tr("auth.cropTitle", root.language); disabled: root.busy || root.avatar-loading; activated => { root.choose-avatar(); } }
                     }
                 }
                 Rectangle { height: 20px; background: transparent; }
@@ -282,6 +310,7 @@ export component NativeApp inherits Window {
                         Text { x: 66px; y: 9px; width: parent.width - 74px; height: 20px; text: friend.name; color: white; font-size: 14px; font-weight: 700; overflow: elide; }
                         Text { x: 66px; y: 31px; width: parent.width - 74px; height: 16px; text: friend.username; color: #949ba4; font-size: 12px; overflow: elide; }
                         friend-touch := TouchArea { clicked => { root.choose-friend(friend.id); } }
+                        IconButton { x: 8px; y: 7px; width: 46px; height: 46px; corner-radius: 23px; label: root.tr("contextMenu.profile", root.language); activated => { root.open-profile(friend.id); } }
                     }
                 }
             }
@@ -322,6 +351,7 @@ export component NativeApp inherits Window {
             Rectangle { x: 16px; y: 12px; width: 51px; height: 51px; background: root.user-color; border-radius: 26px;
                 Image { width: parent.width; height: parent.height; source: root.user-avatar; image-fit: cover; }
                 Rectangle { x: 37px; y: 37px; width: 16px; height: 16px; border-radius: 8px; background: root.connected ? #23a559 : #949ba4; border-width: 3px; border-color: #09090b; }
+                IconButton { width: parent.width; height: parent.height; corner-radius: 26px; label: root.tr("contextMenu.profile", root.language); activated => { root.open-profile(root.user-id); } }
             }
             Text { x: 79px; y: 20px; width: 178px; height: 20px; text: root.user-name; color: white; font-size: 14px; font-weight: 700; overflow: elide; }
             Text { x: 79px; y: 41px; width: 178px; height: 16px; text: root.user-login; color: #949ba4; font-size: 12px; overflow: elide; }
@@ -369,6 +399,7 @@ export component NativeApp inherits Window {
                     Rectangle { x: (parent.width - 96px) / 2; y: (parent.height - 128px) / 2; width: 96px; height: 96px; background: user.color; border-radius: 48px;
                         Image { width: 96px; height: 96px; source: user.avatar; image-fit: cover; }
                         Rectangle { width: parent.width; height: parent.height; border-radius: 48px; border-width: user.speaking && !user.muted ? 2px : 0px; border-color: #3ba55c; background: transparent; }
+                        IconButton { width: parent.width; height: parent.height; corner-radius: 48px; label: root.tr("contextMenu.profile", root.language); activated => { root.open-profile(user.id); } }
                     }
                     if user.muted || user.deafened : Image { x: parent.width - 36px; y: 16px; width: 20px; height: 20px; source: user.deafened ? @image-url("../assets/icons/headphones.svg") : @image-url("../assets/icons/microphone.svg"); colorize: #da373c; }
                     if user.id != root.user-id : IconButton { x: 12px; y: 12px; width: 44px; height: 44px; icon: @image-url("../assets/icons/headphones.svg"); label: root.tr("modals.userVolume.title", root.language); activated => { root.show-user-volume(user.id, user.name); } }
@@ -462,7 +493,10 @@ export component NativeApp inherits Window {
                     }
                     if root.settings-tab == 1 : AudioSettingsPanel { audio: root.audio-settings; inputs: root.input-devices; outputs: root.output-devices; input-name: root.input-device-name; output-name: root.output-device-name; reduced-motion: root.reduced-motion; devices-failed: root.audio-devices-failed; mic-db: root.mic-db; tr(key) => { return root.tr(key, root.language); } edited(key, value) => { root.audio-setting-changed(key, value); } }
                     if root.settings-tab == 2 : RelaySetting { relay-only: root.audio-settings.relay-only; reduced-motion: root.reduced-motion; tr(key) => { return root.tr(key, root.language); } toggled(value) => { root.audio-setting-changed("relayOnly", value ? "true" : "false"); } }
-                    if root.settings-tab == 3 : FormButton { label: root.tr("settings.privacy.logout", root.language); foreground: #da373c; activated => { root.logout(); } }
+                    if root.settings-tab == 3 : VerticalLayout { spacing: 12px;
+                        FormButton { label: root.tr("profile.editTitle", root.language); activated => { root.open-profile(root.user-id); root.edit-profile(); } }
+                        FormButton { label: root.tr("settings.privacy.logout", root.language); foreground: #da373c; activated => { root.logout(); } }
+                    }
                     if root.error != "" : Text { text: root.error; color: #da373c; font-size: 14px; wrap: word-wrap; }
                 }
             }
@@ -478,7 +512,50 @@ export component NativeApp inherits Window {
             }
         }
     }
-    if root.modal > 0 && root.modal != 3 && root.modal != 8 : Rectangle {
+    if root.modal == 9 : Rectangle {
+        y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
+        Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: 400px; height: min(root.profile-editing ? 548px : 432px, parent.height - 48px); background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12; clip: true;
+            Rectangle { x: 0px; y: 0px; width: parent.width; height: 128px; background: root.profile-color; }
+            IconButton { x: parent.width - 56px; y: 16px; corner-radius: 20px; foreground: white; icon: @image-url("../assets/icons/window-close.svg"); label: root.tr("common.close", root.language); activated => { root.modal = 0; } }
+            if root.profile-id == root.user-id && !root.profile-editing : IconButton { x: parent.width - 104px; y: 16px; corner-radius: 20px; foreground: white; icon: @image-url("../assets/icons/gear.svg"); label: root.tr("profile.editTitle", root.language); activated => { root.edit-profile(); } }
+            Rectangle { x: 32px; y: 72px; width: 112px; height: 112px; background: #161618; border-radius: 56px;
+                Rectangle { x: 6px; y: 6px; width: 100px; height: 100px; background: root.profile-color; border-radius: 50px;
+                    Image { width: parent.width; height: parent.height; source: root.profile-avatar; image-fit: cover; }
+                    if root.profile-editing : IconButton { width: parent.width; height: parent.height; corner-radius: 50px; label: root.tr("auth.cropTitle", root.language); icon: @image-url("../assets/icons/camera.svg"); disabled: root.avatar-loading || root.profile-saving; activated => { root.choose-avatar(); } }
+                }
+                if !root.profile-editing : Rectangle { x: 80px; y: 80px; width: 28px; height: 28px; border-radius: 14px; border-width: 4px; border-color: #161618; background: (root.profile-id == root.user-id ? root.connected : root.profile-online) ? #23a559 : #949ba4; }
+            }
+            ScrollView { x: 32px; y: 208px; width: parent.width - 64px; height: parent.height - 232px;
+                VerticalLayout { spacing: 16px; alignment: start;
+                    if !root.profile-editing : VerticalLayout { spacing: 8px; alignment: start; vertical-stretch: 0;
+                        Text { text: root.profile-name; font-size: 30px; font-weight: 900; color: white; wrap: word-wrap; }
+                        Text { text: "@" + root.profile-login; font-size: 16px; font-weight: 700; color: #ee68a9; }
+                        if root.profile-about != "" : Text { text: root.profile-about; font-size: 14px; color: #f2f3f5; wrap: word-wrap; }
+                        if root.profile-friend && root.profile-id != root.user-id : HorizontalLayout { spacing: 16px;
+                            FormButton { label: root.tr("profile.chat", root.language); activated => { root.choose-friend(root.profile-id); root.modal = 0; } }
+                            FormButton { label: root.tr("profile.call", root.language); primary: true; disabled: root.busy || !root.connected; activated => { root.call-friend(root.profile-id); root.modal = 0; } }
+                        }
+                        FormButton { label: root.tr("common.close", root.language); activated => { root.modal = 0; } }
+                    }
+                    if root.profile-editing : VerticalLayout { spacing: 12px; alignment: start; vertical-stretch: 0;
+                        Text { height: self.preferred-height; text: root.tr("profile.displayName", root.language); font-size: 12px; font-weight: 700; color: #949ba4; }
+                        FormField { text <=> root.profile-name; label: root.tr("profile.displayName", root.language); disabled: root.profile-saving; edited(value) => { root.profile-name = root.limit-text(value, 20); root.error = ""; } }
+                        Text { height: self.preferred-height; text: root.tr("profile.aboutMe", root.language); font-size: 12px; font-weight: 700; color: #949ba4; }
+                        Rectangle { height: 88px; background: #ffffff0b; border-radius: 16px; border-width: about.has-focus ? 2px : 1px; border-color: about.has-focus ? #c81e70 : #ffffff12;
+                            if root.profile-about == "" : Text { x: 12px; y: 12px; width: parent.width - 24px; text: root.tr("profile.aboutMePlaceholder", root.language); color: #949ba4; font-size: 14px; wrap: word-wrap; }
+                            about := TextInput { x: 12px; y: 12px; width: parent.width - 24px; height: parent.height - 24px; text <=> root.profile-about; color: white; font-size: 14px; single-line: false; wrap: word-wrap; enabled: !root.profile-saving; accessible-label: root.tr("profile.aboutMe", root.language); edited => { root.profile-about = root.limit-text(root.profile-about, 150); } }
+                        }
+                        if root.error != "" : Text { text: root.error; color: #da373c; font-size: 12px; wrap: word-wrap; }
+                        HorizontalLayout { spacing: 16px;
+                            FormButton { label: root.tr("common.cancel", root.language); disabled: root.profile-saving; activated => { root.cancel-profile-edit(); } }
+                            FormButton { label: root.tr(root.profile-saving ? "common.loading" : "common.save", root.language); primary: true; disabled: root.profile-saving || root.avatar-loading || root.crop-active; activated => { root.save-profile(); } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if root.modal > 0 && root.modal != 3 && root.modal != 8 && root.modal != 9 : Rectangle {
         y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
         Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: root.modal == 5 ? 540px : 400px; height: root.modal == 5 ? 600px : root.modal == 3 ? 276px : 288px; background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
             VerticalLayout { padding: 32px; spacing: 16px;
@@ -524,6 +601,13 @@ export component NativeApp inherits Window {
                     FormButton { label: root.tr(root.modal == 7 ? "chat.sendFile" : root.modal == 6 ? "modals.switchChannel.switch" : root.modal == 5 ? "stream.confirm" : root.modal == 4 ? "main.notifications.accept" : root.modal == 3 ? "settings.privacy.logout" : root.modal == 1 ? "modals.createChannel.submit" : "modals.addFriend.submit", root.language); primary: true; disabled: root.busy || (root.modal == 5 && (root.selected-screen == "" || root.picker-loading)) || (root.modal == 6 && root.pending-channel == ""); activated => { if root.modal == 7 { root.confirm-files(true); } else if root.modal == 6 { root.confirm-channel-switch(); } else if root.modal == 5 { root.start-share(root.selected-screen, root.screen-source-kind == 2 ? "camera" : root.screen-quality, root.screen-source-kind != 2 && root.screen-include-audio, root.screen-source-kind != 2 && root.screen-allow-control); } else if root.modal == 4 { root.answer-call(root.incoming-call-id, true); } else if root.modal == 3 { root.logout(); } else { root.submit-modal(root.modal, root.modal-input); } } }
                 }
             }
+        }
+    }
+    if root.crop-active : Rectangle {
+        y: 36px; width: parent.width; height: parent.height - 36px; background: #000000e6;
+        AvatarCropper { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; source: root.crop-image;
+            scale <=> root.crop-scale; offset-x <=> root.crop-x; offset-y <=> root.crop-y; busy: root.avatar-loading; reduced-motion: root.reduced-motion;
+            tr(key) => { return root.tr(key, root.language); } cancel => { root.cancel-crop(); } apply => { root.apply-crop(); }
         }
     }
 }

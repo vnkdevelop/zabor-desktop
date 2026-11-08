@@ -66,6 +66,7 @@ fn answer(method: &str) -> Value {
         "GetJokeOfTheDay" => json!("fixture"),
         "GetIceServers" => json!({"iceServers":[]}),
         "GetRegistrationCaptcha" => json!({"id":"fixture-captcha","imageBase64":"fixture-image"}),
+        "UpdateProfile" => Value::Null,
         "CheckUserExists"
         | "EnableCallResume"
         | "CreateChannel"
@@ -148,6 +149,7 @@ async fn fixture_with_login(hold: &'static str, login_result: Value) -> Fixture 
                             if method == "LoginAndResume" { assert_eq!(request["arguments"].as_array().unwrap().len(), 3); assert_eq!(request["arguments"][2], RESUME_SESSION); }
                             if method == "Login" { assert_eq!(request["arguments"].as_array().unwrap().len(), 2); }
                             if matches!(method, "CreateChannel" | "SendFriendRequest") { assert_eq!(request["arguments"], json!(["Fixture"])); }
+                            if method == "UpdateProfile" { assert_eq!(request["arguments"], json!(["New Name", null, "#123abc", "about me"])); }
                             if matches!(method, "AcceptFriendRequest" | "DeclineFriendRequest" | "DeclineChannelInvite") { assert_eq!(request["arguments"], json!(["fixture-id"])); }
                             if method == hold {
                                 assert!(waiting.is_none());
@@ -315,6 +317,140 @@ fn cases() -> Vec<(&'static str, Command)> {
         ),
     ]);
     cases
+}
+
+fn profile_update() -> zabor_native::auth::ProfileUpdate {
+    zabor_native::auth::ProfileUpdate {
+        owner: "fixture-owner".into(),
+        name: " New Name ".into(),
+        avatar: None,
+        color: "#123abc".into(),
+        about: " about me ".into(),
+    }
+}
+
+#[tokio::test]
+async fn profile_update_preserves_four_argument_wire_contract_and_original_session_across_leave() {
+    timeout(Duration::from_secs(10), async {
+        let fixture = fixture("UpdateProfile").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let intents = Arc::new(CriticalIntents::default());
+        let query = super::avatar_ui::Query::profile(&intents, "fixture-owner".into());
+        let ticket = query.ticket;
+        let original = query.clone();
+        let controls = intents.clone();
+        let connection = hub.clone();
+        let task = tokio::spawn(async move {
+            let stop = CancellationToken::new();
+            let audio = audio(&stop);
+            let generation = AtomicU64::new(0);
+            let update = |_| {};
+            let work = SessionWork::new(&controls, ticket, &stop, &update);
+            let auth = AuthClient::new(connection.clone());
+            drive(
+                &work,
+                ticket,
+                &audio,
+                &generation,
+                Some(&connection),
+                main_session::compute(
+                    Command::UpdateProfile(profile_update(), query),
+                    &auth,
+                    &connection,
+                    Some(user()),
+                ),
+            )
+            .await
+        });
+        fixture.held.notified().await;
+        intents.request(CriticalAction::Leave);
+        assert!(original.alive());
+        fixture.release.notify_one();
+        let Some(Ok(MainResult::Profile(result))) = task.await.unwrap() else {
+            panic!("profile update did not finish");
+        };
+        assert_eq!(result.user.display_name, "New Name");
+        assert_eq!(result.user.about_me.as_deref(), Some("about me"));
+        assert_eq!(result.user.avatar_color, "#123abc");
+        assert!(result.query.alive() && intents.is_current(ticket, IntentScope::Session));
+        assert!(!intents.is_current(ticket, IntentScope::Voice));
+        hub.close();
+        assert_eq!(
+            fixture
+                .server
+                .await
+                .unwrap()
+                .iter()
+                .filter(|method| method.as_str() == "UpdateProfile")
+                .count(),
+            1
+        );
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn cancelled_profile_context_never_dispatches_a_queued_update() {
+    let fixture = fixture("UpdateProfile").await;
+    let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+        .await
+        .unwrap();
+    let intents = CriticalIntents::default();
+    let query = super::avatar_ui::Query::profile(&intents, "fixture-owner".into());
+    query.stop.cancel();
+    let result = main_session::compute(
+        Command::UpdateProfile(profile_update(), query.clone()),
+        &AuthClient::new(hub.clone()),
+        &hub,
+        Some(user()),
+    )
+    .await;
+    assert!(result.is_err());
+    assert!(UiEvent::ProfileSaved(user(), query)
+        .for_current(&intents)
+        .is_none());
+    hub.close();
+    assert!(fixture.server.await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn logout_during_dispatched_profile_update_rejects_the_original_result_without_late_publication(
+) {
+    let fixture = fixture("UpdateProfile").await;
+    let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+        .await
+        .unwrap();
+    let intents = Arc::new(CriticalIntents::default());
+    let query = super::avatar_ui::Query::profile(&intents, "fixture-owner".into());
+    let original = query.clone();
+    let connection = hub.clone();
+    let task = tokio::spawn(async move {
+        main_session::compute(
+            Command::UpdateProfile(profile_update(), query),
+            &AuthClient::new(connection.clone()),
+            &connection,
+            Some(user()),
+        )
+        .await
+    });
+    fixture.held.notified().await;
+    intents.request(CriticalAction::Logout);
+    assert!(timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_err());
+    assert!(!original.alive());
+    assert!(UiEvent::ProfileError(original, super::AuthError::Network)
+        .for_current(&intents)
+        .is_none());
+    fixture.release.notify_one();
+    fixture.answered.notified().await;
+    hub.close();
+    assert_eq!(fixture.server.await.unwrap(), ["UpdateProfile"]);
 }
 
 #[tokio::test]

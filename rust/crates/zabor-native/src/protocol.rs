@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-pub const MAX_RECORD_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_RECORD_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProtocolError {
@@ -102,5 +102,53 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["invocationId"], "9");
         assert_eq!(records[0]["arguments"][1], "x\u{1e}\"\\");
+    }
+
+    #[test]
+    fn maximum_file_gif_survives_the_bounded_profile_record_without_changing_arguments() {
+        use base64::Engine;
+        let gif = format!(
+            "data:image/gif;base64,{}",
+            base64::engine::general_purpose::STANDARD
+                .encode(vec![0; crate::avatar::MAX_FILE_BYTES])
+        );
+        let packed = json!({"g":gif,"s":1.0,"x":-12.5,"y":20.0}).to_string();
+        let arguments = vec![
+            json!("имя"),
+            json!(packed),
+            json!("#123abc"),
+            json!("о себе"),
+        ];
+        let wire = invocation(42, "UpdateProfile", arguments.clone()).unwrap();
+        assert!(wire.len() > 4 * 1024 * 1024 && wire.len() <= MAX_RECORD_BYTES);
+        let mut decoder = Decoder::default();
+        let records = wire
+            .as_bytes()
+            .chunks(65536)
+            .flat_map(|bytes| decoder.push(bytes).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["arguments"], json!(arguments));
+    }
+
+    #[test]
+    fn exact_record_limit_excludes_separator_and_excess_still_fails_closed() {
+        let mut value = json!({"padding":""});
+        let overhead = serde_json::to_string(&value).unwrap().len();
+        value["padding"] = json!("x".repeat(MAX_RECORD_BYTES - overhead));
+        let wire = encode(&value).unwrap();
+        assert_eq!(wire.len(), MAX_RECORD_BYTES + 1);
+        assert_eq!(
+            Decoder::default().push(wire.as_bytes()).unwrap(),
+            [value.clone()]
+        );
+        value["padding"] = json!("x".repeat(MAX_RECORD_BYTES - overhead + 1));
+        assert_eq!(encode(&value), Err(ProtocolError::Oversized));
+        let mut decoder = Decoder::default();
+        assert_eq!(
+            decoder.push(&vec![b'x'; MAX_RECORD_BYTES + 1]),
+            Err(ProtocolError::Oversized)
+        );
+        assert_eq!(decoder.push(b"{}\x1e").unwrap(), [json!({})]);
     }
 }

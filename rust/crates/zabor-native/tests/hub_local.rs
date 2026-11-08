@@ -73,6 +73,20 @@ async fn server(throttle: bool) -> (String, tokio::task::JoinHandle<Vec<String>>
                         Value::Null
                     }
                     "DeclineChannelInvite" => json!(false),
+                    "UpdateProfile" => {
+                        assert_eq!(request["arguments"].as_array().unwrap().len(), 4);
+                        let user = json!({"id":"fixture-owner","username":"fixture","displayName":request["arguments"][0],"avatarBase64":request["arguments"][1],"avatarColor":request["arguments"][2],"aboutMe":request["arguments"][3],"isOnline":true});
+                        websocket
+                            .send(Message::text(
+                                encode(
+                                    &json!({"type":1,"target":"UserUpdated","arguments":[user]}),
+                                )
+                                .unwrap(),
+                            ))
+                            .await
+                            .unwrap();
+                        Value::Null
+                    }
                     _ => Value::Null,
                 };
                 let response = if throttle {
@@ -189,6 +203,85 @@ async fn notification_commands_keep_the_existing_null_success_and_false_rejectio
                 "DeclineChannelInvite"
             ]
         );
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn five_mib_packed_gif_profile_update_and_user_event_cross_actual_local_websocket_unchanged()
+{
+    use tokio_util::sync::CancellationToken;
+    use zabor_native::auth::{ProfileUpdate, User};
+    use zabor_native::avatar::{Crop, Source, MAX_FILE_BYTES};
+    timeout(Duration::from_secs(15), async {
+        let mut gif = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut gif);
+            encoder
+                .set_repeat(image::codecs::gif::Repeat::Infinite)
+                .unwrap();
+            for pixel in [[255, 0, 0, 255], [0, 0, 255, 255]] {
+                encoder
+                    .encode_frame(image::Frame::from_parts(
+                        image::RgbaImage::from_pixel(8, 4, image::Rgba(pixel)),
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(40, 1),
+                    ))
+                    .unwrap();
+            }
+        }
+        assert_eq!(gif.pop(), Some(0x3b));
+        gif.extend_from_slice(&[0x21, 0xfe]);
+        while MAX_FILE_BYTES - gif.len() > 3 {
+            let size = (MAX_FILE_BYTES - gif.len() - 3).min(255);
+            gif.push(size as u8);
+            gif.resize(gif.len() + size, 0);
+        }
+        gif.extend_from_slice(&[0, 0x3b]);
+        assert!((MAX_FILE_BYTES - 1..=MAX_FILE_BYTES).contains(&gif.len()));
+        let source = Source::from_bytes(&gif, &CancellationToken::new()).unwrap();
+        let selected = source
+            .select(
+                Crop {
+                    scale: 1.25,
+                    x: -10.5,
+                    y: 20.0,
+                },
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        assert_eq!(selected.avatar.frames.len(), 2);
+        assert!(selected.wire.len() > 4 * 1024 * 1024);
+        let (endpoint, server) = server(false).await;
+        let (hub, mut events) = HubConnection::connect(&endpoint, None).await.unwrap();
+        assert_eq!(events.recv().await.unwrap().target, "SyncFullChannelState");
+        let user = User {
+            id: "fixture-owner".into(),
+            username: "fixture".into(),
+            is_muted: true,
+            ..Default::default()
+        };
+        let update = ProfileUpdate {
+            owner: user.id.clone(),
+            name: " имя ".into(),
+            avatar: Some(selected.wire.clone()),
+            color: selected.color,
+            about: " о себе ".into(),
+        };
+        let result = AuthClient::new(hub.clone())
+            .update_profile(&update, &user)
+            .await
+            .unwrap();
+        assert!(result.is_muted);
+        let event = events.recv().await.unwrap();
+        assert_eq!(event.target, "UserUpdated");
+        assert_eq!(event.arguments[0]["avatarBase64"], selected.wire);
+        assert_eq!(event.arguments[0]["displayName"], "имя");
+        assert_eq!(event.arguments[0]["aboutMe"], "о себе");
+        hub.close();
+        assert_eq!(server.await.unwrap(), ["UpdateProfile"]);
     })
     .await
     .unwrap();

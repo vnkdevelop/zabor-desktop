@@ -7,6 +7,7 @@ use zabor_native::roster::{respond_notification, NotificationKind};
 pub(super) enum MainResult {
     Authentication(LoginOutcome, Credentials),
     Event(UiEvent),
+    Profile(super::UserProfileResult),
 }
 
 pub(super) fn is_session_command(command: &Command) -> bool {
@@ -15,6 +16,7 @@ pub(super) fn is_session_command(command: &Command) -> bool {
         Command::Authenticate { .. }
             | Command::Captcha
             | Command::Modal { .. }
+            | Command::UpdateProfile(..)
             | Command::Notification(
                 NotificationKind::Friend | NotificationKind::Channel,
                 _,
@@ -48,6 +50,21 @@ pub(super) async fn compute(
             .captcha()
             .await
             .map(|captcha| MainResult::Event(UiEvent::Captcha(captcha))),
+        Command::UpdateProfile(update, query) => {
+            let user = user.ok_or(AuthError::Network)?;
+            let result = tokio::select! {
+                biased;
+                _ = query.stop.cancelled() => return Err(AuthError::Network),
+                result = auth.update_profile(&update, &user) => result,
+            }?;
+            if !query.alive() {
+                return Err(AuthError::Network);
+            }
+            Ok(MainResult::Profile(super::UserProfileResult {
+                user: result,
+                query,
+            }))
+        }
         Command::Notification(kind, id, accept) => {
             if !respond_notification(connection, kind, &id, accept)
                 .await

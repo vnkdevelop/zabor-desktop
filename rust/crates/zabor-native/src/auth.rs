@@ -87,6 +87,48 @@ pub struct Registration {
     pub answer: String,
 }
 
+#[derive(Clone)]
+pub struct ProfileUpdate {
+    pub owner: String,
+    pub name: String,
+    pub avatar: Option<String>,
+    pub color: String,
+    pub about: String,
+}
+
+impl ProfileUpdate {
+    pub fn validate(&self, user: &User) -> Result<(), AuthError> {
+        if self.owner.is_empty() || self.owner != user.id {
+            return Err(AuthError::Network);
+        }
+        validate_name(&self.name)?;
+        if self.about.encode_utf16().count() > 150 {
+            return Err(AuthError::Validation("validation.maxChars"));
+        }
+        if self
+            .avatar
+            .as_ref()
+            .is_some_and(|avatar| avatar.len() > crate::avatar::MAX_WIRE_BYTES)
+        {
+            return Err(AuthError::Validation("common.fileTooLarge"));
+        }
+        if self.color.len() != 7
+            || !self.color.starts_with('#')
+            || !self.color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(AuthError::Network);
+        }
+        Ok(())
+    }
+
+    pub fn apply(&self, user: &mut User) {
+        user.display_name = self.name.trim().into();
+        user.avatar_base64.clone_from(&self.avatar);
+        user.avatar_color.clone_from(&self.color);
+        user.about_me = Some(self.about.trim().into());
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AuthError {
     Validation(&'static str),
@@ -170,6 +212,29 @@ pub struct AuthClient {
 impl AuthClient {
     pub fn new(hub: HubConnection) -> Self {
         Self { hub }
+    }
+
+    pub async fn update_profile(
+        &self,
+        update: &ProfileUpdate,
+        user: &User,
+    ) -> Result<User, AuthError> {
+        update.validate(user)?;
+        self.hub
+            .invoke(
+                "UpdateProfile",
+                vec![
+                    json!(update.name.trim()),
+                    json!(update.avatar),
+                    json!(update.color),
+                    json!(update.about.trim()),
+                ],
+                Duration::from_secs(20),
+            )
+            .await?;
+        let mut user = user.clone();
+        update.apply(&mut user);
+        Ok(user)
     }
 
     pub async fn login(&self, credentials: &Credentials) -> Result<LoginOutcome, AuthError> {
@@ -381,5 +446,49 @@ mod tests {
             AuthError::Throttled(1)
         );
         assert_eq!(AuthError::from(HubError::Network), AuthError::Network);
+    }
+
+    #[test]
+    fn profile_updates_enforce_original_owner_utf16_limits_and_preserve_non_profile_state() {
+        let mut user = User {
+            id: "owner".into(),
+            username: "login".into(),
+            is_muted: true,
+            current_channel_id: Some("channel".into()),
+            allow_remote_control: true,
+            ..Default::default()
+        };
+        let update = ProfileUpdate {
+            owner: "owner".into(),
+            name: " Виктор ".into(),
+            avatar: None,
+            color: "#C81E70".into(),
+            about: " о себе ".into(),
+        };
+        assert_eq!(update.validate(&user), Ok(()));
+        update.apply(&mut user);
+        assert_eq!(user.display_name, "Виктор");
+        assert_eq!(user.about_me.as_deref(), Some("о себе"));
+        assert!(user.is_muted && user.allow_remote_control);
+        assert_eq!(user.current_channel_id.as_deref(), Some("channel"));
+        assert_eq!(user.username, "login");
+        let mut invalid = update.clone();
+        invalid.owner = "other".into();
+        assert!(invalid.validate(&user).is_err());
+        invalid = update.clone();
+        invalid.name = "😀".repeat(11);
+        assert_eq!(
+            invalid.validate(&user),
+            Err(AuthError::Validation("validation.maxNameChars"))
+        );
+        invalid = update.clone();
+        invalid.about = "😀".repeat(76);
+        assert!(invalid.validate(&user).is_err());
+        invalid = update.clone();
+        invalid.color = "#123xyZ".into();
+        assert!(invalid.validate(&user).is_err());
+        invalid = update;
+        invalid.avatar = Some("x".repeat(crate::avatar::MAX_WIRE_BYTES + 1));
+        assert!(invalid.validate(&user).is_err());
     }
 }

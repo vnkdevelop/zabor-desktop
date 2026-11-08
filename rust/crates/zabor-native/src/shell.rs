@@ -48,6 +48,8 @@ use zabor_native::video::{DecodedVideo, StreamDropGrace, VideoFrameLease, VideoR
 use zabor_native::voice::VoiceSession;
 use zeroize::Zeroizing;
 
+mod avatar_interactions;
+mod avatar_ui;
 #[cfg(test)]
 mod critical_tests;
 mod leave_work;
@@ -84,6 +86,7 @@ enum Command {
         kind: i32,
         value: String,
     },
+    UpdateProfile(zabor_native::auth::ProfileUpdate, avatar_ui::Query),
     Logout,
     Join(String),
     Leave,
@@ -234,7 +237,9 @@ enum UiEvent {
     Hub(HubEvent),
     Disconnected,
     SignedOut,
-    Avatar(String),
+    Avatar(avatar_ui::Event),
+    ProfileSaved(zabor_native::auth::User, avatar_ui::Query),
+    ProfileError(avatar_ui::Query, AuthError),
     Voice(String, Vec<zabor_native::auth::User>),
     VoiceEnded,
     Toast(&'static str),
@@ -288,6 +293,13 @@ impl UiEvent {
                     return (!query.is_cancelled())
                         .then_some(Self::SourcePreview(query, source, image));
                 }
+                Self::Avatar(event) => return event.alive().then_some(Self::Avatar(event)),
+                Self::ProfileSaved(user, query) => {
+                    return query.alive().then_some(Self::ProfileSaved(user, query))
+                }
+                Self::ProfileError(query, error) => {
+                    return query.alive().then_some(Self::ProfileError(query, error))
+                }
                 event => return Some(event),
             }
         }
@@ -316,6 +328,11 @@ impl FrameUpdate {
     }
 }
 type VideoSink = Arc<dyn Fn(FrameUpdate) + Send + Sync>;
+
+struct UserProfileResult {
+    user: zabor_native::auth::User,
+    query: avatar_ui::Query,
+}
 
 struct WorkerMedia {
     video_sink: VideoSink,
@@ -516,6 +533,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     });
     let captcha_id = Rc::new(RefCell::new(String::new()));
     let setup_avatar = Rc::new(RefCell::new(None::<String>));
+    let avatars = Rc::new(RefCell::new(avatar_ui::AvatarUi::new()));
     let latest = Rc::new(RefCell::new(Bootstrap::default()));
     let pending_files = Rc::new(RefCell::new(None::<(String, String, Vec<PathBuf>)>));
     let video_generation = Arc::new(AtomicU64::new(0));
@@ -641,7 +659,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let auth_avatar = setup_avatar.clone();
     ui.on_submit_auth(move || {
         if let Some(ui) = weak.upgrade() {
-            if ui.get_busy() {
+            if ui.get_busy() || ui.get_crop_active() || ui.get_avatar_loading() {
                 return;
             }
             let credentials = Credentials {
@@ -655,7 +673,12 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             let registration = (ui.get_auth_step() == 2).then(|| Registration {
                 name: ui.get_display_name().to_string(),
                 avatar: auth_avatar.borrow().clone(),
-                color: "#C81E70".into(),
+                color: format!(
+                    "#{:02x}{:02x}{:02x}",
+                    ui.get_avatar_color().red(),
+                    ui.get_avatar_color().green(),
+                    ui.get_avatar_color().blue()
+                ),
                 captcha_id: auth_captcha.borrow().clone(),
                 answer: ui.get_captcha_answer().to_string(),
             });
@@ -853,58 +876,19 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    let image_runtime = runtime.handle().clone();
-    let avatar_update = send_update.clone();
-    ui.on_choose_avatar(move || {
-        let update = avatar_update.clone();
-        image_runtime.spawn(async move {
-            let Some(file) = rfd::AsyncFileDialog::new()
-                .add_filter("images", &["png", "jpg", "jpeg", "webp", "gif"])
-                .pick_file()
-                .await
-            else {
-                return;
-            };
-            let path = file.path().to_owned();
-            let image = tokio::task::spawn_blocking(move || -> Result<String, ()> {
-                if std::fs::metadata(&path).map_err(|_| ())?.len() > 16 * 1024 * 1024 {
-                    return Err(());
-                }
-                let mut reader = image::ImageReader::open(path)
-                    .map_err(|_| ())?
-                    .with_guessed_format()
-                    .map_err(|_| ())?;
-                let mut limits = image::Limits::default();
-                limits.max_image_width = Some(8192);
-                limits.max_image_height = Some(8192);
-                limits.max_alloc = Some(128 * 1024 * 1024);
-                reader.limits(limits);
-                let image = reader.decode().map_err(|_| ())?;
-                let side = image.width().min(image.height());
-                let image = image
-                    .crop_imm(
-                        (image.width() - side) / 2,
-                        (image.height() - side) / 2,
-                        side,
-                        side,
-                    )
-                    .resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
-                let mut bytes = std::io::Cursor::new(Vec::new());
-                image
-                    .write_to(&mut bytes, image::ImageFormat::Png)
-                    .map_err(|_| ())?;
-                Ok(format!(
-                    "data:image/png;base64,{}",
-                    base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())
-                ))
-            })
-            .await;
-            match image {
-                Ok(Ok(image)) => update(UiEvent::Avatar(image)),
-                _ => update(UiEvent::Error(AuthError::Network)),
-            }
-        });
-    });
+    let avatar_timer = avatar_ui::bind(
+        &ui,
+        avatars.clone(),
+        latest.clone(),
+        setup_avatar.clone(),
+        avatar_ui::Bindings {
+            commands: commands.clone(),
+            runtime: runtime.handle().clone(),
+            update: send_update.clone(),
+            intents: intents.clone(),
+            stop: stop.clone(),
+        },
+    );
     let weak = ui.as_weak();
     let channel_state = latest.clone();
     let channel_commands = commands.clone();
@@ -1552,6 +1536,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let updated_preferences = audio_preferences.clone();
     let update_intents = intents.clone();
     let update_stop = stop.clone();
+    let updated_avatars = avatars.clone();
     ui.on_process_updates(move || {
         if update_stop.is_cancelled() {
             return;
@@ -1609,6 +1594,10 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_busy(false);
                 }
                 UiEvent::SignedOut => {
+                    updated_avatars.borrow_mut().cancel(&ui);
+                    setup_avatar.borrow_mut().take();
+                    ui.set_setup_avatar(slint::Image::default());
+                    ui.set_avatar_color(color("#C81E70"));
                     pending_files.borrow_mut().take();
                     *latest.borrow_mut() = Bootstrap::default();
                     ui.set_authenticated(false);
@@ -1627,10 +1616,31 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_user_id("".into());
                     ui.set_chat_input("".into());
                 }
-                UiEvent::Avatar(image) => {
-                    ui.set_setup_avatar(decode_image(&image));
-                    *setup_avatar.borrow_mut() = Some(image);
+                UiEvent::Avatar(event) => {
+                    updated_avatars
+                        .borrow_mut()
+                        .handle(event, &ui, &update_intents, &setup_avatar)
                 }
+                UiEvent::ProfileSaved(user, query) => {
+                    updated_avatars
+                        .borrow_mut()
+                        .profile_saved(&ui, &user, &query);
+                    if latest.borrow().user.id == user.id {
+                        let mut fresh = latest.borrow().user.clone();
+                        fresh.display_name = user.display_name;
+                        fresh.avatar_base64 = user.avatar_base64;
+                        fresh.avatar_color = user.avatar_color;
+                        fresh.about_me = user.about_me;
+                        let event = HubEvent {
+                            target: "UserUpdated".into(),
+                            arguments: vec![json!(fresh)],
+                        };
+                        apply_hub_event(&ui, &mut latest.borrow_mut(), event);
+                    }
+                }
+                UiEvent::ProfileError(query, error) => updated_avatars
+                    .borrow_mut()
+                    .profile_error(&ui, error, &query),
                 UiEvent::Voice(channel, users) => {
                     {
                         let mut data = latest.borrow_mut();
@@ -1951,6 +1961,12 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         reconcile_volume_modal(&ui);
+        updated_avatars.borrow_mut().refresh(
+            &ui,
+            &latest.borrow(),
+            setup_avatar.borrow().as_deref(),
+            &update_intents,
+        );
     });
     let mut preview_scroll = false;
     let motion_preview = matches!(preview.as_deref(), Some("mic-motion" | "mic-motion-frames"));
@@ -2150,9 +2166,14 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     clear_picker_rows(&ui);
     mic_test_ui.borrow_mut().close();
     stop.cancel();
+    avatar_timer.stop();
+    let (avatar_jobs, mut avatar_join_failed) = avatars.borrow_mut().take_jobs(&ui);
     worker.abort();
     let (session_io_result, audio_cleanup_result) = runtime.block_on(async {
         let _ = worker.await;
+        for job in avatar_jobs {
+            avatar_join_failed |= job.await.is_err();
+        }
         let _ = local_settings_job.await;
         let _ = remote_settings_job.await;
         let audio_runtime_result = audio_runtime_job.await;
@@ -2171,6 +2192,10 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     ui_result?;
     session_io_result?;
     audio_cleanup_result?;
+    avatar_join_failed |= avatars.borrow().failed();
+    if avatar_join_failed {
+        return Err("Avatar worker did not complete normally".into());
+    }
     if let Some(error) = capture_error.borrow_mut().take() {
         return Err(error.into());
     }
@@ -3490,6 +3515,11 @@ async fn worker(
         }
         if main_session::is_session_command(&command) {
             let work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            let profile_query = if let Command::UpdateProfile(_, query) = &command {
+                Some(query.clone())
+            } else {
+                None
+            };
             let result = run_session!(
                 work,
                 main_session::compute(command, &auth, &connection, current_user.clone())
@@ -3564,7 +3594,31 @@ async fn worker(
                     work.publish(UiEvent::SignedIn(data));
                 }
                 Ok(MainResult::Event(event)) => work.publish(event),
-                Err(error) => work.publish(UiEvent::Error(error)),
+                Ok(MainResult::Profile(result)) => {
+                    if !result.query.alive() {
+                        continue;
+                    }
+                    let user = work
+                        .commit(|| {
+                            let user = current_user
+                                .as_mut()
+                                .filter(|user| user.id == result.user.id)?;
+                            user.display_name = result.user.display_name;
+                            user.avatar_base64 = result.user.avatar_base64;
+                            user.avatar_color = result.user.avatar_color;
+                            user.about_me = result.user.about_me;
+                            Some(user.clone())
+                        })
+                        .flatten();
+                    if let Some(user) = user {
+                        work.publish(UiEvent::ProfileSaved(user, result.query));
+                    }
+                }
+                Err(error) => work.publish(if let Some(query) = profile_query {
+                    UiEvent::ProfileError(query, error)
+                } else {
+                    UiEvent::Error(error)
+                }),
             }
             continue;
         }
@@ -3617,6 +3671,7 @@ async fn worker(
                 Command::Authenticate { .. }
                 | Command::Captcha
                 | Command::Modal { .. }
+                | Command::UpdateProfile(..)
                 | Command::Audio => unreachable!(),
                 Command::Notification(kind, id, accept) => {
                     if !respond_notification(&connection, kind, &id, accept)
@@ -4453,9 +4508,11 @@ fn check_auth_interactions(ui: &NativeApp) -> Result<(), &'static str> {
     check_audio_interactions(ui)?;
     check_mic_test_interactions(ui)?;
     check_stream_picker_interactions(ui)?;
+    avatar_ui::check_guards(ui)?;
+    avatar_interactions::check(ui)?;
     println!(
         "{}",
-        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeAudioInteractionCheck":"passed","nativeMicTestInteractionCheck":"passed","nativeStreamPickerInteractionCheck":"passed","nativePickerThumbnailBindingCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true,"physicalDevices":false})
+        serde_json::json!({"nativeAuthInteractionCheck":"passed","nativeRosterBindingCheck":"passed","nativeAudioInteractionCheck":"passed","nativeMicTestInteractionCheck":"passed","nativeStreamPickerInteractionCheck":"passed","nativePickerThumbnailBindingCheck":"passed","nativeAvatarProfileInteractionCheck":"passed","nativeTextInput":true,"maxLength":25,"passwordVisibility":true,"validationBeforeNetwork":true,"physicalDevices":false})
     );
     Ok(())
 }

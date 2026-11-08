@@ -1,0 +1,62 @@
+import { FormButton, IconButton } from "controls.slint";
+import { AudioSlider } from "audio-settings.slint";
+
+export component AvatarCropper inherits Rectangle {
+    in property <image> source;
+    in-out property <float> scale: 1;
+    in-out property <float> offset-x;
+    in-out property <float> offset-y;
+    in property <bool> busy;
+    in property <bool> reduced-motion;
+    pure callback tr(string) -> string;
+    callback cancel;
+    callback apply;
+    width: 360px; height: 448px;
+    background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
+    Text { x: 24px; y: 24px; width: parent.width - 96px; height: 28px; text: root.tr("auth.cropTitle"); color: white; font-size: 20px; font-weight: 700; }
+    IconButton { x: parent.width - 60px; y: 20px; icon: @image-url("../assets/icons/window-close.svg"); label: root.tr("common.close"); activated => { root.cancel(); } }
+    preview := Rectangle {
+        x: (root.width - 200px) / 2; y: 72px; width: 200px; height: 200px;
+        background: black; border-radius: 100px; clip: true;
+        private property <float> fit: min(200 / max(1, root.source.width), 200 / max(1, root.source.height));
+        Image {
+            width: root.source.width * preview.fit * root.scale * 1px;
+            height: root.source.height * preview.fit * root.scale * 1px;
+            x: (parent.width - self.width) / 2 + root.offset-x * 1px;
+            y: (parent.height - self.height) / 2 + root.offset-y * 1px;
+            source: root.source; image-fit: fill;
+        }
+        forward-focus: keys;
+        keys := FocusScope { enabled: !root.busy;
+            key-pressed(event) => {
+                if event.text == Key.LeftArrow { root.offset-x -= 1; return accept; }
+                if event.text == Key.RightArrow { root.offset-x += 1; return accept; }
+                if event.text == Key.UpArrow { root.offset-y -= 1; return accept; }
+                if event.text == Key.DownArrow { root.offset-y += 1; return accept; }
+                if event.text == Key.Escape { root.cancel(); return accept; }
+                return reject;
+            }
+        }
+        touch := TouchArea {
+            enabled: !root.busy; mouse-cursor: move;
+            private property <float> drag-x;
+            private property <float> drag-y;
+            private property <bool> dragging;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    keys.focus(); self.drag-x = self.mouse-x / 1px - root.offset-x; self.drag-y = self.mouse-y / 1px - root.offset-y; self.dragging = true;
+                }
+                else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { self.dragging = false; }
+            }
+            moved => { if !self.has-hover { self.dragging = false; } if self.pressed && self.dragging { root.offset-x = self.mouse-x / 1px - self.drag-x; root.offset-y = self.mouse-y / 1px - self.drag-y; } }
+            scroll-event(event) => { if !root.busy { root.scale = clamp(root.scale + (event.delta-y < 0px ? -0.1 : 0.1), 0.5, 5); return accept; } return reject; }
+        }
+        if keys.has-focus : Rectangle { width: parent.width; height: parent.height; background: transparent; border-radius: 100px; border-width: 2px; border-color: #ee68a9; }
+        accessible-role: groupbox; accessible-label: root.tr("auth.cropTitle");
+    }
+    AudioSlider { x: 24px; y: 284px; width: parent.width - 48px; minimum: 50; maximum: 300; step: 5; value: root.scale * 100; label: root.tr("auth.cropTitle"); disabled: root.busy; edited(value) => { root.scale = value / 100; } }
+    HorizontalLayout { x: 24px; y: 376px; width: parent.width - 48px; height: 48px; spacing: 16px;
+        FormButton { label: root.tr("common.cancel"); reduced-motion: root.reduced-motion; activated => { root.cancel(); } }
+        FormButton { label: root.tr(root.busy ? "common.loading" : "common.apply"); primary: true; reduced-motion: root.reduced-motion; disabled: root.busy; activated => { root.apply(); } }
+    }
+}

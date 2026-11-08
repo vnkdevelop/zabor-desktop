@@ -142,8 +142,8 @@ impl HubConnection {
             );
         }
         let config = WebSocketConfig::default()
-            .max_message_size(Some(MAX_RECORD_BYTES))
-            .max_frame_size(Some(MAX_RECORD_BYTES));
+            .max_message_size(Some(MAX_RECORD_BYTES + 1))
+            .max_frame_size(Some(MAX_RECORD_BYTES + 1));
         let (mut socket, _) =
             tokio_tungstenite::connect_async_with_config(request, Some(config), false)
                 .await

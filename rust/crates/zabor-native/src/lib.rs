@@ -14,6 +14,7 @@ pub mod audio_route;
 pub mod audio_runtime;
 pub mod audio_settings;
 pub mod auth;
+pub mod avatar;
 pub mod call_recovery;
 #[cfg(all(windows, feature = "native-media"))]
 pub mod camera;
