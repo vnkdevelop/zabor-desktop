@@ -80,6 +80,17 @@ Source/member navigation, clipboard/presence text, achievements, channel actions
 remove-friend, call-failure feedback и все helper/ownership/full-client gates ещё
 открыты. Публикация и выключение не выполнялись; whole-native readiness=false.
 
+В основной native library подключены защищённые update IO/helper модули:
+**`a2dac6a802a2451564d89a09edd68bc101606b17`** после импорта8768a18. Прошли46
+разных тестов, fmt, оба Clippy режима, normal build и отдельная staticCRT/W4WX
+сборка C++ helper. Уже pinned zip9.4.1/flate2 1.1.10 подключены двумя локальными
+dependency edges, без смены внешних зависимостей/SDK/CRT/DSP/ONNX. Graph7385nodes/
+18711edges/302communities,7priorwarnings/HTML5000limit. Temp fixtures удалены.
+Подробнее: [native-update-io.md](native-update-io.md). Реальные helper-host lifetime,
+app/media/input/session/file drain, health IPC, принятый baseline/bootstrap recovery,
+trust/certification/licenses и hostile/crash/physical/full-native acceptance всё ещё
+открыты. Библиотечная интеграция не разрешает установку, публикацию или выключение.
+
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
 
 Рабочая ветка: `rust/native-client`. Checkpoint рабочего Electron/WASM-клиента перед переносом: `d088795`. Нативный код находится в `rust/crates/zabor-native`; состояние этой ветки не означает перенос в основную пользовательскую папку или публикацию релиза.

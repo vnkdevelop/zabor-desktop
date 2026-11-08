@@ -10,10 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest checked source — **5d4a540e2132465ac1501627aafb415d1e39a57e**:
-fresh peer profiles/typed add-friend/offline-call/chat,138 unique affected tests/
-fmt/both Clippy/native build/RUEN/Graphify passed. Prior integration94/profile134
-proofs retained. Normal executable2c389b1f… is component evidence,
+сборкой. Latest checked source — **a2dac6a802a2451564d89a09edd68bc101606b17**:
+protected update IO/helper main-crate integration,46 unique affected tests/fmt/
+both Clippy/native helper/build/Graphify passed. Peer profiles138/RUEN and prior
+integration94/profile134 proofs retained. Normal executable11b19deb… is component evidence,
 not full-client acceptance. RC2108f86, SFU2d254a2 and original peer/capture/mic retained.
 Picker **0dcfef7**,audio **5b8d656** and camera **df43be2** retained;physical camera/audio/
 complete client readiness=false. Metadata-only continuation save follows this source.
@@ -349,6 +349,54 @@ push/merge/release/shutdown не выполнялись. После каждог
   exact true/false/null add results, no bootstrap reload, priority Leave and
   offline/online/add-button pointer and independent Voice/chat checks passed.
   These are component proofs, not physical/full-native or release acceptance.
+- Peer-profile continuation saved as `3c873d45ac326f2a50fc68bd1e3477dd48403a34`,
+  clean/source guard and post-save Graphify passed. Authorized independent General
+  session `ses_e441da897ffezpJCWS3jbyqKUX` is now working in new
+  `native-profile-achievements`: new scoped achievements/presence modules, exact
+  reference definitions and bounded own/peer loaders, native presentation and
+  RU/EN/local-day/plural formatting. It owns only new scoped files/own docs, not
+  shared Cargo/lock/lib/auth/shell/app/Avatar or helper scopes. Main RPC/UI/durable/
+  OS binding remains explicit. No polling or duplication of its new work.
+- Updater file phase returned verified clean-tree commit
+  `88f3cd41e013511c528b1e4fb9c3137a528e780a`: operation-owned bounded download,
+  protected DPAPI journal/selector, immutable version/receipt recovery/health,
+  separate native C++ helper and strict sandbox harness.46tests passed/1ignored;
+  the ignored crash worker was actually executed at4subprocess boundaries with
+  exit77. StaticCRT/W4WX/fmt/all-targetClippy passed. Own harness/target/sandboxes
+  removed; own graph13924nodes/30146edges/535communities,9warnings/HTML5000limit,
+  main graph unchanged. This child phase is finished, not whole-app update readiness.
+- Saved updater phase integrated without conflicts as `8768a18`. Main-only wiring
+  now adds Windows update_helper/update_io library modules and direct dependencies
+  on already locked zip9.4.1/flate2 1.1.10; only2local zabor-native dependency edges
+  change in the root lock. No external version/checksum, SDK/DSP/CRT/ONNX pin or
+  Electron validator changes. App/host/health/bootstrap wiring is not yet added.
+  Pending primary integration `sh_1bbe873d90017BKbgO7lUZskqp`, evidence
+  `migration-artifacts/native-data/update-io-integration-2026-11-08/checked-v1/`:
+  actual standalone C++ helper compiled in owned temp sandbox, fmt, fixture/normal
+  all-target Clippy, release/update/helper/IO tests in the main native crate,
+  normal build and Graphify.13source+pinhashes are frozen; no edits/polling while
+  running. Temporary helper/fixtures/runner self-clean after completion. No full
+  neural/UI/license inventory matrix is repeated. Trust/certification, original
+  helper-host process lifetime, authenticated health IPC, real app/media/input/
+  session/file drain, accepted baseline/bootstrap recovery and power-loss/hostile
+  ACL/hung-volume/physical/full-native acceptance remain gates. No live installation.
+- Main RC next subset identified by targeted graph/reference reads: immutable
+  decoder completion timestamp must survive through FrameUpdate and a retained
+  displayed-frame proof; cached Slint VideoItem alone is not provenance/freshness.
+  Match original selected P2P PeerLifetime/subscription and ACK/start boundary,
+  propagate original frame ticket into queued input and recheck at worker dispatch.
+  This is not yet implemented; do not overlap the pending updater integration or
+  the independent RC desktop-helper child's host/viewport ownership.
+- Update IO primary integration `sh_1bbe873d90017BKbgO7lUZskqp` completed:4release/
+  15update/19helper/8IO tests, union46, fmt, both native-media Clippy modes, actual
+  temp staticCRT/W4WX C++ helper, normal build and Graphify all passed. Native
+  source wiring saved as `a2dac6a802a2451564d89a09edd68bc101606b17` after imported
+  `8768a18`. Frozen13source+pinhashes remain exact. Normal binary
+  `11b19deb865d700ce9e51d9460363647fe03664e7436a3bd335323533ad7a558`.
+  Main graph7385nodes/18711edges/302communities,7priorwarnings/HTML5000limit.
+  Own temp helper/fixtures/runner removed; no current primary check job remains.
+  No actual app/installed baseline/health IPC/drain or real trust certificate is
+  implied by this library integration. Whole-native/install/publication remain false.
 
 ### Verified native RC components after b4b52bc
 

@@ -185,3 +185,28 @@ sandbox roots before the final scoped save.
 
 These results verify this isolated update IO/helper source scope, not full native
 Windows crash/drain, ACL-adversary, physical, two-device or release acceptance.
+
+## Checked primary library integration
+
+The saved child source88f3cd4 was imported as8768a18. Main-owned Windows module/
+dependency wiring is checked and saved as
+`a2dac6a802a2451564d89a09edd68bc101606b17`: update_helper/update_io are exposed by
+the native library, and direct zip9.4.1/flate2 1.1.10 dependencies reuse existing
+root-lock pins. Only two local zabor-native dependency edges changed; no external
+dependency version/checksum, SDK/CRT/DSP/ONNX or Electron validator changed.
+
+Primary grouped check `sh_1bbe873d90017BKbgO7lUZskqp` passed46 distinct tests
+in the main native crate, both native-media all-targets Clippy modes, fmt, normal
+native build and separately compiled staticCRT/W4WX fixture helper. Main
+Graphify7385nodes/18711edges/302communities;7priorzero-nodewarnings/HTML5000limit
+remain. Frozen13source/pinhashes are unchanged. Evidence:
+`migration-artifacts/native-data/update-io-integration-2026-11-08/checked-v1/` and
+`save-verification.json`. Own temporary helper/fixtures/runner were removed.
+
+Normal executable SHA-256:
+`11b19deb865d700ce9e51d9460363647fe03664e7436a3bd335323533ad7a558`.
+This build proves library integration, not an installed package or whole-client
+receipt. Original helper-host launch/registered blocking ownership, app/resource
+drain, authenticated health IPC, bootstrap baseline/recovery, real trust pins/
+certification, legal approval and all listed hostile/physical/crash gates remain
+required. No live root was opened or installed; publication/shutdown remain false.
