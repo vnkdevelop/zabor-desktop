@@ -147,6 +147,7 @@ pub(super) fn session() -> VoiceSession {
         audio: None,
         playback: None,
         streams: StreamRoutes::default(),
+        remote: RemoteControl::default(),
     }
 }
 

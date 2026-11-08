@@ -7935,6 +7935,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "zabor-input"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "windows",
+]
+
+[[package]]
 name = "zabor-native"
 version = "0.1.0"
 dependencies = [
@@ -7981,6 +7989,7 @@ dependencies = [
  "windows-dpapi",
  "zabor-camera",
  "zabor-dsp",
+ "zabor-input",
  "zabor-stream-audio",
  "zeroize",
 ]

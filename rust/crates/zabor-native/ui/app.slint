@@ -3,6 +3,7 @@ import { ScrollView } from "std-widgets.slint";
 import { AudioSettingsPanel, AudioSettingsView, AudioDeviceItem, AudioSlider, RelaySetting, StreamAudioSetting } from "audio-settings.slint";
 import { MicTestPanel, MicTestView, MicButtonFeedback } from "mic-test.slint";
 import { StreamSource } from "stream-source.slint";
+import { RemoteViewer } from "remote-viewer.slint";
 
 export struct ChannelItem { id: string, name: string, count: int }
 export struct FriendItem { id: string, name: string, username: string, online: bool, color: color, avatar: image, speaking: bool, muted: bool, deafened: bool }
@@ -60,6 +61,7 @@ export component NativeApp inherits Window {
     in-out property <int> screen-source-kind;
     in-out property <string> screen-quality: "low";
     in-out property <bool> screen-include-audio: true;
+    in-out property <bool> screen-allow-control;
     in-out property <bool> screen-sources-loading;
     in-out property <bool> camera-sources-loading;
     private property <[ScreenItem]> picker-sources: root.screen-source-kind == 2 ? root.camera-sources : root.screen-source-kind == 0 ? root.screen-sources : root.window-sources;
@@ -69,6 +71,11 @@ export component NativeApp inherits Window {
     in-out property <bool> sharing;
     in-out property <string> selected-screen;
     in-out property <string> focused-video;
+    in property <[string]> control-permitted;
+    in property <string> control-viewer;
+    in property <bool> control-ready;
+    in property <bool> control-host-active;
+    in property <string> control-controller;
     in-out property <string> incoming-call-id;
     in property <string> incoming-call-name;
     in-out property <bool> muted;
@@ -136,7 +143,14 @@ export component NativeApp inherits Window {
     callback refresh-screens;
     callback list-cameras;
     callback cancel-picker-query;
-    callback start-share(string, string, bool);
+    callback start-share(string, string, bool, bool);
+    callback toggle-control(string);
+    callback revoke-control;
+    callback release-control;
+    callback control-pointer(string, float, float, float, float, int, int);
+    callback control-wheel(string, float, float);
+    callback control-key(string, string, bool, int);
+    pure callback control-can-request(string) -> bool;
     callback focus-stream-audio(string);
     changed focused-video => { root.focus-stream-audio(root.focused-video); }
     callback stop-share;
@@ -150,7 +164,7 @@ export component NativeApp inherits Window {
     callback mic-test-toggle;
     callback mic-test-seek(float);
     changed language => { root.language-changed(root.language); }
-    changed modal => { if root.modal == 3 { root.refresh-audio-devices(); } if root.modal != 5 { root.cancel-picker-query(); } root.mic-test-context-changed(); }
+    changed modal => { if root.modal == 3 { root.refresh-audio-devices(); } if root.modal != 5 { root.cancel-picker-query(); } if root.modal != 0 && root.control-viewer != "" { root.release-control(); } root.mic-test-context-changed(); }
     changed voice-active => { if !root.voice-active { root.cancel-picker-query(); } }
     changed settings-tab => { root.settings-scroll-y = 0px; root.mic-test-context-changed(); }
     changed authenticated => { root.mic-test-context-changed(); }
@@ -368,9 +382,22 @@ export component NativeApp inherits Window {
                 for video in root.video-frames : Rectangle {
                     visible: root.focused-video == "" || root.focused-video == video.id;
                     background: #09090b; border-width: 1px; border-color: #ffffff12; border-radius: 18px;
-                    Image { y: 36px; width: parent.width; height: parent.height - 36px; source: video.frame; image-fit: contain; }
+                    RemoteViewer {
+                        y: 36px; width: parent.width; height: parent.height - 36px; frame: video.frame;
+                        active: root.control-ready && root.control-viewer == video.id && root.modal == 0 && root.focused-video == video.id;
+                        activate => { root.focused-video = root.focused-video == video.id ? "" : video.id; }
+                        pointer(x, y, width, height, kind, button) => { root.control-pointer(video.id, x, y, width, height, kind, button); }
+                        wheel(y, x) => { root.control-wheel(video.id, y, x); }
+                        key(text, down, modifiers) => { root.control-key(video.id, text, down, modifiers); }
+                        release => { root.release-control(); }
+                    }
                     Text { x: 16px; height: 36px; text: video.title; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }
-                    TouchArea { clicked => { root.focused-video = root.focused-video == video.id ? "" : video.id; } }
+                    if root.focused-video == video.id && root.control-can-request(video.id) : IconButton {
+                        x: parent.width - 44px; width: 44px; height: 36px; icon: @image-url("../assets/icons/desktop.svg");
+                        label: root.tr(root.control-viewer == video.id ? "stream.remoteControlRelease" : "stream.remoteControlCapture", root.language);
+                        foreground: root.control-viewer == video.id ? #ee68a9 : white;
+                        activated => { root.toggle-control(video.id); }
+                    }
                 }
             }
         }
@@ -383,6 +410,12 @@ export component NativeApp inherits Window {
                 IconButton { width: 56px; height: 56px; icon: @image-url("../assets/icons/desktop.svg"); foreground: root.sharing ? #ee68a9 : white; label: root.tr(root.sharing ? "stream.stopHint" : "stream.pickerTitle", root.language); activated => { if root.sharing { root.stop-share(); } else { root.list-screens(); } } }
                 FormButton { height: 56px; label: root.tr("main.voice.endCall", root.language); primary: true; activated => { root.leave-voice(); } }
             }
+        }
+        if root.voice-active && root.control-controller != "" : FormButton {
+            x: 356px; y: parent.height - 172px; width: min(500px, parent.width - 380px); height: 44px;
+            label: root.tr("stream.revokeRemoteControlHint", root.language);
+            primary: true;
+            activated => { root.revoke-control(); }
         }
     }
     if root.authenticated && root.error != "" && root.modal == 0 : Rectangle { x: 356px; y: parent.height - 170px; width: parent.width - 380px; height: 44px; background: #09090be6; border-radius: 12px; Text { x: 12px; width: parent.width - 24px; height: parent.height; text: root.error; font-size: 14px; color: #da373c; wrap: word-wrap; vertical-alignment: center; } TouchArea { clicked => { root.error = ""; } } }
@@ -476,6 +509,7 @@ export component NativeApp inherits Window {
                     }
                 }
                 if root.modal == 5 && root.screen-source-kind != 2 && root.selected-screen != "" : StreamAudioSetting { label: root.tr("stream.shareAudio", root.language); checked: root.screen-include-audio; disabled: root.busy || root.picker-loading; reduced-motion: root.reduced-motion; toggled(value) => { root.screen-include-audio = value; } }
+                if root.modal == 5 && root.screen-source-kind != 2 && root.selected-screen != "" : StreamAudioSetting { label: root.tr("stream.allowRemoteControl", root.language); checked: root.screen-allow-control; disabled: root.busy || root.picker-loading; reduced-motion: root.reduced-motion; toggled(value) => { root.screen-allow-control = value; } }
                 if root.modal == 5 && root.screen-source-kind != 2 && root.selected-screen != "" : HorizontalLayout { spacing: 12px;
                     Text { text: root.tr("stream.quality", root.language); color: #949ba4; font-size: 14px; vertical-alignment: center; }
                     FormButton { label: root.tr("stream.qualityLow", root.language); primary: root.screen-quality == "low"; disabled: root.busy; activated => { root.screen-quality = "low"; } }
@@ -487,7 +521,7 @@ export component NativeApp inherits Window {
                 if root.error != "" : Text { text: root.error; color: #da373c; font-size: 14px; wrap: word-wrap; }
                 HorizontalLayout { spacing: 16px;
                     FormButton { label: root.tr(root.modal == 4 ? "main.notifications.decline" : root.modal == 6 ? "modals.switchChannel.stay" : "common.cancel", root.language); disabled: root.busy; activated => { if root.modal == 7 { root.confirm-files(false); } if root.modal == 4 { root.answer-call(root.incoming-call-id, false); } if root.modal == 6 { root.pending-channel = ""; } root.modal = 0; } }
-                    FormButton { label: root.tr(root.modal == 7 ? "chat.sendFile" : root.modal == 6 ? "modals.switchChannel.switch" : root.modal == 5 ? "stream.confirm" : root.modal == 4 ? "main.notifications.accept" : root.modal == 3 ? "settings.privacy.logout" : root.modal == 1 ? "modals.createChannel.submit" : "modals.addFriend.submit", root.language); primary: true; disabled: root.busy || (root.modal == 5 && (root.selected-screen == "" || root.picker-loading)) || (root.modal == 6 && root.pending-channel == ""); activated => { if root.modal == 7 { root.confirm-files(true); } else if root.modal == 6 { root.confirm-channel-switch(); } else if root.modal == 5 { root.start-share(root.selected-screen, root.screen-source-kind == 2 ? "camera" : root.screen-quality, root.screen-source-kind != 2 && root.screen-include-audio); } else if root.modal == 4 { root.answer-call(root.incoming-call-id, true); } else if root.modal == 3 { root.logout(); } else { root.submit-modal(root.modal, root.modal-input); } } }
+                    FormButton { label: root.tr(root.modal == 7 ? "chat.sendFile" : root.modal == 6 ? "modals.switchChannel.switch" : root.modal == 5 ? "stream.confirm" : root.modal == 4 ? "main.notifications.accept" : root.modal == 3 ? "settings.privacy.logout" : root.modal == 1 ? "modals.createChannel.submit" : "modals.addFriend.submit", root.language); primary: true; disabled: root.busy || (root.modal == 5 && (root.selected-screen == "" || root.picker-loading)) || (root.modal == 6 && root.pending-channel == ""); activated => { if root.modal == 7 { root.confirm-files(true); } else if root.modal == 6 { root.confirm-channel-switch(); } else if root.modal == 5 { root.start-share(root.selected-screen, root.screen-source-kind == 2 ? "camera" : root.screen-quality, root.screen-source-kind != 2 && root.screen-include-audio, root.screen-source-kind != 2 && root.screen-allow-control); } else if root.modal == 4 { root.answer-call(root.incoming-call-id, true); } else if root.modal == 3 { root.logout(); } else { root.submit-modal(root.modal, root.modal-input); } } }
                 }
             }
         }

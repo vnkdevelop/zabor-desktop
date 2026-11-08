@@ -17,6 +17,7 @@ pub(super) struct StreamRoutes {
     pub(super) pending_publish: Option<u64>,
     streaming: BTreeSet<String>,
     focus: Option<String>,
+    control: Option<String>,
     reported: BTreeMap<String, ViewerState>,
     p2p_video: BTreeMap<String, VideoBackup>,
     pub(super) p2p_audio: BTreeMap<String, AudioBackup>,
@@ -386,6 +387,7 @@ impl Default for StreamRoutes {
             pending_publish: None,
             streaming: BTreeSet::new(),
             focus: None,
+            control: None,
             reported: BTreeMap::new(),
             p2p_video: BTreeMap::new(),
             p2p_audio: BTreeMap::new(),
@@ -401,6 +403,8 @@ impl Default for StreamRoutes {
 
 impl VoiceSession {
     pub(super) fn reset_stream_routes(&mut self) {
+        #[cfg(windows)]
+        self.reset_remote_control();
         self.streams = StreamRoutes::default();
         self.engine.reset_sfu_publisher();
     }
@@ -425,6 +429,34 @@ impl VoiceSession {
         self.streams.focus.as_deref() == Some(peer)
     }
 
+    pub(super) fn control_stream_focused(&self, peer: &str) -> bool {
+        self.watching(peer) && self.streams.streaming.contains(peer)
+    }
+
+    pub(super) fn set_control_stream(&mut self, peer: Option<String>) {
+        self.streams.control = peer;
+    }
+
+    pub(super) fn control_p2p_ready(&self, peer: &str) -> bool {
+        self.streams.control.as_deref() == Some(peer)
+            && self.streams.selected.get(peer) == Some(&None)
+            && self
+                .streams
+                .p2p_video
+                .get(peer)
+                .is_some_and(|(_, lifetime)| lifetime.is_alive())
+            && !self.streams.probes.contains_key(peer)
+    }
+
+    pub(super) async fn control_to_p2p(&mut self, hub: &HubConnection, peer: &str) {
+        self.fallback_video(peer);
+        let _ = hub.send("SfuUnsubscribe", vec![json!(peer)]).await;
+        let _ = self.engine.send_remote_control(
+            peer,
+            zabor_input::Packet::Signal(zabor_input::Signal::KeyframeRequest),
+        );
+    }
+
     pub async fn set_stream_focus(
         &mut self,
         hub: &HubConnection,
@@ -436,7 +468,7 @@ impl VoiceSession {
         for peer in peers {
             let watching = self.watching(&peer);
             self.engine.sfu_preview(&peer, watching);
-            if watching {
+            if watching && self.streams.control.as_deref() != Some(&peer) {
                 if let Some(delivery) = self
                     .streams
                     .delivery
@@ -481,6 +513,11 @@ impl VoiceSession {
     }
 
     pub async fn maintain_streams(&mut self, hub: &HubConnection) {
+        #[cfg(windows)]
+        self.maintain_remote_control();
+        for peer in self.engine.maintain_remote_channels() {
+            let _ = self.renegotiate(hub, &peer).await;
+        }
         self.retain_stream_peers();
         if self.is_sharing() {
             if let Some(epoch) = self.streams.pending_publish.take() {
@@ -829,6 +866,9 @@ impl VoiceSession {
                 track,
                 lifetime,
             } => {
+                if self.streams.control.as_deref() == Some(&peer) {
+                    return Ok(());
+                }
                 if !self
                     .engine
                     .sfu_epoch_matches(&peer, false, epoch, &lifetime)
@@ -908,6 +948,9 @@ impl VoiceSession {
                 self.streams
                     .delivery
                     .insert(delivery.streamer.clone(), delivery.clone());
+                if self.streams.control.as_deref() == Some(&delivery.streamer) {
+                    return Ok(());
+                }
                 if delivery.streamer == self.local_id {
                     self.engine
                         .set_delivery_mode(delivery.mode, delivery.epoch)?;

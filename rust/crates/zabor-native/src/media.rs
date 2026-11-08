@@ -35,6 +35,9 @@ pub mod adaptive;
 mod sfu;
 use adaptive::{AdaptiveVideo, VideoProfile, ViewerState};
 pub use sfu::{DeliveryMode, StreamDelivery};
+pub mod remote_control;
+use remote_control::RemoteChannel;
+pub use remote_control::{ChannelLease, RemoteControlEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MediaError {
@@ -142,6 +145,12 @@ pub enum MediaEvent {
         lifetime: PeerLifetime,
         lease: crate::video::VideoFrameLease,
     },
+    RemoteControl {
+        peer: String,
+        event: RemoteControlEvent,
+        lifetime: PeerLifetime,
+        channel: ChannelLease,
+    },
 }
 
 impl MediaEvent {
@@ -158,6 +167,7 @@ impl MediaEvent {
             | Self::Renegotiate { lifetime, .. }
             | Self::SfuConnection { lifetime, .. }
             | Self::SfuTrack { lifetime, .. }
+            | Self::RemoteControl { lifetime, .. }
             | Self::StreamVideoReady { lifetime, .. } => lifetime,
         }
     }
@@ -183,6 +193,7 @@ struct Peer {
     stream_sender: Option<RtpSender>,
     needs_offer: bool,
     adaptive: AdaptiveVideo,
+    remote_control: Option<RemoteChannel>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,6 +287,7 @@ impl VideoSendDefaults {
 impl Drop for Peer {
     fn drop(&mut self) {
         self.lifetime.invalidate();
+        self.remote_control = None;
         self.connection.on_ice_candidate(None);
         self.connection.on_connection_state_change(None);
         self.connection.on_track(None);
@@ -297,7 +309,9 @@ pub struct MediaEngine {
     data_only: bool,
     video: Option<RtcVideoTrack>,
     video_profile: Option<VideoSendProfile>,
+    remote_allowed: bool,
     viewers: BTreeMap<String, ViewerState>,
+    controllers: BTreeSet<String>,
     sfu: sfu::SfuMedia,
 }
 
@@ -318,7 +332,9 @@ impl MediaEngine {
                 data_only: false,
                 video: None,
                 video_profile: None,
+                remote_allowed: false,
                 viewers: BTreeMap::new(),
+                controllers: BTreeSet::new(),
                 sfu: sfu::SfuMedia::default(),
             },
             receiver,
@@ -358,6 +374,7 @@ impl MediaEngine {
             .collect();
         self.peers.retain(|id, _| self.allowed.contains(id));
         self.viewers.retain(|id, _| self.allowed.contains(id));
+        self.controllers.retain(|id| self.allowed.contains(id));
         self.sfu
             .subscribers
             .retain(|id, _| self.allowed.contains(id));
@@ -373,6 +390,7 @@ impl MediaEngine {
     pub fn disconnect_peer(&mut self, peer: &str) {
         self.peers.remove(peer);
         self.viewers.remove(peer);
+        self.controllers.remove(peer);
         self.sfu.subscribers.remove(peer);
     }
 
@@ -437,6 +455,8 @@ impl MediaEngine {
             return Err(MediaError::Backend);
         }
         self.reset_sfu_publisher();
+        self.remote_allowed = false;
+        self.controllers.clear();
         if let Some(video) = self.video.take() {
             video.set_enabled(false);
         }
@@ -710,6 +730,18 @@ impl MediaEngine {
                 }
                 stream_sender = Some(sender);
             }
+            let remote_control = if self.data_only {
+                None
+            } else {
+                match RemoteChannel::new(&connection, id, &lifetime, self.events.clone()) {
+                    Ok(channel) => Some(channel),
+                    Err(error) => {
+                        lifetime.invalidate();
+                        connection.close();
+                        return Err(error);
+                    }
+                }
+            };
             self.peers.insert(
                 id.to_owned(),
                 Peer {
@@ -723,6 +755,7 @@ impl MediaEngine {
                     stream_sender,
                     needs_offer: false,
                     adaptive: AdaptiveVideo::default(),
+                    remote_control,
                 },
             );
         }
@@ -742,6 +775,7 @@ impl MediaEngine {
     }
 
     pub async fn offer(&mut self, id: &str, ice_restart: bool) -> Result<String, MediaError> {
+        let allowed = self.remote_allowed && self.has_live_video();
         let peer = self.peer(id)?;
         if peer.connection.signaling_state() != SignalingState::Stable {
             return Err(MediaError::Backend);
@@ -775,7 +809,7 @@ impl MediaEngine {
             .set_local_description(offer.clone())
             .await
             .map_err(|_| MediaError::Backend)?;
-        Ok(json!({"type":"offer","sdp":offer.to_string(),"epoch":peer.epoch,"allowRemoteControl":false,"remoteControlProtocol":2}).to_string())
+        Ok(json!({"type":"offer","sdp":offer.to_string(),"epoch":peer.epoch,"allowRemoteControl":allowed,"remoteControlProtocol":2}).to_string())
     }
 
     pub async fn offer_when_stable(&mut self, id: &str) -> Result<Option<String>, MediaError> {
@@ -795,6 +829,7 @@ impl MediaEngine {
     ) -> Result<Option<String>, MediaError> {
         let value = parse_signal(payload)?;
         let polite = self.local_id.as_str() > id;
+        let allowed = self.remote_allowed && self.has_live_video();
         let peer = self.peer(id)?;
         if peer.connection.signaling_state() != SignalingState::Stable {
             if !polite {
@@ -824,6 +859,9 @@ impl MediaEngine {
             .await
             .map_err(|_| MediaError::Backend)?;
         flush_candidates(peer).await?;
+        if let Some(channel) = peer.remote_control.as_mut() {
+            channel.metadata(&value);
+        }
         let answer = peer
             .connection
             .create_answer(AnswerOptions::default())
@@ -841,7 +879,7 @@ impl MediaEngine {
                 lifetime,
             });
         }
-        Ok(Some(json!({"type":"answer","sdp":answer.to_string(),"epoch":value.get("epoch"),"allowRemoteControl":false,"remoteControlProtocol":2}).to_string()))
+        Ok(Some(json!({"type":"answer","sdp":answer.to_string(),"epoch":value.get("epoch"),"allowRemoteControl":allowed,"remoteControlProtocol":2}).to_string()))
     }
 
     pub async fn receive_answer(&mut self, id: &str, payload: &str) -> Result<(), MediaError> {
@@ -870,6 +908,9 @@ impl MediaEngine {
             .map_err(|_| MediaError::Backend)?;
         flush_candidates(peer).await?;
         peer.ignored_offer = false;
+        if let Some(channel) = peer.remote_control.as_mut() {
+            channel.metadata(&value);
+        }
         if peer.needs_offer {
             peer.needs_offer = false;
             let lifetime = peer.lifetime.clone();

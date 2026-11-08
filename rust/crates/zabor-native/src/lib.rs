@@ -46,6 +46,10 @@ pub mod picker;
 pub mod profile;
 pub mod protocol;
 pub mod release;
+#[cfg(all(windows, feature = "native-media"))]
+mod remote_input;
+#[cfg(feature = "native-media")]
+pub mod remote_viewer;
 pub mod roster;
 #[cfg(feature = "native-media")]
 pub mod screen;

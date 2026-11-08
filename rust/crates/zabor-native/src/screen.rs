@@ -67,6 +67,7 @@ pub struct ScreenCapture {
     stop: Arc<AtomicBool>,
     failed: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    pub(crate) geometry: Arc<zabor_input::CaptureLease>,
 }
 
 impl ScreenCapture {
@@ -195,6 +196,10 @@ impl ScreenCapture {
         let worker_failed = failed.clone();
         let frames = source.clone();
         let (ready, status) = mpsc::sync_channel(1);
+        let geometry = zabor_input::CaptureLease::new(
+            (selected.kind == SourceKind::Window).then_some(selected.id),
+        );
+        let frame_geometry = geometry.clone();
         let thread = std::thread::Builder::new()
             .name("zabor-screen".into())
             .spawn(move || {
@@ -229,6 +234,12 @@ impl ScreenCapture {
                             height,
                         ) {
                             Ok(buffer) => {
+                                frame_geometry.update(zabor_input::Rect {
+                                    left: frame.left(),
+                                    top: frame.top(),
+                                    width: frame.width(),
+                                    height: frame.height(),
+                                });
                                 frames.capture_frame(&VideoFrame::new(
                                     VideoRotation::VideoRotation0,
                                     buffer,
@@ -238,12 +249,14 @@ impl ScreenCapture {
                                 }
                             }
                             Err(_) => {
+                                frame_geometry.revoke();
                                 worker_failed.store(true, Ordering::Release);
                                 callback_stop.store(true, Ordering::Release);
                             }
                         }
                     }
                     Err(CaptureError::Permanent) => {
+                        frame_geometry.revoke();
                         worker_failed.store(true, Ordering::Release);
                         callback_stop.store(true, Ordering::Release);
                         if let Some(ready) = ready.take() {
@@ -265,6 +278,7 @@ impl ScreenCapture {
             stop,
             failed,
             thread: Some(thread),
+            geometry,
         };
         match status.recv_timeout(Duration::from_secs(5)) {
             Ok(true) => Ok(capture),
@@ -308,6 +322,7 @@ impl ScreenCapture {
                 stop: stop.clone(),
                 failed: failed.clone(),
                 thread: Some(thread),
+                geometry: zabor_input::CaptureLease::new(None),
             },
             stop,
             failed,
@@ -317,6 +332,7 @@ impl ScreenCapture {
 
 impl Drop for ScreenCapture {
     fn drop(&mut self) {
+        self.geometry.revoke();
         self.stop.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
             thread.thread().unpark();

@@ -365,18 +365,22 @@ impl MediaEngine {
         let Some(quality) = self.video_quality() else {
             return Ok(());
         };
+        let controller = self.controllers.contains(peer);
         if let Some(peer) = self.peers.get_mut(peer) {
             apply_profile(
                 peer.video_sender.as_ref(),
                 &mut peer.adaptive,
                 quality,
                 state,
+                controller,
             )?;
         }
         Ok(())
     }
 
     pub fn set_screen_sender_active(&mut self, id: &str, active: bool) -> Result<(), MediaError> {
+        let controller = self.controllers.contains(id);
+        let active = active || controller;
         let quality = self.video_quality();
         let viewer = self.viewers.get(id).copied().unwrap_or_default();
         let peer = self.peers.get_mut(id).ok_or(MediaError::UnauthorizedPeer)?;
@@ -403,6 +407,7 @@ impl MediaEngine {
                     &mut peer.adaptive,
                     quality,
                     viewer,
+                    controller,
                 )?;
             }
         }
@@ -429,6 +434,7 @@ impl MediaEngine {
                         &mut peer.adaptive,
                         quality,
                         self.viewers.get(id).copied().unwrap_or_default(),
+                        self.controllers.contains(id),
                     );
                 }
             }
@@ -446,6 +452,7 @@ impl MediaEngine {
                         &mut peer.adaptive,
                         quality,
                         ViewerState::Watching,
+                        false,
                     );
                 }
             }
@@ -660,6 +667,27 @@ impl MediaEngine {
         Ok(())
     }
 
+    pub(crate) fn set_controller(&mut self, id: &str, controller: bool) -> Result<(), MediaError> {
+        if !self.allowed.contains(id)
+            || (controller
+                && (!self.remote_allowed
+                    || !self.has_live_video()
+                    || self.video_quality() == Some("camera")))
+        {
+            return Err(MediaError::UnauthorizedPeer);
+        }
+        if controller {
+            self.controllers.insert(id.into());
+        } else {
+            self.controllers.remove(id);
+        }
+        let active = controller
+            || !self.sfu.active
+            || !self.sfu.ready.contains(id)
+            || self.sfu.fallback.contains(id);
+        self.set_screen_sender_active(id, active)
+    }
+
     pub(crate) fn sfu_expired(&mut self, now: Instant) -> (Vec<(String, u64, bool)>, Vec<String>) {
         if self.sfu.close_at.is_some_and(|deadline| now >= deadline) && !self.sfu.active {
             self.sfu.publisher = None;
@@ -700,10 +728,11 @@ fn apply_profile(
     adaptive: &mut AdaptiveVideo,
     quality: &str,
     viewer: ViewerState,
+    controller: bool,
 ) -> Result<(), MediaError> {
     let (Some(sender), Some(profile)) = (
         sender,
-        VideoProfile::for_quality(quality, adaptive.step, viewer, false)?,
+        VideoProfile::for_quality(quality, adaptive.step, viewer, controller)?,
     ) else {
         return Ok(());
     };

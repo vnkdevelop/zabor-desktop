@@ -1,0 +1,41 @@
+export component RemoteViewer inherits Rectangle {
+    in property <image> frame;
+    in property <bool> active;
+    callback activate;
+    callback pointer(float, float, float, float, int, int);
+    callback wheel(float, float);
+    callback key(string, bool, int);
+    callback release;
+    private property <length> content-width: min(root.width, root.height * root.frame.width / max(1, root.frame.height));
+    private property <length> content-height: min(root.height, root.width * root.frame.height / max(1, root.frame.width));
+    changed active => { if root.active { keyboard.focus(); } }
+    Image { width: parent.width; height: parent.height; source: root.frame; image-fit: contain; }
+    keyboard := FocusScope {
+        enabled: root.active;
+        changed has-focus => { if root.active && !self.has-focus { root.release(); } }
+        key-pressed(event) => {
+            if event.modifiers.control && event.modifiers.alt && (event.text == "k" || event.text == "K" || event.text == "л" || event.text == "Л") { root.release(); return accept; }
+            root.key(event.text, true, (event.modifiers.shift ? 1 : 0) + (event.modifiers.control ? 2 : 0) + (event.modifiers.alt ? 4 : 0) + (event.modifiers.meta ? 8 : 0));
+            return accept;
+        }
+        key-released(event) => { root.key(event.text, false, (event.modifiers.shift ? 1 : 0) + (event.modifiers.control ? 2 : 0) + (event.modifiers.alt ? 4 : 0) + (event.modifiers.meta ? 8 : 0)); return accept; }
+    }
+    pointer := TouchArea {
+        clicked => { if !root.active { root.activate(); } }
+        moved => { if root.active { root.pointer(self.mouse-x / 1px, self.mouse-y / 1px, self.width / 1px, self.height / 1px, 0, 0); } }
+        pointer-event(event) => {
+            if root.active {
+                if event.kind == PointerEventKind.cancel { root.release(); }
+                else if (event.kind == PointerEventKind.down || event.kind == PointerEventKind.up) && (event.button == PointerEventButton.left || event.button == PointerEventButton.middle || event.button == PointerEventButton.right) {
+                    root.pointer(self.mouse-x / 1px, self.mouse-y / 1px, self.width / 1px, self.height / 1px, event.kind == PointerEventKind.down ? 1 : 2, event.button == PointerEventButton.left ? 0 : event.button == PointerEventButton.middle ? 1 : 2);
+                }
+            }
+        }
+        scroll-event(event) => {
+            if root.active && self.mouse-x >= (root.width - root.content-width) / 2 && self.mouse-x <= (root.width + root.content-width) / 2 && self.mouse-y >= (root.height - root.content-height) / 2 && self.mouse-y <= (root.height + root.content-height) / 2 {
+                root.wheel(event.delta-y / 1px, event.delta-x / 1px); return accept;
+            }
+            return reject;
+        }
+    }
+}

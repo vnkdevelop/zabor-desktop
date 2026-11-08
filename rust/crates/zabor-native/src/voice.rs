@@ -23,6 +23,12 @@ use tokio::sync::mpsc;
 
 mod stream_delivery;
 use stream_delivery::StreamRoutes;
+#[cfg(windows)]
+mod remote_control;
+#[cfg(windows)]
+use remote_control::RemoteControl;
+#[cfg(windows)]
+pub use remote_control::{ControlTarget, RemoteControlView};
 
 #[derive(Deserialize)]
 pub struct ChannelMembership {
@@ -83,6 +89,8 @@ pub struct VoiceSession {
     audio: Option<VoiceLease<NativeAudio>>,
     playback: Option<AudioPlayback>,
     streams: StreamRoutes,
+    #[cfg(windows)]
+    remote: RemoteControl,
 }
 
 impl VoiceSession {
@@ -129,6 +137,8 @@ impl VoiceSession {
                 audio: None,
                 playback: None,
                 streams: StreamRoutes::default(),
+                #[cfg(windows)]
+                remote: RemoteControl::default(),
             },
             events,
         ))
@@ -300,11 +310,23 @@ impl VoiceSession {
         quality: &str,
         include_audio: bool,
     ) -> Result<(), MediaError> {
+        self.start_share_with_control(hub, source, quality, include_audio, false)
+            .await
+    }
+
+    pub async fn start_share_with_control(
+        &mut self,
+        hub: &HubConnection,
+        source: ScreenSource,
+        quality: &str,
+        include_audio: bool,
+        allow_control: bool,
+    ) -> Result<(), MediaError> {
         let (width, height, fps) = capture_format(quality)?;
         #[cfg(windows)]
         let audio_source = source.clone();
         let capture = tokio::task::spawn_blocking(move || {
-            ScreenCapture::start(source, width, height, fps, true)
+            ScreenCapture::start(source, width, height, fps, !allow_control)
         })
         .await
         .map_err(|_| MediaError::Backend)??;
@@ -318,7 +340,7 @@ impl VoiceSession {
         };
         #[cfg(not(windows))]
         let _ = include_audio;
-        self.announce_prepared_share(
+        self.announce_prepared_share_with_control(
             hub,
             ScreenShare {
                 capture: ShareCapture::Desktop(capture),
@@ -326,6 +348,7 @@ impl VoiceSession {
                 #[cfg(windows)]
                 audio,
             },
+            allow_control,
         )
         .await
     }
@@ -362,7 +385,17 @@ impl VoiceSession {
     async fn announce_prepared_share(
         &mut self,
         hub: &HubConnection,
+        share: ScreenShare,
+    ) -> Result<(), MediaError> {
+        self.announce_prepared_share_with_control(hub, share, false)
+            .await
+    }
+
+    async fn announce_prepared_share_with_control(
+        &mut self,
+        hub: &HubConnection,
         mut share: ScreenShare,
+        allow_control: bool,
     ) -> Result<(), MediaError> {
         let started = hub
             .invoke(
@@ -375,6 +408,8 @@ impl VoiceSession {
         if started != true {
             return Err(MediaError::Backend);
         }
+        #[cfg(windows)]
+        self.reset_remote_control();
         if let Err(error) = self
             .engine
             .set_video_with_quality(share.capture.source(), &share.quality)
@@ -391,6 +426,13 @@ impl VoiceSession {
         {
             let _ = self.engine.set_stream_audio(None);
             share.audio = None;
+        }
+        self.engine
+            .set_remote_control_allowed(allow_control && share.quality != "camera");
+        #[cfg(windows)]
+        {
+            self.remote.allowed = allow_control && share.quality != "camera";
+            self.remote.revoked = false;
         }
         self.capture = Some(share);
         for peer in self.peers.clone() {
@@ -422,6 +464,8 @@ impl VoiceSession {
     }
 
     pub async fn stop_share(&mut self, hub: &HubConnection) {
+        #[cfg(windows)]
+        self.revoke_remote_control();
         self.stop_local_stream_route();
         self.capture = None;
         let _ = self.engine.set_stream_audio(None);
@@ -491,6 +535,8 @@ impl VoiceSession {
     }
 
     fn stop_audio(&mut self) {
+        #[cfg(windows)]
+        self.reset_remote_control();
         #[cfg(windows)]
         if let Some(audio) = &self.audio {
             audio.clear_network_status();
@@ -727,6 +773,7 @@ mod tests {
             audio: None,
             playback: None,
             streams: StreamRoutes::default(),
+            remote: RemoteControl::default(),
         };
         session.stop_audio();
         drop(session);

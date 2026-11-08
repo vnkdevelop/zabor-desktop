@@ -1,5 +1,6 @@
-use super::{Command, CommandQueue, UiEvent};
+use super::{queue_control_command, Command, CommandQueue, UiEvent};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use zabor_native::critical_intents::{CriticalAction, CriticalIntents, IntentScope};
 
@@ -174,6 +175,7 @@ async fn stream_audio_selection_and_focus_commands_cannot_escape_the_original_vo
         .try_send(Command::StartShare(
             "window:98765".into(),
             "high".into(),
+            false,
             false
         ))
         .is_ok());
@@ -182,7 +184,10 @@ async fn stream_audio_selection_and_focus_commands_cannot_escape_the_original_vo
         .is_ok());
     let start = receiver.recv().await.unwrap();
     let focus = receiver.recv().await.unwrap();
-    assert!(matches!(start.command, Command::StartShare(_, _, false)));
+    assert!(matches!(
+        start.command,
+        Command::StartShare(_, _, false, false)
+    ));
     assert_eq!(start.command.scope(), IntentScope::Voice);
     assert_eq!(focus.command.scope(), IntentScope::Voice);
     intents.request(CriticalAction::Leave);
@@ -268,4 +273,33 @@ async fn stream_maintenance_keeps_original_voice_admission_and_cannot_run_after_
     intents.request(CriticalAction::Leave);
     assert!(!intents.is_current(queued.ticket, queued.command.scope()));
     assert!(intents.is_current(original, IntentScope::Session));
+}
+
+#[tokio::test]
+async fn remote_release_and_revoke_keep_original_voice_tickets_while_waiting_for_queue_space() {
+    let intents = Arc::new(CriticalIntents::default());
+    let (sender, mut receiver) = mpsc::channel(1);
+    let queue = CommandQueue {
+        sender,
+        intents: intents.clone(),
+    };
+    assert!(queue.try_send(Command::MaintainStreams).is_ok());
+    let original = intents.ticket();
+    queue_control_command(
+        &queue,
+        &tokio::runtime::Handle::current(),
+        Command::ReleaseControl,
+    );
+    intents.request(CriticalAction::Leave);
+    assert_eq!(receiver.recv().await.unwrap().ticket, original);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), receiver.recv())
+            .await
+            .is_err()
+    );
+    assert!(matches!(Command::RevokeControl.scope(), IntentScope::Voice));
+    assert!(matches!(
+        Command::ReleaseControl.scope(),
+        IntentScope::Voice
+    ));
 }

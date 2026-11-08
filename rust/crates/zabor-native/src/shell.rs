@@ -99,7 +99,11 @@ enum Command {
     AnswerCall(String, bool),
     ListScreens(PickerQuery, u64, SourceKind),
     ListCameras(PickerQuery),
-    StartShare(String, String, bool),
+    StartShare(String, String, bool, bool),
+    ToggleControl(zabor_native::voice::ControlTarget),
+    ControlInput(zabor_native::voice::ControlTarget, zabor_input::Packet),
+    ReleaseControl,
+    RevokeControl,
     FocusStreamAudio(String),
     StopShare,
     CheckShare,
@@ -124,7 +128,11 @@ impl Command {
             | Self::ResumeCall
             | Self::ListScreens(_, _, _)
             | Self::ListCameras(_)
-            | Self::StartShare(_, _, _)
+            | Self::StartShare(_, _, _, _)
+            | Self::ToggleControl(_)
+            | Self::ControlInput(_, _)
+            | Self::ReleaseControl
+            | Self::RevokeControl
             | Self::FocusStreamAudio(_)
             | Self::StopShare
             | Self::CheckShare
@@ -186,6 +194,26 @@ impl CommandQueue {
     }
 }
 
+fn queue_control_command(queue: &CommandQueue, runtime: &tokio::runtime::Handle, command: Command) {
+    if let Err(error) = queue.try_send(command) {
+        if let mpsc::error::TrySendError::Full(queued) = *error {
+            if let Command::ControlInput(target, packet) = &queued.command {
+                if !matches!(packet, zabor_input::Packet::Move { .. }) {
+                    target.emergency_stop();
+                }
+                return;
+            }
+            let queue = queue.clone();
+            runtime.spawn(async move {
+                let _ = queue
+                    .intents
+                    .run(queued.ticket, IntentScope::Voice, queue.sender.send(queued))
+                    .await;
+            });
+        }
+    }
+}
+
 enum FileAction {
     Stage(Vec<PathBuf>),
     Save(String, PathBuf),
@@ -218,6 +246,10 @@ enum UiEvent {
     Cameras(PickerQuery, Option<Vec<zabor_camera::Device>>),
     SourcePreview(PickerQuery, String, Option<PickerImage>),
     Sharing(bool),
+    RemoteControl(
+        zabor_native::voice::RemoteControlView,
+        Vec<zabor_native::voice::ControlTarget>,
+    ),
     RemoveVideo(String),
     NotificationResolved(NotificationKind, String, bool),
     PickedFiles(String, String, Vec<PathBuf>),
@@ -410,6 +442,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         sender,
         intents: intents.clone(),
     };
+    let control_targets = Rc::new(RefCell::new(
+        Vec::<zabor_native::voice::ControlTarget>::new(),
+    ));
     let local_settings = match profile
         .as_ref()
         .map(|profile| profile.read_settings())
@@ -1171,6 +1206,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         ui.set_screen_source_kind(0);
         ui.set_screen_quality("low".into());
         ui.set_screen_include_audio(true);
+        ui.set_screen_allow_control(false);
         ui.set_screen_sources_loading(true);
         ui.set_error("".into());
         ui.set_modal(5);
@@ -1273,7 +1309,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     }
     let weak = ui.as_weak();
     let screen_commands = commands.clone();
-    ui.on_start_share(move |source, quality, include_audio| {
+    ui.on_start_share(move |source, quality, include_audio, allow_control| {
         let Some(ui) = weak
             .upgrade()
             .filter(|ui| ui.get_voice_active() && !ui.get_busy())
@@ -1295,6 +1331,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 source.to_string(),
                 quality.to_string(),
                 include_audio && !source.starts_with("camera:"),
+                allow_control && !source.starts_with("camera:"),
             ))
             .is_ok()
         {
@@ -1306,6 +1343,159 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let screen_commands = commands.clone();
     ui.on_stop_share(move || {
         let _ = screen_commands.try_send(Command::StopShare);
+    });
+    let target_commands = commands.clone();
+    let targets = control_targets.clone();
+    ui.on_toggle_control(move |peer| {
+        if let Some(target) = targets
+            .borrow()
+            .iter()
+            .find(|target| target.peer == peer.as_str())
+            .cloned()
+        {
+            let _ = target_commands.try_send(Command::ToggleControl(target));
+        }
+    });
+    let weak = ui.as_weak();
+    ui.on_control_can_request(move |peer| {
+        weak.upgrade()
+            .is_some_and(|ui| ui.get_control_permitted().iter().any(|id| id == peer))
+    });
+    let control_commands = commands.clone();
+    let control_runtime = runtime.handle().clone();
+    let weak = ui.as_weak();
+    let targets = control_targets.clone();
+    ui.on_release_control(move || {
+        if let Some(ui) = weak.upgrade() {
+            if let Some(target) = targets
+                .borrow()
+                .iter()
+                .find(|target| target.peer == ui.get_control_viewer().as_str())
+            {
+                target.send_stop();
+            }
+            ui.set_control_ready(false);
+        }
+        queue_control_command(&control_commands, &control_runtime, Command::ReleaseControl);
+    });
+    let control_commands = commands.clone();
+    let control_runtime = runtime.handle().clone();
+    let targets = control_targets.clone();
+    let weak = ui.as_weak();
+    ui.on_revoke_control(move || {
+        if let Some(ui) = weak.upgrade() {
+            if let Some(target) = targets
+                .borrow()
+                .iter()
+                .find(|target| target.peer == ui.get_control_controller().as_str())
+            {
+                target.emergency_stop();
+            }
+            ui.set_control_controller("".into());
+        }
+        queue_control_command(&control_commands, &control_runtime, Command::RevokeControl);
+    });
+    let weak = ui.as_weak();
+    let targets = control_targets.clone();
+    let control_commands = commands.clone();
+    let control_runtime = runtime.handle().clone();
+    ui.on_control_pointer(move |peer, x, y, width, height, kind, button| {
+        let Some(ui) = weak.upgrade().filter(|ui| {
+            ui.get_control_viewer() == peer && ui.get_control_ready() && ui.get_modal() == 0
+        }) else {
+            return;
+        };
+        let Some(target) = targets
+            .borrow()
+            .iter()
+            .find(|target| target.peer == peer.as_str())
+            .cloned()
+        else {
+            return;
+        };
+        let Some(frame) = ui.get_video_frames().iter().find(|video| video.id == peer) else {
+            return;
+        };
+        let pixels = frame.frame.size();
+        let point = zabor_native::remote_viewer::normalized_point(
+            x,
+            y,
+            width,
+            height,
+            (pixels.width, pixels.height),
+        );
+        if let Some((x, y)) = point {
+            queue_control_command(
+                &control_commands,
+                &control_runtime,
+                Command::ControlInput(target.clone(), zabor_input::Packet::Move { x, y }),
+            );
+        }
+        if (kind == 2 || (kind == 1 && point.is_some())) && (0..=2).contains(&button) {
+            queue_control_command(
+                &control_commands,
+                &control_runtime,
+                Command::ControlInput(
+                    target,
+                    zabor_input::Packet::Mouse {
+                        button: button as u8,
+                        down: kind == 1,
+                    },
+                ),
+            );
+        }
+    });
+    let targets = control_targets.clone();
+    let control_commands = commands.clone();
+    let control_runtime = runtime.handle().clone();
+    ui.on_control_wheel(move |peer, vertical, horizontal| {
+        if !vertical.is_finite() || !horizontal.is_finite() {
+            return;
+        }
+        if let Some(target) = targets
+            .borrow()
+            .iter()
+            .find(|target| target.peer == peer.as_str())
+            .cloned()
+        {
+            queue_control_command(
+                &control_commands,
+                &control_runtime,
+                Command::ControlInput(
+                    target,
+                    zabor_input::Packet::Wheel {
+                        vertical: vertical.clamp(-32768.0, 32767.0) as i16,
+                        horizontal: horizontal.clamp(-32768.0, 32767.0) as i16,
+                    },
+                ),
+            );
+        }
+    });
+    let targets = control_targets.clone();
+    let control_commands = commands.clone();
+    let control_runtime = runtime.handle().clone();
+    ui.on_control_key(move |peer, text, down, modifiers| {
+        if let (Some(vk), Some(target)) = (
+            zabor_native::remote_viewer::key_code(&text),
+            targets
+                .borrow()
+                .iter()
+                .find(|target| target.peer == peer.as_str())
+                .cloned(),
+        ) {
+            queue_control_command(
+                &control_commands,
+                &control_runtime,
+                Command::ControlInput(
+                    target,
+                    zabor_input::Packet::Key {
+                        vk,
+                        down,
+                        modifiers: modifiers as u8,
+                    },
+                ),
+            );
+        }
     });
     let weak = ui.as_weak();
     let stream_commands = commands.clone();
@@ -1472,6 +1662,11 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_busy(false);
                 }
                 UiEvent::VoiceEnded => {
+                    control_targets.borrow_mut().clear();
+                    ui.set_control_viewer("".into());
+                    ui.set_control_ready(false);
+                    ui.set_control_controller("".into());
+                    ui.set_control_permitted(ModelRc::default());
                     {
                         let mut data = latest.borrow_mut();
                         let owner = data.user.id.clone();
@@ -1651,6 +1846,28 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     if ui.get_modal() == 5 {
                         ui.set_modal(0);
                     }
+                }
+                UiEvent::RemoteControl(state, targets) => {
+                    if let Some(key) = state.notice {
+                        if let Ok(strings) = Strings::new(ui.get_language().as_str()) {
+                            ui.set_error(strings.text(key).into());
+                        }
+                    }
+                    *control_targets.borrow_mut() = targets;
+                    ui.set_control_permitted(
+                        Rc::new(VecModel::from(
+                            state
+                                .permitted_peers
+                                .into_iter()
+                                .map(slint::SharedString::from)
+                                .collect::<Vec<_>>(),
+                        ))
+                        .into(),
+                    );
+                    ui.set_control_viewer(state.viewer.into());
+                    ui.set_control_ready(state.viewer_ready);
+                    ui.set_control_host_active(state.host_active);
+                    ui.set_control_controller(state.controller.into());
                 }
                 UiEvent::RemoveVideo(peer) => {
                     if ui.get_focused_video() == peer {
@@ -2412,6 +2629,12 @@ async fn worker(
                     },
                     event @ (MediaEvent::SfuConnection { .. } | MediaEvent::SfuTrack { .. }) => {
                         if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) { let _ = voice.handle_sfu_event(hub, event).await; }
+                    },
+                    MediaEvent::RemoteControl { peer, event, lifetime, channel } => {
+                        if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) {
+                            let _ = voice.handle_remote_control(hub, &peer, event, lifetime.clone(), channel, intents.voice_token(ticket)).await;
+                            work.publish_peer(&lifetime, UiEvent::RemoteControl(voice.remote_control_view(), voice.control_targets()));
+                        }
                     },
                     MediaEvent::StreamVideoReady { peer, epoch, track, lifetime, lease } => {
                             let accepted = if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) { voice.accept_stream_video_ready(hub, &peer, epoch, &lifetime, &lease).await } else { false };
@@ -3655,7 +3878,7 @@ async fn worker(
                         Err(_) => Ok(UiEvent::Cameras(query, None)),
                     }
                 }
-                Command::StartShare(id, quality, include_audio) => {
+                Command::StartShare(id, quality, include_audio, allow_control) => {
                     if let Some(device) = id.strip_prefix("camera:") {
                         if quality != "camera"
                             || device.is_empty()
@@ -3704,7 +3927,13 @@ async fn worker(
                     };
                     let result = if let Some(session) = resources.0.as_mut() {
                         session
-                            .start_share(&connection, source, &quality, include_audio)
+                            .start_share_with_control(
+                                &connection,
+                                source,
+                                &quality,
+                                include_audio,
+                                allow_control,
+                            )
                             .await
                             .map_err(|_| AuthError::Network)
                     } else {
@@ -3731,6 +3960,45 @@ async fn worker(
                     }
                     Ok(UiEvent::Connected)
                 }
+                Command::ToggleControl(target) => {
+                    let session = voice
+                        .as_mut()
+                        .filter(|session| session.control_target_current(&target))
+                        .ok_or(AuthError::Network)?;
+                    session
+                        .toggle_remote_control(&connection, &target.peer)
+                        .await
+                        .map_err(|_| AuthError::Network)?;
+                    Ok(UiEvent::RemoteControl(
+                        session.remote_control_view(),
+                        session.control_targets(),
+                    ))
+                }
+                Command::ControlInput(target, packet) => {
+                    let session = voice
+                        .as_mut()
+                        .filter(|session| session.control_target_current(&target))
+                        .ok_or(AuthError::Network)?;
+                    session
+                        .send_control_input(&target.peer, packet)
+                        .map_err(|_| AuthError::Network)?;
+                    Ok(UiEvent::Connected)
+                }
+                Command::ReleaseControl | Command::RevokeControl => {
+                    if let Some(session) = voice.as_mut() {
+                        if matches!(command, Command::RevokeControl) {
+                            session.revoke_remote_control();
+                        } else {
+                            session.release_remote_control();
+                        }
+                        Ok(UiEvent::RemoteControl(
+                            session.remote_control_view(),
+                            session.control_targets(),
+                        ))
+                    } else {
+                        Ok(UiEvent::Connected)
+                    }
+                }
                 Command::MaintainStreams => {
                     if let Some(session) = voice.as_mut() {
                         session.maintain_streams(&connection).await;
@@ -3750,7 +4018,14 @@ async fn worker(
                             drop(receiver);
                         }
                     }
-                    Ok(UiEvent::Connected)
+                    if let Some(session) = voice.as_ref() {
+                        Ok(UiEvent::RemoteControl(
+                            session.remote_control_view(),
+                            session.control_targets(),
+                        ))
+                    } else {
+                        Ok(UiEvent::Connected)
+                    }
                 }
                 Command::StopShare => {
                     if let Some(session) = voice.as_mut() {
@@ -4268,7 +4543,10 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     let recorded = starts.clone();
     let audio_selections = Rc::new(RefCell::new(Vec::new()));
     let audio_recorded = audio_selections.clone();
-    ui.on_start_share(move |source, quality, audio| {
+    let control_selections = Rc::new(RefCell::new(Vec::new()));
+    let control_recorded = control_selections.clone();
+    ui.on_start_share(move |source, quality, audio, control| {
+        control_recorded.borrow_mut().push(control);
         audio_recorded.borrow_mut().push(audio);
         recorded
             .borrow_mut()
@@ -4312,6 +4590,7 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     ui.set_screen_source_kind(0);
     ui.set_screen_quality("low".into());
     ui.set_screen_include_audio(true);
+    ui.set_screen_allow_control(false);
     ui.set_selected_screen("".into());
     ui.set_screen_sources_loading(false);
     ui.set_modal(5);
@@ -4319,6 +4598,7 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
         let y = match y as i32 {
             254 => 194.0,
             318 => 258.0,
+            450 => 368.0,
             475 => 535.0,
             582 => 642.0,
             _ => y,
@@ -4439,6 +4719,13 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     if ui.get_screen_include_audio() {
         return Err("Stream audio toggle did not disable capture");
     }
+    if control_selections.borrow().last() != Some(&false) {
+        return Err("Stream control started without explicit consent");
+    }
+    click(730.0, 451.0);
+    if !ui.get_screen_allow_control() {
+        return Err("Stream control consent toggle did not enable permission");
+    }
     ui.set_busy(true);
     click(730.0, 450.0);
     if ui.get_screen_include_audio() {
@@ -4470,6 +4757,9 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     }
     if audio_selections.borrow().last() != Some(&false) {
         return Err("Disabled stream audio selection was not preserved");
+    }
+    if control_selections.borrow().last() != Some(&true) {
+        return Err("Explicit stream control consent was not forwarded");
     }
     click(550.0, 254.0);
     if ui.get_screen_source_kind() != 1 || !ui.get_selected_screen().is_empty() {
@@ -4521,6 +4811,9 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     }
     if audio_selections.borrow().last() != Some(&false) {
         return Err("Camera started isolated desktop audio");
+    }
+    if control_selections.borrow().last() != Some(&false) {
+        return Err("Camera started remote input control");
     }
     let started = starts.borrow().len();
     ui.set_busy(true);
