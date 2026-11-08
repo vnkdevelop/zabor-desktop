@@ -2098,6 +2098,9 @@ async fn worker(
                                             stream_drops.cancel(&user.id);
                                             work.publish(UiEvent::RemoveVideo(user.id.clone()));
                                             work.publish(UiEvent::Voice(String::new(), vec![user]));
+                                            if matches!(work.run(session.restore_share(hub)).await, Some(Err(_))) {
+                                                work.publish(UiEvent::Toast("toasts.streamStartFailed"));
+                                            }
                                         }
                                     }
                                 }
@@ -2659,6 +2662,12 @@ async fn worker(
                                     stream_drops.cancel(&peer);
                                     work.publish(UiEvent::RemoveVideo(peer));
                                     work.publish(UiEvent::Voice(String::new(), vec![*user]));
+                                    if matches!(
+                                        work.run(voice.restore_share(connection)).await,
+                                        Some(Err(_))
+                                    ) {
+                                        work.publish(UiEvent::Toast("toasts.streamStartFailed"));
+                                    }
                                 }
                             }
                             continue;
@@ -2929,6 +2938,16 @@ async fn worker(
                                     drop(retired);
                                     if let Some(work) = &restore_work {
                                         work.publish(UiEvent::Voice(channel, users));
+                                        if let Some(session) = voice.as_ref() {
+                                            if matches!(
+                                                work.run(session.restore_share(&connection)).await,
+                                                Some(Err(_))
+                                            ) {
+                                                work.publish(UiEvent::Toast(
+                                                    "toasts.streamStartFailed",
+                                                ));
+                                            }
+                                        }
                                     }
                                 }
                                 Err(_) => {

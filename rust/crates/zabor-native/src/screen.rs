@@ -183,6 +183,44 @@ impl ScreenCapture {
     pub fn failed(&self) -> bool {
         self.failed.load(Ordering::Acquire)
     }
+
+    pub(crate) fn is_live(&self) -> bool {
+        !self.failed()
+            && !self.stop.load(Ordering::Acquire)
+            && self
+                .thread
+                .as_ref()
+                .is_some_and(|thread| !thread.is_finished())
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn synthetic() -> (Self, Arc<AtomicBool>, Arc<AtomicBool>) {
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: 160,
+                height: 96,
+            },
+            true,
+        );
+        let stop = Arc::new(AtomicBool::new(false));
+        let failed = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let thread = std::thread::spawn(move || {
+            while !worker_stop.load(Ordering::Acquire) {
+                std::thread::park_timeout(Duration::from_millis(10));
+            }
+        });
+        (
+            Self {
+                source,
+                stop: stop.clone(),
+                failed: failed.clone(),
+                thread: Some(thread),
+            },
+            stop,
+            failed,
+        )
+    }
 }
 
 impl Drop for ScreenCapture {

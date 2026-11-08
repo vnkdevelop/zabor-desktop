@@ -10,8 +10,8 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **f05ec02**:picker98targeted tests/build/RUEN100%
-interactions и Graphify passed. Sender-quality functional checks passed ниже;
+сборкой. Latest saved source commit — **43122d4**:sender-quality11targeted tests/build/
+RUEN100% actual quality-pointer interactions и Graphify passed,clean tree confirmed.
 no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
@@ -49,6 +49,51 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
 
+## Stream reconnect — functional checks passed 2026-11-08
+
+- Saved43122d4,clean tree after commit;no pending jobs. Next group:live stream
+  reannouncement after channel rejoin and both call-resume paths. Keep capture and
+  quality together in the existing Voice owner;never renew Voice/peer/frame tickets.
+- Reference signalr.ts1380-1384,1411 reannounces StartStream only for live capture,
+  then restores senders. Native engine already retains source/profile for fresh peers;
+  do not recreate capture or replace a healthy retained native track just to restore.
+- Run stream restoration after membership/call recovery has succeeded and under the
+  same original VoiceWork;do not include the10s stream invoke in the5s call recovery
+  budget or turn a stream rejection/network error into channel/call loss. Existing
+  bundle take/install/terminal retirement/strict acceptance remains unchanged.
+- Add local negotiate/WebSocket protocol tests with synthetic native video only:
+  original quality,success/refusal/retry,absent/failed/stopped capture,original peer
+  lifetime and current-intent cancellation. No physical audio/capture or production.
+- Affected checks/build/Clippy and shell guard regressions only;full-client/physical/
+  exact comparison and all remaining camera/system audio/SFU/RC/profile/UI/import/
+  packaging work still open. No publication/shutdown until final acceptance.
+- Implemented:ScreenShare retains original capture+quality;restore_share checks
+  capture stop/failure/thread liveness and live enabled engine track before invoking
+  StartStream(original quality). Rechecks liveness after success;never replaces
+  capture/track/peer or clears membership on refusal/network failure.
+- All3shell entrypoints now invoke restoration under original VoiceWork after
+  channel bundle installation or call_recovery.restored commit and UI publication.
+  Original5s call timeout unchanged;10s StartStream outside it. Failure publishes
+  existing localized toasts.streamStartFailed only,does not retry/end recovered call.
+- **sh_1ba4caa600012Yfu1lpRZZXhlw completed/passed** under
+  `native-streams/reannouncement-functional-2026-11-08`:7local protocol unit tests
+  with synthetic native sources,panic-on-audio factory and no desktop acquisition.
+  Capture/track/restored-peer retention;original low/medium/high;refusal/null/string/
+  hub error/network-close and retry;absent/failed/stopped/disabled/removed/unowned;
+  original intent cancellation before/during;failure while awaiting;both local
+  resume protocols with5.2s stream response after call commit. Actual shell/native
+  channel rejoin requiring physical audio is not covered by these unit fixtures.
+  Passed7tests in10.69s;no physical audio/capture. Affected checks
+  **sh_1ba4e42b1001fAK2bVUJXxBt89 completed/passed**:133tests total
+  (7stream/8media/3screen/8call/1old Voice/92shell/14local hub-call-intent-RTP),fmt/
+  native-media all-targets Clippy/build. No failures or pending jobs. Graphify
+  **sh_1ba4ed340001WhdTGG9NXaXA9C completed/passed**:6085nodes/15120edges/
+  252communities;existing7warnings/HTML5000limit retained. Scoped diff check passed;
+  save next. Exact UI/DSP/full-client checks deferred,not claimed accepted.
+  No complete native-client claim. RC reference inspected without changes:binary
+  zabor-rc-v1,id4243,little-endian packets and whitelist/system-shortcut filters in
+  src/renderer/src/services/remoteControl.ts remain required for later RC stage.
+
 ## Native sender quality — functional checks passed 2026-11-08
 
 - Saved f05ec02 stream picker;Graphify sh_1ba398377001AhJ1MiBUF9OklG passed:
@@ -85,12 +130,11 @@ push/merge/release/shutdown не выполнялись. После каждог
   3localRTP tests,fmt/Clippy/build/actual high-low pointer and busy refusal checks.
   No physical capture or full-client acceptance. Graphify sh_1ba45e633001ny2Ado7o4yDH2O
   passed6053nodes/15032edges/247communities;existing7warnings/HTML5000limit retained.
-  Save next;no full DSP/visual matrix per microchange.
-- Stream channel/call reconnect retains capture source but server StartStream quality
-  restoration is not yet wired. Reference signalr.ts1380-1384 reannounces only live
-  track after rejoin;native rejoin currently joins peers without that announcement.
-  Implement with original VoiceWork/bundle identity,do not turn stream restore failure
-  into channel loss;add local hub protocol tests before claiming restored behavior.
+  Saved **43122d4**,clean tree confirmed;no full DSP/visual matrix per microchange.
+- At43122d4 stream channel/call reconnect retained capture without reannouncement.
+  The next functional stage above wires StartStream(original quality) under original
+  VoiceWork/bundle identity;local restore protocol checks passed. Physical/audio rejoin
+  and complete recovery/parity acceptance remain open.
 
 ## Stream picker — functional checks passed 2026-11-08
 

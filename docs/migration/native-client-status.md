@@ -1337,7 +1337,27 @@ parameters. SSRC/transaction identity retained;unset degradation maps to equival
 Balanced default. Local RTP decoding test starts with low profile;desktop→camera/
 stop/default reset scenarios expanded. Corrected affected checks passed;Graphify
 sh_1ba45e633001ny2Ado7o4yDH2O passed6053nodes/15032edges/247communities with existing
-7warnings/HTML5000limit. Save next;full-client and physical readiness remain false.
+7warnings/HTML5000limit. Saved **43122d4**,clean tree confirmed;full-client and
+physical readiness remain false. The following stage checks live stream reannouncement
+after channel/call recovery under original VoiceWork without membership loss.
+
+### Stream reannouncement: functional components checked
+
+Retained ScreenShare owns original capture+quality. New restore_share only invokes
+StartStream for live capture/enabled native track after membership/call recovery;
+does not reacquire capture,replace track or rebuild restored peers. All3shell recovery
+entrypoints run it under original VoiceWork after bundle install/call commit,not in
+the5s call timeout. Rejection/network failure uses existing streamStartFailed toast
+without losing channel/call. Passed sh_1ba4caa600012Yfu1lpRZZXhlw:7local protocol
+unit fixtures in10.69s,synthetic video and panic-on-physical-audio factory. Passed
+sh_1ba4e42b1001fAK2bVUJXxBt89:133total tests (7stream/8media/3screen/8call/1old Voice/
+92shell/14local hub-call-intent-RTP),fmt/native-media all-targets Clippy/build.
+Graphify sh_1ba4ed340001WhdTGG9NXaXA9C passed6085nodes/15120edges/252communities,
+existing7warnings/HTML5000limit retained.
+Shell/native channel
+rejoin with actual audio,physical capture,universal acquisition/Drop deadlines and
+full-client acceptance remain unverified. No pending jobs;scoped diff check passed,
+save next. No publication/shutdown.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

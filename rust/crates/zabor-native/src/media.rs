@@ -368,6 +368,17 @@ impl MediaEngine {
         self.set_video_profile(Some(source), Some(profile))
     }
 
+    pub(crate) fn has_live_video(&self) -> bool {
+        self.video.as_ref().is_some_and(|track| {
+            track.enabled() && track.state() == libwebrtc::media_stream_track::RtcTrackState::Live
+        })
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn local_video(&self) -> Option<RtcVideoTrack> {
+        self.video.clone()
+    }
+
     fn set_video_profile(
         &mut self,
         source: Option<NativeVideoSource>,

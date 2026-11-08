@@ -22,6 +22,11 @@ pub struct ChannelMembership {
     pub users: Vec<User>,
 }
 
+struct ScreenShare {
+    capture: ScreenCapture,
+    quality: String,
+}
+
 pub struct VoiceSession {
     engine: MediaEngine,
     local_id: String,
@@ -29,7 +34,7 @@ pub struct VoiceSession {
     pub channel: Option<String>,
     pub call_peer: Option<String>,
     relay_only: bool,
-    capture: Option<ScreenCapture>,
+    capture: Option<ScreenShare>,
     controls: Arc<AudioControls>,
     #[cfg(windows)]
     audio_runtime: Arc<SharedAudio<NativeAudio>>,
@@ -268,11 +273,36 @@ impl VoiceSession {
             let _ = hub.send("StopStream", Vec::new()).await;
             return Err(error);
         }
-        self.capture = Some(capture);
+        self.capture = Some(ScreenShare {
+            capture,
+            quality: quality.to_owned(),
+        });
         for peer in self.peers.clone() {
             self.renegotiate(hub, &peer).await?;
         }
         Ok(())
+    }
+
+    pub async fn restore_share(&self, hub: &HubConnection) -> Result<bool, MediaError> {
+        let Some(share) = self.capture.as_ref().filter(|share| {
+            share.capture.is_live()
+                && self.engine.has_live_video()
+                && (self.channel.is_some() || self.call_peer.is_some())
+        }) else {
+            return Ok(false);
+        };
+        let started = hub
+            .invoke(
+                "StartStream",
+                vec![json!(share.quality)],
+                Duration::from_secs(10),
+            )
+            .await
+            .map_err(|_| MediaError::Backend)?;
+        if started != true {
+            return Err(MediaError::Backend);
+        }
+        Ok(share.capture.is_live() && self.engine.has_live_video())
     }
 
     pub async fn stop_share(&mut self, hub: &HubConnection) {
@@ -285,7 +315,9 @@ impl VoiceSession {
     }
 
     pub fn share_failed(&self) -> bool {
-        self.capture.as_ref().is_some_and(ScreenCapture::failed)
+        self.capture
+            .as_ref()
+            .is_some_and(|share| share.capture.failed())
     }
     pub fn is_sharing(&self) -> bool {
         self.capture.is_some()
@@ -496,6 +528,10 @@ impl Drop for VoiceSession {
         self.stop_audio();
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "voice/stream_tests.rs"]
+mod stream_tests;
 
 #[cfg(all(test, windows))]
 mod tests {
