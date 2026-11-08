@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod achievements;
 pub mod attestation;
 #[cfg(windows)]
 pub mod audio_device;
@@ -44,6 +45,7 @@ pub mod native_audio;
 pub mod neural;
 #[cfg(feature = "native-media")]
 pub mod picker;
+pub mod presence;
 pub mod profile;
 pub mod protocol;
 pub mod release;
