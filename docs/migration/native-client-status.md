@@ -1434,6 +1434,16 @@ thumbnails/physical/hotplug/long-session/native deadlines and isolated stream au
 remaining full migration/data-integrity/visual/release gates remain unfinished.
 Full-client/publication/shutdown acceptance=false.
 
+Saved source **df43be2e329a8db4cf6a7cffae002fdd6e8e35f4** on rust/native-client,
+clean tree confirmed after scoped16path/source/executable guard and commit.
+134targeted tests/RUEN picker/fmt/normal+feature Clippy/native build/Graphify passed.
+Evidence:camera-integration-functional-2026-11-08/save-verification.json and
+verified-owner-order/verification.json. No pending build/test jobs;post-save metadata
+sync only. Next functional work is isolated process/system stream audio,then
+thumbnails/adaptive bitrate/SFU/RC and remaining full UI/profile/import/packaging,
+ownership/data-integrity issues. No push/merge/publication/shutdown or whole-client
+acceptance. Camera hardware/hotplug/privacy/long-session/native deadlines remain open.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final

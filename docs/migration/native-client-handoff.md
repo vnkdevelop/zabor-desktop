@@ -2,7 +2,7 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний функционально проверенный этап после `2ccbc75`: video task join;
+Ранее функционально проверенный этап после `2ccbc75`: video task join;
 регистрация до native acquisition,наблюдаемый исходный JoinHandle,общий app drain.
 Прошли7video/92shell-Voice-Leave/3localRTP tests,fmt и Clippy(native-media/all-targets).
 По уточнению владельца полный DSP/default и точный визуальный/multi-hash прогон
@@ -10,10 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **99f59ca9dfb5f6da9239c48ada629b4e30f7f629**:
-standalone async camera boundary,10camera/7stream tests/fmt/normal+test-source Clippy/
-camera+native-media builds и Graphify passed,clean tree confirmed. Boundary not yet
-linked into native app;camera/complete client readiness=false.
+сборкой. Latest saved source commit — **df43be2e329a8db4cf6a7cffae002fdd6e8e35f4**:
+camera/Voice/picker/app cleanup integration,134targeted tests/fmt/normal+feature
+Clippy/normal native build/RUEN inert picker и Graphify passed,clean tree confirmed.
+Camera linked into native app;physical camera/complete client readiness=false.
 no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
@@ -60,7 +60,7 @@ push/merge/release/shutdown не выполнялись. После каждог
   original-ticket shell take/reinstall and third picker tab with separate loading/
   query-child identity,RUEN keys,camera exact id/camera quality,no desktop quality.
   No physical enumeration/acquisition or production access. Targeted checks passed;
-  save next,not physical-camera or whole-client readiness.
+  saved **df43be2**,not physical-camera or whole-client readiness.
 - Initial **sh_1ba6e9c3c001GGnUfK1pcGTt0t failed**:tiny4x2 synthetic frame triggered
   WebRTC height>0 fatal;full diagnostics retained. Application now rejects<16x16
   before adapter,added separate160x96 test-source-only video fixture while retaining
@@ -96,7 +96,9 @@ push/merge/release/shutdown не выполнялись. После каждог
   Normalexe synthetic camera markers absent;stage SHA2560f599ada78fe5cfe... stored
   in verified-owner-order/verification.json. Not a new full-client attestation.
 - Source-order Graphify **sh_1ba8ca45e001lZrCuTCqG5NsGP passed**:6332nodes/15703edges/
-  276communities,existing7warnings/HTML5000limit. No pending jobs. Scoped save next.
+  276communities,existing7warnings/HTML5000limit. Scoped save **df43be2** passed,
+  clean tree confirmed;save proof and source/executable hashes in camera-integration
+  evidence/save-verification.json. No pending build/test jobs;metadata sync follows.
 - Next missing functional scenario:isolated stream audio,screen excludes app process
   tree/window includes selected process tree,48kHz float stereo/music separate from
   microphone/DSP/MicTest. Then thumbnails/adaptive bitrate/SFU/RC and remaining
