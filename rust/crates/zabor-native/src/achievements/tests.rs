@@ -329,15 +329,7 @@ fn own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation() {
     let plan = catalog.prepare(&view).unwrap().unwrap();
     let json = plan.prepared_json().to_owned();
     assert_eq!(plan.owner(), "local-owner");
-    assert!(plan
-        .commit_if_current(&intents, &view, |_| Err::<(), _>("local failure"))
-        .unwrap()
-        .is_err());
-    let plan = catalog.prepare(&view).unwrap().unwrap();
-    let committed = plan
-        .commit_if_current(&intents, &view, |_| Ok::<(), ()>(()))
-        .unwrap()
-        .unwrap();
+    let committed = plan.commit_if_current(&intents, &view).unwrap();
     assert_eq!(
         HiddenCatalog::from_durable("local-owner", &json).unwrap(),
         committed
@@ -373,9 +365,7 @@ fn own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation() {
             AchievementTarget::Peer("local-peer".into()),
         )
         .unwrap();
-    assert!(plan
-        .commit_if_current::<()>(&intents, &view, |_| panic!("stale write"))
-        .is_none());
+    assert!(plan.commit_if_current(&intents, &view).is_none());
     view.accept(&intents, &peer, Ok(missing));
     assert_eq!(
         view.rows("en", |key| translate("en", key), Some(&committed))
@@ -393,9 +383,7 @@ fn own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation() {
     view.accept(&intents, &own, Ok(data()));
     let plan = committed.prepare(&view).unwrap().unwrap();
     intents.request(CriticalAction::Logout);
-    assert!(plan
-        .commit_if_current::<()>(&intents, &view, |_| panic!("logout write"))
-        .is_none());
+    assert!(plan.commit_if_current(&intents, &view).is_none());
 }
 
 #[test]
@@ -408,6 +396,57 @@ fn durable_map_malformed_duplicate_key_and_mismatched_id_fail() {
     assert!(HiddenCatalog::from_durable("local-owner", &duplicate).is_err());
     let wrong = json!({"wrong":hidden()}).to_string();
     assert!(HiddenCatalog::from_durable("local-owner", &wrong).is_err());
+}
+
+#[tokio::test]
+async fn original_query_lifetime_survives_leave_but_close_and_replacement_revoke_every_clone() {
+    let intents = CriticalIntents::default();
+    let (mut view, query) = own_view(&intents);
+    let clone = query.clone();
+    let ticket = query.ticket();
+    intents.request(CriticalAction::Leave);
+    assert!(query.alive() && clone.alive());
+    assert_eq!(query.ticket(), ticket);
+    assert!(view.accept(&intents, &query, Ok(data())));
+    let catalog = HiddenCatalog::empty("local-owner").unwrap();
+    let mut replacement = AchievementsView::default();
+    let unrelated = replacement
+        .begin(&intents, ticket, "local-owner", AchievementTarget::Own)
+        .unwrap();
+    assert_eq!(query.generation(), unrelated.generation());
+    assert_eq!(query.ticket(), unrelated.ticket());
+    assert_ne!(query, unrelated);
+    assert!(replacement.accept(&intents, &unrelated, Ok(data())));
+    assert!(catalog
+        .prepare(&view)
+        .unwrap()
+        .unwrap()
+        .commit_if_current(&intents, &replacement)
+        .is_none());
+    let plan = catalog.prepare(&view).unwrap().unwrap();
+    view.close();
+    tokio::time::timeout(Duration::from_secs(1), clone.cancelled())
+        .await
+        .unwrap();
+    assert!(!query.alive());
+    assert!(plan.commit_if_current(&intents, &view).is_none());
+    assert!(catalog.prepare_response(&clone, &data()).unwrap().is_none());
+    let own = view
+        .begin(&intents, ticket, "local-owner", AchievementTarget::Own)
+        .unwrap();
+    assert!(own.alive());
+    assert!(view.accept(&intents, &own, Ok(data())));
+    let peer = view
+        .begin(
+            &intents,
+            ticket,
+            "local-owner",
+            AchievementTarget::Peer("local-peer".into()),
+        )
+        .unwrap();
+    assert!(!own.alive());
+    assert!(peer.alive());
+    assert_eq!(peer.ticket(), ticket);
 }
 
 async fn server(
@@ -561,6 +600,7 @@ async fn held_response_survives_leave_but_rejects_new_selected_view() {
         tokio::pin!(load);
         tokio::select! { biased; _ = request => {}, _ = &mut load => panic!("not held") }
         intents.request(CriticalAction::Leave);
+        assert!(query.alive());
         let newer = view
             .begin(
                 &intents,
@@ -569,9 +609,11 @@ async fn held_response_survives_leave_but_rejects_new_selected_view() {
                 AchievementTarget::Peer("local-peer".into()),
             )
             .unwrap();
+        assert!(!query.alive());
         release.send(()).unwrap();
-        let result = load.await.unwrap();
-        assert!(!view.accept(&intents, &query, Ok(result)));
+        let result = load.await;
+        assert_eq!(result, Err(AchievementError::Cancelled));
+        assert!(!view.accept(&intents, &query, result));
         assert_eq!(view.query(), Some(&newer));
         hub.close();
         server.await.unwrap();

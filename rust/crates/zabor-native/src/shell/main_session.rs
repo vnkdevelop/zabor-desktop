@@ -19,6 +19,7 @@ pub(super) fn is_session_command(command: &Command) -> bool {
             | Command::UpdateProfile(..)
             | Command::LookupProfile(..)
             | Command::ProfileAddFriend(..)
+            | Command::Achievements(..)
             | Command::Notification(
                 NotificationKind::Friend | NotificationKind::Channel,
                 _,
@@ -26,6 +27,29 @@ pub(super) fn is_session_command(command: &Command) -> bool {
             )
             | Command::Notification(NotificationKind::Friend, _, true)
     )
+}
+
+pub(super) async fn achievements(
+    query: zabor_native::achievements::AchievementQuery,
+    connection: &HubConnection,
+    user: Option<&User>,
+    intents: &zabor_native::critical_intents::CriticalIntents,
+    stop: &tokio_util::sync::CancellationToken,
+) -> Result<MainResult, AuthError> {
+    use zabor_native::achievements::AchievementError;
+    let result = if user.is_some_and(|user| user.id == query.owner()) {
+        zabor_native::achievements::load(connection, intents, stop, &query).await
+    } else {
+        Err(AchievementError::Cancelled)
+    };
+    Ok(MainResult::Event(UiEvent::App(
+        super::app_ui::Event::Achievements(Box::new(super::app_ui::AchievementResult {
+            query,
+            result,
+            catalog: None,
+            storage_failed: false,
+        })),
+    )))
 }
 
 pub(super) async fn compute(

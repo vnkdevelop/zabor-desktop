@@ -64,6 +64,9 @@ fn answer(method: &str) -> Value {
         "GetChannels" | "GetFriends" | "GetFriendRequests" | "GetChannelInvites" => json!([]),
         "GetAudioSettings" => json!("{\"language\":\"en\",\"inputVolume\":73}"),
         "GetJokeOfTheDay" => json!("fixture"),
+        "GetMyAchievements" | "GetUserAchievements" => {
+            json!("{\"unlockedIds\":[\"first_friend\"],\"totalHiddenCount\":0}")
+        }
         "GetIceServers" => json!({"iceServers":[]}),
         "GetRegistrationCaptcha" => json!({"id":"fixture-captcha","imageBase64":"fixture-image"}),
         "UpdateProfile" => Value::Null,
@@ -161,7 +164,9 @@ async fn fixture_with_response(
                             if method == "Login" { assert_eq!(request["arguments"].as_array().unwrap().len(), 2); }
                             if matches!(method, "CreateChannel" | "SendFriendRequest") { assert_eq!(request["arguments"], json!(["Fixture"])); }
                              if method == "UpdateProfile" { assert_eq!(request["arguments"], json!(["New Name", null, "#123abc", "about me"])); }
-                             if method == "GetUserByUsername" { assert_eq!(request["arguments"], json!(["Fixture"])); }
+                              if method == "GetUserByUsername" { assert_eq!(request["arguments"], json!(["Fixture"])); }
+                              if method == "GetMyAchievements" { assert_eq!(request["arguments"], json!([])); }
+                              if method == "GetUserAchievements" { assert_eq!(request["arguments"], json!(["fixture-peer"])); }
                             if matches!(method, "AcceptFriendRequest" | "DeclineFriendRequest" | "DeclineChannelInvite") { assert_eq!(request["arguments"], json!(["fixture-id"])); }
                             if method == hold {
                                 assert!(waiting.is_none());
@@ -344,6 +349,461 @@ fn profile_update() -> zabor_native::auth::ProfileUpdate {
 fn peer_query(intents: &CriticalIntents) -> super::profile_lookup::Request {
     super::profile_lookup::Request::new("fixture-owner", "fixture-peer", " Fixture ", intents)
         .unwrap()
+}
+
+#[tokio::test]
+async fn achievements_original_session_worker_keeps_query_once_through_leave_and_rejects_logout() {
+    use zabor_native::achievements::{AchievementTarget, AchievementsView};
+    timeout(Duration::from_secs(20), async {
+        for own in [true, false] {
+            for logout in [false, true] {
+                let method = if own {
+                    "GetMyAchievements"
+                } else {
+                    "GetUserAchievements"
+                };
+                let fixture = fixture(method).await;
+                let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+                    .await
+                    .unwrap();
+                let intents = Arc::new(CriticalIntents::default());
+                let mut view = AchievementsView::default();
+                let query = view
+                    .begin(
+                        &intents,
+                        intents.ticket(),
+                        "fixture-owner",
+                        if own {
+                            AchievementTarget::Own
+                        } else {
+                            AchievementTarget::Peer("fixture-peer".into())
+                        },
+                    )
+                    .unwrap();
+                let original = query.clone();
+                assert!(main_session::is_session_command(&Command::Achievements(
+                    query.clone()
+                )));
+                let controls = intents.clone();
+                let connection = hub.clone();
+                let task = tokio::spawn(async move {
+                    let stop = CancellationToken::new();
+                    let audio = audio(&stop);
+                    let generation = AtomicU64::new(0);
+                    let update = |_| {};
+                    let work = SessionWork::new(&controls, query.ticket(), &stop, &update);
+                    drive(
+                        &work,
+                        query.ticket(),
+                        &audio,
+                        &generation,
+                        Some(&connection),
+                        main_session::achievements(
+                            query,
+                            &connection,
+                            Some(&user()),
+                            &controls,
+                            &stop,
+                        ),
+                    )
+                    .await
+                });
+                fixture.held.notified().await;
+                intents.request(if logout {
+                    CriticalAction::Logout
+                } else {
+                    CriticalAction::Leave
+                });
+                if logout {
+                    assert!(timeout(Duration::from_secs(2), task)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .is_none());
+                    assert!(!view.accept(&intents, &original, Ok(Default::default())));
+                    fixture.release.notify_one();
+                    fixture.answered.notified().await;
+                } else {
+                    fixture.release.notify_one();
+                    let Some(Ok(MainResult::Event(UiEvent::App(
+                        super::app_ui::Event::Achievements(result),
+                    )))) = task.await.unwrap()
+                    else {
+                        panic!("achievement worker lost original result")
+                    };
+                    assert_eq!(result.query, original);
+                    assert!(result.catalog.is_none());
+                    assert!(view.accept(&intents, &result.query, result.result));
+                    assert_eq!(view.data().unwrap().unlocked_ids, ["first_friend"]);
+                }
+                hub.close();
+                assert_eq!(
+                    fixture
+                        .server
+                        .await
+                        .unwrap()
+                        .iter()
+                        .filter(|value| value.as_str() == method)
+                        .count(),
+                    1
+                );
+            }
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn achievements_worker_wire_errors_and_owner_replacement_never_fabricate_unlocks() {
+    use zabor_native::achievements::{AchievementTarget, AchievementsView};
+    timeout(Duration::from_secs(15), async {
+        for reply in [Value::Null, json!({}), json!("malformed"), json!("[]")] {
+            let fixture =
+                fixture_with_response("GetMyAchievements", json!(user()), Some(reply)).await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+                .await
+                .unwrap();
+            let intents = Arc::new(CriticalIntents::default());
+            let mut view = AchievementsView::default();
+            let query = view
+                .begin(
+                    &intents,
+                    intents.ticket(),
+                    "fixture-owner",
+                    AchievementTarget::Own,
+                )
+                .unwrap();
+            let connection = hub.clone();
+            let controls = intents.clone();
+            let task = tokio::spawn(async move {
+                main_session::achievements(
+                    query,
+                    &connection,
+                    Some(&user()),
+                    &controls,
+                    &CancellationToken::new(),
+                )
+                .await
+            });
+            fixture.held.notified().await;
+            fixture.release.notify_one();
+            let MainResult::Event(UiEvent::App(super::app_ui::Event::Achievements(result))) =
+                task.await.unwrap().unwrap()
+            else {
+                panic!("achievement result changed kind")
+            };
+            assert!(result.result.is_err());
+            assert!(view.accept(&intents, &result.query, result.result));
+            assert!(view.data().unwrap().unlocked_ids.is_empty());
+            assert!(view.error().is_some());
+            hub.close();
+            assert_eq!(fixture.server.await.unwrap(), ["GetMyAchievements"]);
+        }
+        let fixture = fixture("GetMyAchievements").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let intents = CriticalIntents::default();
+        let mut view = AchievementsView::default();
+        let query = view
+            .begin(
+                &intents,
+                intents.ticket(),
+                "old-owner",
+                AchievementTarget::Own,
+            )
+            .unwrap();
+        let MainResult::Event(UiEvent::App(super::app_ui::Event::Achievements(result))) =
+            main_session::achievements(
+                query,
+                &hub,
+                Some(&user()),
+                &intents,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("owner rejection changed kind")
+        };
+        assert!(result.result.is_err());
+        hub.close();
+        assert!(fixture.server.await.unwrap().is_empty());
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn achievements_actual_worker_dispatch_preserves_original_queue_ticket_and_observed_join() {
+    use zabor_native::achievements::{AchievementTarget, AchievementsView};
+    timeout(Duration::from_secs(20), async {
+        for logout in [false, true] {
+            let fixture = fixture("GetMyAchievements").await;
+            let intents = Arc::new(CriticalIntents::default());
+            let stop = CancellationToken::new();
+            let session_io = SessionIo::new(None, intents.clone(), stop.clone());
+            let (sender, commands) = mpsc::channel(8);
+            let queue = CommandQueue {
+                sender,
+                intents: intents.clone(),
+            };
+            queue
+                .try_send(Command::Authenticate {
+                    credentials: credentials(),
+                    registration: None,
+                })
+                .unwrap_or_else(|_| panic!("fixture authentication queue failed"));
+            let (updates, mut published) = mpsc::unbounded_channel();
+            let task = tokio::spawn(worker(
+                fixture.endpoint.clone(),
+                commands,
+                Arc::new(move |event| {
+                    let _ = updates.send(event);
+                }),
+                stop.clone(),
+                None,
+                WorkerMedia {
+                    video_sink: Arc::new(|_| panic!("achievement worker must not produce video")),
+                    video_generation: Arc::new(AtomicU64::new(1)),
+                    audio_preferences: AudioPreferences::new(&json!({})),
+                    audio_runtime: audio(&stop),
+                    intents: intents.clone(),
+                    session_io: session_io.clone(),
+                    achievement_io: super::achievement_io::AchievementIo::new(
+                        None,
+                        intents.clone(),
+                        stop.clone(),
+                    ),
+                },
+            ));
+            loop {
+                let event = published.recv().await.unwrap();
+                if matches!(event.for_current(&intents), Some(UiEvent::SignedIn(_))) {
+                    break;
+                }
+            }
+            let mut view = AchievementsView::default();
+            let query = view
+                .begin(
+                    &intents,
+                    intents.ticket(),
+                    "fixture-owner",
+                    AchievementTarget::Own,
+                )
+                .unwrap();
+            queue
+                .sender
+                .try_send(super::QueuedCommand {
+                    command: Command::Achievements(query.clone()),
+                    ticket: query.ticket(),
+                })
+                .unwrap_or_else(|_| panic!("achievement original-ticket queue failed"));
+            fixture.held.notified().await;
+            queue
+                .try_send(if logout {
+                    Command::Logout
+                } else {
+                    Command::Leave
+                })
+                .unwrap_or_else(|_| panic!("priority intent queue failed"));
+            if logout {
+                loop {
+                    let event = published.recv().await.unwrap();
+                    if matches!(event.for_current(&intents), Some(UiEvent::SignedOut)) {
+                        break;
+                    }
+                }
+                assert!(!view.accept(&intents, &query, Ok(Default::default())));
+                fixture.release.notify_one();
+                fixture.answered.notified().await;
+            } else {
+                loop {
+                    let event = published.recv().await.unwrap();
+                    if matches!(event.for_current(&intents), Some(UiEvent::VoiceEnded)) {
+                        break;
+                    }
+                }
+                fixture.release.notify_one();
+                loop {
+                    if let Some(UiEvent::App(super::app_ui::Event::Achievements(result))) =
+                        published.recv().await.unwrap().for_current(&intents)
+                    {
+                        assert_eq!(result.query, query);
+                        assert!(view.accept(&intents, &result.query, result.result));
+                        break;
+                    }
+                }
+            }
+            stop.cancel();
+            task.await.unwrap();
+            session_io.finish().await.unwrap();
+            let methods = fixture.server.await.unwrap();
+            assert_eq!(
+                methods
+                    .iter()
+                    .filter(|method| method.as_str() == "GetMyAchievements")
+                    .count(),
+                1
+            );
+            assert!(!methods.iter().any(|method| method == "ViewProfile"));
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn achievements_actual_worker_services_leave_and_drains_held_storage_ack_before_logout_or_cancel(
+) {
+    use zabor_native::achievement_store::HiddenStore;
+    use zabor_native::achievements::{parse_result, AchievementTarget, AchievementsView};
+    timeout(Duration::from_secs(40), async {
+        let payload = |id| json!({"unlockedHiddenDefs":[{"id":id,"icon":"x","maxValue":1,"statKey":id,"titleRu":"r","descriptionRu":"r","titleEn":"e","descriptionEn":"e"}]}).to_string();
+        for mode in ["accept", "leave", "logout", "view", "owner", "cancel", "ack-view", "worker-abort-error", "metadata-blocked"] {
+            let root = tempfile::tempdir().unwrap();
+            let profile = Arc::new(Profile::open(root.path()).unwrap());
+            let intents = Arc::new(CriticalIntents::default());
+            let stop = CancellationToken::new();
+            let store = HiddenStore::open(&profile, "fixture-owner").unwrap();
+            let mut seed = AchievementsView::default();
+            let seed_query = seed.begin(&intents, intents.ticket(), "fixture-owner", AchievementTarget::Own).unwrap();
+            assert!(seed.accept(&intents, &seed_query, parse_result(&json!(payload("old-hidden")))));
+            let plan = store.load().unwrap().prepare(&seed).unwrap().unwrap();
+            let prepared = store.prepare(&plan).unwrap();
+            store.replace_if(prepared, || true, || plan.commit_if_current(&intents, &seed)).unwrap().unwrap();
+            drop(store);
+            let path = std::fs::read_dir(root.path().join("achievements")).unwrap().map(|entry| entry.unwrap().path()).find(|path| path.extension().is_some_and(|extension| extension == "json")).unwrap();
+            let original = std::fs::read(&path).unwrap();
+            let fixture = fixture_with_response("GetMyAchievements", json!(user()), Some(json!(payload("fresh-hidden")))).await;
+            let session_io = SessionIo::new(Some(profile.clone()), intents.clone(), stop.clone());
+            let achievement_io = if mode == "metadata-blocked" {
+                super::achievement_io::AchievementIo::new(Some(profile.clone()), intents.clone(), stop.clone())
+            } else {
+                super::achievement_io::AchievementIo::unverified_transaction_fixture(Some(profile.clone()), intents.clone(), stop.clone())
+            };
+            let (sender, commands) = mpsc::channel(8);
+            let queue = CommandQueue { sender, intents: intents.clone() };
+            queue.try_send(Command::Authenticate { credentials: credentials(), registration: None }).unwrap_or_else(|_| panic!("storage fixture authentication queue failed"));
+            let (updates, mut published) = mpsc::unbounded_channel();
+            let task = tokio::spawn(worker(
+                fixture.endpoint.clone(), commands, Arc::new(move |event| { let _ = updates.send(event); }), stop.clone(), Some(profile.clone()),
+                WorkerMedia {
+                    video_sink: Arc::new(|_| panic!("storage fixture must not produce video")),
+                    video_generation: Arc::new(AtomicU64::new(1)),
+                    audio_preferences: AudioPreferences::new(&json!({})),
+                    audio_runtime: audio(&stop),
+                    intents: intents.clone(),
+                    session_io: session_io.clone(),
+                    achievement_io: achievement_io.clone(),
+                },
+            ));
+            loop {
+                if matches!(published.recv().await.unwrap().for_current(&intents), Some(UiEvent::SignedIn(_))) { break; }
+            }
+            let mut view = AchievementsView::default();
+            let query = view.begin(&intents, intents.ticket(), "fixture-owner", AchievementTarget::Own).unwrap();
+            queue.sender.try_send(super::QueuedCommand { command: Command::Achievements(query.clone()), ticket: query.ticket() }).unwrap_or_else(|_| panic!("storage fixture original-ticket queue failed"));
+            fixture.held.notified().await;
+            fixture.release.notify_one();
+            if mode == "metadata-blocked" {
+                loop {
+                    if let Some(UiEvent::App(super::app_ui::Event::Achievements(result))) = published.recv().await.unwrap().for_current(&intents) {
+                        assert_eq!(result.query, query);
+                        assert!(result.storage_failed && result.result.is_ok());
+                        break;
+                    }
+                }
+                stop.cancel();
+                task.await.unwrap();
+                assert!(achievement_io.finish().await.is_err());
+                session_io.finish().await.unwrap();
+                assert_eq!(std::fs::read(&path).unwrap(), original);
+                assert!(!path.with_extension("journal").exists());
+                let methods = fixture.server.await.unwrap();
+                assert_eq!(methods.iter().filter(|method| method.as_str() == "GetMyAchievements").count(), 1);
+                continue;
+            }
+            let proposal = loop {
+                if let Some(UiEvent::App(super::app_ui::Event::AchievementProposal { result, plan, acknowledge })) = published.recv().await.unwrap().for_current(&intents) {
+                    break (result, plan, acknowledge);
+                }
+            };
+            let (result, plan, acknowledge) = proposal;
+            assert_eq!(result.query, query);
+            assert!(path.with_extension("journal").exists());
+            assert!(std::str::from_utf8(&std::fs::read(&path).unwrap()).unwrap().contains("fresh-hidden"));
+            if mode == "leave" {
+                queue.try_send(Command::Leave).unwrap_or_else(|_| panic!("held-ack Leave queue failed"));
+                loop {
+                    if matches!(timeout(Duration::from_millis(1500), published.recv()).await.unwrap().unwrap().for_current(&intents), Some(UiEvent::VoiceEnded)) { break; }
+                }
+            }
+            match mode {
+                "logout" => {
+                    queue.try_send(Command::Logout).unwrap_or_else(|_| panic!("held-ack Logout queue failed"));
+                    loop {
+                        if matches!(timeout(Duration::from_secs(3), published.recv()).await.unwrap().unwrap().for_current(&intents), Some(UiEvent::SignedOut)) { break; }
+                    }
+                    assert_eq!(std::fs::read(&path).unwrap(), original);
+                    drop(acknowledge);
+                }
+                "cancel" | "worker-abort-error" => {
+                    if mode == "worker-abort-error" {
+                        std::fs::remove_file(&path).unwrap();
+                        std::fs::create_dir(&path).unwrap();
+                    }
+                    if mode == "worker-abort-error" { task.abort(); }
+                    stop.cancel();
+                    drop(acknowledge);
+                }
+                _ => {
+                    if mode == "view" { view.close(); }
+                    if mode == "owner" { view.begin(&intents, intents.ticket(), "replacement", AchievementTarget::Own).unwrap(); }
+                    let accepted = if view.accept(&intents, &result.query, result.result) { plan.commit_if_current(&intents, &view) } else { None };
+                    if mode == "ack-view" {
+                        assert!(accepted.is_some());
+                        view.close();
+                    }
+                    let _ = acknowledge.send(accepted);
+                    loop {
+                        if let Some(UiEvent::App(super::app_ui::Event::AchievementsStored { query: completed, result })) = published.recv().await.unwrap().for_current(&intents) {
+                            assert_eq!(completed, query);
+                            assert_eq!(result.unwrap().is_some(), matches!(mode, "accept" | "leave"));
+                            break;
+                        }
+                    }
+                }
+            }
+            stop.cancel();
+            if mode == "worker-abort-error" {
+                assert!(task.await.unwrap_err().is_cancelled());
+                assert!(achievement_io.finish().await.is_err());
+                assert!(path.with_extension("journal").exists());
+                assert!(zabor_native::achievement_store::load(&profile, "fixture-owner").is_err());
+                std::fs::remove_dir(&path).unwrap();
+                assert!(zabor_native::achievement_store::load(&profile, "fixture-owner").is_ok());
+                assert_eq!(std::fs::read(&path).unwrap(), original);
+            } else {
+                task.await.unwrap();
+                achievement_io.finish().await.unwrap();
+            }
+            session_io.finish().await.unwrap();
+            let stored = std::fs::read(&path).unwrap();
+            if matches!(mode, "accept" | "leave") {
+                let stored = std::str::from_utf8(&stored).unwrap();
+                assert!(stored.contains("old-hidden") && stored.contains("fresh-hidden"));
+            } else {
+                assert_eq!(stored, original);
+            }
+            assert!(!path.with_extension("journal").exists());
+            assert!(!std::fs::read_dir(path.parent().unwrap()).unwrap().any(|entry| entry.unwrap().path().extension().is_some_and(|extension| extension == "tmp")));
+            let methods = fixture.server.await.unwrap();
+            assert_eq!(methods.iter().filter(|method| method.as_str() == "GetMyAchievements").count(), 1);
+            assert!(!methods.iter().any(|method| method == "ViewProfile"));
+        }
+    }).await.unwrap();
 }
 
 #[tokio::test]
@@ -4128,6 +4588,11 @@ async fn actual_logout_worker_registers_durable_clear_before_blocked_resource_cl
             audio_runtime: audio.clone(),
             intents: intents.clone(),
             session_io: session_io.clone(),
+            achievement_io: super::achievement_io::AchievementIo::new(
+                Some(profile.clone()),
+                intents.clone(),
+                stop.clone(),
+            ),
         },
     ));
     let measured = Instant::now();
@@ -4187,6 +4652,7 @@ async fn actual_normal_logout_wait_services_repeated_leave_and_rechecks_replacem
                     video_sink: Arc::new(|_| panic!("Logout fixture must not produce video")),
                     video_generation: generation.clone(), audio_preferences: preferences.clone(),
                     audio_runtime: audio.clone(), intents: intents.clone(), session_io: session_io.clone(),
+                    achievement_io: super::achievement_io::AchievementIo::new(Some(profile.clone()), intents.clone(), stop.clone()),
                 },
             ));
             wait_for_session_removal(&profile).await;
@@ -4278,6 +4744,11 @@ async fn actual_normal_logout_preserves_partial_poison_reset_and_reports_cleanup
             audio_runtime: audio.clone(),
             intents: intents.clone(),
             session_io: session_io.clone(),
+            achievement_io: super::achievement_io::AchievementIo::new(
+                None,
+                intents.clone(),
+                stop.clone(),
+            ),
         },
     ));
     assert!(matches!(
@@ -4353,6 +4824,11 @@ async fn actual_failed_auth_worker_registers_durable_clear_before_reset_wait_and
             audio_runtime: audio.clone(),
             intents: intents.clone(),
             session_io: session_io.clone(),
+            achievement_io: super::achievement_io::AchievementIo::new(
+                Some(profile.clone()),
+                intents.clone(),
+                stop.clone(),
+            ),
         },
     ));
     timeout(Duration::from_secs(3), fixture.held.notified())

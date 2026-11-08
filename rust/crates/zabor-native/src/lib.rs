@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod achievement_store;
 pub mod achievements;
 pub mod attestation;
 #[cfg(windows)]

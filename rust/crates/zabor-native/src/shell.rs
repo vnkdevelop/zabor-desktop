@@ -50,11 +50,14 @@ use zabor_native::video::{
 use zabor_native::voice::VoiceSession;
 use zeroize::Zeroizing;
 
+mod achievement_io;
+mod app_ui;
 mod avatar_interactions;
 mod avatar_ui;
 #[cfg(test)]
 mod critical_tests;
 mod leave_work;
+mod presence_clock;
 mod profile_lookup;
 use leave_work::{close_logout_connection, VoiceLeave};
 #[cfg(test)]
@@ -92,6 +95,7 @@ enum Command {
     UpdateProfile(zabor_native::auth::ProfileUpdate, avatar_ui::Query),
     LookupProfile(profile_lookup::Request),
     ProfileAddFriend(profile_lookup::Request),
+    Achievements(zabor_native::achievements::AchievementQuery),
     Logout,
     Join(String),
     Leave,
@@ -256,6 +260,7 @@ enum UiEvent {
     Disconnected,
     SignedOut,
     Avatar(avatar_ui::Event),
+    App(app_ui::Event),
     ProfileSaved(zabor_native::auth::User, avatar_ui::Query),
     ProfileError(avatar_ui::Query, AuthError),
     ProfileLookup(
@@ -419,6 +424,7 @@ struct WorkerMedia {
     audio_runtime: Arc<SharedAudio<NativeAudio>>,
     intents: Arc<CriticalIntents>,
     session_io: Arc<SessionIo>,
+    achievement_io: Arc<achievement_io::AchievementIo>,
 }
 
 pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -616,6 +622,14 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let setup_avatar = Rc::new(RefCell::new(None::<String>));
     let avatars = Rc::new(RefCell::new(avatar_ui::AvatarUi::new()));
     let latest = Rc::new(RefCell::new(Bootstrap::default()));
+    let app_state = Rc::new(RefCell::new(app_ui::AppUi::default()));
+    let app_timer = app_ui::bind(
+        &ui,
+        app_state.clone(),
+        &commands,
+        intents.clone(),
+        latest.clone(),
+    );
     let pending_files = Rc::new(RefCell::new(None::<(String, String, Vec<PathBuf>)>));
     let video_generation = Arc::new(AtomicU64::new(0));
     let mailbox = Arc::new(Mutex::new(BTreeMap::<String, FrameUpdate>::new()));
@@ -741,6 +755,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         });
     });
     let session_io = SessionIo::new(profile.clone(), intents.clone(), stop.clone());
+    let achievement_io =
+        achievement_io::AchievementIo::new(profile.clone(), intents.clone(), stop.clone());
     let worker = runtime.spawn(worker(
         server,
         receiver,
@@ -754,11 +770,12 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             audio_runtime: audio_runtime.clone(),
             intents: intents.clone(),
             session_io: session_io.clone(),
+            achievement_io: achievement_io.clone(),
         },
     ));
     let local_errors = send_update.clone();
     let local_settings_job = runtime.spawn(audio_preferences.clone().run_local(
-        profile,
+        profile.clone(),
         stop.clone(),
         Arc::new(move || local_errors(UiEvent::Toast("validation.sessionSaveError"))),
     ));
@@ -1741,6 +1758,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let update_intents = intents.clone();
     let update_stop = stop.clone();
     let updated_avatars = avatars.clone();
+    let updated_app = app_state.clone();
     let control_frame_generation = video_generation.clone();
     let control_frame_stop = stop.clone();
     ui.on_process_updates(move || {
@@ -1833,6 +1851,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         .borrow_mut()
                         .handle(event, &ui, &update_intents, &setup_avatar)
                 }
+                UiEvent::App(event) => updated_app.borrow_mut().handle(&ui, event, &update_intents),
                 UiEvent::ProfileSaved(user, query) => {
                     updated_avatars
                         .borrow_mut()
@@ -2409,30 +2428,35 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     mic_test_ui.borrow_mut().close();
     stop.cancel();
     avatar_timer.stop();
+    app_timer.stop();
     let (avatar_jobs, mut avatar_join_failed) = avatars.borrow_mut().take_jobs(&ui);
     worker.abort();
-    let (session_io_result, audio_cleanup_result) = runtime.block_on(async {
-        let _ = worker.await;
-        for job in avatar_jobs {
-            avatar_join_failed |= job.await.is_err();
-        }
-        let _ = local_settings_job.await;
-        let _ = remote_settings_job.await;
-        let audio_runtime_result = audio_runtime_job.await;
-        let session_result = session_io.finish().await;
-        let audio_seal_result = audio_runtime.seal_cleanup();
-        let audio_result = audio_runtime.wait_for_cleanup().await;
-        (
-            session_result,
-            audio_runtime_result
-                .map_err(|_| zabor_native::audio_runtime::AudioCleanupError::Incomplete)
-                .and(audio_seal_result)
-                .and(audio_result),
-        )
-    });
+    let (session_io_result, achievement_io_result, audio_cleanup_result) =
+        runtime.block_on(async {
+            let _ = worker.await;
+            for job in avatar_jobs {
+                avatar_join_failed |= job.await.is_err();
+            }
+            let _ = local_settings_job.await;
+            let _ = remote_settings_job.await;
+            let audio_runtime_result = audio_runtime_job.await;
+            let session_result = session_io.finish().await;
+            let achievement_result = achievement_io.finish().await;
+            let audio_seal_result = audio_runtime.seal_cleanup();
+            let audio_result = audio_runtime.wait_for_cleanup().await;
+            (
+                session_result,
+                achievement_result,
+                audio_runtime_result
+                    .map_err(|_| zabor_native::audio_runtime::AudioCleanupError::Incomplete)
+                    .and(audio_seal_result)
+                    .and(audio_result),
+            )
+        });
     runtime.shutdown_timeout(Duration::from_secs(2));
     ui_result?;
     session_io_result?;
+    achievement_io_result?;
     audio_cleanup_result?;
     avatar_join_failed |= avatars.borrow().failed();
     if avatar_join_failed {
@@ -2459,6 +2483,7 @@ async fn worker(
         audio_runtime,
         intents,
         session_io,
+        achievement_io,
     } = media;
     let audio_controls = audio_preferences.controls.clone();
     let signing = match Attestation::from_environment(zabor_native::release::TARGET_BETA_VERSION) {
@@ -3768,10 +3793,24 @@ async fn worker(
             } else {
                 None
             };
-            let result = run_session!(
-                work,
-                main_session::compute(command, &auth, &connection, current_user.clone())
-            );
+            let result = run_session!(work, async {
+                match command {
+                    Command::Achievements(query) => {
+                        main_session::achievements(
+                            query,
+                            &connection,
+                            current_user.as_ref(),
+                            &intents,
+                            &stop,
+                        )
+                        .await
+                    }
+                    command => {
+                        main_session::compute(command, &auth, &connection, current_user.clone())
+                            .await
+                    }
+                }
+            });
             let Some(result) = result else {
                 continue;
             };
@@ -3841,7 +3880,30 @@ async fn worker(
                     }
                     work.publish(UiEvent::SignedIn(data));
                 }
-                Ok(MainResult::Event(event)) => work.publish(event),
+                Ok(MainResult::Event(event)) => {
+                    if let UiEvent::App(app_ui::Event::Achievements(result)) = event {
+                        let mut job = achievement_io.start(*result, update.clone());
+                        let completed = run_session!(work, &mut job.receiver);
+                        let joined = match run_session!(work, achievement_io.join(job.id)) {
+                            Some(joined) => joined,
+                            None => achievement_io.join(job.id).await,
+                        };
+                        if joined.is_err() {
+                            work.publish(UiEvent::Toast("validation.sessionSaveError"));
+                            if let Some(Ok(UiEvent::App(app_ui::Event::Achievements(result)))) =
+                                completed
+                            {
+                                if result.storage_failed {
+                                    work.publish(UiEvent::App(app_ui::Event::Achievements(result)));
+                                }
+                            }
+                        } else if let Some(Ok(event)) = completed {
+                            work.publish(event);
+                        }
+                    } else {
+                        work.publish(event);
+                    }
+                }
                 Ok(MainResult::Profile(result)) => {
                     if !result.query.alive() {
                         continue;
@@ -3922,6 +3984,7 @@ async fn worker(
                 | Command::UpdateProfile(..)
                 | Command::LookupProfile(..)
                 | Command::ProfileAddFriend(..)
+                | Command::Achievements(..)
                 | Command::Audio => unreachable!(),
                 Command::Notification(kind, id, accept) => {
                     if !respond_notification(&connection, kind, &id, accept)

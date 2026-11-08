@@ -68,6 +68,8 @@ export component AchievementsPanel inherits Rectangle {
     in property <string> summary;
     in property <bool> reduced-motion;
     in property <string> language: "ru";
+    in property <int> focus-reset;
+    changed focus-reset => { root.focus-close(); }
     pure callback tr(string, string) -> string;
     callback close-requested;
     public function focus-close() { close-button.focus(); }
@@ -83,6 +85,7 @@ export component AchievementsPanel inherits Rectangle {
     keys := FocusScope {
         key-pressed(event) => {
             if event.text == Key.Escape { root.close-requested(); return accept; }
+            if event.text == Key.Tab { close-button.focus(); return accept; }
             return reject;
         }
         VerticalLayout {
