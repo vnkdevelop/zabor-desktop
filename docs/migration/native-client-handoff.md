@@ -10,10 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **0dcfef75fa2dfcd35cac38b0724c27b412682445**:
-query-owned desktop/window/camera thumbnails,own-HWND filter,130targeted tests/fmt/
-normal+fixtureClippy/nativebuild/expandedRUENinertpicker/Graphifypassed.
-Audio source **5b8d656** and camera **df43be2** retained;physical camera/audio/
+сборкой. Latest saved source commit — **2d254a2243dd478bc0f33c2fb0da9648dedeb16c**:
+adaptivevideo/viewerinterest/isolatedSFUdelivery,153uniqueaffectedtests/fmt/both
+Clippy/nativebuild/RUENinert/Graphifypassed. Originalpeer/capture/mic ownership retained.
+Picker **0dcfef7**,audio **5b8d656** and camera **df43be2** retained;physical camera/audio/
 complete client readiness=false. Metadata-only continuation save follows this source.
 no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
@@ -53,6 +53,83 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
 
 ## Picker thumbnails — saved checked components 2026-11-08
+
+### Verified functional components: adaptive video/SFU after 5e4430b
+
+- Saved functional source **2d254a2243dd478bc0f33c2fb0da9648dedeb16c**: `media/adaptive.rs`, `media/sfu.rs`,
+  `voice/stream_delivery.rs`, media/Voice/shell/playback wiring. Reference ladder,
+  viewer interest, separate send-only video/share-audio publisher and receive-only
+  subscriber, original route epochs/lifetimes/frame leases, first-decoded-frame
+  handoff, retained P2P video/audio, preview snapshot/watchdogs/fallback are wired.
+  Starting/replacing own share preserves independent remote SFU subscriptions.
+- Saved initial medium3.5Mbit remains unchanged; separate adaptive/SFU medium3.0Mbit
+  follows reference. Camera profile does not overwrite defaults; scaling restoration
+  is included. Playback replaces only stream-audio lanes, never voice lanes.
+- All terminal commands remain cmd.exe. Initial check `sh_1bb01c4900018LZqB4YfvuJV8Z`
+  failed on pending-publish visibility, corrected. First test compile
+  `sh_1bb0664b40014osKtioQoR4FTI` failed in new tests on capture_frame bool/unit and
+  synchronous Hub.close(). Corrected without suppressions or relaxed assertions.
+- `sh_1bb081e6a001BkUMcdet7YPR0B` passed21media tests including actual local SFU RTP
+  decoding,failed4new native-source tests without a Tokio runtime. Converted those
+  to tokio tests without relaxed checks. New Voice fixtures retain named `_events`
+  rather than dropping Hub receiver. Added originalVoice maintenance admission
+  guard and periodic dead-video retirement preserving snapshots/outside-gateDrop.
+- **sh_1bb0bf9a9001DOu2WdH1GQMKeH passed150affectedtests**25media/15Voice/3playback/
+  7video/3localRTP/97shell. Clippy failed on one nested callback if,now equivalent
+  short-circuit form without suppression. Added stats correlation/counter reset
+  and stream-only lane replacement tests. No original functional code weakened.
+- **sh_1bb13b455001QoCdFJqrm6ucsp passed** bothClippy/build/RUEN inert,
+  14affectedadaptive/first-frame/playbacktests;unique total152 rather than
+  double-counting12repeats. Prior150 results reused for unchanged code paths.
+  13scopedsources/dependency pins andnormalbinary captured in final-checked evidence.
+- Read-only review during final job noticed an additional same-peer ordering race:
+  `prepare_p2p_video` can replace an in-progress SFU first-frame probe when a late
+  P2P ontrack arrives before SFU selection. Fixed by retaining the P2P backup without
+  replacing a live SFU probe (`probe_deadlines` epoch=Some). New test first decodes
+  SFU then proves fresh P2P fallback under respective original lifetimes.
+- **sh_1bb1972d3001T9Dkd9jVmwxL3N passed**6Voicehandoff/bothClippy/build/
+  RUENinert,13sourceguards;12otherhashesmatch,prior152testevidencereusedwithout
+  doublecounting. Unique153. No pendingverificationjobs.
+  Stagebinary6b419849787165418b18a9148d0f769abec124f675d54417e1f1bdb17e14a706,
+  notwholeclient/audio/physicalattestation. route-order-checked/verification.json.
+- **sh_1bb1cc8e8001VzRd11OEy0PN6R passed**finalGraphify/scopedsource save:9nativepaths,
+  13source/pinhashes,checkednormalbinary,synthfixturemarkersabsent,only3docsremain.
+  Graph6645nodes/16503edges/290communities;existing7zero-nodewarnings/HTML5000limit.
+  No pendingjobs;sourcecode unchanged since finalverification/Graphify.
+  Details `native-stream-delivery.md`;save-verification.json in the stage directory.
+  RC native consent/channel/input/pressed-key/cursor/panic ownership remains next;
+  pure profile has controller overrides but no native RC session integration.
+  Reference RC source inspected: webrtc.ts5065-5292 ACK(v2)/Start(v1), controller
+  exclusivity, host activity, release-only while active, whitelist/LE parsing;
+  fail-safe15s at5295-5301. remoteControlSimulator.ts holds captured target, helper
+  owner and panic Ctrl+Alt+Backspace/Escape. Do not claim RC migration complete.
+- Additional RC reference: webrtc.ts4810-4820 uses negotiated/ordered channel4243,
+  not an unreliable channel. build/ZaborInputSimulator.cs is the unchanged managed
+  reference helper,not a suitable Rust/native final binary. Its300-353 map uses
+  captured window DWM bounds or exact selected screen rect,negative display origins,
+  width/height-minus-one and virtual-desktop absolute coordinates;down/wheel need
+  captured foreground,release remains possible for cleanup. Hook filtering uses
+  injected flags plus ZABO signature;reset releases held inputs/unclips/restores
+  cursor. Port to a native owner/boundary rather than shipping the .NET helper.
+  Do not infer screen geometry from screen thumbnails or use primary-screen fallback.
+- Pinned safe SDK lacks pending/local SDP getter; owned capped candidate callback
+  augments SDP exact media MID after1200ms gather without SDK edits. Typed stats
+  lose optional presence and omit outbound framesDropped; absent-fraction/CPU-toast
+  parity remains unproven. Full Go/.NET local integration, physical/long-session,
+  ownership/data-integrity/UI/import/packaging/final acceptance remain unchanged.
+  No production, push, publication, merge or shutdown.
+- Resume after metadata/compact from **2d254a2**;no jobs require waiting. Next grouped
+  functional stage is native RC:binaryLE protocol/negotiated4243 channel/host consent
+  and one-controller ownership/ACKv2+Startv1/peer and Voice epochs/native input owner/
+  held-key/button release/real capture geometry/physical-host priority/panic hotkeys/
+  cursor restoration/viewer controls/P2P-only controller override. Do not ship the
+  managed reference helper. Then remaining UI/profile/GIF/crop/avatar/import-copy/
+  rollback/updater/packaging/signatures/licenses and all listed data-integrity/native
+  ownership/finaldefault-neural/visual/physical/localGo-.NET/long-session acceptance.
+  Keep unchanged reference/dependency pins and original Voice/Session/peer/frame/UI
+  tickets. Do not repeat comprehensive matrices during functional migration.
+  Finish all acceptance before push/publication3.8.0-rust and nonforcedWindows
+  shutdown;never merge main automatically. Whole-client/audio/call readiness=false.
 
 - Resumed saved source5b8d656,metadatae3cc8cd,clean rust/native-client tree.
   Implemented two-column RGBA thumbnail tiles,exact own-HWND filtering,safe winit

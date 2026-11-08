@@ -27,6 +27,16 @@ Graphify: 6502 nodes/16134 edges/283 communities; прежние семь zero-n
 и HTML limit 5000 остаются. Следующий блок — adaptive bitrate/viewer interest/SFU/
 remote control. Physical/full-client acceptance, публикация и shutdown не выполнены.
 
+После `5e4430b` проверены функциональные компоненты adaptive bitrate/viewer interest/
+SFU: 153 уникальных затронутых теста, fmt, normal/fixture Clippy, native build и RU/EN
+inert interactions. Отдельный SFU publisher несёт video/share audio без микрофона;
+subscriber receive-only, переключение после декодированного кадра, snapshots и
+P2P fallback сохраняют Voice/peer/frame ownership. Исправлен порядок late P2P/SFU
+callbacks. Источник сохранён **`2d254a2243dd478bc0f33c2fb0da9648dedeb16c`**;
+Graphify 6645 nodes/16503 edges/290 communities,9 native paths/13 checked hashes.
+RC input/consent/UI ещё не
+перенесены. Подробности: [native-stream-delivery.md](native-stream-delivery.md).
+
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
 
 Рабочая ветка: `rust/native-client`. Checkpoint рабочего Electron/WASM-клиента перед переносом: `d088795`. Нативный код находится в `rust/crates/zabor-native`; состояние этой ветки не означает перенос в основную пользовательскую папку или публикацию релиза.
