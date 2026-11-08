@@ -10,8 +10,8 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **43122d4**:sender-quality11targeted tests/build/
-RUEN100% actual quality-pointer interactions и Graphify passed,clean tree confirmed.
+сборкой. Latest saved source commit — **1993b1f**:retained stream reannouncement,
+133affected tests/fmt/native-media Clippy/build и Graphify passed,clean tree confirmed.
 no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
@@ -48,6 +48,78 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Camera/system audio — next functional stage 2026-11-08
+
+- Saved **1993b1f**,clean tree after commit;no pending jobs. Reannouncement is now
+  wired after channel and both call recoveries under original VoiceWork;7new local
+  protocol tests and133affected checks passed. No push/merge/release/shutdown.
+- Next missing scenario group:camera start/stop and system-audio share,then picker
+  thumbnails/adaptive bitrate/SFU/RC. Native shell currently has no Camera command
+  or camera toggle;screen button at app.slint371 still offers desktop picker only.
+- Before camera dependencies/code,finish safe-backend selection. Do not silently
+  adopt researched nokhwa0.10.11/input-msmf:published windows0.4.6 uses global COM
+  init,synchronous ReadSample,state-only stop and potentially blocking Drop/Flush.
+  Camera Drop unwraps stop_stream. One persistent owner for enumerate/open/read/
+  stop/Drop is required but does not prove cancellation/driver bounds. Pinned
+  libwebrtc0.4.0 exposes native source/track,but no camera acquisition API found.
+- Keep zabor-native forbid(unsafe_code),pinned SDK/staticCRT/audio/protocol contracts,
+  independent Voice/MicTest and original acceptance tickets. Do not put potentially
+  blocking acquisition/mutation/Drop under CriticalIntents/peer gates or UI thread.
+  Camera profile remains default sender parameters,not desktop bitrate limits.
+- Follow real camera/system-audio contracts in webrtc.ts and existing RUEN labels;
+  no locale/style refactor. Tests remain local/synthetic/panic-on-device factories,
+  no physical/production access during unattended functional integration. Document
+  actual teardown/callback bounds instead of claiming tests prove driver deadlines.
+- Full functionality,profile/GIF/crop/import/packaging/updater and generalized native
+  teardown remain open. Final comprehensive exact/physical acceptance must pass
+  before push/publish3.8.0-rust/non-forced Windows shutdown. Do not stop for continue.
+- Selected backend:separate zabor-camera native boundary owns asynchronous MF
+  source reader,per-owner MTA/COM/Media Foundation and byte-only CXX bridge. Original
+  zabor-native forbid(unsafe_code),WebRTC/DSP/CRT pins unchanged. No nokhwa installed.
+  Callback mailbox/owner-side conversion,stop-only Drop,original Completion and
+  native-thread join after Flush/source shutdown/final callback/MF/COM release.
+  Driver hangs remain pending,not accepted. Details:native-camera-owner.md.
+- **sh_1ba5b50770014PVrSG7wD3TC4J completed/passed**:offline boundary build/8synthetic
+  owner tests. **sh_1ba5d4952001uoc4qRBM5tWcfn completed/passed**:10expanded tests,
+  including padded/bottom-up RGB32 copy and invalid sizes/strides/bounds. Initial
+  unused fixture warnings retained in logs;fixtures now test-source-gated and safe
+  feature API references frame-copy function. No physical enumeration/acquisition.
+  Artifacts:native-streams/camera-owner-functional-2026-11-08. Lock diff adds only
+  zabor-camera with existing CXX1.0.205/thiserror;no existing versions changed.
+  Backend not wired to Voice/UI/runtime yet;system/process-isolated audio unfinished.
+  Final fmt/Clippy/normal+test-source build/native-media checks/Graphify/save follow.
+- Final-check **sh_1ba5f14e4001i6Vr2IC4dLygYw failed** at strict C++ compilation:
+  /WX exposed missing explicit exception-unwind option in generated bridge and
+  signed MF stream-enum→DWORD warnings in authored backend. Retained diagnosis logs;
+  enabled /EHsc and explicit DWORD casts,kept /W4 /WX rather than suppressing checks.
+  Corrected **sh_1ba6170c00013iZqMweqnzeSXP completed/passed** under directory/verified:
+  10camera/7retained-stream tests,normal+test-source Clippy/standalone camera build,
+  native-media all-targets Clippy/native build/fmt. No existing dependency versions
+  changed;new standalone package is not linked into native app yet.
+- First Graphify **sh_1ba5f3b37001obIpUl6MtbMQ3a completed/passed**:6273nodes/
+  15507edges/275communities,existing7warnings/HTML5000limit. Needs another update
+  after explicit casts. Final Graphify **sh_1ba6344f4001vcee7XhZ7vY9gO completed/passed**:
+  no topology changes,retained6273nodes/15507edges/275communities and existing7warnings.
+  Added explicit elapsed-delay assertion for delayed native callback cleanup before
+  save;all10camera tests/Clippy/fmt passed again (callback-delay-* evidence). Final
+  test-only graph sync/save follows;no other pending jobs. Native camera/complete
+  client readiness remains false until original-owner Voice/UI/drain integration.
+- Reference clarified:camera is the third StreamPicker tab,not an extra independent
+  capture button. StreamPicker.tsx170-206/294-303/410-415 uses camera:<deviceId>,
+  camera quality and forces includeAudio/allowRemoteControl=false;quality/settings
+  are hidden for camera. Add that missing tab using existing RUEN stream.cameras/
+  stream.camera keys;do not invent a separate interaction. Refresh/cancel inventory
+  and eventual thumbnails must keep original owner/admission identity.
+- Stream audio is isolated,not ordinary endpoint loopback:main/index.ts1057-1084
+  captures the selected window process tree,or all system audio excluding the app
+  process tree for screen share. Keep second 48kHz float stereo/music track separate
+  from microphone/DSP/MicTest. Pinned wasapi0.26.0 already has
+  AudioClient::new_application_loopback_client(pid,include_tree);its code maps false
+  to EXCLUDE_TARGET_PROCESS_TREE despite misleading prose. It waits synchronously
+  for async activation,has special period/buffer limitations and still needs
+  cancellation/COM-owner/observed teardown scrutiny before adoption. No system-audio
+  backend/device access or implementation has occurred in this stage.
 
 ## Stream reconnect — functional checks passed 2026-11-08
 
@@ -89,7 +161,8 @@ push/merge/release/shutdown не выполнялись. После каждог
   native-media all-targets Clippy/build. No failures or pending jobs. Graphify
   **sh_1ba4ed340001WhdTGG9NXaXA9C completed/passed**:6085nodes/15120edges/
   252communities;existing7warnings/HTML5000limit retained. Scoped diff check passed;
-  save next. Exact UI/DSP/full-client checks deferred,not claimed accepted.
+  saved **1993b1f**,clean tree confirmed. Exact UI/DSP/full-client checks deferred,
+  not claimed accepted.
   No complete native-client claim. RC reference inspected without changes:binary
   zabor-rc-v1,id4243,little-endian packets and whitelist/system-shortcut filters in
   src/renderer/src/services/remoteControl.ts remain required for later RC stage.

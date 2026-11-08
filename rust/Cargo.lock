@@ -7911,6 +7911,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zabor-camera"
+version = "0.1.0"
+dependencies = [
+ "cxx",
+ "cxx-build",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "zabor-core"
 version = "0.1.0"
 

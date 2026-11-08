@@ -1356,8 +1356,30 @@ Graphify sh_1ba4ed340001WhdTGG9NXaXA9C passed6085nodes/15120edges/252communities
 existing7warnings/HTML5000limit retained.
 Shell/native channel
 rejoin with actual audio,physical capture,universal acquisition/Drop deadlines and
-full-client acceptance remain unverified. No pending jobs;scoped diff check passed,
-save next. No publication/shutdown.
+full-client acceptance remain unverified. Saved **1993b1f**,clean tree confirmed;
+no pending jobs. Next missing scenario group:camera/system-audio share,with safe
+backend/COM-owner selection before adopting blocking camera dependencies.
+No publication/shutdown.
+
+### Camera backend ownership: checked components, not camera readiness
+
+Added standalone zabor-camera with asynchronous Media Foundation reader,one MTA/COM
+owner and owned-byte-only CXX bridge. zabor-native unsafe forbid and existing pinned
+WebRTC/DSP/ORT/CRT dependencies unchanged;nokhwa not installed. Passed8initial and
+10expanded synthetic contract tests:owner isolation,non-driver stop/Drop,late open/
+callback cleanup,failed read/cleanup and checked padded/bottom-up RGB32 copy.
+No physical enumeration/acquisition. Synthetic sources are test-source-feature-gated.
+Strict /W4 /WX found bridge unwind/stream enum-conversion compilation issues;fixed
+with /EHsc/explicit DWORD casts,not weaker checks. Corrected
+sh_1ba6170c00013iZqMweqnzeSXP passed10camera/7stream tests,fmt,normal+test-source
+camera Clippy/standalone build and native-media all-targets Clippy/client build.
+Final Graphify sh_1ba6344f4001vcee7XhZ7vY9gO passed,no topology changes after casts;
+retained6273nodes/15507edges/275communities,existing7warnings. No pending jobs;scoped
+diff check passed,save next. Native app does not yet use this backend;camera UI/tab,
+original Voice admission and registered cleanup observation remain unwired. Hung
+driver and universal callback teardown deadlines are not proved. System audio must
+preserve selected-process capture or app-tree-excluding screen capture,not naive
+endpoint loopback. Full-client acceptance/publication/shutdown remain false.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

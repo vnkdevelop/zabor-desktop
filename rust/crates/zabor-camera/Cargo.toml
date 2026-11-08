@@ -1,0 +1,23 @@
+[package]
+name = "zabor-camera"
+version = "0.1.0"
+edition.workspace = true
+rust-version = "1.92"
+license.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[dependencies]
+thiserror = "2"
+
+[target.'cfg(windows)'.dependencies]
+cxx = "=1.0.205"
+
+[build-dependencies]
+cxx-build = "=1.0.205"
+
+[features]
+test-source = []
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
