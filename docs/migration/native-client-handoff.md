@@ -10,8 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **1993b1f**:retained stream reannouncement,
-133affected tests/fmt/native-media Clippy/build и Graphify passed,clean tree confirmed.
+сборкой. Latest saved source commit — **99f59ca9dfb5f6da9239c48ada629b4e30f7f629**:
+standalone async camera boundary,10camera/7stream tests/fmt/normal+test-source Clippy/
+camera+native-media builds и Graphify passed,clean tree confirmed. Boundary not yet
+linked into native app;camera/complete client readiness=false.
 no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
@@ -51,6 +53,75 @@ push/merge/release/shutdown не выполнялись. После каждог
 
 ## Camera/system audio — next functional stage 2026-11-08
 
+- Checked integration after saved99f59ca:CameraCapture registered blocking actor owns
+  acquisition/source/frame conversion/native Completion join;stop-only public Drop
+  and startup/inventory cancellation do not abort cleanup. Added strict result/join
+  observer via AudioCleanupTask.spawn_blocking_result,source Desktop/Camera variants,
+  original-ticket shell take/reinstall and third picker tab with separate loading/
+  query-child identity,RUEN keys,camera exact id/camera quality,no desktop quality.
+  No physical enumeration/acquisition or production access. Targeted checks passed;
+  save next,not physical-camera or whole-client readiness.
+- Initial **sh_1ba6e9c3c001GGnUfK1pcGTt0t failed**:tiny4x2 synthetic frame triggered
+  WebRTC height>0 fatal;full diagnostics retained. Application now rejects<16x16
+  before adapter,added separate160x96 test-source-only video fixture while retaining
+  existing4x2 byte-copy contracts. Corrected **sh_1ba7393a6001kN7cV5Rm6KFxL4** passed
+  10camera integration/9stream tests,then Clippy failed solely at a new test's
+  constant chunks_exact. Changed to as_chunks::<4>(),no suppression. Camera startup
+  rejects failed/finished readiness. Requiring subscriber delivery before source
+  return was incorrect:no track/sink exists until after source readiness.
+- **sh_1ba79eec5001sQqjV0dyhM1lLn failed**:10backend passed,then8/11integration
+  passed and3valid-start tests timed out due that startup dependency cycle. Reverted
+  only this new delivery prerequisite;retain first valid copied/converted producer
+  frame readiness and actual sink-delivery test after track attachment. No weakenings
+  to original native-owner completion/cleanup-failure or small-frame safety guard.
+- **sh_1ba7cd525001Jtur8b4gShu9uN pending**:fmt,10backend/11camera integration/9stream
+  tests,camera-feature Clippy,93shell original-owner/Leave/Logout guards,8media/3screen,
+  normal-native/camera Clippy,normal binary build and RUEN inert picker interactions;
+  normal binary must not contain synthetic camera markers. No other build jobs.
+  Do not poll or change consumed native/UI/backend sources until notification.
+  Integration Graphify **sh_1ba7578e0001myybvdRxwJ16wX passed**:6330nodes/15698edges/
+  259communities,existing7warnings/HTML5000limit. Sync final changed tests before
+  saving. Details:native-camera-integration.md. No physical devices/production.
+- Final Graphify **sh_1ba7ee7580014PI5k09T8DM06n passed**:6332nodes/15702edges/
+  270communities,existing7warnings/HTML5000limit. sh_1ba7cd525001Jtur8b4gShu9uN passed
+  all134targeted tests/fmt/normal+feature Clippy/normal native build;UI check did not
+  launch because relativeforwardslash executable path was parsed as rust command.
+  Launch failure retained,not UI acceptance. Changed invocation to normalizedWindows
+  path. NativeOwner now also retains its source until original native camera join,
+  including unwind;unwind test uses an actual source rather than camera-only owner.
+- **sh_1ba8abb0c001pbcInUCM8oMibX** passed final134tests/fmt/normal+feature Clippy/
+  normal build;home-fixture invocation of auth-first interaction checker failed.
+  Corrected Windows-path **login fixture** RUEN inert full-picker checks passed,
+  including camera tab/loading/empty/busy/exact ID/camera quality/query cancel.
+  Normalexe synthetic camera markers absent;stage SHA2560f599ada78fe5cfe... stored
+  in verified-owner-order/verification.json. Not a new full-client attestation.
+- Source-order Graphify **sh_1ba8ca45e001lZrCuTCqG5NsGP passed**:6332nodes/15703edges/
+  276communities,existing7warnings/HTML5000limit. No pending jobs. Scoped save next.
+- Next missing functional scenario:isolated stream audio,screen excludes app process
+  tree/window includes selected process tree,48kHz float stereo/music separate from
+  microphone/DSP/MicTest. Then thumbnails/adaptive bitrate/SFU/RC and remaining
+  profile/UI/import/packaging plus ownership/data-integrity defects. Camera physical
+  privacy/hotplug/long-session/source native deadlines remain final acceptance gates.
+- Saved baseline **99f59ca** had clean tree/no jobs after save;current WIP/jobs above. Native
+  camera boundary selected and verified locally;Voice/picker/runtime integration
+  is being implemented/verified above. Previous reannouncement source **1993b1f** stays
+  saved. No push/merge/release/shutdown. Post-save documentation updates only.
+- Next implementation:register AudioCleanup.prepare_task before any camera/source
+  acquisition,retain that original observer through startup cancellation and late
+  native return. Camera Drop cancels only;actor must keep Completion until actual
+  native owner join and report cleanup_failed,not equate cancelled await/abort with
+  native completion. Do not abort the camera cleanup actor to implement Leave.
+- Use CameraCapture wrapper and Desktop/Camera capture variant inside existing
+  retained-quality share owner. Camera NativeVideoSource is non-screencast;quality
+  remains camera with default sender limits. Preserve healthy capture/track on
+  restore_share and original VoiceWork on prepare/commit/late install/Leave/Logout.
+  Keep native acquisition/conversion/track mutation/Drop outside acceptance gates
+  and UI thread;test pre-start/sealed/late-return cancellation and actual drain.
+- Add third camera picker tab using existing RUEN keys,camera:<exact device id>,
+  selection reset/loading/empty/busy/cancel and camera quality;hide desktop quality/
+  audio/remote-control settings for camera. No separate toggle invented. Local
+  synthetic fixture feature is available only with zabor-camera/test-source;no
+  unattended physical device or production access. Actual thumbnails can follow.
 - Saved **1993b1f**,clean tree after commit;no pending jobs. Reannouncement is now
   wired after channel and both call recoveries under original VoiceWork;7new local
   protocol tests and133affected checks passed. No push/merge/release/shutdown.
@@ -103,7 +174,9 @@ push/merge/release/shutdown не выполнялись. После каждог
   no topology changes,retained6273nodes/15507edges/275communities and existing7warnings.
   Added explicit elapsed-delay assertion for delayed native callback cleanup before
   save;all10camera tests/Clippy/fmt passed again (callback-delay-* evidence). Final
-  test-only graph sync/save follows;no other pending jobs. Native camera/complete
+  **sh_1ba6748ff0012MPhx4bOTVDv5s completed/passed**:Graphify6273nodes/15507edges/
+  276communities with existing7warnings/HTML5000limit;scoped staged paths/diff check,
+  save **99f59ca**,clean tree confirmed. No pending jobs. Native camera/complete
   client readiness remains false until original-owner Voice/UI/drain integration.
 - Reference clarified:camera is the third StreamPicker tab,not an extra independent
   capture button. StreamPicker.tsx170-206/294-303/410-415 uses camera:<deviceId>,

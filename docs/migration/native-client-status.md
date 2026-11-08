@@ -1375,11 +1375,64 @@ sh_1ba6170c00013iZqMweqnzeSXP passed10camera/7stream tests,fmt,normal+test-sourc
 camera Clippy/standalone build and native-media all-targets Clippy/client build.
 Final Graphify sh_1ba6344f4001vcee7XhZ7vY9gO passed,no topology changes after casts;
 retained6273nodes/15507edges/275communities,existing7warnings. No pending jobs;scoped
-diff check passed,save next. Native app does not yet use this backend;camera UI/tab,
+diff check passed;save completed below. Native app does not yet use this backend;camera UI/tab,
 original Voice admission and registered cleanup observation remain unwired. Hung
 driver and universal callback teardown deadlines are not proved. System audio must
 preserve selected-process capture or app-tree-excluding screen capture,not naive
 endpoint loopback. Full-client acceptance/publication/shutdown remain false.
+
+Saved **99f59ca9dfb5f6da9239c48ada629b4e30f7f629**,clean tree confirmed;final
+sh_1ba6748ff0012MPhx4bOTVDv5s passedGraphify6273nodes/15507edges/276communities and
+scoped staged-path/diff/save checks,existing7warnings/HTML5000limit retained.
+Delayed callback test now also asserts elapsed cleanup wait;all10camera tests/
+Clippy/fmt passed again. No pending jobs. Next:original observer registration before
+camera acquisition,CameraCapture/native source/Voice retained-quality integration
+and third picker tab with existing RUEN labels;camera cannot add stream audio/RC.
+No camera/full-client readiness or publication/shutdown.
+
+### Camera application integration: WIP under final local checks
+
+CameraCapture now registers its original blocking-task cleanup observation before
+camera/source acquisition;public Drop and cancelled startup/inventory waits request
+stop only. NativeOwner keeps Completion through native join,including actor unwind;
+actual blocking-task join and cleanup_failed propagate to the application tracker.
+Voice retains Desktop/Camera variants and camera quality;the shell takes/reinstalls
+the original Voice/events tuple with its original ticket outside native mutation.
+Third camera picker tab uses exact IDs,RUEN keys,separate loading,cancelled-query
+identity and forced camera quality;desktop quality/audio/RC remain absent for camera.
+
+First tiny4x2 integration aborted in WebRTC;height guard and160x96 video fixture
+were added without changing original4x2 byte tests. Corrected intermediate10camera/
+9stream tests passed;Clippy then rejected a new test's chunks_exact,use as_chunks
+instead without suppression. sh_1ba79eec5001sQqjV0dyhM1lLn failed8/11integration:
+requiring WebRTC delivery before creating the sender track/sink caused a startup
+cycle. Valid producer-frame readiness restored;actual delivery test stays after
+track/sink attachment. sh_1ba7cd525001Jtur8b4gShu9uN is the pending corrected final
+targeted run,including11camera original-intent cancellation tests,93shell guards,
+normal/feature Clippy/build and RUEN inert picker interactions. First integration
+Graphify passed6330nodes/15698edges/259communities,existing7warnings/HTML5000limit.
+Current source is uncommitted WIP after99f59ca;physical camera/audio/production
+access,full regression/exact visual comparison,readiness/publication/shutdown=false.
+
+Corrected sh_1ba7cd525001Jtur8b4gShu9uN passed134targeted tests/fmt/normal+feature
+Clippy/native build. Inert UI invocation failed at cmd relativeforwardslash path,
+not a passed UI result. NativeOwner now additionally keeps the source through its
+original camera join on exit/unwind;actual-source unwind test updated. Pending
+sh_1ba8abb0c001pbcInUCM8oMibX reruns134checks and RUEN inert picker with Windows
+path,then verifies normal binary lacks synthetic camera markers. Save/readiness
+remain conditional;no physical devices/production/publication/shutdown.
+
+Camera application targeted result:final134tests passed(10backend/11camera/
+9stream/93shell/8media/3screen),fmt,normal+feature all-targets Clippy and normal
+native-media build passed. First inert checker invocation used home but auth-first
+test requires login;corrected login-fixture RUEN checks passed,including new camera
+tab/loading/empty/busy/exact id/camera quality/query cancel. Normal binary lacks
+synthetic camera markers;stage SHA2560f599ada78fe5cfe... in verified-owner-order
+evidence is not whole-client attestation. Graphify6332nodes/15703edges/276communities
+passed,existing7warnings/HTML5000limit remain. No pending jobs;save next. Camera
+thumbnails/physical/hotplug/long-session/native deadlines and isolated stream audio,
+remaining full migration/data-integrity/visual/release gates remain unfinished.
+Full-client/publication/shutdown acceptance=false.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

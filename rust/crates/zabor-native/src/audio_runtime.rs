@@ -261,6 +261,18 @@ impl AudioCleanup {
 }
 
 impl AudioCleanupTask {
+    pub(crate) fn spawn_blocking_result(
+        mut self,
+        work: impl FnOnce() -> Result<(), AudioCleanupError> + Send + 'static,
+    ) {
+        let job = self.job.take().unwrap();
+        let task = tokio::task::spawn_blocking(work);
+        tokio::spawn(async move {
+            let result = task.await.unwrap_or(Err(AudioCleanupError::Incomplete));
+            job.complete(result);
+        });
+    }
+
     pub(crate) fn spawn(
         mut self,
         stop: CancellationToken,

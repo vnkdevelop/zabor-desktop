@@ -149,6 +149,14 @@ impl Camera {
             })
             .map_err(|_| CameraError)
     }
+
+    #[cfg(feature = "test-source")]
+    pub fn synthetic_video(mode: u8, delay_ms: u32) -> Result<Self, CameraError> {
+        if mode > 5 {
+            return Err(CameraError);
+        }
+        Self::synthetic(mode | 128, delay_ms)
+    }
 }
 
 #[cfg(windows)]

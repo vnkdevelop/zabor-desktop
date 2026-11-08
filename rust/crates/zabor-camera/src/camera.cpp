@@ -443,13 +443,14 @@ public:
 #ifdef ZABOR_CAMERA_TEST_SOURCE
 class TestCamera final : public Backend {
     std::uint8_t mode_;
+    bool video_;
     std::uint32_t delay_;
     std::shared_ptr<Inbox> inbox_ = std::make_shared<Inbox>();
     ComPtr<ReaderCallback> callback_;
     std::uint32_t frames_ = 0;
 public:
     TestCamera(std::shared_ptr<State> state, std::uint8_t mode, std::uint32_t delay)
-        : Backend(std::move(state)), mode_(mode), delay_(delay) {}
+        : Backend(std::move(state)), mode_(mode & 127), video_((mode & 128) != 0), delay_(delay) {}
     void open(const std::string&, bool) override {
         owner_ = std::this_thread::get_id();
         if (mode_ == 1) std::this_thread::sleep_for(std::chrono::milliseconds(delay_));
@@ -459,8 +460,8 @@ public:
     std::optional<Image> next() override {
         check_owner();
         if (mode_ == 4 && frames_++ > 0) throw std::runtime_error("synthetic camera read failed");
-        Image image{4, 2, {}};
-        for (int pixel = 0; pixel < 8; ++pixel) {
+        Image image{video_ ? 160u : 4u, video_ ? 96u : 2u, {}};
+        for (UINT32 pixel = 0; pixel < image.width * image.height; ++pixel) {
             for (const auto value : {19, 37, 71, 255}) image.bgra.push_back(static_cast<std::uint8_t>(value));
         }
         return image;
@@ -661,7 +662,7 @@ void release(std::uint64_t owner) noexcept {
 
 #ifdef ZABOR_CAMERA_TEST_SOURCE
 std::uint64_t begin_test(std::uint8_t mode, std::uint32_t delay_ms) {
-    if (mode > 5 || delay_ms > 1000) throw std::runtime_error("invalid camera fixture");
+    if ((mode & 127) > 5 || delay_ms > 1000) throw std::runtime_error("invalid camera fixture");
     return start({}, false, mode, delay_ms);
 }
 

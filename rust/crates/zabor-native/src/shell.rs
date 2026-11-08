@@ -27,6 +27,7 @@ use zabor_native::auth::{
     AuthClient, AuthError, Bootstrap, Captcha, Credentials, LoginOutcome, Registration,
 };
 use zabor_native::call_recovery::{CallRecovery, RecoveryAction, ResumeResult};
+use zabor_native::camera::CameraCapture;
 use zabor_native::chat::{ChatEngine, ChatError};
 use zabor_native::chat_crypto::ChatIdentity;
 use zabor_native::chat_store::{ChatMessage, ChatStore};
@@ -96,6 +97,7 @@ enum Command {
     Call(String),
     AnswerCall(String, bool),
     ListScreens,
+    ListCameras(CancellationToken),
     StartShare(String, String),
     StopShare,
     CheckShare,
@@ -118,6 +120,7 @@ impl Command {
             | Self::AnswerCall(_, _)
             | Self::ResumeCall
             | Self::ListScreens
+            | Self::ListCameras(_)
             | Self::StartShare(_, _)
             | Self::StopShare
             | Self::CheckShare
@@ -207,6 +210,7 @@ enum UiEvent {
     Calling(String),
     IncomingDismissed,
     Screens(Vec<ScreenSource>),
+    Cameras(CancellationToken, Option<Vec<zabor_camera::Device>>),
     Sharing(bool),
     RemoveVideo(String),
     NotificationResolved(NotificationKind, String, bool),
@@ -1130,8 +1134,10 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         else {
             return;
         };
+        ui.invoke_cancel_camera_query();
         ui.set_screen_sources(ModelRc::default());
         ui.set_window_sources(ModelRc::default());
+        ui.set_camera_sources(ModelRc::default());
         ui.set_selected_screen("".into());
         ui.set_screen_source_kind(0);
         ui.set_screen_quality("low".into());
@@ -1144,6 +1150,40 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let weak = ui.as_weak();
+    let camera_query = Rc::new(RefCell::new(None::<CancellationToken>));
+    let cancelled_query = camera_query.clone();
+    ui.on_cancel_camera_query(move || {
+        if let Some(query) = cancelled_query.borrow_mut().take() {
+            query.cancel();
+        }
+    });
+    let camera_commands = commands.clone();
+    ui.on_list_cameras(move || {
+        let Some(ui) = weak.upgrade().filter(|ui| {
+            ui.get_voice_active()
+                && !ui.get_busy()
+                && ui.get_modal() == 5
+                && ui.get_screen_source_kind() == 2
+        }) else {
+            return;
+        };
+        ui.invoke_cancel_camera_query();
+        let query = CancellationToken::new();
+        *camera_query.borrow_mut() = Some(query.clone());
+        ui.set_camera_sources(ModelRc::default());
+        ui.set_selected_screen("".into());
+        ui.set_camera_sources_loading(true);
+        ui.set_error("".into());
+        if camera_commands
+            .try_send(Command::ListCameras(query))
+            .is_err()
+        {
+            ui.set_camera_sources_loading(false);
+            ui.invoke_cancel_camera_query();
+            show_error(&ui, AuthError::Network);
+        }
+    });
+    let weak = ui.as_weak();
     let screen_commands = commands.clone();
     ui.on_start_share(move |source, quality| {
         let Some(ui) = weak
@@ -1152,7 +1192,13 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         else {
             return;
         };
-        if source.is_empty() || !matches!(quality.as_str(), "low" | "high") {
+        if source.is_empty()
+            || if source.starts_with("camera:") {
+                quality != "camera"
+            } else {
+                !matches!(quality.as_str(), "low" | "high")
+            }
+        {
             return;
         }
         ui.set_error("".into());
@@ -1241,6 +1287,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_busy(false);
                     ui.set_captcha_busy(false);
                     ui.set_screen_sources_loading(false);
+                    ui.set_camera_sources_loading(false);
                     show_error(&ui, error);
                 }
                 UiEvent::Data(mut data) => {
@@ -1420,6 +1467,36 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_screen_sources(Rc::new(VecModel::from(screens)).into());
                     ui.set_window_sources(Rc::new(VecModel::from(windows)).into());
                     ui.set_screen_sources_loading(false);
+                }
+                UiEvent::Cameras(query, sources) => {
+                    if !query.is_cancelled()
+                        && ui.get_modal() == 5
+                        && ui.get_screen_source_kind() == 2
+                    {
+                        let Some(sources) = sources else {
+                            ui.set_camera_sources_loading(false);
+                            show_error(&ui, AuthError::Network);
+                            continue;
+                        };
+                        let camera_label = Strings::new(ui.get_language().as_str())
+                            .ok()
+                            .map(|strings| strings.text("stream.camera"))
+                            .unwrap_or_default();
+                        let rows = sources
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, source)| ScreenItem {
+                                id: format!("camera:{}", source.id).into(),
+                                title: if source.name.is_empty() {
+                                    format!("{camera_label} {}", index + 1).into()
+                                } else {
+                                    source.name.into()
+                                },
+                            })
+                            .collect::<Vec<_>>();
+                        ui.set_camera_sources(Rc::new(VecModel::from(rows)).into());
+                        ui.set_camera_sources_loading(false);
+                    }
                 }
                 UiEvent::Sharing(active) => {
                     ui.set_sharing(active);
@@ -1790,6 +1867,7 @@ async fn worker(
     let mut share_watch = tokio::time::interval(Duration::from_secs(1));
     share_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut screen_sources = Vec::<ScreenSource>::new();
+    let mut camera_sources = Vec::<zabor_camera::Device>::new();
     let mut pending_join: Option<String> = None;
     let mut audio_watch = tokio::time::interval(Duration::from_millis(50));
     audio_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -3363,7 +3441,65 @@ async fn worker(
                         .map_err(|_| AuthError::Network)?;
                     Ok(UiEvent::Screens(screen_sources.clone()))
                 }
+                Command::ListCameras(query) => {
+                    tokio::select! {
+                        biased;
+                        _ = query.cancelled() => Ok(UiEvent::Connected),
+                        result = CameraCapture::devices_with_audio_runtime(&audio_runtime, query.clone()) => {
+                            if query.is_cancelled() {
+                                Ok(UiEvent::Connected)
+                            } else {
+                                match result {
+                                    Ok(sources) => {
+                                        camera_sources = sources;
+                                        Ok(UiEvent::Cameras(query, Some(camera_sources.clone())))
+                                    }
+                                    Err(_) => {
+                                        camera_sources.clear();
+                                        Ok(UiEvent::Cameras(query, None))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 Command::StartShare(id, quality) => {
+                    if let Some(device) = id.strip_prefix("camera:") {
+                        if quality != "camera"
+                            || device.is_empty()
+                            || !camera_sources.iter().any(|source| source.id == device)
+                        {
+                            return Err(AuthError::Network);
+                        }
+                        let Some(mut resources) = voice_work.take_voice(
+                            &mut voice,
+                            &mut media_events,
+                            voice_ticket,
+                            |_| {},
+                        ) else {
+                            return Err(AuthError::Network);
+                        };
+                        let result = if let Some(session) = resources.0.as_mut() {
+                            session
+                                .start_camera_share(&connection, device.to_owned())
+                                .await
+                                .map_err(|_| AuthError::Network)
+                        } else {
+                            Err(AuthError::Network)
+                        };
+                        let Some(replaced) = voice_work.install_previous_media(
+                            &mut voice,
+                            &mut media_events,
+                            voice_ticket,
+                            (resources.0, resources.1, BTreeMap::new()),
+                            || {},
+                        ) else {
+                            return Err(AuthError::Network);
+                        };
+                        drop(replaced);
+                        result?;
+                        return Ok(UiEvent::Sharing(true));
+                    }
                     let source = screen_sources
                         .iter()
                         .find(|source| source.key() == id)
@@ -3818,6 +3954,12 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
             .borrow_mut()
             .push((source.to_string(), quality.to_string()));
     });
+    let camera_queries = Rc::new(RefCell::new(0));
+    let queries = camera_queries.clone();
+    ui.on_list_cameras(move || *queries.borrow_mut() += 1);
+    let camera_cancellations = Rc::new(RefCell::new(0));
+    let cancellations = camera_cancellations.clone();
+    ui.on_cancel_camera_query(move || *cancellations.borrow_mut() += 1);
     ui.set_screen_sources(
         Rc::new(VecModel::from(vec![ScreenItem {
             id: "screen:7".into(),
@@ -3832,6 +3974,14 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
         }]))
         .into(),
     );
+    ui.set_camera_sources(
+        Rc::new(VecModel::from(vec![ScreenItem {
+            id: "camera:exact-device-id:with:colons".into(),
+            title: "camera 1".into(),
+        }]))
+        .into(),
+    );
+    ui.set_camera_sources_loading(false);
     ui.set_error("".into());
     ui.set_busy(false);
     ui.set_voice_active(true);
@@ -3894,7 +4044,7 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     if starts.borrow().last() != Some(&("screen:7".to_owned(), "high".to_owned())) {
         return Err("Stream picker did not forward high quality");
     }
-    click(680.0, 254.0);
+    click(550.0, 254.0);
     if ui.get_screen_source_kind() != 1 || !ui.get_selected_screen().is_empty() {
         return Err("Stream picker tab retained the previous source");
     }
@@ -3906,8 +4056,52 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
     if starts.borrow().last() != Some(&("window:9".to_owned(), "high".to_owned())) {
         return Err("Stream picker window start changed quality or source identity");
     }
+    click(730.0, 254.0);
+    if ui.get_screen_source_kind() != 2
+        || !ui.get_selected_screen().is_empty()
+        || *camera_queries.borrow() != 1
+    {
+        return Err("Stream picker camera tab did not reset selection and request inventory");
+    }
+    ui.set_camera_sources_loading(true);
+    click(450.0, 318.0);
+    click(680.0, 582.0);
+    if starts.borrow().last() != Some(&("window:9".to_owned(), "high".to_owned()))
+        || !ui.get_selected_screen().is_empty()
+    {
+        return Err("Loading camera picker accepted source or start");
+    }
+    ui.set_camera_sources_loading(false);
+    click(450.0, 318.0);
+    if ui.get_selected_screen() != "camera:exact-device-id:with:colons" {
+        return Err("Camera picker lost exact device identity");
+    }
+    click(680.0, 582.0);
+    if starts.borrow().last()
+        != Some(&(
+            "camera:exact-device-id:with:colons".to_owned(),
+            "camera".to_owned(),
+        ))
+    {
+        return Err("Camera picker forwarded desktop quality or changed device identity");
+    }
+    let started = starts.borrow().len();
+    ui.set_busy(true);
+    click(550.0, 254.0);
+    click(680.0, 582.0);
+    if ui.get_screen_source_kind() != 2 || starts.borrow().len() != started {
+        return Err("Busy camera picker changed tab or started duplicate capture");
+    }
+    ui.set_busy(false);
+    ui.set_camera_sources(ModelRc::default());
+    ui.set_selected_screen("".into());
+    click(680.0, 582.0);
+    if starts.borrow().len() != started {
+        return Err("Empty camera picker started a capture");
+    }
+    let cancelled = *camera_cancellations.borrow();
     click(430.0, 582.0);
-    if ui.get_modal() != 0 {
+    if ui.get_modal() != 0 || *camera_cancellations.borrow() <= cancelled {
         return Err("Stream picker cancel failed");
     }
     Ok(())

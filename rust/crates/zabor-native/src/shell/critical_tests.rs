@@ -140,3 +140,24 @@ async fn async_queue_backpressure_preserves_the_original_owner_ticket() {
     let queued = receiver.recv().await.unwrap();
     assert!(!intents.is_current(queued.ticket, IntentScope::Session));
 }
+
+#[tokio::test]
+async fn camera_inventory_queue_and_late_ui_completion_keep_the_original_voice_ticket() {
+    let intents = Arc::new(CriticalIntents::default());
+    let ticket = intents.ticket();
+    let (sender, mut receiver) = mpsc::channel(16);
+    let queue = CommandQueue {
+        sender,
+        intents: intents.clone(),
+    };
+    let query = tokio_util::sync::CancellationToken::new();
+    assert!(queue.try_send(Command::ListCameras(query.clone())).is_ok());
+    let queued = receiver.recv().await.unwrap();
+    assert_eq!(queued.ticket, ticket);
+    assert_eq!(queued.command.scope(), IntentScope::Voice);
+    let event = UiEvent::Cameras(query, Some(Vec::new())).guarded(ticket, IntentScope::Voice);
+    intents.request(CriticalAction::Leave);
+    assert!(!intents.is_current(queued.ticket, queued.command.scope()));
+    assert!(event.for_current(&intents).is_none());
+    assert!(intents.is_current(ticket, IntentScope::Session));
+}

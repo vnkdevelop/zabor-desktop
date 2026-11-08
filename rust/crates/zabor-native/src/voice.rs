@@ -3,6 +3,8 @@ use crate::audio_playback::AudioPlayback;
 #[cfg(windows)]
 use crate::audio_runtime::{SharedAudio, VoiceLease};
 use crate::auth::User;
+#[cfg(windows)]
+use crate::camera::CameraCapture;
 use crate::hub::HubConnection;
 use crate::media::PeerLifetime;
 use crate::media::{IceServerSettings, MediaEngine, MediaError, MediaEvent};
@@ -22,8 +24,40 @@ pub struct ChannelMembership {
     pub users: Vec<User>,
 }
 
+enum ShareCapture {
+    Desktop(ScreenCapture),
+    #[cfg(windows)]
+    Camera(CameraCapture),
+}
+
+impl ShareCapture {
+    fn source(&self) -> libwebrtc::video_source::native::NativeVideoSource {
+        match self {
+            Self::Desktop(capture) => capture.source.clone(),
+            #[cfg(windows)]
+            Self::Camera(capture) => capture.source.clone(),
+        }
+    }
+
+    fn is_live(&self) -> bool {
+        match self {
+            Self::Desktop(capture) => capture.is_live(),
+            #[cfg(windows)]
+            Self::Camera(capture) => capture.is_live(),
+        }
+    }
+
+    fn failed(&self) -> bool {
+        match self {
+            Self::Desktop(capture) => capture.failed(),
+            #[cfg(windows)]
+            Self::Camera(capture) => capture.failed(),
+        }
+    }
+}
+
 struct ScreenShare {
-    capture: ScreenCapture,
+    capture: ShareCapture,
     quality: String,
 }
 
@@ -258,6 +292,27 @@ impl VoiceSession {
         })
         .await
         .map_err(|_| MediaError::Backend)??;
+        self.announce_share(hub, ShareCapture::Desktop(capture), quality)
+            .await
+    }
+
+    #[cfg(windows)]
+    pub async fn start_camera_share(
+        &mut self,
+        hub: &HubConnection,
+        device: String,
+    ) -> Result<(), MediaError> {
+        let capture = CameraCapture::start(device, self.audio_runtime.cleanup_tracker()).await?;
+        self.announce_share(hub, ShareCapture::Camera(capture), "camera")
+            .await
+    }
+
+    async fn announce_share(
+        &mut self,
+        hub: &HubConnection,
+        capture: ShareCapture,
+        quality: &str,
+    ) -> Result<(), MediaError> {
         let started = hub
             .invoke("StartStream", vec![json!(quality)], Duration::from_secs(10))
             .await
@@ -267,7 +322,7 @@ impl VoiceSession {
         }
         if let Err(error) = self
             .engine
-            .set_video_with_quality(capture.source.clone(), quality)
+            .set_video_with_quality(capture.source(), quality)
         {
             let _ = self.engine.set_video(None);
             let _ = hub.send("StopStream", Vec::new()).await;

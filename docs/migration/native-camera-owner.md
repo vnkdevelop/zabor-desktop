@@ -60,10 +60,11 @@ deadlines, camera hotplug, privacy-denial behavior and long-session stability ne
 final physical verification. A blocked owner must block release acceptance rather
 than be silently reported as clean.
 
-This boundary does not yet wire the camera command, picker/toggle, original Voice
-acceptance ticket, native video source, channel/call restoration, or application
-cleanup observer. System/process-isolated stream audio is a separate remaining
-scenario. No camera or full-client readiness is claimed.
+The saved boundary milestone `99f59ca` does not itself wire the camera command,
+picker, original Voice ticket, native source, restoration or application observer.
+The next stage's wiring is described in `native-camera-integration.md` and remains
+under targeted application verification. System/process-isolated stream audio is
+a separate remaining scenario. No camera or full-client readiness is claimed.
 
 ## API references
 
@@ -75,5 +76,7 @@ Local tests use a synthetic backend and the same native owner loop and COM callb
 implementation. They do not enumerate, activate, read or stop a physical device.
 Synthetic backend/frame-copy entrypoints are gated by the `test-source` Cargo
 feature and are absent from the ordinary native-library build.
+Application tests additionally use a test-source-gated 160×96 video variant; the
+original tiny BGRA copy and owner fixtures retain their dimensions and contracts.
 Verification results are retained under
 `migration-artifacts/native-streams/camera-owner-functional-2026-11-08/`.

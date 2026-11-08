@@ -7979,6 +7979,7 @@ dependencies = [
  "wasapi",
  "webrtc-vad",
  "windows-dpapi",
+ "zabor-camera",
  "zabor-dsp",
  "zeroize",
 ]

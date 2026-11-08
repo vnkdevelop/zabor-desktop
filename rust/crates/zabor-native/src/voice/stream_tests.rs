@@ -153,7 +153,7 @@ fn share(session: &mut VoiceSession, quality: &str) -> (Arc<AtomicBool>, Arc<Ato
         .set_video_with_quality(capture.source.clone(), quality)
         .unwrap();
     session.capture = Some(ScreenShare {
-        capture,
+        capture: ShareCapture::Desktop(capture),
         quality: quality.into(),
     });
     (stop, failed)
@@ -481,6 +481,108 @@ async fn resumed_call_is_committed_before_slow_stream_restoration_outside_call_b
             );
             assert_eq!(requests.last().unwrap()["arguments"], json!(["high"]));
         }
+    })
+    .await
+    .unwrap();
+}
+
+#[cfg(feature = "camera-test-source")]
+#[tokio::test]
+async fn camera_start_and_reannouncement_keep_default_quality_original_capture_and_track() {
+    timeout(Duration::from_secs(10), async {
+        for call in [false, true] {
+            let fixture = fixture([Reply::Value(json!(true)), Reply::Value(json!(true))]).await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+                .await
+                .unwrap();
+            let mut session = session();
+            session.peers.clear();
+            if call {
+                session.channel = None;
+                session.call_peer = Some("peer".into());
+            }
+            let runtime = session.audio_runtime.clone();
+            let capture = CameraCapture::synthetic(runtime.cleanup_tracker(), 2, 150)
+                .await
+                .unwrap();
+            session
+                .announce_share(&hub, ShareCapture::Camera(capture), "camera")
+                .await
+                .unwrap();
+            let lifetime = peer(&mut session);
+            let track = session.engine.local_video().unwrap();
+            let original = &session.capture.as_ref().unwrap().capture;
+            assert!(session.restore_share(&hub).await.unwrap());
+            assert!(std::ptr::eq(
+                original,
+                &session.capture.as_ref().unwrap().capture
+            ));
+            assert_retained(&session, &track, &lifetime);
+            session.stop_share(&hub).await;
+            assert!(!session.is_sharing());
+            assert!(!track.enabled());
+            runtime.seal_cleanup().unwrap();
+            runtime.wait_for_cleanup().await.unwrap();
+            hub.close();
+            let requests = fixture.server.await.unwrap();
+            assert_eq!(
+                requests
+                    .iter()
+                    .filter(|request| request["target"] == "StartStream")
+                    .count(),
+                2
+            );
+            assert!(requests
+                .iter()
+                .filter(|request| request["target"] == "StartStream")
+                .all(|request| request["arguments"] == json!(["camera"])));
+            assert_eq!(requests.last().unwrap()["target"], "StopStream");
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[cfg(feature = "camera-test-source")]
+#[tokio::test]
+async fn camera_stream_refusal_preserves_membership_and_retained_camera_can_reannounce() {
+    timeout(Duration::from_secs(10), async {
+        let fixture = fixture([
+            Reply::Value(json!(true)),
+            Reply::Value(json!(false)),
+            Reply::Value(json!(true)),
+        ])
+        .await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let mut session = session();
+        session.peers.clear();
+        let runtime = session.audio_runtime.clone();
+        let capture = CameraCapture::synthetic(runtime.cleanup_tracker(), 0, 0)
+            .await
+            .unwrap();
+        session
+            .announce_share(&hub, ShareCapture::Camera(capture), "camera")
+            .await
+            .unwrap();
+        let lifetime = peer(&mut session);
+        let track = session.engine.local_video().unwrap();
+        assert!(session.restore_share(&hub).await.is_err());
+        assert_retained(&session, &track, &lifetime);
+        assert_eq!(session.channel.as_deref(), Some("fixture-channel"));
+        assert!(session.restore_share(&hub).await.unwrap());
+        assert_retained(&session, &track, &lifetime);
+        drop(session);
+        runtime.seal_cleanup().unwrap();
+        runtime.wait_for_cleanup().await.unwrap();
+        hub.close();
+        let requests = fixture.server.await.unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests
+            .iter()
+            .all(|request| request["target"] == "StartStream"
+                && request["arguments"] == json!(["camera"])));
     })
     .await
     .unwrap();
