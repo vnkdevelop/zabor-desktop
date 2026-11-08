@@ -1089,9 +1089,37 @@ outside1helper/6new tests/7worker metadata scopes exactly equals saved3ac1e18;
 four existing sources changed,no new sources. Tested executable SHA-256:
 `d2f889d682fbba98d97205cdd613826d61c4be696e08a3aaf874be05108d8c07`.
 voiceResourceMetadataChecked=true is narrow worker metadata/two old-video extraction
-acceptance. Save/post-save Graphify/guard/compact next;all temporary helpers removed.
+acceptance. Saved9f983971dc81b7729933cc03d332ef9b90ae2987/post-saveGraphify/438/3/24/
+current-frozen binary+ONNX/dependency/proofs/clean-tree guard passed;helpers removed.
 General VideoReceiver/peer-exclusive/shared/native-resource/worker/UI bounds and
 full-client/worker/audio/call readiness remain false,no generalized off-thread teardown.
+
+### Peer-exclusive incoming-video acceptance: components checked locally
+
+PeerLifetime metadata mutex linearizes commit versus atomic invalidation;poison fails
+admission closed,cancellation remains outside mutex. Original Arc identity and stored
+Voice ticket participate in intent->peer acceptance,window stop rechecked after peer
+wait. Staged install_video receiver/FnMut/replaced resources stay outside both gates.
+One incoming video Track scope only:guarded old extraction/max3 watch calculation,
+outside-gate Drop/native start/watching-send,final original-ticket/peer install.
+Seven new tests/source-scope438/3/3SDK audit passed;18filtered tests include all7new.
+Final `native-calls/peer-acceptance-final-2026-11-08/` passed311default/301neural-disabled,
+bothClippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI interactions;
+protected neural metrics unchanged. Independent438primary/3reference/24evidence/
+current+frozen executable+ONNX/3SDK/proofs matched0mismatches;all304/294previous
+test names/multiplicity retained,seven new tests/main32/VoiceWork15/media3/previous
+suites verified in both modes.71new/425prior markers and previous diagnostic
+signatures/multiplicity verified;raw logs/source/deadlines unchanged. Independent
+source reconstruction outside PeerState/2helpers/7new tests/1incoming-video scope
+exactly equals saved9f98397;four existing sources changed,no new sources. Tested
+executable SHA-256:
+`3a2b502bc32b0e342d8ba716c80d4a1b962fdbb5d75f3439c92c468591eb0a83`.
+peerExclusiveCommitChecked=true/incomingVideoResourceAcceptanceChecked=true only
+for exclusive metadata and one incoming-track extraction/install scope. Callback
+unwind retains installed receiver with poisoned peer admission,not rollback/health
+acceptance. Save/post-saveGraphify/guard/compact next;all temporary helpers removed.
+Other video restart/stop/prune/shared-resource/native lifecycle/timing/full readiness
+remain open,no generalized off-thread teardown/native-start/stop deadline claim.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

@@ -1,5 +1,6 @@
-use super::{HubConnection, MediaEvent, UiEvent, VoiceSession};
+use super::{HubConnection, MediaEvent, UiEvent, VideoReceiver, VoiceSession};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::future::Future;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -73,6 +74,41 @@ impl<'a> VoiceWork<'a> {
             true
         });
         taken.filter(|taken| *taken).and(resources)
+    }
+
+    pub(super) fn commit_peer_resource<T>(
+        &self,
+        resource_ticket: Option<IntentTicket>,
+        lifetime: &PeerLifetime,
+        mut accepted: impl FnMut() -> T,
+    ) -> Option<T> {
+        self.commit_resource(resource_ticket, || {
+            lifetime.commit(|| (!self.stop.is_cancelled()).then(&mut accepted))
+        })
+        .flatten()
+        .flatten()
+    }
+
+    pub(super) fn install_video(
+        &self,
+        videos: &mut BTreeMap<String, VideoReceiver>,
+        resource_ticket: Option<IntentTicket>,
+        lifetime: &PeerLifetime,
+        prepared: (String, VideoReceiver),
+        mut accepted: impl FnMut(),
+    ) -> Option<Option<VideoReceiver>> {
+        let mut prepared = Some(prepared);
+        let mut replaced = None;
+        let installed = self.commit_peer_resource(resource_ticket, lifetime, || {
+            if !prepared.as_ref().unwrap().1.lifetime().is_same(lifetime) {
+                return false;
+            }
+            let (peer, receiver) = prepared.take().unwrap();
+            replaced = Some(videos.insert(peer, receiver));
+            accepted();
+            true
+        });
+        installed.filter(|installed| *installed).and(replaced)
     }
 
     pub(super) fn take_previous_voice(

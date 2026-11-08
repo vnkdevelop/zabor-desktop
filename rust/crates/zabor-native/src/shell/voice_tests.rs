@@ -886,6 +886,442 @@ async fn native_call_restore_resource_commit_keeps_retired_video_drop_outside_ga
     engine.close();
 }
 
+#[tokio::test]
+async fn peer_resource_ready_commits_require_original_voice_ticket_and_peer_identity() {
+    for mode in [
+        "live",
+        "leave-pending",
+        "leave-consumed",
+        "logout-pending",
+        "logout-consumed",
+        "window",
+        "missing",
+        "reticket",
+        "peer",
+        "replacement",
+        "poison",
+    ] {
+        let (mut engine, lifetime) = peer();
+        let intents = CriticalIntents::default();
+        let original = intents.ticket();
+        let stop = CancellationToken::new();
+        let update = |_| panic!("Peer metadata must not publish under either gate");
+        assert_eq!(
+            VoiceWork::new(&intents, original, &stop, &update)
+                .run_peer(&lifetime, async { 42 })
+                .await,
+            Some(42)
+        );
+        match mode {
+            "leave-pending" | "leave-consumed" | "reticket" => {
+                intents.request(CriticalAction::Leave)
+            }
+            "logout-pending" | "logout-consumed" => intents.request(CriticalAction::Logout),
+            "window" => stop.cancel(),
+            "peer" | "replacement" => {
+                engine.disconnect_peer("peer");
+                if mode == "replacement" {
+                    engine
+                        .create_data_channel(
+                            "peer",
+                            "peer-acceptance-replacement",
+                            DataChannelInit::default(),
+                        )
+                        .unwrap();
+                    let replacement = engine.peer_lifetime("peer").unwrap();
+                    assert!(replacement.is_alive());
+                    assert!(!replacement.is_same(&lifetime));
+                }
+            }
+            "poison" => {
+                assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                    || lifetime.commit(|| panic!("Expected peer admission poison"))
+                ))
+                .is_err());
+            }
+            _ => {}
+        }
+        if mode.ends_with("consumed") || mode == "reticket" {
+            intents.next().await;
+        }
+        let ticket = if mode == "reticket" {
+            intents.ticket()
+        } else {
+            original
+        };
+        let resource_ticket = (mode != "missing").then_some(original);
+        let work = VoiceWork::new(&intents, ticket, &stop, &update);
+        let mut value = 0;
+        assert_eq!(
+            work.commit_peer_resource(resource_ticket, &lifetime, || {
+                value += 1;
+                42
+            }),
+            (mode == "live").then_some(42)
+        );
+        assert_eq!(value, usize::from(mode == "live"));
+        assert_eq!(resource_ticket, (mode != "missing").then_some(original));
+        if mode != "live" {
+            assert!(work
+                .commit_peer_resource(resource_ticket, &lifetime, || panic!(
+                    "Rejected original peer resource tail ran"
+                ))
+                .is_none());
+        }
+        engine.close();
+        println!("peer acceptance resource mode={mode} ready_result=true original_voice_peer=true accepted={} physical_audio=false", mode == "live");
+    }
+}
+
+#[test]
+fn peer_resource_gate_orders_intent_before_peer_and_rechecks_window_after_peer_wait() {
+    for mode in ["leave", "logout", "window"] {
+        let (mut engine, lifetime) = peer();
+        let intents = CriticalIntents::default();
+        let ticket = intents.ticket();
+        let stop = CancellationToken::new();
+        let update = |_| {};
+        let work = VoiceWork::new(&intents, ticket, &stop, &update);
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let (started, starting) = std::sync::mpsc::channel();
+        let (done, finished) = std::sync::mpsc::channel();
+        let value = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            let lifetime = &lifetime;
+            let intents = &intents;
+            let work = &work;
+            let value = &value;
+            if mode == "window" {
+                let holder = scope.spawn(move || {
+                    lifetime.commit(|| {
+                        entered.send(()).unwrap();
+                        held.recv_timeout(Duration::from_secs(3)).unwrap();
+                    })
+                });
+                waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                let commit = scope.spawn(move || {
+                    started.send(()).unwrap();
+                    done.send(work.commit_peer_resource(Some(ticket), lifetime, || {
+                        panic!("Window stop while waiting for peer gate accepted resource")
+                    }))
+                    .unwrap();
+                });
+                starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                stop.cancel();
+                release.send(()).unwrap();
+                holder.join().unwrap().unwrap();
+                assert_eq!(
+                    finished.recv_timeout(Duration::from_secs(1)).unwrap(),
+                    None::<()>
+                );
+                commit.join().unwrap();
+            } else {
+                let commit = scope.spawn(move || {
+                    work.commit_peer_resource(Some(ticket), lifetime, || {
+                        entered.send(()).unwrap();
+                        held.recv_timeout(Duration::from_secs(3)).unwrap();
+                        value.store(1, Ordering::Release);
+                    })
+                });
+                waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                let requester = scope.spawn(move || {
+                    started.send(()).unwrap();
+                    intents.request(if mode == "leave" {
+                        CriticalAction::Leave
+                    } else {
+                        CriticalAction::Logout
+                    });
+                    assert_eq!(value.load(Ordering::Acquire), 1);
+                    done.send(None).unwrap();
+                });
+                starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                release.send(()).unwrap();
+                assert_eq!(commit.join().unwrap(), Some(()));
+                finished.recv_timeout(Duration::from_secs(1)).unwrap();
+                requester.join().unwrap();
+            }
+        });
+        assert!(work
+            .commit_peer_resource(Some(ticket), &lifetime, || panic!(
+                "Revoked joint-gate resource accepted"
+            ))
+            .is_none());
+        engine.close();
+        println!("peer acceptance joint_gate={mode} strict_intent_peer_order=true stop_after_peer_wait=true physical_audio=false");
+    }
+}
+
+#[tokio::test]
+async fn peer_video_admission_and_install_keep_receivers_and_fnmut_captures_outside_both_gates() {
+    use libwebrtc::peer_connection_factory::{
+        native::PeerConnectionFactoryExt, PeerConnectionFactory,
+    };
+    struct Probe {
+        intents: Arc<CriticalIntents>,
+        lifetime: PeerLifetime,
+        drops: Arc<AtomicUsize>,
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let _ = self.intents.ticket();
+            let _ = self.lifetime.commit(|| 43);
+            self.drops.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    let factory = PeerConnectionFactory::default();
+    let source = NativeVideoSource::new(
+        VideoResolution {
+            width: 160,
+            height: 96,
+        },
+        true,
+    );
+    for phase in ["admission", "installation"] {
+        for occupied in [false, true] {
+            for mode in [
+                "live",
+                "leave",
+                "logout",
+                "window",
+                "missing",
+                "reticket",
+                "peer",
+                "replacement",
+                "poison",
+                "wrong-peer",
+                "panic",
+            ] {
+                let (mut engine, lifetime) = peer();
+                let (mut other_engine, other_lifetime) = peer();
+                let intents = Arc::new(CriticalIntents::default());
+                let original = intents.ticket();
+                let stop = CancellationToken::new();
+                let old_drops = Arc::new(AtomicUsize::new(0));
+                let new_drops = Arc::new(AtomicUsize::new(0));
+                let callback_drops = Arc::new(AtomicUsize::new(0));
+                let mut videos = std::collections::BTreeMap::new();
+                if occupied {
+                    let probe = Probe {
+                        intents: intents.clone(),
+                        lifetime: lifetime.clone(),
+                        drops: old_drops.clone(),
+                    };
+                    videos.insert(
+                        "peer".into(),
+                        VideoReceiver::new(
+                            factory.create_video_track("peer-old", source.clone()),
+                            lifetime.clone(),
+                            Arc::new(move |_| {
+                                let _ = &probe;
+                            }),
+                        ),
+                    );
+                }
+                let new_lifetime = if mode == "wrong-peer" {
+                    other_lifetime.clone()
+                } else {
+                    lifetime.clone()
+                };
+                let probe = Probe {
+                    intents: intents.clone(),
+                    lifetime: new_lifetime.clone(),
+                    drops: new_drops.clone(),
+                };
+                let prepared = VideoReceiver::new(
+                    factory.create_video_track("peer-new", source.clone()),
+                    new_lifetime,
+                    Arc::new(move |_| {
+                        let _ = &probe;
+                    }),
+                );
+                let callback_probe = Probe {
+                    intents: intents.clone(),
+                    lifetime: lifetime.clone(),
+                    drops: callback_drops.clone(),
+                };
+                let update = |_| {};
+                assert_eq!(
+                    VoiceWork::new(&intents, original, &stop, &update)
+                        .run_peer(&lifetime, async { 42 })
+                        .await,
+                    Some(42)
+                );
+                match mode {
+                    "leave" | "reticket" => {
+                        intents.request(CriticalAction::Leave);
+                        intents.next().await;
+                    }
+                    "logout" => {
+                        intents.request(CriticalAction::Logout);
+                        intents.next().await;
+                    }
+                    "window" => stop.cancel(),
+                    "peer" | "replacement" => {
+                        engine.disconnect_peer("peer");
+                        if mode == "replacement" {
+                            engine
+                                .create_data_channel(
+                                    "peer",
+                                    "same-name-new-lifetime",
+                                    DataChannelInit::default(),
+                                )
+                                .unwrap();
+                            assert!(!engine.peer_lifetime("peer").unwrap().is_same(&lifetime));
+                        }
+                    }
+                    "poison" => {
+                        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            lifetime
+                                .commit(|| panic!("Expected configured receiver admission poison"))
+                        }))
+                        .is_err());
+                    }
+                    _ => {}
+                }
+                let work = VoiceWork::new(
+                    &intents,
+                    if mode == "reticket" {
+                        intents.ticket()
+                    } else {
+                        original
+                    },
+                    &stop,
+                    &update,
+                );
+                let resource_ticket = (mode != "missing").then_some(original);
+                if phase == "admission" {
+                    let mut retired = None;
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        work.commit_peer_resource(resource_ticket, &lifetime, || {
+                            retired = videos.remove("peer");
+                            assert_ne!(
+                                mode, "panic",
+                                "Expected admitted receiver extraction unwind"
+                            );
+                            42
+                        })
+                    }));
+                    assert_eq!(result.is_err(), mode == "panic");
+                    let admitted = matches!(mode, "live" | "wrong-peer" | "panic");
+                    if let Ok(result) = result {
+                        assert_eq!(result, admitted.then_some(42));
+                    }
+                    assert_eq!(retired.is_some(), occupied && admitted);
+                    assert_eq!(videos.is_empty(), !occupied || admitted);
+                    assert_eq!(old_drops.load(Ordering::Acquire), 0);
+                    drop(retired);
+                    drop(prepared);
+                    drop(callback_probe);
+                } else {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        work.install_video(
+                            &mut videos,
+                            resource_ticket,
+                            &lifetime,
+                            ("peer".into(), prepared),
+                            move || {
+                                let _ = &callback_probe;
+                                assert_ne!(
+                                    mode, "panic",
+                                    "Expected accepted video installation unwind"
+                                );
+                            },
+                        )
+                    }));
+                    assert_eq!(result.is_err(), mode == "panic");
+                    let installed = matches!(mode, "live" | "panic");
+                    if let Ok(result) = result {
+                        assert_eq!(result.is_some(), installed);
+                        assert_eq!(
+                            result.as_ref().is_some_and(Option::is_some),
+                            occupied && installed
+                        );
+                        assert_eq!(old_drops.load(Ordering::Acquire), 0);
+                        drop(result);
+                    } else {
+                        assert_eq!(old_drops.load(Ordering::Acquire), usize::from(occupied));
+                    }
+                    assert_eq!(videos.is_empty(), !occupied && !installed);
+                    assert_eq!(new_drops.load(Ordering::Acquire), usize::from(!installed));
+                    assert_eq!(callback_drops.load(Ordering::Acquire), 1);
+                }
+                drop(videos);
+                assert_eq!(old_drops.load(Ordering::Acquire), usize::from(occupied));
+                assert_eq!(new_drops.load(Ordering::Acquire), 1);
+                assert_eq!(callback_drops.load(Ordering::Acquire), 1);
+                assert_eq!(resource_ticket, (mode != "missing").then_some(original));
+                engine.close();
+                other_engine.close();
+                println!("peer acceptance video phase={phase} occupied={occupied} mode={mode} resource_capture_drop_gate_reentry=true original_lifetime=true physical_audio=false");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn peer_video_active_native_preparation_rechecks_original_resources_before_installation() {
+    use libwebrtc::peer_connection_factory::{
+        native::PeerConnectionFactoryExt, PeerConnectionFactory,
+    };
+    timeout(Duration::from_secs(15), async {
+        let factory = PeerConnectionFactory::default();
+        let source = NativeVideoSource::new(VideoResolution { width: 160, height: 96 }, true);
+        for mode in ["live", "leave", "logout", "window", "peer", "replacement"] {
+            let (mut engine, lifetime) = peer();
+            let intents = CriticalIntents::default();
+            let original = intents.ticket();
+            let stop = CancellationToken::new();
+            let generation = AtomicU64::new(7);
+            let update = |_| {};
+            let work = VoiceWork::new(&intents, original, &stop, &update);
+            let mut videos = std::collections::BTreeMap::<String, VideoReceiver>::new();
+            let (sender, mut frames) = mpsc::channel(8);
+            let track = factory.create_video_track("peer-active-preparation", source.clone());
+            let mut receiver = VideoReceiver::new(track, lifetime.clone(), frame_sink(sender, original, 7));
+            let mut retired = None;
+            let watch = work.commit_peer_resource(Some(original), &lifetime, || {
+                retired = videos.remove("alice");
+                videos.values().filter(|receiver| receiver.is_playing()).count() < 3
+            }).unwrap();
+            drop(retired);
+            assert!(watch);
+            receiver.start();
+            assert!(receiver.is_playing());
+            let mut ticker = tokio::time::interval(Duration::from_millis(33));
+            let frame = loop {
+                tokio::select! {
+                    _ = ticker.tick() => { source.capture_frame(&VideoFrame::new(VideoRotation::VideoRotation0, I420Buffer::new_black(160, 96))); },
+                    frame = frames.recv() => break frame.unwrap(),
+                }
+            };
+            assert!(frame.is_current(&intents, &generation, &stop));
+            match mode {
+                "leave" => { intents.request(CriticalAction::Leave); intents.next().await; },
+                "logout" => { intents.request(CriticalAction::Logout); intents.next().await; },
+                "window" => stop.cancel(),
+                "peer" | "replacement" => {
+                    engine.disconnect_peer("peer");
+                    if mode == "replacement" { engine.create_data_channel("peer", "active-new-peer", DataChannelInit::default()).unwrap(); assert!(!engine.peer_lifetime("peer").unwrap().is_same(&lifetime)); }
+                },
+                _ => {},
+            }
+            let installed = work.install_video(&mut videos, Some(original), &lifetime, ("alice".into(), receiver), || {});
+            assert_eq!(installed.is_some(), mode == "live");
+            assert_eq!(videos.len(), usize::from(mode == "live"));
+            assert_eq!(frame.lease.is_alive(), mode == "live");
+            assert_eq!(frame.is_current(&intents, &generation, &stop), mode == "live");
+            drop(installed);
+            drop(videos);
+            assert!(!frame.lease.is_alive());
+            engine.close();
+            println!("peer acceptance active_video={mode} native_subscription=true original_frame_voice_peer=true post_prepare_recheck=true physical_audio=false");
+        }
+    }).await.unwrap();
+}
+
 fn frame_sink(
     sender: mpsc::Sender<FrameUpdate>,
     ticket: IntentTicket,

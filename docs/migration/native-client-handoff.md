@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `3ac1e18`: исходный resource-ticket
-для worker metadata Join/CheckAudio/call recovery и двух restored-video extractions.
-Final `resource-metadata-final-2026-11-08` прошёл304default/294neural-disabled tests
+Последний проверенный компонентный этап после `9f98397`: peer-exclusive metadata
+acceptance и original-ticket/lifetime извлечение/установка нового видеотрека.
+Final `peer-acceptance-final-2026-11-08` прошёл311default/301neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`d2f889d682fbba98d97205cdd613826d61c4be696e08a3aaf874be05108d8c07`.
+`3a2b502bc32b0e342d8ba716c80d4a1b962fdbb5d75f3439c92c468591eb0a83`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
 compact;actual saved commit брать из Git и
-`native-calls/resource-metadata-post-save-2026-11-08/saved-boundary.json`.
+`native-calls/peer-acceptance-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Историческийa7412868… previous-Voice binary не заменяет
+visual/physical gates. Историческийd2f889d6… resource-metadata binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,86 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Peer-exclusive incoming-video acceptance — checked locally 2026-11-08
+
+- Saved predecessor **9f983971dc81b7729933cc03d332ef9b90ae2987**;post-save
+  **sh_1b9ae2603001bU5smcDsCrIaSl completed/passed**:clean tree,438/3/24/current+
+  frozen executable+ONNX/3SDK/final-independent-source-predecessor proofs matched.
+- PeerLifetime has exclusive metadata commit mutex plus unchanged atomic liveness/
+  CancellationToken. Original identity is Arc::ptr_eq. Commit rejects poisoned gate;
+  invalidate recovers only to store false under mutex,then cancels after releasing it.
+  FnMut captures remain outside peer gate on rejection/unwind. Native peer callbacks,
+  callback removal/close/destructor order remain unchanged and outside peer gate.
+- VoiceWork.commit_peer_resource holds unchanged original-resource intent gate then
+  original peer gate,rechecks window stop after peer wait. install_video stages
+  prepared/replaced receivers and borrowed FnMut capture outside both gates;prepared
+  receiver must carry same original lifetime. One incoming video Track scope only:
+  extract old receiver/compute max3 watch eligibility under joint acceptance,drop old
+  outside gates,unchanged native start/watching-send,final guarded install,dispose
+  replaced outside. Original frame ticket/generation/peer/lease retained. Start may
+  finish after admitted revocation;post-start install rejects revoked resources,
+  but no native start/stop/close deadline or generalized off-thread safety is claimed.
+  Callback unwind after insertion retains newly installed receiver in owning map,
+  retires displaced receiver outside both gates and leaves peer admission poisoned;
+  no rollback/reopening/reticketing is performed. Atomic is_alive remains unchanged
+  until native invalidation;poison acceptance refusal is not an endpoint-health claim.
+- Seven new tests:3pure peer tests with7evidence cases (invalidation linearization,
+  capture/unwind/poison and cancellation-waker gate reentry);11ready Voice-peer cases;
+  3held joint-gate cases;44configured native receiver extraction/install/capture/
+  rejection/unwind cases;6active local native subscription/frame cases. No physical
+  endpoint/audio/two-device/native AEC integration acceptance.
+- Initial development **sh_1b9b33b49001MeqAkZacNciKYp** compile failed only in new
+  active-video test:inferred empty BTreeMap and capture_frame bool select arm. Added
+  explicit String/VideoReceiver type and discarded bool in that new branch only;
+  raw failure and initial source proof retained under peer-acceptance-development.
+  Fixed test job **sh_1b9b636a0001vLKQP5eQDIW23L passed18filtered tests**,including
+  all7new tests,active native-video test passed6cases. Development Graphify
+  **sh_1b9b68bb4001GgEvO7RrddJeos passed**;5974nodes/14656edges/261communities,
+  existing7metadata warnings/HTML5000limit retained.
+  `native-calls/peer-acceptance-source-audit-2026-11-08.json` passed438/3/3SDK:
+  outside PeerState/2helpers/7new tests/1incoming-video scope exactly equals9f98397;
+  all original strict Voice/session/audio/metadata methods,other worker scopes,
+  native callbacks/start/wire/frame contract unchanged. Source helper deleted.
+- Full **sh_1b9b825b20019MiDgttwVMuSYW completed/passed**:311default/301neural-disabled,
+  bothClippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI auth/roster/audio/
+  MicTest interactions plusGraphify. Protected neural metrics unchanged. Output
+  `native-calls/peer-acceptance-final-2026-11-08/`. Independent
+  `native-calls/peer-acceptance-final-independent-2026-11-08.json` passed0mismatches:
+  438primary/3reference/24evidence/current+frozen exe+ONNX/3SDK/final/source/predecessor/
+  initial-development proofs checked. All304/294previous pass-names/multiplicity
+  retained,7new tests passed;main32/VoiceWork15/media3 and every prior suite verified
+  in both modes. Each mode71new/425prior component markers and all prior diagnostic
+  signatures/multiplicity verified,normalizing only measured `_ms`. Prior13protocol
+  waits/3normal Logout/4partial-poison/original Voice Leave-Logout tail_runs=0 preserved.
+  Raw logs/source/deadlines unchanged. Independent reconstruction repeated:outside
+  PeerState/2helpers/7new tests/1incoming-video scope exactly equals saved9f98397.
+  All strict intent/session/Voice/audio/resource-metadata methods,other worker scopes,
+  native peer callbacks/removal/close,video runtime/start/wire/frame contracts unchanged.
+  Original Voice ticket/peer identity,intent->peer order/stop-after-peer-wait,
+  outside cancellation/capture/prepared/extracted/replaced receiver Drop verified.
+  Executable **3a2b502bc32b0e342d8ba716c80d4a1b962fdbb5d75f3439c92c468591eb0a83**.
+  FinalProof **2cfa0c3dee344dd6d160f5fa98af53e031e97f8b0f3058797962ec8335c4476d**.
+  IndependentProof7c885fc0…;SourceScopeProofb91bc091…;all source/final/independent
+  temporary helpers deleted immediately,no helper/profile cleanup debt.
+  Save narrow peerExclusiveCommitChecked/incomingVideoResourceAcceptanceChecked,
+  then post-saveGraphify/frozen source-evidence/current-frozen binary-ONNX/dependency/
+  predecessor-proof/clean-tree guard/compact. No next source patch before guard.
+- Next:remaining UserStarted/StoppedStreaming,UserLeft/prune/ExpireStreams receiver
+  extraction/start/stop admission and shared-runtime/monitor acquisition/lifecycle.
+  Live receiver restart/stop admission should stage/extract subscription or receiver
+  before outside-gate native mutation and same-ticket/lifetime installation;do not
+  hold either mutex around VideoReceiver.start/stop/task.abort/native remove_sink.
+  Dead-peer retirement must not require successful live-peer commit:atomic invalidation
+  is monotonic,so original Voice-ticket retirement can extract already-dead receiver
+  into outer owner without reopening peer admission. Keep grace cancellation/UI
+  publication outside acceptance and max3 eligibility semantics unchanged. Currently
+  VideoSubscription.Drop invalidates active lease then aborts task,without join;
+  resulting NativeVideoStream sink teardown/task completion remain unverified.
+  Peer-exclusive metadata is not generalized native start/teardown safety. Preserve
+  intent->peer order;no intent acquisition from peer callbacks/no cancel/Drop/native
+  start/remove_sink/close under either mutex;retain original Voice/peer/frame tickets.
+  General peer/video/shared/worker/UI/audio/call/full-client gates remain false.
 
 ## Original-resource worker metadata — checked locally 2026-11-08
 
@@ -94,9 +174,8 @@ push/merge/release/shutdown не выполнялись. После каждог
   IndependentProoff53d83a4…;SourceScopeProof31e166f8…;all source/final/independent
   temporary helpers immediately deleted,no helper/profile cleanup debt.
   Graphify5959nodes/14609edges/261communities;existing7metadata warnings/HTML5000limit.
-  Save narrow voiceResourceMetadataChecked acceptance,then post-saveGraphify/frozen
-  source-evidence/current-frozen binary-ONNX/dependency/proof/clean-tree guard/compact.
-  No next source patch before guard.
+  Saved9f983971dc81b7729933cc03d332ef9b90ae2987/post-saveGraphify/frozen sources+
+  evidence/current-frozen binary+ONNX/dependency/proof/clean-tree guard passed.
 - Next read-only graph map:PeerLifetime has only AtomicBool+CancellationToken;
   invalidate stores false then cancels from Peer::Drop before callback removal/close.
   General receiver extraction/start/install requires peer-exclusive acceptance in

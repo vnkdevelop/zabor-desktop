@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -48,6 +48,7 @@ pub struct PeerLifetime(Arc<PeerState>);
 struct PeerState {
     alive: AtomicBool,
     stop: CancellationToken,
+    commit: Mutex<()>,
 }
 
 impl PeerLifetime {
@@ -55,16 +56,31 @@ impl PeerLifetime {
         Self(Arc::new(PeerState {
             alive: AtomicBool::new(true),
             stop: CancellationToken::new(),
+            commit: Mutex::new(()),
         }))
     }
     pub fn is_alive(&self) -> bool {
         self.0.alive.load(Ordering::Acquire)
     }
+    pub fn is_same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+    pub fn commit<T>(&self, mut accepted: impl FnMut() -> T) -> Option<T> {
+        let _gate = self.0.commit.lock().ok()?;
+        self.is_alive().then(&mut accepted)
+    }
     pub async fn cancelled(&self) {
         self.0.stop.cancelled().await;
     }
     fn invalidate(&self) {
-        self.0.alive.store(false, Ordering::Release);
+        {
+            let _gate = self
+                .0
+                .commit
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            self.0.alive.store(false, Ordering::Release);
+        }
         self.0.stop.cancel();
     }
 }
@@ -653,4 +669,160 @@ fn parse_signal(payload: &str) -> Result<Value, MediaError> {
         return Err(MediaError::InvalidSignal);
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Duration;
+
+    #[test]
+    fn peer_commit_linearizes_invalidation_and_rejects_every_later_callback() {
+        let lifetime = PeerLifetime::new();
+        assert!(lifetime.is_same(&lifetime.clone()));
+        assert!(!lifetime.is_same(&PeerLifetime::new()));
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let (started, starting) = std::sync::mpsc::channel();
+        let (done, finished) = std::sync::mpsc::channel();
+        let committed = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            let lifetime = &lifetime;
+            let committed = &committed;
+            let commit = scope.spawn(move || {
+                lifetime.commit(|| {
+                    entered.send(()).unwrap();
+                    held.recv_timeout(Duration::from_secs(3)).unwrap();
+                    assert!(lifetime.is_alive());
+                    committed.store(1, Ordering::Release);
+                    42
+                })
+            });
+            waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+            let invalidate = scope.spawn(move || {
+                started.send(()).unwrap();
+                lifetime.invalidate();
+                assert_eq!(committed.load(Ordering::Acquire), 1);
+                done.send(()).unwrap();
+            });
+            starting.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+            release.send(()).unwrap();
+            assert_eq!(commit.join().unwrap(), Some(42));
+            finished.recv_timeout(Duration::from_secs(1)).unwrap();
+            invalidate.join().unwrap();
+        });
+        assert!(!lifetime.is_alive());
+        assert!(lifetime
+            .commit(|| panic!("Invalidated peer commit ran"))
+            .is_none());
+        assert!(lifetime.0.stop.is_cancelled());
+        println!("peer acceptance invalidation strict_linearization=true original_identity=true physical_audio=false");
+    }
+
+    #[test]
+    fn peer_commit_capture_drop_is_outside_gate_and_poison_never_reopens_admission() {
+        struct Probe {
+            lifetime: PeerLifetime,
+            drops: Arc<AtomicUsize>,
+        }
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                let _ = self.lifetime.commit(|| 43);
+                self.drops.fetch_add(1, Ordering::AcqRel);
+            }
+        }
+        for mode in ["live", "invalid", "panic", "poison"] {
+            let lifetime = PeerLifetime::new();
+            if mode == "invalid" {
+                lifetime.invalidate();
+            }
+            if mode == "poison" {
+                assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                    || lifetime.commit(|| panic!("Expected peer gate poison"))
+                ))
+                .is_err());
+            }
+            let drops = Arc::new(AtomicUsize::new(0));
+            let probe = Probe {
+                lifetime: lifetime.clone(),
+                drops: drops.clone(),
+            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                lifetime.commit(move || {
+                    let _ = &probe;
+                    assert_ne!(mode, "panic", "Expected peer commit callback unwind");
+                    42
+                })
+            }));
+            assert_eq!(result.is_err(), mode == "panic");
+            if let Ok(result) = result {
+                assert_eq!(result, (mode == "live").then_some(42));
+            }
+            assert_eq!(drops.load(Ordering::Acquire), 1);
+            if matches!(mode, "poison" | "panic") {
+                assert!(lifetime.is_alive());
+                assert!(lifetime
+                    .commit(|| panic!("Poisoned peer admission reopened"))
+                    .is_none());
+            }
+            lifetime.invalidate();
+            assert!(!lifetime.is_alive());
+            assert!(lifetime.0.stop.is_cancelled());
+            assert!(lifetime
+                .commit(|| panic!("Invalidation reopened peer admission"))
+                .is_none());
+            println!("peer acceptance capture={mode} drop_gate_reentry=true poison_fail_closed=true physical_audio=false");
+        }
+    }
+
+    #[test]
+    fn peer_invalidation_cancels_after_gate_release_even_with_poisoned_admission() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Wake, Waker};
+        struct Observer {
+            lifetime: PeerLifetime,
+            wakes: AtomicUsize,
+        }
+        impl Wake for Observer {
+            fn wake(self: Arc<Self>) {
+                self.wake_by_ref();
+            }
+            fn wake_by_ref(self: &Arc<Self>) {
+                let _gate = match self.lifetime.0.commit.try_lock() {
+                    Ok(gate) => gate,
+                    Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+                    Err(std::sync::TryLockError::WouldBlock) => {
+                        panic!("Peer cancellation ran under acceptance gate")
+                    }
+                };
+                assert!(!self.lifetime.is_alive());
+                self.wakes.fetch_add(1, Ordering::AcqRel);
+            }
+        }
+        for poison in [false, true] {
+            let lifetime = PeerLifetime::new();
+            if poison {
+                assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                    || lifetime.commit(|| panic!("Expected peer admission poison"))
+                ))
+                .is_err());
+            }
+            let observer = Arc::new(Observer {
+                lifetime: lifetime.clone(),
+                wakes: AtomicUsize::new(0),
+            });
+            let waker = Waker::from(observer.clone());
+            let mut context = Context::from_waker(&waker);
+            let mut cancelled = Box::pin(lifetime.cancelled());
+            assert_eq!(cancelled.as_mut().poll(&mut context), Poll::Pending);
+            lifetime.invalidate();
+            assert_eq!(observer.wakes.load(Ordering::Acquire), 1);
+            assert_eq!(cancelled.as_mut().poll(&mut context), Poll::Ready(()));
+            lifetime.invalidate();
+            assert_eq!(observer.wakes.load(Ordering::Acquire), 1);
+            println!("peer acceptance cancellation poison={poison} wake_after_gate_release=true idempotent=true physical_audio=false");
+        }
+    }
 }

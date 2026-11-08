@@ -2102,14 +2102,19 @@ async fn worker(
                             let sink = video_sink.clone();
                             let generation = video_generation.load(Ordering::Acquire);
                             let id = peer.clone();
-                            let mut receiver = VideoReceiver::new(track, lifetime, Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), ticket, generation, lease: delivery.lease, frame: delivery.frame }); }));
-                            video_jobs.remove(&peer);
-                            if !paused_video.contains(&peer) && video_jobs.values().filter(|receiver| receiver.is_playing()).count() < 3 {
+                            let mut receiver = VideoReceiver::new(track, lifetime.clone(), Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), ticket, generation, lease: delivery.lease, frame: delivery.frame }); }));
+                            let mut retired_video = None;
+                            let Some(watch) = work.commit_peer_resource(voice_ticket, &lifetime, || {
+                                retired_video = video_jobs.remove(&peer);
+                                !paused_video.contains(&peer) && video_jobs.values().filter(|receiver| receiver.is_playing()).count() < 3
+                            }) else { return; };
+                            drop(retired_video);
+                            if watch {
                                 receiver.start();
                                 if let Some(hub) = &hub { let _ = work.send_peer(receiver.lifetime(), hub, "SendStreamViewState", vec![json!(peer), json!("watching")]).await; }
                             }
-                            if !work.is_current() || !receiver.is_alive() { return; }
-                            video_jobs.insert(peer, receiver);
+                            let replaced = work.install_video(&mut video_jobs, voice_ticket, &lifetime, (peer, receiver), || {});
+                            drop(replaced);
                     },
                     _ => {},
                 }
