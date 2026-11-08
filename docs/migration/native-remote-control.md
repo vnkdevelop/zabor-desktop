@@ -123,3 +123,62 @@ source/pin hashes remained unchanged. Code graph: 6870 nodes, 17027 edges,
 289 communities; the existing seven zero-node warnings and 5000-node HTML limit
 remain. The stage's `save-verification.json` records the source commit and scope.
 Only continuation documents remained modified after saving source code.
+
+## Active original decoded-frame provenance subset
+
+After checked updater continuation c1e860c, the primary owns a new, not-yet-saved
+RC frame subset. DecodedVideo now records a private local monotonic completion
+timestamp after native RGBA copy/rotation; VideoFrameStamp retains that unchanged
+timestamp, displayed pixel geometry and original VideoFrameLease. It is a local
+copied/decoded-at time, not the remote capture clock or a physical latency proof.
+
+FrameUpdate retains the selected source epoch. A separate bounded displayed-frame
+map is populated only after the corresponding Slint video row is admitted. RC
+readiness/input requires original Voice ticket/generation, live subscription,
+selected P2P source rather than SFU, exact original P2P PeerLifetime/channel and a
+decoded frame no earlier than the original ACK acceptance time. Repeated ACK does
+not refresh that boundary. The cached VideoItem/image alone is never proof.
+
+Pointer/wheel/key input attaches the retained stamp and original frame ticket to
+its ControlTarget. Queue admission preserves that ticket rather than reminting
+after Leave, and worker dispatch rechecks peer/subscription/ACK provenance. A
+failed non-release stamp revokes the viewer; original safe key/mouse release and
+STOP cleanup remain independent. UI release/VoiceEnd/Logout resets authorization;
+video removal discards its displayed stamp. No microphone/SFU publisher or capture
+ownership is changed.
+
+Preliminary compile exposed only authored test arm types and sharing the original
+video-generation Arc after the worker takes it. Corrected with unit-returning
+capture arms and an Arc clone of the same authority; no reminted generation or
+lint suppression. Pending affected group `sh_1bbfa5e9e001V9DBPOzvO5F1vj` covers
+fmt, both native-media all-targets Clippy modes, video/Voice/media-RC/input-owner/
+viewer/shell tests, actual native frame/SCTP and extended loopback RTP proof, normal
+build, RU/EN inert interactions and Graphify. Eight source/pin hashes are frozen.
+Evidence: `migration-artifacts/native-streams/rc-frame-provenance-2026-11-08/checked-v1/`.
+Do not edit sources or poll until automatic completion; no verified milestone is
+claimed before the passing result.
+
+This subset does not impose a new guessed continuous frame-age timeout. Native
+physical confinement/viewport/helper binding must consume the original timestamp,
+not refresh it from a cached image. Continuous frame stalls, physical cursor/
+focus/IME/UIPI/latency, full-resolution visual parity, two-device/long-session,
+universal callback quiescence and all whole-native acceptance gates remain open.
+
+### Checked provenance result
+
+The described copied-frame/input subset passed as
+`66e3b169448771359b0aa72f3c382843680bca37`:4nativepaths/8source+pinhashes,
+155 distinct tests (9video/20Voice/4mediaRC/3input-owner/2viewer/117shell), fmt,
+both native-media all-targets Clippy modes, normal native build, RU/EN inert
+interactions and Graphify. Original timestamps remain unchanged through cached
+stamps; another peer or retired subscription and a pre-ACK frame are rejected.
+The actual loopback RTP fixture also rejects original displayed frames after
+Leave/Logout/generation change before native destruction completes.
+
+Normal executable SHA-256:
+`3675cf738823f68a9154efc04668dfaa55ca9115170a52fe36d4d50be8364cbb`.
+Graph7406nodes/18793edges/296communities;7priorwarnings/HTML5000limit remain.
+Immutable checked-v1/save evidence is under the provenance evidence path above.
+The temporary runner is removed and no primary provenance verification job remains.
+No physical cursor/viewport, continuous age deadline or whole-client/release
+acceptance is implied by these component tests.

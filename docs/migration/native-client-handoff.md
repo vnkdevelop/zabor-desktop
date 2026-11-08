@@ -10,10 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest checked source — **a2dac6a802a2451564d89a09edd68bc101606b17**:
-protected update IO/helper main-crate integration,46 unique affected tests/fmt/
-both Clippy/native helper/build/Graphify passed. Peer profiles138/RUEN and prior
-integration94/profile134 proofs retained. Normal executable11b19deb… is component evidence,
+сборкой. Latest checked source — **66e3b169448771359b0aa72f3c382843680bca37**:
+original decoded P2P frame/input provenance,155 unique affected tests/fmt/both
+Clippy/native build/RUEN/Graphify passed. Updater46/peer138/integration94/profile134
+proofs retained. Normal executable3675cf73… is component evidence,
 not full-client acceptance. RC2108f86, SFU2d254a2 and original peer/capture/mic retained.
 Picker **0dcfef7**,audio **5b8d656** and camera **df43be2** retained;physical camera/audio/
 complete client readiness=false. Metadata-only continuation save follows this source.
@@ -397,6 +397,59 @@ push/merge/release/shutdown не выполнялись. После каждог
   Own temp helper/fixtures/runner removed; no current primary check job remains.
   No actual app/installed baseline/health IPC/drain or real trust certificate is
   implied by this library integration. Whole-native/install/publication remain false.
+- Updater continuation saved as `c1e860ceba089772cbd40a52998a6c90f95b3555`, clean
+  tree/source hashes and post-save Graphify passed. No installed app or publisher
+  trust/health/drain readiness was enabled.
+- Active primary RC frame group afterc1e860c implements private immutable native
+  copied-at timestamp/VideoFrameStamp, displayed-row admitted stamp cache with
+  source epoch, original P2P peer/subscription/Voice/generation and ACK boundary,
+  pointer/wheel/key proof and original-frame ticket queueing. Worker rechecks the
+  retained target stamp and revokes failed non-release input; safe release/STOP
+  cleanup remains independent. UI resets proof on release/VoiceEnd/Logout/removal.
+  No microphone/SFU publisher/capture ownership or guessed continuous age policy
+  changed. Physical viewport/confinement/helper/UI/native teardown remain gates.
+- Preliminary all-target compile found only authored bool/unit select arms and
+  using the original video-generation Arc after worker ownership. Fixed unit
+  capture branches and cloned the same Arc (no new authority, no suppression).
+  Current frozen affected group `sh_1bbfa5e9e001V9DBPOzvO5F1vj`, evidence
+  `migration-artifacts/native-streams/rc-frame-provenance-2026-11-08/checked-v1/`:
+  fmt/both Clippy modes/video/Voice/mediaRC/input-owner/viewer/shell tests including
+  native copied-frame/ACK/SCTP and extended actual loopback RTP, normal build,
+  strict RU/EN inert checks and Graphify.4sourcepaths/8source+pinhashes frozen.
+  No source edits/polling/duplicate full matrices until automatic completion.
+  Temporary runner self-removes. No current RC source commit/whole-native proof
+  before passing the group; do not integrate later helper phases while frozen.
+- Achievements/presence child returned verified scoped source
+  `01ed463e6e222599e579ab9014aa71b9376527f6` on parent3c873d4, clean tree,
+ 6newownedfiles/no shared edits.40Rusttests (24new/16supporting) +1synthetic Slint
+  test passed, scoped fmt/all-targetClippy -Dwarnings and frozen dependency versions.
+  API AchievementsView/begin/accept/close/rows, original Session-ticket bounded
+  GetMyAchievements/GetUserAchievements JSON-string loaders,15reference definitions,
+  own/peer hidden-persistence acceptance plan, typed local-time RU/EN presence and
+  new AchievementsPanel/AchievementItem. Main worker/modal/navigation/focus/durable
+  and actual ISO/local-time/clock binding remain required; no app-ready claim.
+- The child's Graphify update timed out in clustering; no GRAPH_REPORT.md exists.
+  Raw14168nodes/32877edges can answer targeted new-module queries, but9zero-node
+  warnings/1951dangling endpoints/1self-loop/49directed-collapse risks and pending
+  doc/Slint semantics mean it is not a healthy clustered sync. Main graph unchanged.
+  After this final source result, the same General `ses_e441da897ffezpJCWS3jbyqKUX`
+  was assigned ONLY a separate graph/report/diagnostics completion phase, with
+  original01ed463 source frozen and no repeated code tests. Do not poll/duplicate
+  it or silently shrink/reset a curated graph; preserve honest unresolved flags.
+01ed463 remains separately integrable only after the current primary RC group
+  finishes and canonical primary graph/source integration checks can run.
+- RC provenance V1 `sh_1bbfa5e9e001V9DBPOzvO5F1vj` passed155 distinct tests:
+  9video/20Voice/4mediaRC/3input-owner/2viewer/117shell, both native-media Clippy
+  modes, fmt, normal build/RUEN inert and Graphify. Saved source
+  `66e3b169448771359b0aa72f3c382843680bca37`,4nativepaths/8source+pinhashes.
+  Normal binary `3675cf738823f68a9154efc04668dfaa55ca9115170a52fe36d4d50be8364cbb`.
+  Main graph7406nodes/18793edges/296communities,7priorwarnings/HTML5000limit.
+  Original timestamp/P2P/ACK and old/other/retired subscription checks plus extended
+  actual RTP Leave/Logout/generation rejection passed. Temporary runner removed.
+  No current primary check remains; physical viewport/confinement/continuous frame
+  age/host helper/callback quiescence/full-client acceptance still open. Next main
+  integration may take saved01ed463 after continuation save; do not take unfinished
+  child graph/helper phases or claim imported UI/durable/OS binding accepted.
 
 ### Verified native RC components after b4b52bc
 

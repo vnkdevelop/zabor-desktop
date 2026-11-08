@@ -91,6 +91,16 @@ app/media/input/session/file drain, health IPC, принятый baseline/bootst
 trust/certification/licenses и hostile/crash/physical/full-native acceptance всё ещё
 открыты. Библиотечная интеграция не разрешает установку, публикацию или выключение.
 
+Проверен и сохранён RC кадр/input provenance этап
+**`66e3b169448771359b0aa72f3c382843680bca37`**: private immutable local decoded/copy
+timestamp, displayed-row source/P2P stamp, исходные peer/subscription/Voice/ACK
+ограничения и frame ticket в очереди ввода. Прошли155 разных тестов, fmt, оба
+Clippy режима, normal build, RU/EN inert и Graphify. Graph7406nodes/18793edges/
+296communities;7priorwarnings/HTML5000limit. Подробнее:
+[native-remote-control.md](native-remote-control.md). Физические viewport/cursor/
+IME/UIPI, continuous frame age, host helper, callback/native teardown и все
+whole-client/two-device/visual/release gates ещё не закрыты. Готовность=false.
+
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
 
 Рабочая ветка: `rust/native-client`. Checkpoint рабочего Electron/WASM-клиента перед переносом: `d088795`. Нативный код находится в `rust/crates/zabor-native`; состояние этой ветки не означает перенос в основную пользовательскую папку или публикацию релиза.
