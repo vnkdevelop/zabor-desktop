@@ -1,0 +1,39 @@
+import { RemoteViewer } from "../../../ui/remote-viewer.slint";
+export { RemoteControlPillWindow } from "../../../ui/remote-control-pill.slint";
+
+export component DesktopUiFixture inherits Window {
+    width: 900px;
+    height: 700px;
+    in-out property <bool> active;
+    in-out property <bool> confined: true;
+    in-out property <length> left: 24px;
+    in-out property <length> top: 48px;
+    in-out property <length> video-width: 800px;
+    in-out property <length> video-height: 600px;
+    out property <float> vx: viewer.viewport-x;
+    out property <float> vy: viewer.viewport-y;
+    out property <float> vw: viewer.viewport-width;
+    out property <float> vh: viewer.viewport-height;
+    out property <bool> focused: viewer.has-focus;
+    callback key(string, bool, int);
+    callback confinement(bool);
+    callback release;
+    callback focus-away;
+    focus-away => { other.focus(); }
+    Rectangle {
+        x: root.left;
+        y: root.top;
+        width: root.video-width;
+        height: root.video-height;
+        viewer := RemoteViewer {
+            width: parent.width;
+            height: parent.height;
+            active: root.active;
+            confined: root.confined;
+            key(text, down, modifiers) => { root.key(text, down, modifiers); }
+            confinement(value) => { root.confinement(value); }
+            release => { root.release(); }
+        }
+    }
+    other := FocusScope {}
+}

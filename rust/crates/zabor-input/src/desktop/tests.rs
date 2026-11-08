@@ -113,6 +113,26 @@ fn ready_lease() -> Arc<ViewerCursorLease> {
 }
 
 #[test]
+fn original_ack_handoff_preserves_decoder_age_and_cannot_replace_request_ack() {
+    let accepted = Instant::now() - Duration::from_millis(50);
+    let decoded = accepted + Duration::from_millis(10);
+    let lease = ViewerCursorLease::new(123);
+    lease.acknowledge_at(accepted);
+    lease.decoded_p2p_frame(viewport(), (1920, 1080), decoded);
+    assert!(lease.is_ready());
+    lease.acknowledge_at(accepted);
+    assert_eq!(lease.state.lock().unwrap().frame.unwrap().2, decoded);
+    lease.set_confined(false);
+    assert!(lease.is_alive());
+    assert!(!lease.is_ready());
+    lease.acknowledge_at(accepted + Duration::from_nanos(1));
+    assert!(!lease.is_alive());
+    let future = ViewerCursorLease::new(123);
+    future.acknowledge_at(Instant::now() + Duration::from_secs(1));
+    assert!(!future.is_alive());
+}
+
+#[test]
 fn contained_video_geometry_preserves_negative_origins_and_excludes_letterboxing() {
     let rect = fitted_video_rect(viewport(), (1920, 1080)).unwrap();
     assert_eq!(
@@ -312,6 +332,31 @@ fn retirement_and_fallback_cannot_be_revived_by_late_original_callbacks() {
         assert_eq!(lease.snapshot(Instant::now()), None);
     }
     assert_eq!(ViewerCursorLease::new(0).snapshot(Instant::now()), None);
+}
+
+#[test]
+fn observed_stall_is_terminal_even_when_a_fresh_original_frame_arrives_later() {
+    let lease = ready_lease();
+    let at = lease.state.lock().unwrap().frame.unwrap().2;
+    assert_eq!(
+        lease.snapshot(at + FRAME_AGE + Duration::from_nanos(1)),
+        None
+    );
+    lease.acknowledge();
+    lease.activity();
+    lease.set_confined(true);
+    lease.decoded_p2p_frame(viewport(), (1920, 1080), Instant::now());
+    assert!(!lease.is_alive());
+}
+
+#[test]
+fn fresh_callbacks_cannot_hide_an_unobserved_original_frame_stall() {
+    let lease = ready_lease();
+    lease.state.lock().unwrap().frame.as_mut().unwrap().2 =
+        Instant::now() - FRAME_AGE - Duration::from_millis(1);
+    lease.decoded_p2p_frame(viewport(), (1920, 1080), Instant::now());
+    lease.activity();
+    assert!(!lease.is_alive());
 }
 
 #[test]

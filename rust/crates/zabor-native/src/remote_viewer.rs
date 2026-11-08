@@ -1,3 +1,6 @@
+#[cfg(windows)]
+pub mod desktop;
+
 pub fn normalized_point(
     x: f32,
     y: f32,

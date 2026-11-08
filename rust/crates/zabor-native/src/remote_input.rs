@@ -5,6 +5,8 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use zabor_input::{CaptureLease, Event, InputError, Packet};
 
+pub(crate) mod cursor;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InputState {
     Starting,

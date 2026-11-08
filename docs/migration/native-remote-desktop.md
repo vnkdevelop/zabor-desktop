@@ -1,5 +1,141 @@
 # Native remote-control desktop primitives
 
+## Current adapter continuation — 2026-11-08
+
+Worktree `native-rc-integration`, base `4e7dd64`; inherited WIP was preserved,
+without reset or another cherry-pick. The historical primitive receipt below is
+not an integrated shell receipt. Current scope is desktop/tests, remote-input/
+remote-viewer adapters/tests and remote-viewer Slint. Shell/app/root/lib/Cargo,
+Voice/media/data/import/update, immutable SDKs and other agents' WIP are unchanged.
+
+Completed original final check job: `sh_1bce555a1001Eel66hX27N18DA`, evidence
+`migration-artifacts/native-rc/adapter-2026-11-08/checked-v6/`. No pending RC check
+job remains. Fourteen source/pin hashes were unchanged before/after Graphify.
+Checks ran offline/locked, two Cargo jobs, an owned temp target, read-only primary
+WebRTC/libclang caches and an inert software Slint fixture. Final V6 removed the
+original marker-owned target/fixture; all six temporary runners removed themselves
+after their commands exited. No shared target, node_modules, other agent's files
+or live fixture was cleaned. V1 stopped before checks on Python/cmd quoting of vswhere;
+its temp/runner were removed, and it passed zero checks. Corrected foreground
+discovery found installed MSVC without changing source or credential handling.
+
+V2 completed fmt/diff, input Clippy, native-media all-target compilation and 53
+unique tests (30 input, 6 remote-input, 8 remote-viewer, 9 original video). Its only
+native Clippy error was the new test helper's tuple type complexity; a named alias
+fixes it without suppression. V2's target/runner were removed. V3 retains the
+unchanged input/video evidence, reruns affected adapter tests/compile/Clippy and
+finishes the still-unrun inert Slint/Graphify checks. Receipt access now reports
+Pending until the original actor ends and sticky Failed after cleanup failure;
+the held-owner test checks both. Native host authorization/capture/current-surface
+is also checked before Slint show, not only afterwards. The existing app.slint
+ScrollView viewport-y deprecation is primary-owned and is not silently changed.
+
+V3 completed native-media all-target compile, adapter tests and strict Clippy.
+Its standalone Slint resolve stopped before compilation on an uncached optional
+i-slint-backend-testing package; no UI test or Graphify passed in that group.
+V4 reuses only the V3 marker-owned target and unchanged native results. The inert
+fixture now uses the actual pinned app Slint backend features and the already
+cached i-slint-renderer-software directly; it installs a software-only Platform
+before any component is created. V4's prefilled temporary lock still required an
+offline Cargo rewrite and --locked correctly refused it before compilation. V5
+resolves only that owned fixture offline, requires every selected dependency's
+version/source/checksum to match the original lock, then checks it with --locked.
+Shared caches/manifests/lock remain unchanged;
+there is no network fetch, registry patch or GUI/native desktop operation.
+
+V5's full offline fixture resolve preserved every selected original dependency
+pin. Its inert component interaction test passed. Fixture all-target Clippy found
+test-only imports/Platform outside cfg(test), not a production adapter defect;
+these are now scoped to the test module without suppressions. V6 reruns only that
+affected UI test/Clippy/fmt and the unfinished Graphify, retaining V2/V3 native
+evidence. No native group, physical check or completed job is duplicated.
+
+Final acceptance for this scoped candidate: 54 unique tests passed (30 input,
+6 remote-input, 8 remote-viewer, 9 original video, 1 actual inert Slint interaction),
+affected fmt, native-media all-target compile and input/native/fixture all-target
+Clippy with -D warnings. V2's unchanged input/video and V3's unchanged native
+source retain their completed receipts; V6 passed final UI checks and code Graphify.
+Own graph: 14,677 nodes / 32,371 edges / 544 communities, zero API tokens. Nine
+zero-node source warnings remain; HTML was skipped at the 5,000-node limit, not
+accepted. Semantic docs/images and whole-client/default-neural regression are not
+claimed. The graph identifies pre-save HEAD 4e7dd645; the checked source hashes
+are the freshness guard for the subsequent exact eleven-path candidate save.
+The save receipt is `checked-v6/save-verification.json`; source and pins must still
+match before Git staging. Shared shell/app/root/lib/Cargo/SDK paths are excluded.
+
+Adapter contracts:
+
+- `ViewerDesktop` and `HostPill` are UI-thread-affine; `CursorCompletion` is
+  shareable. Register the original cursor blocking join/surface receipt with the
+  existing `SharedAudio` cleanup tracker before native acquisition. Handle drop,
+  cancellation and a timed-out wait never establish native cleanup success.
+- `ViewerBinding` keeps original intent ticket, target lifetime/channel, video
+  generation and original Voice token. `update_control` uses the original ACK
+  instant, never `Instant::now()` on a cached state. `decoded_frame` consumes the
+  immutable stamp plus original frame ticket/generation/source epoch. Frame age,
+  Voice/peer/channel retirement and generation changes are checked continuously
+  by the actor. A stall over 750 ms is terminal, including when a fresh callback
+  arrives before another observation; relayout/Escape/activity cannot revive it.
+- `HostBinding` requires the original live CaptureLease, original Voice token,
+  explicit consent and an atomic original-host authorization fence. Attachment
+  also checks the accepted host view and exact target. Its UI timer follows live
+  capture/DPI and that fence; it owns no RemoteInput and extends no input watchdog.
+  Surface and Slint-handle destruction precede the receipt. Failed cleanup remains
+  pending until retry/drop and stays failed after a later successful retry.
+
+### Exact primary shell hooks still required
+
+1. On the existing `on_toggle_control`, retain one request record for the cloned
+   original target, original command `IntentTicket`, its original Voice token,
+   `video_generation` and the original `native_window_handle`. Create
+   `ViewerDesktop::new(&audio_runtime, ViewerBinding { intents, ticket, target,
+   generation, voice }, hwnd)` on the UI thread. Use the existing runtime's
+   `Handle::enter()` while registering the actor; do not create another runtime,
+   input owner, capture or cleanup tracker. Replacement retires the old record.
+2. In `UiEvent::RemoteControl(state, targets)`, before consuming state strings,
+   call `update_control(&state, original_matching_target, focused, modal != 0)`.
+   Compare lifetime/channel, not peer strings. Do not acknowledge from the derived
+   `control-ready` image boolean or create another request on each maintenance
+   event. Until ACK/P2P readiness, confinement remains unavailable.
+3. Export app callbacks `control-viewport(string,float,float,float,float)` and
+   `control-confinement(string,bool)`. Bind RemoteViewer's `viewport`/`confinement`
+   to these with `video.id`; bind `confined` to the original request's UI state.
+   Use its complete client-relative absolute origin and actual window scale with
+   `relayout`. Also resample on Winit Resized/ScaleFactorChanged/fullscreen/layout;
+   a layout-only callback must never call `decoded_frame`.
+4. In the existing `on_process_video` admitted-row path, call `decoded_frame` only
+   for that actual `FrameUpdate`: `DisplayedFrame::from_update(&frame).stamp`,
+   `frame.ticket`, `frame.generation`, `frame.source_epoch`. Preserve the original
+   decoder stamp/lease. A cached `control_frames` read may validate input but must
+   not stamp or manufacture another decoded delivery. Fallback/RemoveVideo and
+   stale request/frame/Voice tickets retire the original adapter immediately.
+5. RemoteViewer already consumes Escape down/up locally and suppresses repeats.
+   `control-confinement` calls `set_confined`, updates the original `confined` UI
+   state and uses existing `stream.cursorCaptured`/`stream.cursorReleased` strings.
+   Its existing `release` still invokes original STOP/held-input cleanup.
+   Winit Focused(false), keyboard/pointer focus loss, modal entry, Leave/Logout,
+   viewer replacement and exit call `update_focus(false, ...)`/`release` before
+   clearing UI state. A bounded UI maintenance hook checks `is_alive` and surfaces
+   the retained completion; worker completion never calls Slint off-thread.
+6. Notify `admitted_activity` only after successful original-target packet/PING
+   admission, carrying the original ticket/target/ACK identity back to the UI.
+   `UiEvent::Connected`, enqueue success, redraw and layout are not that proof.
+   Preserve the existing 15-second original input inactivity semantics.
+7. Primary must export `RemoteControlPillWindow` from root and provide a narrow
+   read-only original-host geometry/token/authorization handoff from the existing
+   host owner. Clear its atomic fence before owner/consent/controller retirement,
+   not after a delayed UI event. Create the pill hidden on the active event loop,
+   set its lowercase resolved controller name, and use `HostPill::attach(runtime,
+   binding, pill, &state, current_target)`. Missing hidden HWND means defer; never
+   show a normal window to obtain it. Call `update_control` for each host event,
+   and `finish`/retain completion before UI teardown and existing app drain.
+
+All native acquisition/destruction/waits stay outside CriticalIntents,
+peer/channel and Voice/media gates. This is an adapter/hook candidate, not a
+claim that these primary hooks or physical acceptance are complete. Physical
+ClipCursor/input/capture, IME/UIPI, native render/no-activate races, two-device and
+long-session gates remain open. No release, push, legacy deletion or shutdown.
+
 Isolated continuation of `2108f866ce719a210bab679c7b81192094c20445`, based on
 `3ba1ad80f3e5274e01d8f9514061ea3c720ca0d3`, in branch/worktree `native-rc-ui`.
 This block is not wired into the main shell and is not physical acceptance.

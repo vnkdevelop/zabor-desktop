@@ -163,6 +163,22 @@ impl ViewerCursorLease {
         });
     }
 
+    pub fn acknowledge_at(&self, accepted_at: Instant) {
+        if accepted_at > Instant::now() {
+            self.revoke();
+            return;
+        }
+        self.update(|state| {
+            if state.acknowledged.is_none() {
+                state.acknowledged = Some(accepted_at);
+                state.activity = Some(accepted_at);
+                state.confine = true;
+            } else if state.acknowledged != Some(accepted_at) {
+                self.revoke();
+            }
+        });
+    }
+
     pub fn decoded_p2p_frame(&self, viewport: Rect, pixels: (u32, u32), decoded_at: Instant) {
         if fitted_video_rect(viewport, pixels).is_none() {
             self.revoke();
@@ -207,12 +223,32 @@ impl ViewerCursorLease {
         self.snapshot(Instant::now()).flatten().is_some()
     }
 
+    pub fn is_alive(&self) -> bool {
+        self.snapshot(Instant::now()).is_some()
+    }
+
     fn update(&self, change: impl FnOnce(&mut ViewerState)) {
         match self.state.lock() {
-            Ok(mut state) if self.live.load(Ordering::Acquire) => change(&mut state),
+            Ok(mut state) if self.live.load(Ordering::Acquire) => {
+                if self.expired(&state, Instant::now()) {
+                    self.revoke();
+                } else {
+                    change(&mut state);
+                }
+            }
             Ok(_) => {}
             Err(_) => self.revoke(),
         }
+    }
+
+    fn expired(&self, state: &ViewerState, now: Instant) -> bool {
+        let Some(acknowledged) = state.acknowledged else {
+            return now.saturating_duration_since(self.requested) >= INACTIVITY;
+        };
+        now.saturating_duration_since(state.activity.unwrap_or(acknowledged)) >= INACTIVITY
+            || state.frame.is_some_and(|(_, _, at)| {
+                at < acknowledged || now.saturating_duration_since(at) > FRAME_AGE
+            })
     }
 
     fn snapshot(&self, now: Instant) -> Option<Option<Rect>> {
@@ -220,18 +256,13 @@ impl ViewerCursorLease {
         if !self.live.load(Ordering::Acquire) {
             return None;
         }
-        let Some(acknowledged) = state.acknowledged else {
-            return (now.saturating_duration_since(self.requested) < INACTIVITY).then_some(None);
-        };
-        if now.saturating_duration_since(state.activity.unwrap_or(acknowledged)) >= INACTIVITY {
+        if self.expired(&state, now) {
+            self.revoke();
             return None;
         }
-        let Some((viewport, pixels, at)) = state.frame else {
+        let Some((viewport, pixels, _)) = state.frame else {
             return Some(None);
         };
-        if at < acknowledged || now.saturating_duration_since(at) > FRAME_AGE {
-            return None;
-        }
         Some(
             state
                 .confine
