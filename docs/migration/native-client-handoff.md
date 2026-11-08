@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `1245d6b`: native owning-thread
-join и учёт factory/retirement cleanup с сохранением Voice/monitor ownership.
-Final `native-cleanup-final-2026-11-08` прошёл277default/267neural-disabled tests
+Последний проверенный компонентный этап после `5255b3b`: наблюдаемое завершение
+playback/native-stream задач с общим audio cleanup и сохранением Voice/monitor ownership.
+Final `playback-cleanup-final-2026-11-08` прошёл282default/272neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`c7d1d39ed311805f5c47a4fc2404ab4442d0d74f0e35022c92017b514a3843e6`.
+`30245c3d8b4c71afd8553848d4a41bc17c7737723cad4e082396a2657587b56f`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
 compact;actual saved commit брать из Git и
-`native-calls/native-cleanup-post-save-2026-11-08/saved-boundary.json`.
+`native-calls/playback-cleanup-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Исторический7f0e4fcb… Voice maintenance binary не заменяет
+visual/physical gates. Историческийc7d1d39e… native cleanup binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,102 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Playback/native-stream observed task cleanup — checked locally 2026-11-08
+
+- Native cleanup post-save **sh_1b93aaa11001S8fnbEflNZsSyj completed/passed**:
+  saved **5255b3b61f48d48f7ad4da62a5c31492084e94ba**,438primary/3reference/
+  24evidence/current+frozen c7d1d39e… executable+ONNX DLL/proofs match;clean tree.
+  FinalProof a6897277…,independentProof6169b4ec…,sourceScopeProof65666170….
+  Graphify5882nodes/14300edges/257communities unchanged;label1245d6b7 reflects
+  topology-build boundary. Existing7metadata warnings/HTML5000node limit.
+- Exactly3existing sources:audio_playback.rs/audio_runtime.rs/voice.rs,no new sources.
+  SharedAudio cleanup tracker gains crate-private spawn_task:register before spawn,
+  nested original future,then separate observer waits its JoinHandle before releasing
+  registration. Natural completion or cancellation with requested subscription stop
+  is accepted only after observed join;unrequested abort/body/capture-Drop panic or
+  abandoned runtime observation stays sticky failure. Job completion follows observer
+  stop-token drop;canceling waiters never cancels task/observer. No new stop scheduling.
+- Subscription keeps AbortHandle instead of detached JoinHandle;unchanged synchronous
+  stop.cancel → pointer-isolated mixer.remove_lane → task.abort order. AudioPlayback
+  standalone registry/wait_for_cleanup retained by observer after playback destruction;
+  Windows VoiceSession constructs playback with same SharedAudio registry,so existing
+  shell final wait includes admitted playback/native-stream tasks. Original audio
+  frame loop/PCM guard/four-frame queue/peer lifetime checks/retain/drop logic unchanged;
+  original Voice status-before-playback-before-lease cleanup and all tickets untouched.
+- Five new tests:started capture Drop held after successful return/requested abort
+  with canceled/two simultaneous waiters;unpolled future captures after requested
+  abort and abandoned current-thread runtime;6completion/cancel/body/Drop panic cases;
+  actual Subscription Drop held with replacement lane/fresh Voice/MicTest monitor/
+  speaking/dB/epoch unchanged;actual NativeAudioStream replace/clear/peer-retain/
+  playback-Drop with retained external track/source and shared registry drain.
+  Development109neural-disabled library tests and Clippy passed;initial missing test
+  PeerConnectionFactoryExt import corrected only in new fixture. Afterward added
+  observer stop-token drop before completion;frozen full reruns entire source.
+- **Sole pending frozen full sh_1b94204d800151cgYv1YiVm8oQ**,artifacts
+  `native-calls/playback-cleanup-final-2026-11-08/`:438primary+3reference,
+  expect272neural-disabled/282default tests,both Clippy/fmt/pinned/9HTTP/protected
+  neural metrics/freshbuild/8inert RUEN/four-DPI interactions,then Graphify. Do not
+  poll/duplicate jobs/edit consumed sources until automatic completion. On pass audit
+  438/3/24/current+frozen executable+ONNX/proofs,all prior277/267full test names,
+  new5tests/runtime19/playback2/device13/native1/MicTest4/voice1/main20/Leave10/
+  SessionIo6/preferences10/Profile10 and old original-ticket/RTP/quarantine/poison gates.
+  No playbackTaskJoinChecked/commit acceptance yet.
+- `playback-cleanup-source-audit-2026-11-08.json` passed:exact newline-normalized
+  text outside approved cleanup helpers/new5tests equals saved5255b3b;all3existing
+  changes only. Original Subscription cancel/lane/abort,playback loop/queue/PCM and
+  Voice status/lease/drop ordering unchanged;register-before-spawn,join-before-release,
+  requested-stop cancellation and sticky abandoned/panic path verified. Unchanged
+  other primary/reference inputs. Dependency implementation hashes retained for
+  libwebrtc0.4.0 audio_stream wrappers/native Drop(remove_sink) and Tokio1.54.1
+  harness cancellation destruction-before-output;SDK sources not edited.
+  Temporary source-audit .cjs immediately deleted;no helper/profile cleanup debt.
+- Read-only next-stage map:normal Logout already uses original SessionWork.commit
+  for worker object extraction in shell.rs:2348;pre-chat objects/FileJobs dispose
+  before ChatEngine::fail_downloads,then chat transport/friends/Voice/media disposal.
+  Leave still drops Voice/video/media synchronously in leave_work.rs:41-60;the new
+  task registry does not make resource detachment/VoiceLease maintenance safe to
+  move off-thread. Peer::drop must invalidate lifetime before callback removal/
+  connection.close;MediaEngine::close disables own tracks and releases only its own
+  platform ADM. Any next extraction must preserve original ownership and ordering,
+  not use latest ticket,release CriticalIntents mutex inside commit,or move all old
+  disposed objects ahead of chat/file cleanup. Existing worker/Voice/peer/RTP sources
+  were inspected read-only;only playback constructor in Voice changed.
+- Full final **sh_1b94204d800151cgYv1YiVm8oQ completed/passed**:
+  282default/272neural-disabled tests,both Clippy/fmt/pinned/9HTTP/neural/freshbuild/
+  8inert RUEN/four-DPI auth/roster/audio/MicTest interactions;neural metrics unchanged.
+  Actual/frozen executable **30245c3d8b4c71afd8553848d4a41bc17c7737723cad4e082396a2657587b56f**.
+  Independent `playback-cleanup-final-independent-2026-11-08.json` verified438primary/
+  3reference/24evidence/current+frozen executable+ONNX DLL/3existing source changes/
+  zero new sources;all previous277/267passed names retained with unchanged multiplicity.
+  All5new tests/runtime19/playback2/device13/native1/MicTest4/voice1/main20/Leave10/
+  SessionIo6/preferences10/Profile10 suites and old original-ticket/RTP/quarantine/
+  partial-poison/protocol controls passed in both modes. Each mode verified15new
+  evidence markers:2started held captures after natural return/requested abort,
+  2unpolled/abandoned-runtime cases,6success/requested/unrequested cancellation/body/
+  Drop panic cases,held Subscription replacement/fresh Voice-monitor-state case,
+  4actual NativeAudioStream detach paths with external source/track retained;
+  all prior19native-cleanup/32Voice-MicTest maintenance markers and11older controls
+  retained. Exact source reconstruction outside approved cleanup helpers/new5tests
+  equals saved5255b3b after newline normalization;register-before-spawn/observed-join
+  before-release/requested-stop/sticky-panic/Subscription pointer/drop/unchanged
+  PCM/Voice status/lease/drop/source scope audited again;SDK implementation hashes match.
+  FinalProof SHA-256 **8b1e0aa5f2b521f1b99f5be5339ab407db2c4e5a7bdcaa9c668551b295c64b69**.
+  0mismatches;Graphify5907nodes/14386edges/257communities,existing7metadata warnings/
+  HTML5000node limit. Temporary independent-audit .cjs immediately deleted;
+  no helper/profile cleanup debt. All jobs complete;save narrow playbackTaskJoinChecked
+  acceptance,then post-save Graphify/frozen-source/evidence/current+frozen binary/
+  proof/clean-tree guard and compact. Full client/native/worker/physical bounds false;
+  no push/merge/release/shutdown.
+- No original worker-ticket Voice/peer/shared-resource extraction has begun. Native
+  close/remove_sink/destruction still executes where Tokio destroys old task/future;
+  explicit capture join/source/RTC last-Arc/native callback/destructor/syscall bounds
+  remain unaccepted. Lost observer marks failure and is not evidence all detached
+  work terminated;successful registered drain is not sealed future admission or
+  external last-Arc teardown. Unknown poisoned Voice ownership/general supervisor/
+  MonitorLease/cancel/locks/UI/Leave/disconnect/socket workers and downstream
+  chat/SQLite/file-save/Windows journal/filesystem/drain/physical/two-device/UI/import/
+  packaging/full-client gates remain open. Readiness=false;no push/merge/release/shutdown.
 
 ## Native owning-thread join and registered cleanup — checked locally 2026-11-08
 

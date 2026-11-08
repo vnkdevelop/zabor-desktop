@@ -914,10 +914,35 @@ exact source scope/lifecycle registration/owned-Drop/legacy owner-ticket order p
 Executable SHA-256:
 `c7d1d39ed311805f5c47a4fc2404ab4442d0d74f0e35022c92017b514a3843e6`.
 nativeAudioThreadJoinChecked=true/registeredAudioCleanupChecked=true are narrow
-component acceptance;save/post-save Graphify/guard/compact next.
+component acceptance;saved5255b3b61f48d48f7ad4da62a5c31492084e94ba/post-save
+Graphify/438/3/24/binary/proof/clean-tree guard passed,compact done.
 No sealed future admission/external last-Arc source/RTC/physical endpoint completion
 or native responsiveness accepted;normal worker/UI/Leave/disconnect/cancel/resource/
 unknown-poison/general callback/native/system/filesystem/drain gates remain open.
+
+### Playback/native-stream observed task cleanup: components checked locally
+
+SharedAudio cleanup registers playback tasks before spawn and observes JoinHandle
+completion after original future/NativeAudioStream destruction,including requested
+abort. Unrequested cancellation/body/Drop panic/unobserved runtime shutdown remains
+sticky failure. Subscription retains unchanged cancel/lane/abort order via AbortHandle;
+standalone AudioPlayback has wait_for_cleanup and Windows VoiceSession connects it
+to existing shared final audio drain. No new worker/peer/RTP ticket mutations.
+Final `native-calls/playback-cleanup-final-2026-11-08/` passed282default/
+272neural-disabled tests,both Clippy/fmt/pinned/9HTTP/neural/freshbuild/8inert
+RUEN/four-DPI interactions;protected neural metrics unchanged. Independent438primary/
+3reference/24evidence/current+frozen executable+ONNX audit found0mismatches;all prior
+277/267full names retained with unchanged multiplicity,new5tests/runtime19/playback2/
+device13/native1/MicTest4/voice1/main20/Leave10/SessionIo6/preferences10/Profile10
+suites and original peer-ticket/RTP/quarantine/partial-poison/protocol gates passed.
+15new markers and19native-cleanup/32Voice-MicTest markers verified in each mode;
+exact source/lifecycle/legacy playback/Voice/drop ordering and SDK hashes matched.
+Executable SHA-256:
+`30245c3d8b4c71afd8553848d4a41bc17c7737723cad4e082396a2657587b56f`.
+playbackTaskJoinChecked=true is narrow observed-task cleanup acceptance;
+save/post-save Graphify/guard/compact next.
+No generalized off-thread teardown/native destructor/physical endpoint/UI/worker
+bounds or sealed future admission/external last-Arc/full-client acceptance.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

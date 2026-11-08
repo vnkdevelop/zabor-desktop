@@ -305,7 +305,10 @@ impl VoiceSession {
             let audio = self.audio_runtime.voice().await?;
             let device = audio.device().ok_or(MediaError::Microphone)?;
             self.engine.attach_audio_source(device.source.clone())?;
-            self.playback = Some(AudioPlayback::new(device.mixer.clone()));
+            self.playback = Some(AudioPlayback::with_cleanup(
+                device.mixer.clone(),
+                self.audio_runtime.cleanup_tracker(),
+            ));
             self.audio = Some(audio);
             Ok(())
         }

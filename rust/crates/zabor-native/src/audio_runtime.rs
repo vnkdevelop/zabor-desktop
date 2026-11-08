@@ -155,7 +155,7 @@ pub trait SharedAudioDevice: Send + Sync + 'static {
 }
 
 #[derive(Default)]
-struct AudioCleanup {
+pub(crate) struct AudioCleanup {
     pending: AtomicUsize,
     failed: AtomicBool,
     changed: Notify,
@@ -175,7 +175,7 @@ impl AudioCleanup {
         }
     }
 
-    async fn wait(&self) -> Result<(), AudioCleanupError> {
+    pub(crate) async fn wait(&self) -> Result<(), AudioCleanupError> {
         loop {
             let changed = self.changed.notified();
             tokio::pin!(changed);
@@ -189,6 +189,28 @@ impl AudioCleanup {
             }
             changed.await;
         }
+    }
+
+    pub(crate) fn spawn_task(
+        self: &Arc<Self>,
+        stop: CancellationToken,
+        future: impl std::future::Future<Output = ()> + Send + 'static,
+    ) -> tokio::task::AbortHandle {
+        let job = self.register();
+        let task = tokio::spawn(async move {
+            future.await;
+        });
+        let abort = task.abort_handle();
+        tokio::spawn(async move {
+            let result = match task.await {
+                Ok(()) => Ok(()),
+                Err(error) if error.is_cancelled() && stop.is_cancelled() => Ok(()),
+                Err(_) => Err(AudioCleanupError::Incomplete),
+            };
+            drop(stop);
+            job.complete(result);
+        });
+        abort
     }
 
     fn retire<D: SharedAudioDevice>(self: &Arc<Self>, device: Arc<D>) {
@@ -419,6 +441,10 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
 
     pub async fn wait_for_cleanup(&self) -> Result<(), AudioCleanupError> {
         self.cleanup.wait().await
+    }
+
+    pub(crate) fn cleanup_tracker(&self) -> Arc<AudioCleanup> {
+        self.cleanup.clone()
     }
 
     fn start(self: &Arc<Self>, retry: bool) -> Result<Prepared<D>, MediaError> {
@@ -1169,6 +1195,201 @@ mod tests {
             .demand
             .with_voice(voice, || panic!("revoked voice submitted"))
             .is_none());
+    }
+
+    struct TaskDropProbe {
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+        finished: Arc<AtomicBool>,
+    }
+
+    impl Drop for TaskDropProbe {
+        fn drop(&mut self) {
+            self.entered.send(()).unwrap();
+            self.release.recv_timeout(Duration::from_secs(3)).unwrap();
+            self.finished.store(true, Ordering::Release);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tracked_task_join_waits_for_started_capture_destruction_and_keeps_concurrent_waiters()
+    {
+        for abort_task in [false, true] {
+            let cleanup = Arc::new(AudioCleanup::default());
+            let stop = CancellationToken::new();
+            let started = Arc::new(tokio::sync::Semaphore::new(0));
+            let release = Arc::new(tokio::sync::Semaphore::new(0));
+            let (drop_entered, drop_waiting) = std::sync::mpsc::channel();
+            let (drop_release, drop_blocked) = std::sync::mpsc::channel();
+            let finished = Arc::new(AtomicBool::new(false));
+            let probe = TaskDropProbe {
+                entered: drop_entered,
+                release: drop_blocked,
+                finished: finished.clone(),
+            };
+            let task_started = started.clone();
+            let task_release = release.clone();
+            let task = cleanup.spawn_task(stop.clone(), async move {
+                let _probe = probe;
+                task_started.add_permits(1);
+                task_release.acquire().await.unwrap().forget();
+            });
+            started.acquire().await.unwrap().forget();
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 1);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), cleanup.wait())
+                    .await
+                    .is_err()
+            );
+            let first_cleanup = cleanup.clone();
+            let second_cleanup = cleanup.clone();
+            let first = tokio::spawn(async move { first_cleanup.wait().await });
+            let second = tokio::spawn(async move { second_cleanup.wait().await });
+            if abort_task {
+                stop.cancel();
+                task.abort();
+            } else {
+                release.add_permits(1);
+            }
+            tokio::task::spawn_blocking(move || drop_waiting.recv_timeout(Duration::from_secs(1)))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 1);
+            assert!(!finished.load(Ordering::Acquire));
+            assert!(!first.is_finished());
+            assert!(!second.is_finished());
+            drop_release.send(()).unwrap();
+            tokio::time::timeout(Duration::from_secs(1), first)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(1), second)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(finished.load(Ordering::Acquire));
+            assert!(task.is_finished());
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 0);
+            assert!(cleanup.wait().await.is_ok());
+            println!("audio task cleanup started=true abort={abort_task} held_capture_drop=true join_after_destruction=true abandoned_waiter_preserved=true concurrent_waiters=2 physical_audio=false");
+        }
+    }
+
+    #[test]
+    fn tracked_task_keeps_unpolled_captures_registered_and_reports_abandoned_runtime_observation() {
+        for abandon_runtime in [false, true] {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let cleanup = Arc::new(AudioCleanup::default());
+            let stop = CancellationToken::new();
+            let polled = Arc::new(AtomicBool::new(false));
+            let finished = Arc::new(AtomicBool::new(false));
+            let (drop_entered, drop_waiting) = std::sync::mpsc::channel();
+            let (drop_release, drop_blocked) = std::sync::mpsc::channel();
+            let probe = TaskDropProbe {
+                entered: drop_entered,
+                release: drop_blocked,
+                finished: finished.clone(),
+            };
+            let task_polled = polled.clone();
+            let task = {
+                let _enter = runtime.enter();
+                cleanup.spawn_task(stop.clone(), async move {
+                    let _probe = probe;
+                    task_polled.store(true, Ordering::Release);
+                    std::future::pending::<()>().await;
+                })
+            };
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 1);
+            stop.cancel();
+            task.abort();
+            let inspected = cleanup.clone();
+            std::thread::scope(|scope| {
+                scope.spawn(move || {
+                    drop_waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    if !abandon_runtime {
+                        assert_eq!(inspected.pending.load(Ordering::Acquire), 1);
+                    }
+                    drop_release.send(()).unwrap();
+                });
+                if abandon_runtime {
+                    drop(runtime);
+                    assert!(cleanup.failed.load(Ordering::Acquire));
+                } else {
+                    runtime.block_on(async {
+                        tokio::time::timeout(Duration::from_secs(1), cleanup.wait())
+                            .await
+                            .unwrap()
+                            .unwrap();
+                    });
+                    drop(runtime);
+                    assert!(!cleanup.failed.load(Ordering::Acquire));
+                }
+            });
+            assert!(!polled.load(Ordering::Acquire));
+            assert!(finished.load(Ordering::Acquire));
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 0);
+            assert_eq!(cleanup.failed.load(Ordering::Acquire), abandon_runtime);
+            println!("audio task cleanup unpolled=true abandoned_runtime={abandon_runtime} captures_destroyed=true unobserved_join_not_accepted=true physical_audio=false");
+        }
+    }
+
+    struct TaskPanicDrop(bool);
+
+    impl Drop for TaskPanicDrop {
+        fn drop(&mut self) {
+            assert!(!self.0, "Expected tracked task capture destruction panic");
+        }
+    }
+
+    #[tokio::test]
+    async fn tracked_task_accepts_only_observed_completion_or_requested_abort_and_keeps_panic_failure(
+    ) {
+        for mode in [
+            "complete",
+            "expected-abort",
+            "unsolicited-abort",
+            "body-panic",
+            "drop-panic",
+            "cancel-drop-panic",
+        ] {
+            let cleanup = Arc::new(AudioCleanup::default());
+            let stop = CancellationToken::new();
+            let started = Arc::new(tokio::sync::Semaphore::new(0));
+            let task_started = started.clone();
+            let task = cleanup.spawn_task(stop.clone(), async move {
+                let _probe = TaskPanicDrop(mode == "drop-panic" || mode == "cancel-drop-panic");
+                task_started.add_permits(1);
+                if mode.ends_with("abort") || mode == "cancel-drop-panic" {
+                    std::future::pending::<()>().await;
+                }
+                assert_ne!(mode, "body-panic", "Expected tracked playback task panic");
+            });
+            started.acquire().await.unwrap().forget();
+            if mode == "expected-abort" || mode == "cancel-drop-panic" {
+                stop.cancel();
+            }
+            if mode.ends_with("abort") || mode == "cancel-drop-panic" {
+                task.abort();
+            }
+            let accepted = mode == "complete" || mode == "expected-abort";
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(1), cleanup.wait())
+                    .await
+                    .unwrap()
+                    .is_ok(),
+                accepted
+            );
+            assert_eq!(cleanup.wait().await.is_ok(), accepted);
+            assert!(task.is_finished());
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 0);
+            println!("audio task cleanup result={mode} accepted={accepted} join_observed=true failure_sticky=true physical_audio=false");
+        }
     }
 
     struct CleanupCheck {
