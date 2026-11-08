@@ -2329,47 +2329,80 @@ async fn worker(
         }
         if matches!(command, Command::Logout) {
             let clearing = session_io.clear(command_ticket);
-            let end_call = abandoned_call
-                || voice
-                    .as_ref()
-                    .is_some_and(|session| session.call_peer.is_some());
-            let stop_stream =
-                pending_stop_stream || voice.as_ref().is_some_and(VoiceSession::is_sharing);
-            abandoned_call = false;
-            pending_stop_stream = false;
-            audio_preferences.logout();
-            audio_runtime.reset();
-            pending_join = None;
-            video_generation.fetch_add(1, Ordering::AcqRel);
-            video_jobs.clear();
-            paused_video.clear();
-            stream_drops.clear();
-            let old_connection = hub.take();
-            events = None;
-            current_user = None;
-            file_jobs = None;
-            file_progress.clear();
-            if let Some(engine) = chat.as_mut() {
+            let logout_work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            let reset = run_session!(
+                logout_work,
+                reset_audio_session(&logout_work, &audio_preferences, &audio_runtime)
+            );
+            let Some(Some(reset)) = reset else {
+                continue;
+            };
+            let Some((old_connection, stop_stream, end_call, disposed)) =
+                logout_work.commit(|| {
+                    let end_call = abandoned_call
+                        || voice
+                            .as_ref()
+                            .is_some_and(|session| session.call_peer.is_some());
+                    let stop_stream =
+                        pending_stop_stream || voice.as_ref().is_some_and(VoiceSession::is_sharing);
+                    abandoned_call = false;
+                    pending_stop_stream = false;
+                    video_generation.fetch_add(1, Ordering::AcqRel);
+                    chat_failed = false;
+                    call_connected = false;
+                    retry_at = None;
+                    session_ready = false;
+                    (
+                        hub.take(),
+                        stop_stream,
+                        end_call,
+                        (
+                            pending_join.take(),
+                            std::mem::take(&mut video_jobs),
+                            std::mem::take(&mut paused_video),
+                            std::mem::take(&mut stream_drops),
+                            events.take(),
+                            current_user.take(),
+                            file_jobs.take(),
+                            std::mem::take(&mut file_progress),
+                            chat.take(),
+                            chat_transport.take(),
+                            std::mem::take(&mut friends),
+                            selected_chat.take(),
+                            incoming_call.take(),
+                            saved_credentials.take(),
+                            voice.take(),
+                            media_events.take(),
+                        ),
+                    )
+                })
+            else {
+                continue;
+            };
+            drop((
+                disposed.0, disposed.1, disposed.2, disposed.3, disposed.4, disposed.5, disposed.6,
+                disposed.7,
+            ));
+            if let Some(mut engine) = disposed.8 {
                 engine.fail_downloads(None, now_ms());
             }
-            chat = None;
-            chat_transport = None;
-            chat_failed = false;
-            friends.clear();
-            selected_chat = None;
-            incoming_call = None;
-            call_connected = false;
-            saved_credentials = None;
-            retry_at = None;
-            session_ready = false;
-            voice = None;
-            media_events = None;
-            update(UiEvent::VoiceEnded);
-            update(UiEvent::SignedOut);
+            drop((
+                disposed.9,
+                disposed.10,
+                disposed.11,
+                disposed.12,
+                disposed.13,
+                disposed.14,
+                disposed.15,
+            ));
+            logout_work.publish(UiEvent::VoiceEnded);
+            logout_work.publish(UiEvent::SignedOut);
             if let Some(connection) = old_connection {
                 close_logout_connection(connection, &stop, stop_stream, end_call).await;
             }
-            let logout_work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            if !reset {
+                logout_work.publish(UiEvent::Toast("validation.sessionSaveError"));
+            }
             if matches!(run_session!(logout_work, clearing), Some(Err(_))) {
                 logout_work.publish(UiEvent::Toast("validation.sessionSaveError"));
             }

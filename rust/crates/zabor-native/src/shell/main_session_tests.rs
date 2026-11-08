@@ -1440,18 +1440,187 @@ async fn actual_logout_worker_registers_durable_clear_before_blocked_resource_cl
     assert!(!task.is_finished());
     assert!(monitor.is_current());
     assert!(published.try_recv().is_err());
+    let mic_state = audio.mic_test.snapshot(Instant::now());
     stop.cancel();
+    timeout(Duration::from_millis(1500), task)
+        .await
+        .unwrap()
+        .unwrap();
     release.send(()).unwrap();
     holder.await.unwrap();
+    session_io.finish().await.unwrap();
+    assert!(profile.load_session().unwrap().is_none());
+    assert!(!monitor.is_current());
+    assert!(audio.mic_test.has_demand());
+    assert_eq!(audio.demand.active(), 1);
+    assert_eq!(audio.mic_test.snapshot(Instant::now()), mic_state);
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    println!("logout admission held=preferences-lock actual_worker=true clear_before_cleanup=true window_drain=true fixture_ms={} physical_audio=false", measured.elapsed().as_millis());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actual_normal_logout_wait_services_repeated_leave_and_rechecks_replacement_owner() {
+    timeout(Duration::from_secs(15), async {
+        for action in ["release", "window", "replacement"] {
+            let fixture = fixture("unused").await;
+            let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+            let root = tempfile::tempdir().unwrap();
+            let profile = Arc::new(Profile::open(root.path()).unwrap());
+            profile.save_session("original-owner", &credentials()).unwrap();
+            let intents = Arc::new(CriticalIntents::default());
+            let stop = CancellationToken::new();
+            let session_io = SessionIo::new(Some(profile.clone()), intents.clone(), stop.clone());
+            let preferences = AudioPreferences::new(&json!({"inputVolume":99}));
+            assert!(preferences.begin_session("original-owner", hub.clone(), None));
+            let audio = audio(&stop);
+            let monitor = audio.monitor(true);
+            let original = audio.mic_test.snapshot(Instant::now());
+            let generation = Arc::new(AtomicU64::new(1));
+            let (release, holder) = hold_logout_preferences(preferences.clone()).await;
+            let (sender, commands) = mpsc::channel(16);
+            let queue = CommandQueue { sender, intents: intents.clone() };
+            for _ in 0..16 {
+                queue.try_send(Command::Join("old-channel".into())).unwrap_or_else(|_| panic!("Voice FIFO fixture failed"));
+            }
+            queue.try_send(Command::Logout).unwrap_or_else(|_| panic!("Priority Logout failed"));
+            let original_ticket = intents.ticket();
+            let (updates, mut published) = mpsc::unbounded_channel();
+            let task = tokio::spawn(worker(
+                "http://127.0.0.1:1/zabor_v3".into(), commands,
+                Arc::new(move |event| { let _ = updates.send(event); }), stop.clone(), Some(profile.clone()),
+                WorkerMedia {
+                    video_sink: Arc::new(|_| panic!("Logout fixture must not produce video")),
+                    video_generation: generation.clone(), audio_preferences: preferences.clone(),
+                    audio_runtime: audio.clone(), intents: intents.clone(), session_io: session_io.clone(),
+                },
+            ));
+            wait_for_session_removal(&profile).await;
+            let measured = Instant::now();
+            for _ in 0..2 {
+                queue.try_send(Command::Leave).unwrap_or_else(|_| panic!("Priority Leave failed"));
+                assert!(matches!(timeout(Duration::from_millis(1500), published.recv()).await.unwrap().unwrap().for_current(&intents), Some(UiEvent::VoiceEnded)));
+                assert_eq!(audio.demand.active(), 0);
+                assert!(monitor.is_current());
+                assert_eq!(audio.mic_test.snapshot(Instant::now()), original);
+                assert!(!task.is_finished());
+            }
+            assert_eq!(generation.load(Ordering::Acquire), 3);
+            if action == "window" {
+                stop.cancel();
+                timeout(Duration::from_millis(1500), task).await.unwrap().unwrap();
+                assert!(published.try_recv().is_err());
+                release.send(()).unwrap();
+                holder.await.unwrap();
+                assert!(preferences.edit("original-owner", "outputVolume", json!(140)));
+                assert!(audio.mic_test.has_demand());
+                assert_eq!(audio.mic_test.snapshot(Instant::now()), original);
+                assert_eq!(generation.load(Ordering::Acquire), 4);
+            } else {
+                if action == "replacement" {
+                    queue.try_send(Command::Logout).unwrap_or_else(|_| panic!("Replacement Logout failed"));
+                    let update = |_| {};
+                    let old = SessionWork::new(&intents, original_ticket, &stop, &update);
+                    assert!(old.commit(|| panic!("Replaced Logout worker acceptance ran")).is_none());
+                }
+                release.send(()).unwrap();
+                holder.await.unwrap();
+                assert!(matches!(timeout(Duration::from_millis(1500), published.recv()).await.unwrap().unwrap().for_current(&intents), Some(UiEvent::VoiceEnded)));
+                assert!(matches!(timeout(Duration::from_millis(1500), published.recv()).await.unwrap().unwrap().for_current(&intents), Some(UiEvent::SignedOut)));
+                assert!(published.try_recv().is_err());
+                assert_eq!(generation.load(Ordering::Acquire), 4);
+                assert!(!monitor.is_current());
+                assert!(!audio.mic_test.has_demand());
+                assert!(!preferences.edit("original-owner", "outputVolume", json!(140)));
+                drop(queue);
+                timeout(Duration::from_millis(1500), task).await.unwrap().unwrap();
+                assert_eq!(generation.load(Ordering::Acquire), 5);
+            }
+            session_io.finish().await.unwrap();
+            assert!(profile.load_session().unwrap().is_none());
+            assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+            hub.close();
+            fixture.server.await.unwrap();
+            println!("normal logout held=preferences-lock action={action} actual_worker=true repeated_leave=2 queued_voice_commands=16 accepted_cleanup={} fixture_ms={} physical_audio=false", usize::from(action != "window"), measured.elapsed().as_millis());
+        }
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn actual_normal_logout_preserves_partial_poison_reset_and_reports_cleanup_failure() {
+    let preferences = AudioPreferences::new(&json!({"inputVolume":99}));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _held = preferences.try_prepare_logout().unwrap().unwrap();
+        panic!("Expected normal Logout preference fixture poison");
+    }))
+    .is_err());
+    let intents = Arc::new(CriticalIntents::default());
+    let stop = CancellationToken::new();
+    let audio = audio(&stop);
+    let monitor = audio.monitor(true);
+    let generation = Arc::new(AtomicU64::new(1));
+    let session_io = SessionIo::new(None, intents.clone(), stop.clone());
+    let (sender, commands) = mpsc::channel(16);
+    let queue = CommandQueue {
+        sender,
+        intents: intents.clone(),
+    };
+    queue
+        .try_send(Command::Logout)
+        .unwrap_or_else(|_| panic!("Priority Logout failed"));
+    let (updates, mut published) = mpsc::unbounded_channel();
+    let task = tokio::spawn(worker(
+        "http://127.0.0.1:1/zabor_v3".into(),
+        commands,
+        Arc::new(move |event| {
+            let _ = updates.send(event);
+        }),
+        stop.clone(),
+        None,
+        WorkerMedia {
+            video_sink: Arc::new(|_| panic!("Poison fixture must not produce video")),
+            video_generation: generation.clone(),
+            audio_preferences: preferences.clone(),
+            audio_runtime: audio.clone(),
+            intents: intents.clone(),
+            session_io: session_io.clone(),
+        },
+    ));
+    assert!(matches!(
+        timeout(Duration::from_millis(1500), published.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .for_current(&intents),
+        Some(UiEvent::VoiceEnded)
+    ));
+    assert!(matches!(
+        timeout(Duration::from_millis(1500), published.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .for_current(&intents),
+        Some(UiEvent::SignedOut)
+    ));
+    assert!(matches!(
+        timeout(Duration::from_millis(1500), published.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .for_current(&intents),
+        Some(UiEvent::Toast("validation.sessionSaveError"))
+    ));
+    assert!(!monitor.is_current());
+    assert_eq!(audio.demand.active(), 0);
+    assert!(!audio.mic_test.has_demand());
+    assert_eq!(generation.load(Ordering::Acquire), 2);
+    assert!(preferences.try_prepare_logout().is_err());
+    drop(queue);
     timeout(Duration::from_millis(1500), task)
         .await
         .unwrap()
         .unwrap();
     session_io.finish().await.unwrap();
-    assert!(profile.load_session().unwrap().is_none());
-    assert!(!monitor.is_current());
-    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
-    println!("logout admission held=preferences-lock actual_worker=true clear_before_cleanup=true window_drain=true fixture_ms={} physical_audio=false", measured.elapsed().as_millis());
+    println!("normal logout poison=preferences actual_worker=true legacy_partial=true poison_retained=true complete=false physical_audio=false");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

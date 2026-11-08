@@ -794,10 +794,48 @@ retained in both modes, including13stalled protocol/original-ticket controls.
 Executable SHA-256:
 `a26533a9a9c7b4844ffc7bb3e6db1f3b5f61f22fdec3a6b5c3d3c2595dd8b8c7`.
 logoutCleanupAdmissionChecked=true is narrow component acceptance only;
-source save/post-save Graphify/guard/compact next, no push/release/shutdown.
+saved02b7c32a35d6550b6bfe245cf6efb6bb8dc94156/post-save Graphify/438-source/
+3reference/24evidence/current+frozen binary/clean-tree guard passed, compact done;
+no push/release/shutdown.
 Native synchronous cleanup can
 still block normal worker/UI and reaching hints; syscall/job-lock/drain/native
 endpoint/fullclient completion bounds remainfalse; no full-client acceptance.
+
+### Normal worker Logout intent work: components checked locally
+
+Normal Logout now reuses nonwaiting resource preparation and pinned Leave-aware
+reset waiting; Logout/window cancellation rejects the original Session ticket.
+Separate downstream worker extraction uses the same strict ticket, retaining
+pending/live StopStream and abandoned/live EndCall obligations across Leave.
+Old-object storage/native teardown stays outside intent gate but synchronous;
+VoiceEnded/SignedOut/partial-poison failure now owner-guarded. Existing durable
+clear registration remains first, tracked through unpolled canceled window exit.
+Two new actual-worker repeatedLeave/16staleVoiceFIFO/replacement/window and
+partial-poison tests; existing actual window proof strengthened to exit before
+held preference reset released, preserving canceled demand/MicTest state.
+Initial fmt/Clippy/56prefix tests passed,main19passed/1failed on new fixture's
+incorrect video-generation count after independent normal worker shutdown.
+Window/no late signout/preserved MicTest proof passed; count corrected and
+accepted cleanup count checked separately before/after shutdown. Exact legacy
+pre-chat/FileJobs/chat/post-chat destructor order restored outside intent gate.
+Corrected438-source development118tests/fmt/Clippy passed; independent438/3/freeze/
+exact12suite counts match, all20main/10Leave/6SessionIo and new actual-worker
+repeatedLeave/window/replacement/partialpoison controls passed. Final
+`native-calls/normal-logout-final-2026-11-08/` passed261default/251neural-disabled
+tests,both Clippy modes/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI
+interactions; protected neural metrics unchanged. Independent438/3/all24evidence/
+current+frozen executable+ONNX audit found0mismatches,exact2existing source changes/
+zero added modules. All2new actual-worker tests/20main+10Leave+6SessionIo+
+10preferences+10Profile+6runtime+3MicTest suites and previous259/249full proof
+names retained in both modes, including13stalled protocol/original-ticket controls.
+Source-owner/strict extraction/guarded publications/legacy destructor order audit
+passed. Executable SHA-256:
+`14b0f8a9168042920eba9bd0ae08957ed7e2132cc815e5d99b570e1c3a439a82`.
+normalLogoutIntentWorkChecked=true is narrow component acceptance only;
+source save/post-save Graphify/guard/compact next, no push/release/shutdown.
+Shared Voice/lease destructor mutations
+must not be deferred onto a new owner's runtime without additional guards.
+Native/UI/worker/resource/syscall/drain/full-client bounds remainfalse.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
