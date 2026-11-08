@@ -139,7 +139,7 @@ async fn video_subscription_restarts_on_the_existing_rtp_receiver_and_invalidate
         alice.authorize_peers(["bob".into()]);
         bob.authorize_peers(["alice".into()]);
         let source = NativeVideoSource::new(VideoResolution { width: 160, height: 96 }, true);
-        alice.set_video(Some(source.clone())).unwrap();
+        alice.set_video_with_quality(source.clone(), "low").unwrap();
         let offer = alice.offer("bob", false).await.unwrap();
         let answer = bob.receive_offer("alice", &offer).await.unwrap().unwrap();
         alice.receive_answer("bob", &answer).await.unwrap();

@@ -260,7 +260,10 @@ impl VoiceSession {
         if started != true {
             return Err(MediaError::Backend);
         }
-        if let Err(error) = self.engine.set_video(Some(capture.source.clone())) {
+        if let Err(error) = self
+            .engine
+            .set_video_with_quality(capture.source.clone(), quality)
+        {
             let _ = self.engine.set_video(None);
             let _ = hub.send("StopStream", Vec::new()).await;
             return Err(error);

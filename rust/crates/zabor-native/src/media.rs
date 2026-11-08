@@ -10,6 +10,9 @@ use libwebrtc::peer_connection_factory::{
     native::PeerConnectionFactoryExt, IceServer, IceTransportsType, PeerConnectionFactory,
     RtcConfiguration,
 };
+use libwebrtc::rtp_parameters::{
+    DegradationPreference, Priority, RtpEncodingParameters, RtpParameters,
+};
 use libwebrtc::rtp_sender::RtpSender;
 use libwebrtc::rtp_transceiver::{RtpTransceiverDirection, RtpTransceiverInit};
 use libwebrtc::session_description::{SdpType, SessionDescription};
@@ -145,7 +148,93 @@ struct Peer {
     ignored_offer: bool,
     pending_ice: VecDeque<IceCandidate>,
     video_sender: Option<RtpSender>,
+    video_defaults: Option<VideoSendDefaults>,
     needs_offer: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VideoSendProfile {
+    Low,
+    Medium,
+    High,
+    Camera,
+}
+
+impl VideoSendProfile {
+    fn parse(quality: &str) -> Result<Self, MediaError> {
+        match quality {
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            "camera" => Ok(Self::Camera),
+            _ => Err(MediaError::Backend),
+        }
+    }
+
+    fn apply(self, parameters: &mut RtpParameters) {
+        let (bitrate, fps) = match self {
+            Self::Low => (2_500_000, 30.0),
+            Self::Medium => (3_500_000, 60.0),
+            Self::High => (6_000_000, 60.0),
+            Self::Camera => return,
+        };
+        if parameters.encodings.is_empty() {
+            parameters.encodings.push(RtpEncodingParameters::default());
+        }
+        parameters.set_degradation_preference(DegradationPreference::MaintainFramerate);
+        parameters.encodings[0].max_bitrate = Some(bitrate);
+        parameters.encodings[0].max_framerate = Some(fps);
+        parameters.encodings[0].priority = Priority::High;
+    }
+
+    fn configure(self, sender: &RtpSender) -> Result<Option<VideoSendDefaults>, MediaError> {
+        if self == Self::Camera {
+            return Ok(None);
+        }
+        let mut parameters = sender.parameters();
+        let defaults = VideoSendDefaults::capture(&parameters);
+        self.apply(&mut parameters);
+        sender
+            .set_parameters(parameters)
+            .map_err(|_| MediaError::Backend)?;
+        Ok(Some(defaults))
+    }
+}
+
+struct VideoSendDefaults {
+    max_bitrate: Option<u64>,
+    max_framerate: Option<f64>,
+    priority: Priority,
+    degradation: DegradationPreference,
+}
+
+impl VideoSendDefaults {
+    fn capture(parameters: &RtpParameters) -> Self {
+        let first = parameters.encodings.first();
+        Self {
+            max_bitrate: first.and_then(|encoding| encoding.max_bitrate),
+            max_framerate: first.and_then(|encoding| encoding.max_framerate),
+            priority: first.map_or(Priority::Low, |encoding| encoding.priority),
+            degradation: parameters.degradation_preference().unwrap_or_default(),
+        }
+    }
+
+    fn apply(&self, parameters: &mut RtpParameters) {
+        if let Some(first) = parameters.encodings.first_mut() {
+            first.max_bitrate = self.max_bitrate;
+            first.max_framerate = self.max_framerate;
+            first.priority = self.priority;
+        }
+        parameters.set_degradation_preference(self.degradation);
+    }
+
+    fn restore(self, sender: &RtpSender) -> Result<(), MediaError> {
+        let mut parameters = sender.parameters();
+        self.apply(&mut parameters);
+        sender
+            .set_parameters(parameters)
+            .map_err(|_| MediaError::Backend)
+    }
 }
 
 impl Drop for Peer {
@@ -170,6 +259,7 @@ pub struct MediaEngine {
     platform_audio: bool,
     data_only: bool,
     video: Option<RtcVideoTrack>,
+    video_profile: Option<VideoSendProfile>,
 }
 
 impl MediaEngine {
@@ -187,6 +277,7 @@ impl MediaEngine {
                 platform_audio: false,
                 data_only: false,
                 video: None,
+                video_profile: None,
             },
             receiver,
         )
@@ -265,6 +356,23 @@ impl MediaEngine {
     }
 
     pub fn set_video(&mut self, source: Option<NativeVideoSource>) -> Result<(), MediaError> {
+        self.set_video_profile(source, None)
+    }
+
+    pub fn set_video_with_quality(
+        &mut self,
+        source: NativeVideoSource,
+        quality: &str,
+    ) -> Result<(), MediaError> {
+        let profile = VideoSendProfile::parse(quality)?;
+        self.set_video_profile(Some(source), Some(profile))
+    }
+
+    fn set_video_profile(
+        &mut self,
+        source: Option<NativeVideoSource>,
+        profile: Option<VideoSendProfile>,
+    ) -> Result<(), MediaError> {
         if self.data_only {
             return Err(MediaError::Backend);
         }
@@ -274,6 +382,9 @@ impl MediaEngine {
         let mut failed = false;
         for peer in self.peers.values_mut() {
             if let Some(sender) = peer.video_sender.take() {
+                if let Some(defaults) = peer.video_defaults.take() {
+                    failed |= defaults.restore(&sender).is_err();
+                }
                 failed |= peer.connection.remove_track(sender).is_err();
             }
         }
@@ -284,12 +395,21 @@ impl MediaEngine {
                     .connection
                     .add_track(video.clone().into(), &["zabor-screen"])
                 {
-                    Ok(sender) => peer.video_sender = Some(sender),
+                    Ok(sender) => {
+                        if let Some(profile) = profile {
+                            match profile.configure(&sender) {
+                                Ok(defaults) => peer.video_defaults = defaults,
+                                Err(_) => failed = true,
+                            }
+                        }
+                        peer.video_sender = Some(sender);
+                    }
                     Err(_) => failed = true,
                 }
             }
             self.video = Some(video);
         }
+        self.video_profile = self.video.as_ref().and(profile);
         if failed {
             Err(MediaError::Backend)
         } else {
@@ -410,6 +530,7 @@ impl MediaEngine {
                 send_encodings: Vec::new(),
             };
             let mut video_sender = None;
+            let mut video_defaults = None;
             if !self.data_only {
                 if let Some(track) = &self.microphone {
                     connection
@@ -421,11 +542,21 @@ impl MediaEngine {
                         .map_err(|_| MediaError::Backend)?;
                 }
                 if let Some(video) = &self.video {
-                    video_sender = Some(
-                        connection
-                            .add_track(video.clone().into(), &["zabor-screen"])
-                            .map_err(|_| MediaError::Backend)?,
-                    );
+                    let sender = connection
+                        .add_track(video.clone().into(), &["zabor-screen"])
+                        .map_err(|_| MediaError::Backend)?;
+                    if let Some(profile) = self.video_profile {
+                        match profile.configure(&sender) {
+                            Ok(defaults) => video_defaults = defaults,
+                            Err(error) => {
+                                lifetime.invalidate();
+                                let _ = connection.remove_track(sender);
+                                connection.close();
+                                return Err(error);
+                            }
+                        }
+                    }
+                    video_sender = Some(sender);
                 } else {
                     connection
                         .add_transceiver_for_media(MediaType::Video, init)
@@ -441,6 +572,7 @@ impl MediaEngine {
                     ignored_offer: false,
                     pending_ice: VecDeque::new(),
                     video_sender,
+                    video_defaults,
                     needs_offer: false,
                 },
             );
@@ -634,6 +766,7 @@ impl MediaEngine {
         if let Some(video) = self.video.take() {
             video.set_enabled(false);
         }
+        self.video_profile = None;
         if self.platform_audio {
             self.factory.set_adm_recording_enabled(false);
             self.factory.stop_recording();
@@ -676,6 +809,226 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
+
+    #[test]
+    fn video_send_profile_rejects_unknown_quality_without_implicit_defaults() {
+        for (quality, profile) in [
+            ("low", VideoSendProfile::Low),
+            ("medium", VideoSendProfile::Medium),
+            ("high", VideoSendProfile::High),
+            ("camera", VideoSendProfile::Camera),
+        ] {
+            assert_eq!(VideoSendProfile::parse(quality).unwrap(), profile);
+        }
+        for quality in ["", "HIGH", "automatic", "1920x1080", "low "] {
+            assert!(VideoSendProfile::parse(quality).is_err());
+        }
+    }
+
+    #[test]
+    fn desktop_video_profiles_match_reference_start_limits_and_preserve_rtp_identity() {
+        for (profile, bitrate, fps) in [
+            (VideoSendProfile::Low, 2_500_000, 30.0),
+            (VideoSendProfile::Medium, 3_500_000, 60.0),
+            (VideoSendProfile::High, 6_000_000, 60.0),
+        ] {
+            let encoding = RtpEncodingParameters {
+                active: false,
+                rid: "original".into(),
+                has_ssrc: true,
+                ssrc: 42,
+                scale_resolution_down_by: Some(2.0),
+                scalability_mode: Some("L1T2".into()),
+                ..Default::default()
+            };
+            let untouched = RtpEncodingParameters {
+                rid: "second".into(),
+                max_bitrate: Some(123_456),
+                ..Default::default()
+            };
+            let mut parameters = RtpParameters::default();
+            parameters.encodings = vec![encoding, untouched.clone()];
+            parameters.rtcp.cname = "original-rtcp".into();
+            profile.apply(&mut parameters);
+            assert_eq!(parameters.encodings.len(), 2);
+            let first = &parameters.encodings[0];
+            assert_eq!(first.max_bitrate, Some(bitrate));
+            assert_eq!(first.max_framerate, Some(fps));
+            assert_eq!(first.priority, Priority::High);
+            assert!(!first.active);
+            assert_eq!(first.rid, "original");
+            assert!(first.has_ssrc);
+            assert_eq!(first.ssrc, 42);
+            assert_eq!(first.scale_resolution_down_by, Some(2.0));
+            assert_eq!(first.scalability_mode.as_deref(), Some("L1T2"));
+            assert_eq!(parameters.rtcp.cname, "original-rtcp");
+            assert_eq!(
+                format!("{:?}", parameters.encodings[1]),
+                format!("{untouched:?}")
+            );
+            assert_eq!(
+                parameters.degradation_preference(),
+                Some(DegradationPreference::MaintainFramerate)
+            );
+            let mut empty = RtpParameters::default();
+            profile.apply(&mut empty);
+            assert_eq!(empty.encodings.len(), 1);
+            assert_eq!(empty.encodings[0].max_bitrate, Some(bitrate));
+            assert_eq!(empty.encodings[0].max_framerate, Some(fps));
+        }
+    }
+
+    #[test]
+    fn camera_video_profile_does_not_apply_desktop_encoding_limits() {
+        for populated in [false, true] {
+            let mut parameters = RtpParameters::default();
+            if populated {
+                parameters.encodings.push(RtpEncodingParameters {
+                    max_bitrate: Some(123_456),
+                    max_framerate: Some(15.0),
+                    priority: Priority::Medium,
+                    ..Default::default()
+                });
+                parameters.set_degradation_preference(DegradationPreference::Balanced);
+            }
+            let original = format!("{parameters:?}");
+            VideoSendProfile::Camera.apply(&mut parameters);
+            assert_eq!(format!("{parameters:?}"), original);
+        }
+    }
+
+    #[test]
+    fn video_profile_restores_original_limits_without_replacing_rtp_encoding_identity() {
+        for populated in [false, true] {
+            let mut parameters = RtpParameters::default();
+            if populated {
+                parameters.encodings.push(RtpEncodingParameters {
+                    max_bitrate: Some(123_456),
+                    max_framerate: Some(15.0),
+                    priority: Priority::Medium,
+                    rid: "original".into(),
+                    has_ssrc: true,
+                    ssrc: 42,
+                    ..Default::default()
+                });
+                parameters.set_degradation_preference(DegradationPreference::MaintainResolution);
+            }
+            let defaults = VideoSendDefaults::capture(&parameters);
+            VideoSendProfile::High.apply(&mut parameters);
+            parameters.encodings[0].ssrc = 43;
+            defaults.apply(&mut parameters);
+            let first = &parameters.encodings[0];
+            assert_eq!(first.max_bitrate, populated.then_some(123_456));
+            assert_eq!(first.max_framerate, populated.then_some(15.0));
+            assert_eq!(
+                first.priority,
+                if populated {
+                    Priority::Medium
+                } else {
+                    Priority::Low
+                }
+            );
+            assert_eq!(first.ssrc, 43);
+            assert_eq!(first.rid, if populated { "original" } else { "" });
+            assert_eq!(
+                parameters.degradation_preference(),
+                Some(if populated {
+                    DegradationPreference::MaintainResolution
+                } else {
+                    DegradationPreference::Balanced
+                })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn native_video_senders_keep_quality_across_late_peers_and_source_replacement() {
+        use libwebrtc::video_source::VideoResolution;
+        for preexisting_peer in [false, true] {
+            for (quality, bitrate, fps) in [
+                ("low", Some(2_500_000), Some(30.0)),
+                ("medium", Some(3_500_000), Some(60.0)),
+                ("high", Some(6_000_000), Some(60.0)),
+                ("camera", None, None),
+            ] {
+                let (mut engine, _) = MediaEngine::new("alice".into());
+                engine.authorize_peers(["bob".into(), "carol".into()]);
+                if preexisting_peer {
+                    engine.peer("bob").unwrap();
+                }
+                let source = NativeVideoSource::new(
+                    VideoResolution {
+                        width: 160,
+                        height: 96,
+                    },
+                    quality != "camera",
+                );
+                engine
+                    .set_video_with_quality(source.clone(), quality)
+                    .unwrap();
+                engine.peer("bob").unwrap();
+                engine.peer("carol").unwrap();
+                let lifetime = engine.peer_lifetime("bob").unwrap();
+                for id in ["bob", "carol"] {
+                    let parameters = engine.peers[id].video_sender.as_ref().unwrap().parameters();
+                    assert_eq!(parameters.encodings[0].max_bitrate, bitrate);
+                    assert_eq!(parameters.encodings[0].max_framerate, fps);
+                    if quality != "camera" {
+                        assert_eq!(parameters.encodings[0].priority, Priority::High);
+                        assert_eq!(
+                            parameters.degradation_preference(),
+                            Some(DegradationPreference::MaintainFramerate)
+                        );
+                    }
+                }
+                let original = engine.video.as_ref().unwrap().clone();
+                assert!(engine
+                    .set_video_with_quality(source.clone(), "invalid")
+                    .is_err());
+                assert!(original.enabled());
+                assert!(engine.peer_lifetime("bob").unwrap().is_same(&lifetime));
+                engine
+                    .set_video_with_quality(source.clone(), "high")
+                    .unwrap();
+                assert!(!original.enabled());
+                assert!(lifetime.is_alive());
+                assert!(engine.peer_lifetime("bob").unwrap().is_same(&lifetime));
+                for peer in engine.peers.values() {
+                    let parameters = peer.video_sender.as_ref().unwrap().parameters();
+                    assert_eq!(parameters.encodings[0].max_bitrate, Some(6_000_000));
+                    assert_eq!(parameters.encodings[0].max_framerate, Some(60.0));
+                }
+                engine
+                    .set_video_with_quality(source.clone(), "camera")
+                    .unwrap();
+                for peer in engine.peers.values() {
+                    let parameters = peer.video_sender.as_ref().unwrap().parameters();
+                    assert!(parameters.encodings[0].max_bitrate.is_none());
+                    assert!(parameters.encodings[0].max_framerate.is_none());
+                    assert_eq!(parameters.encodings[0].priority, Priority::Low);
+                }
+                engine
+                    .set_video_with_quality(source.clone(), "low")
+                    .unwrap();
+                engine.set_video(None).unwrap();
+                assert!(engine.video_profile.is_none());
+                assert!(engine
+                    .peers
+                    .values()
+                    .all(|peer| peer.video_sender.is_none()));
+                engine.set_video(Some(source)).unwrap();
+                assert!(engine.video_profile.is_none());
+                for peer in engine.peers.values() {
+                    let parameters = peer.video_sender.as_ref().unwrap().parameters();
+                    assert!(parameters.encodings[0].max_bitrate.is_none());
+                    assert!(parameters.encodings[0].max_framerate.is_none());
+                }
+                engine.close();
+                assert!(engine.video_profile.is_none());
+                assert!(!lifetime.is_alive());
+            }
+        }
+    }
 
     #[test]
     fn peer_commit_linearizes_invalidation_and_rejects_every_later_callback() {

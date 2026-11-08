@@ -1317,6 +1317,27 @@ SFU/restore still unfinished. Exact comparison/full regression remains final-sta
 work per owner;no complete-client acceptance/publication yet. Passed98tests and
 fmt/Clippy/build/two inert interactions. High quality forwarding checked with direct
 property assignment;pointer coverage of the quality controls remains to add.
+Saved **f05ec02**;Graphify sh_1ba398377001AhJ1MiBUF9OklG passed6035nodes/14965edges/
+260communities with existing7warnings/HTML5000limit.
+
+### Native sender quality: functional components checked
+
+Native RTP low2.5M/30,medium3.5M/60,high6M/60 with maintain-framerate/high network
+priority wired for existing/late peers through set_video_with_quality. Old default
+API retained;camera defaults unchanged;invalid quality does not replace resources;
+stop/close clear profile. Five new media tests and actual quality-control pointer
+coverage added. Initial sh_1ba3d40d3001nY6Vx42SzT89fj failed new native-source test
+without Tokio reactor;corrected test annotation only,logs retained. Completed/passed
+sh_1ba410b0c0019U21vXJt0y1hgK:fmt/8media/3localRTP/Clippy/
+build/two inert RUEN100% actual quality-pointer interactions. Adaptive bitrate/stream restoration/SFU/camera/
+system audio/physical/full comparison still pending;nativeClientReady=false.
+Revision sh_1ba3e8f28001i1Vex6mqM2ZAbT exposed sender reuse with old limits;production
+now captures modified-field baseline and restores it before removal via fresh RTP
+parameters. SSRC/transaction identity retained;unset degradation maps to equivalent
+Balanced default. Local RTP decoding test starts with low profile;desktop→camera/
+stop/default reset scenarios expanded. Corrected affected checks passed;Graphify
+sh_1ba45e633001ny2Ado7o4yDH2O passed6053nodes/15032edges/247communities with existing
+7warnings/HTML5000limit. Save next;full-client and physical readiness remain false.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

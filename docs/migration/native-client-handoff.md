@@ -10,8 +10,8 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **4446514**:102targeted tests и Graphify passed.
-Stream picker functional checks passed ниже;
+сборкой. Latest saved source commit — **f05ec02**:picker98targeted tests/build/RUEN100%
+interactions и Graphify passed. Sender-quality functional checks passed ниже;
 no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
@@ -49,6 +49,49 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
 
+## Native sender quality — functional checks passed 2026-11-08
+
+- Saved f05ec02 stream picker;Graphify sh_1ba398377001AhJ1MiBUF9OklG passed:
+  6035nodes/14965edges/260communities,existing7warnings/HTML5000limit retained.
+- New MediaEngine.set_video_with_quality validates quality before replacing resources;
+  retains explicit profile for already-existing/new peers. Desktop initial RTP limits
+  match reference webrtc.ts6700-6705/6793-6798:low2.5M/30,medium3.5M/60,high6M/60,
+  maintain-framerate/networkPriority high. Medium localization/adaptive3.0M differs
+  from initial3.5M;use actual initial algorithm,adaptive/SFU paths still pending.
+  Camera deliberately keeps default sender parameters,no camera capture implemented.
+  Old set_video API/default behavior retained;stop/close clear profile. Native RTP
+  parameters are round-tripped from original sender (transaction/SSRC/etc preserved).
+  Peer tickets/lifetimes/frame/audio/strict acceptance/native SDK sources unchanged.
+- Five new media tests:validation,pure profiles/fidelity,camera no-op,baseline restore,
+  eight native
+  quality/preexisting-peer cases through late peers/replacement/invalid/stop/default.
+  Inert picker helper now clicks high/low and checks busy-quality refusal instead
+  of assigning high directly. No functional UI layout or locales changed.
+- Initial **sh_1ba3d40d3001nY6Vx42SzT89fj failed**:6media tests passed;new native
+  source test lacked Tokio reactor. No production code failure at this point;
+  changed only test annotation to tokio::test/async,retained initial logs.
+- Revision **sh_1ba3e8f28001i1Vex6mqM2ZAbT failed**:6media tests passed;native test
+  exposed libwebrtc reuse of sender with old encoding limits after remove_track.
+  Fixed production by capturing only modified encoding defaults per sender and
+  restoring them via fresh parameters before removal;SSRC/transaction identity not
+  replaced. None degradation preference restores equivalent Balanced default through
+  existing SDK API. Late-peer configuration error invalidates lifetime/removes track/
+  closes that unpublished native connection. No native SDK/strict gate changes.
+  Expanded native scenarios to desktop→camera→low→stop→default;one existing local
+  RTP video test now starts with low profile to verify real decoding with limits.
+- **sh_1ba410b0c0019U21vXJt0y1hgK completed/passed** under
+  `native-streams/sender-quality-functional-reset-2026-11-08`:fmt/media tests/local RTP/
+  native-media all-targets Clippy/build/two inert RUEN100% interactions. Passed8media/
+  3localRTP tests,fmt/Clippy/build/actual high-low pointer and busy refusal checks.
+  No physical capture or full-client acceptance. Graphify sh_1ba45e633001ny2Ado7o4yDH2O
+  passed6053nodes/15032edges/247communities;existing7warnings/HTML5000limit retained.
+  Save next;no full DSP/visual matrix per microchange.
+- Stream channel/call reconnect retains capture source but server StartStream quality
+  restoration is not yet wired. Reference signalr.ts1380-1384 reannounces only live
+  track after rejoin;native rejoin currently joins peers without that announcement.
+  Implement with original VoiceWork/bundle identity,do not turn stream restore failure
+  into channel loss;add local hub protocol tests before claiming restored behavior.
+
 ## Stream picker — functional checks passed 2026-11-08
 
 - Saved4446514:video task join,102targeted tests/Clippy/fmt/Graphify,clean tree.
@@ -69,6 +112,8 @@ push/merge/release/shutdown не выполнялись. После каждог
   inert interactions. No failure or physical capture. Quality buttons themselves
   still need pointer coverage:helper sets high directly before checking forwarding.
   Graphify/save next. Full DSP/default/precise comparison deferred.
+  Saved **f05ec02**;Graphify sh_1ba398377001AhJ1MiBUF9OklG passed6035nodes/14965edges/
+  260communities. Latest sender-quality stage adds quality-control pointer coverage.
 - Next camera implementation candidate researched without code/dependency/device
   changes: nokhwa0.10.11 Apache-2.0,input-msmf+decoding only (no OpenCV/WebView),
   Camera created/read/stopped on one owning thread,frames→RGB/I420→existing native
@@ -82,6 +127,9 @@ push/merge/release/shutdown не выполнялись. После каждог
   stop_stream only clears state and Drop Flush can block. If used,one persistent
   owner must perform query/create/read/stop/Drop;that alone does not prove bounded
   cancellation or driver shutdown. Do not silently integrate it across tokio threads.
+  nokhwa0.10.11 Camera Drop also unwraps stop_stream;backend raw_bytes/COM ownership
+  require further scrutiny before adoption. Download inspections used memory only,
+  no dependency/native-device changes or temporary source files.
 
 ## Video task join — targeted checks passed 2026-11-08
 

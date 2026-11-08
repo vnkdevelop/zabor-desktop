@@ -3856,7 +3856,21 @@ fn check_stream_picker_interactions(ui: &NativeApp) -> Result<(), &'static str> 
         return Err("Busy stream picker started duplicate capture");
     }
     ui.set_busy(false);
-    ui.set_screen_quality("high".into());
+    click(700.0, 475.0);
+    if ui.get_screen_quality() != "high" {
+        return Err("Stream picker high quality pointer selection failed");
+    }
+    ui.set_busy(true);
+    click(540.0, 475.0);
+    if ui.get_screen_quality() != "high" {
+        return Err("Busy stream picker changed quality");
+    }
+    ui.set_busy(false);
+    click(540.0, 475.0);
+    if ui.get_screen_quality() != "low" {
+        return Err("Stream picker low quality pointer selection failed");
+    }
+    click(700.0, 475.0);
     click(680.0, 582.0);
     if starts.borrow().last() != Some(&("screen:7".to_owned(), "high".to_owned())) {
         return Err("Stream picker did not forward high quality");
