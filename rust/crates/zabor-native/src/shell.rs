@@ -2018,7 +2018,11 @@ async fn worker(
                             },
                             "CallEnded" | "CallDeclined" if event.target != "CallEnded" || call_recovery.accepts_end(event.arguments.first().and_then(Value::as_str)) => {
                                 if voice_work.as_ref().is_some_and(VoiceWork::is_current) && voice.as_ref().is_some_and(|session| session.call_peer.is_some()) && (event.target != "CallDeclined" || !call_connected) {
-                                    voice = None; media_events = None; call_connected = false; incoming_call = None; if let Some(work) = &voice_work { work.publish(UiEvent::VoiceEnded); }
+                                    if let Some(work) = &voice_work {
+                                        let Some(disposed) = work.take_voice(&mut voice, &mut media_events, voice_ticket, |_| { call_connected = false; incoming_call = None; }) else { continue; };
+                                        drop(disposed);
+                                        work.publish(UiEvent::VoiceEnded);
+                                    }
                                 }
                                 else if incoming_call.take().is_some() { session_work.publish(UiEvent::IncomingDismissed); }
                             },
@@ -2047,7 +2051,11 @@ async fn worker(
                         if let Some(work) = voice_work.as_ref().filter(|work| work.is_current()) {
                             video_jobs.retain(|peer, receiver| { if receiver.is_alive() { true } else { stream_drops.cancel(peer); work.publish(UiEvent::RemoveVideo(peer.clone())); false } });
                             paused_video.retain(|peer| voice.as_ref().is_some_and(|voice| voice.has_peer(peer)));
-                            if event.target == "ForceLeaveVoice" || voice.as_ref().is_some_and(|voice| voice.channel.is_none() && voice.call_peer.is_none()) { voice = None; media_events = None; work.publish(UiEvent::VoiceEnded); }
+                            if event.target == "ForceLeaveVoice" || voice.as_ref().is_some_and(|voice| voice.channel.is_none() && voice.call_peer.is_none()) {
+                                let Some(disposed) = work.take_voice(&mut voice, &mut media_events, voice_ticket, |_| {}) else { continue; };
+                                drop(disposed);
+                                work.publish(UiEvent::VoiceEnded);
+                            }
                         }
                         update(UiEvent::Hub(event).guarded(event_ticket, IntentScope::Session));
                     },
@@ -2149,17 +2157,25 @@ async fn worker(
                 continue;
             }
             if voice.as_mut().is_some_and(VoiceSession::audio_failed) {
-                if let Some(mut session) = voice.take() {
-                    abandoned_call |= session.call_peer.is_some();
+                let Some(disposed) =
+                    work.take_voice(&mut voice, &mut media_events, voice_ticket, |session| {
+                        abandoned_call |= session.is_some_and(|session| session.call_peer.is_some())
+                    })
+                else {
+                    continue;
+                };
+                if let Some(mut session) = disposed.0 {
                     if let Some(hub) = &hub {
                         let result = work.run(session.leave(hub)).await;
                         if result.is_none() {
                             continue;
                         }
-                        abandoned_call = false;
+                        if work.commit(|| abandoned_call = false).is_none() {
+                            continue;
+                        }
                     }
                 }
-                media_events = None;
+                drop(disposed.1);
                 work.publish(UiEvent::VoiceEnded);
                 work.publish(UiEvent::Toast("toasts.micUnknownError"));
                 continue;
@@ -2734,8 +2750,15 @@ async fn worker(
                                     }
                                 }
                                 Err(_) => {
-                                    voice = None;
-                                    media_events = None;
+                                    let Some(disposed) = work.take_voice(
+                                        &mut voice,
+                                        &mut media_events,
+                                        voice_ticket,
+                                        |_| {},
+                                    ) else {
+                                        continue;
+                                    };
+                                    drop(disposed);
                                     if let Some(work) = &restore_work {
                                         work.publish(UiEvent::VoiceEnded);
                                         work.publish(UiEvent::Toast("toasts.channelJoinFailed"));

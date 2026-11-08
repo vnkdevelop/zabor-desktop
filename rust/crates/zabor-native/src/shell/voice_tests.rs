@@ -391,6 +391,130 @@ async fn guarded_ice_and_stream_view_notifications_preserve_wire_shape_and_skip_
     .unwrap();
 }
 
+#[tokio::test]
+async fn voice_commit_rechecks_original_ticket_after_ready_result_leave_logout_and_window_stop() {
+    for mode in ["live", "leave", "logout", "window"] {
+        let intents = CriticalIntents::default();
+        let ticket = intents.ticket();
+        let stop = CancellationToken::new();
+        let update = |_| panic!("Commit fixture must not publish");
+        let work = VoiceWork::new(&intents, ticket, &stop, &update);
+        let result = work.run(async { 42 }).await.unwrap();
+        match mode {
+            "leave" => intents.request(CriticalAction::Leave),
+            "logout" => intents.request(CriticalAction::Logout),
+            "window" => stop.cancel(),
+            _ => {}
+        }
+        let mut accepted = 0;
+        assert_eq!(
+            work.commit(|| {
+                accepted += 1;
+                result
+            }),
+            (mode == "live").then_some(42)
+        );
+        assert_eq!(accepted, usize::from(mode == "live"));
+        if matches!(mode, "leave" | "logout") {
+            assert_eq!(
+                intents.next().await,
+                if mode == "leave" {
+                    CriticalAction::Leave
+                } else {
+                    CriticalAction::Logout
+                }
+            );
+            assert!(work
+                .commit(|| panic!("Consumed priority must not revive original Voice ticket"))
+                .is_none());
+            let fresh = VoiceWork::new(&intents, intents.ticket(), &stop, &update);
+            assert_eq!(fresh.commit(|| 43), Some(43));
+        }
+        println!("voice extraction commit={mode} original_ticket=true ready_result_rechecked=true stale_tail_rejected=true physical_audio=false");
+    }
+}
+
+#[test]
+fn voice_commit_holds_original_intent_gate_and_rechecks_window_stop_after_waiting_for_it() {
+    for action in [CriticalAction::Leave, CriticalAction::Logout] {
+        let intents = CriticalIntents::default();
+        let ticket = intents.ticket();
+        let stop = CancellationToken::new();
+        let update = |_| {};
+        let work = VoiceWork::new(&intents, ticket, &stop, &update);
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let (requesting, requested) = std::sync::mpsc::channel();
+        let (done, finished) = std::sync::mpsc::channel();
+        let value = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            let work = &work;
+            let value = &value;
+            let commit = scope.spawn(move || {
+                work.commit(|| {
+                    entered.send(()).unwrap();
+                    held.recv_timeout(Duration::from_secs(3)).unwrap();
+                    value.store(1, Ordering::Release);
+                    42
+                })
+            });
+            waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+            let requester = scope.spawn(|| {
+                requesting.send(()).unwrap();
+                intents.request(action);
+                assert_eq!(value.load(Ordering::Acquire), 1);
+                done.send(()).unwrap();
+            });
+            requested.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+            release.send(()).unwrap();
+            assert_eq!(commit.join().unwrap(), Some(42));
+            finished.recv_timeout(Duration::from_secs(1)).unwrap();
+            requester.join().unwrap();
+        });
+        assert!(work
+            .commit(|| panic!("Original Voice ticket revived after priority"))
+            .is_none());
+        println!("voice extraction gate={action:?} linearized=true mutation_before_priority=true arbitrary_commit_not_unlocked=true physical_audio=false");
+    }
+    let intents = CriticalIntents::default();
+    let ticket = intents.ticket();
+    let stop = CancellationToken::new();
+    let update = |_| {};
+    let work = VoiceWork::new(&intents, ticket, &stop, &update);
+    let (entered, waiting) = std::sync::mpsc::channel();
+    let (release, held) = std::sync::mpsc::channel();
+    let (started, starting) = std::sync::mpsc::channel();
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        let intents = &intents;
+        let holder = scope.spawn(move || {
+            intents.commit(ticket, IntentScope::Session, || {
+                entered.send(()).unwrap();
+                held.recv_timeout(Duration::from_secs(3)).unwrap();
+            })
+        });
+        waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+        let commit = scope.spawn(|| {
+            started.send(()).unwrap();
+            let result =
+                work.commit(|| panic!("Window stop must be checked after acquiring the gate"));
+            done.send(result).unwrap();
+        });
+        starting.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+        stop.cancel();
+        release.send(()).unwrap();
+        holder.join().unwrap().unwrap();
+        assert_eq!(
+            finished.recv_timeout(Duration::from_secs(1)).unwrap(),
+            None::<()>
+        );
+        commit.join().unwrap();
+    });
+    println!("voice extraction gate=window stop_after_gate_wait_rechecked=true stale_mutation_rejected=true physical_audio=false");
+}
+
 fn frame_sink(
     sender: mpsc::Sender<FrameUpdate>,
     ticket: IntentTicket,

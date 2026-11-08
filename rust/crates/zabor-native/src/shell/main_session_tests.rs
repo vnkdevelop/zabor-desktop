@@ -1370,6 +1370,156 @@ async fn failed_auth_preference_poison_still_resets_runtime_and_reports_incomple
     println!("audio reset poison=preferences legacy_partial=true poison_retained=true complete=false physical_audio=false");
 }
 
+#[tokio::test]
+async fn native_voice_extraction_accepts_only_original_worker_resource_ticket_and_preserves_shared_monitor(
+) {
+    timeout(Duration::from_secs(15), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        for mode in ["live", "leave", "logout", "window", "mismatch", "missing"] {
+            let intents = CriticalIntents::default();
+            let original = intents.ticket();
+            let stop = CancellationToken::new();
+            let controls = AudioPreferences::new(&json!({})).controls.clone();
+            let audio = SharedAudio::new(controls.clone(), stop.child_token(), |_, _, _| {
+                Box::pin(async { panic!("Voice extraction fixture must not start physical audio") })
+            });
+            let generation = audio.demand.reserve().unwrap();
+            assert!(audio.demand.activate(generation));
+            let monitor = audio.monitor(true);
+            let (mut session, receiver) = VoiceSession::new(&hub, &user(), false, controls.clone(), audio.clone()).await.unwrap();
+            session.call_peer = Some("fixture-peer".into());
+            let mut voice = Some(session);
+            let mut events = Some(receiver);
+            let ticket = match mode {
+                "leave" | "mismatch" => {
+                    intents.request(CriticalAction::Leave);
+                    assert_eq!(intents.next().await, CriticalAction::Leave);
+                    if mode == "mismatch" { intents.ticket() } else { original }
+                },
+                "logout" => {
+                    intents.request(CriticalAction::Logout);
+                    assert_eq!(intents.next().await, CriticalAction::Logout);
+                    original
+                },
+                "window" => { stop.cancel(); original },
+                _ => original,
+            };
+            let resource_ticket = (mode != "missing").then_some(original);
+            let monitor_current = monitor.is_current();
+            controls.speaking.store(true, Ordering::Release);
+            controls.mic_db.store((-17.0_f32).to_bits(), Ordering::Release);
+            let epoch = controls.capture_epoch.load(Ordering::Acquire);
+            let snapshot = audio.mic_test.snapshot(Instant::now());
+            let update = |_| panic!("Extraction must not publish while holding the intent gate");
+            let work = VoiceWork::new(&intents, ticket, &stop, &update);
+            let mut accepted = 0;
+            let mut connected = true;
+            let disposed = work.take_voice(&mut voice, &mut events, resource_ticket, |session| {
+                assert_eq!(session.unwrap().call_peer.as_deref(), Some("fixture-peer"));
+                accepted += 1;
+                connected = false;
+            });
+            assert_eq!(disposed.is_some(), mode == "live");
+            assert_eq!(accepted, usize::from(mode == "live"));
+            assert_eq!(connected, mode != "live");
+            assert_eq!(voice.is_none(), mode == "live");
+            assert_eq!(events.is_none(), mode == "live");
+            if let Some(disposed) = disposed {
+                assert_eq!(disposed.0.as_ref().unwrap().call_peer.as_deref(), Some("fixture-peer"));
+                assert!(!disposed.1.as_ref().unwrap().is_closed());
+                assert_eq!(intents.ticket(), original);
+                drop(disposed);
+            } else {
+                assert_eq!(voice.as_ref().unwrap().call_peer.as_deref(), Some("fixture-peer"));
+                assert!(!events.as_ref().unwrap().is_closed());
+                drop(voice);
+                drop(events);
+            }
+            assert_eq!(audio.demand.active(), generation);
+            assert!(audio.demand.is_reserved(generation));
+            assert!(controls.speaking.load(Ordering::Acquire));
+            assert_eq!(f32::from_bits(controls.mic_db.load(Ordering::Acquire)), -17.0);
+            assert_eq!(controls.capture_epoch.load(Ordering::Acquire), epoch);
+            assert_eq!(monitor.is_current(), monitor_current);
+            assert_eq!(audio.mic_test.snapshot(Instant::now()), snapshot);
+            audio.wait_for_cleanup().await.unwrap();
+            println!("voice extraction native={mode} original_resource_ticket=true accepted={} callback_and_slots_guarded=true status_monitor_unchanged=true physical_audio=false", mode == "live");
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; 6]);
+    }).await.unwrap();
+}
+
+struct VoiceExtractionDropCheck {
+    intents: Arc<CriticalIntents>,
+    drops: Arc<AtomicUsize>,
+}
+
+impl Drop for VoiceExtractionDropCheck {
+    fn drop(&mut self) {
+        let _ = self.intents.ticket();
+        self.drops.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+#[tokio::test]
+async fn native_voice_extraction_releases_intent_gate_before_rejected_callback_drop_and_accepted_unwind(
+) {
+    timeout(Duration::from_secs(10), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        for mode in ["live", "leave", "window", "mismatch", "panic"] {
+            let intents = Arc::new(CriticalIntents::default());
+            let original = intents.ticket();
+            let stop = CancellationToken::new();
+            let controls = AudioPreferences::new(&json!({})).controls.clone();
+            let audio = SharedAudio::new(controls.clone(), stop.child_token(), |_, _, _| {
+                Box::pin(async { panic!("Voice extraction fixture must not start physical audio") })
+            });
+            let generation = audio.demand.reserve().unwrap();
+            assert!(audio.demand.activate(generation));
+            let monitor = audio.monitor(true);
+            let (session, receiver) = VoiceSession::new(&hub, &user(), false, controls, audio.clone()).await.unwrap();
+            let mut voice = Some(session);
+            let mut events = Some(receiver);
+            let ticket = if matches!(mode, "leave" | "mismatch") {
+                intents.request(CriticalAction::Leave);
+                assert_eq!(intents.next().await, CriticalAction::Leave);
+                if mode == "mismatch" { intents.ticket() } else { original }
+            } else { original };
+            if mode == "window" { stop.cancel(); }
+            let monitor_current = monitor.is_current();
+            let drops = Arc::new(AtomicUsize::new(0));
+            let probe = VoiceExtractionDropCheck { intents: intents.clone(), drops: drops.clone() };
+            let update = |_| {};
+            let work = VoiceWork::new(&intents, ticket, &stop, &update);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                work.take_voice(&mut voice, &mut events, Some(original), move |_| {
+                    let _ = &probe;
+                    assert_ne!(mode, "panic", "Expected accepted Voice extraction callback panic");
+                })
+            }));
+            assert_eq!(drops.load(Ordering::Acquire), 1);
+            assert_eq!(result.is_err(), mode == "panic");
+            assert_eq!(voice.is_none(), matches!(mode, "live" | "panic"));
+            assert_eq!(events.is_none(), matches!(mode, "live" | "panic"));
+            if mode == "panic" {
+                assert_eq!(work.commit(|| 42), Some(42));
+            }
+            drop(result);
+            drop(voice);
+            drop(events);
+            assert_eq!(monitor.is_current(), monitor_current);
+            assert_eq!(audio.demand.active(), 1);
+            audio.wait_for_cleanup().await.unwrap();
+            println!("voice extraction callback_drop={mode} gate_reentry=true owned_resources_outside_gate=true native_drop_order_unchanged=true physical_audio=false");
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; 5]);
+    }).await.unwrap();
+}
+
 async fn hold_logout_preferences(
     preferences: Arc<AudioPreferences>,
 ) -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>) {

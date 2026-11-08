@@ -1,10 +1,13 @@
-use super::{HubConnection, UiEvent};
+use super::{HubConnection, MediaEvent, UiEvent, VoiceSession};
 use serde_json::Value;
 use std::future::Future;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use zabor_native::critical_intents::{CriticalIntents, IntentScope, IntentTicket};
 use zabor_native::hub::HubError;
 use zabor_native::media::PeerLifetime;
+
+type VoiceResources = (Option<VoiceSession>, Option<mpsc::Receiver<MediaEvent>>);
 
 pub(super) struct VoiceWork<'a> {
     intents: &'a CriticalIntents,
@@ -30,6 +33,37 @@ impl<'a> VoiceWork<'a> {
 
     pub(super) fn is_current(&self) -> bool {
         !self.stop.is_cancelled() && self.intents.is_current(self.ticket, IntentScope::Voice)
+    }
+
+    pub(super) fn commit<T>(&self, commit: impl FnOnce() -> T) -> Option<T> {
+        self.intents
+            .commit(self.ticket, IntentScope::Voice, || {
+                (!self.stop.is_cancelled()).then(commit)
+            })
+            .flatten()
+    }
+
+    pub(super) fn take_voice(
+        &self,
+        voice: &mut Option<VoiceSession>,
+        events: &mut Option<mpsc::Receiver<MediaEvent>>,
+        resource_ticket: Option<IntentTicket>,
+        mut accepted: impl FnMut(Option<&VoiceSession>),
+    ) -> Option<VoiceResources> {
+        let mut resources = None;
+        let taken = self.commit(|| {
+            if resource_ticket != Some(self.ticket) {
+                return false;
+            }
+            resources = Some((voice.take(), events.take()));
+            accepted(
+                resources
+                    .as_ref()
+                    .and_then(|resources| resources.0.as_ref()),
+            );
+            true
+        });
+        taken.filter(|taken| *taken).and(resources)
     }
 
     pub(super) fn publish(&self, event: UiEvent) {

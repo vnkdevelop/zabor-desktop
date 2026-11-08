@@ -969,9 +969,38 @@ interleave normalized only for pass-name parsing;both Leave/Logout tail=0 checke
 Executable SHA-256:
 `13dbfec2475a869c3f1dbe8c8b0312b6ff7503b6703d6b071a442f6c28edab69`.
 sealedAudioCleanupAdmissionChecked=true is narrow background-audio root acceptance;
-save/post-save Graphify/guard/compact next.
+saved1edab768492097d7941e9649365f411d4e7e3c7d/post-save Graphify/438/3/24/
+binary/dependency/proof/clean-tree guard passed.
 This is not sealed admission for all operations/external last-Arc/physical native
 completion or generalized off-thread Voice/peer/worker/UI bounds;full readiness=false.
+
+### Original-ticket worker Voice extraction: components checked locally
+
+VoiceWork.commit retains the original CriticalIntents mutation mutex and rechecks
+window stop inside it. take_voice compares original stored resource ticket under
+the gate,keeps owned Voice/media receiver and FnMut metadata capture outside its
+closure,and returns ownership for Voice-before-receiver destruction outside the
+gate. Four CallEnded/ForceLeaveVoice/audio-failure/rejoin-error sites use it;
+successful audio-failure leave flag acceptance also rechecks the original ticket.
+Normal Logout/Leave/peer/RTP/native-audio/shared seal/Voice Drop order unchanged.
+Four new tests cover ready-result rejection/strict gate/held-gate stop plus actual
+configured native session/receiver extraction and callback-capture Drop/unwind.
+Development58native-bin tests/Clippy/Graphify passed;source audit passed.
+Final `native-calls/voice-extraction-final-2026-11-08/` passed291default/
+281neural-disabled tests,both Clippy/fmt/pinned/9HTTP/neural/freshbuild/8inert
+RUEN/four-DPI interactions;protected neural metrics unchanged. Independent438primary/
+3reference/24evidence/current+frozen executable+ONNX/SDK audit found0mismatches;
+all prior287/277names/multiplicity retained,new4tests and main22/VoiceWork8/Leave10/
+SessionIo6/preferences10/Profile10/runtime23/playback3/device13/native1/MicTest4/
+VoiceSession1 suites passed. 18new and75retained component markers per mode plus
+owner/RTP/quarantine/partial-poison/protocol/actual-worker controls verified.
+Exact source reconstruction/gate/original-ticket/owned disposal order audited again.
+Executable SHA-256:
+`b466d6892dc902784b063c6e77903b8853a3b74561651fad2caa11a175a74229`.
+voiceResourceExtractionChecked=true is narrow four-site extraction acceptance;
+save/post-save Graphify/guard/compact next. Temporary helpers deleted.
+Acquisition/install/peer/shared/video gates and native/worker/UI deadlines remain
+open;no generalized off-thread teardown or complete-client acceptance.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
