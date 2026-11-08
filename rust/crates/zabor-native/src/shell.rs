@@ -59,6 +59,10 @@ mod mic_pressed;
 use main_session::MainResult;
 #[cfg(test)]
 mod main_session_tests;
+mod session_io;
+use session_io::SessionIo;
+#[cfg(test)]
+mod session_io_tests;
 mod session_work;
 use session_work::SessionWork;
 mod voice_work;
@@ -267,6 +271,7 @@ struct WorkerMedia {
     audio_preferences: Arc<AudioPreferences>,
     audio_runtime: Arc<SharedAudio<NativeAudio>>,
     intents: Arc<CriticalIntents>,
+    session_io: Arc<SessionIo>,
 }
 
 pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -548,6 +553,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     });
+    let session_io = SessionIo::new(profile.clone(), intents.clone(), stop.clone());
     let worker = runtime.spawn(worker(
         server,
         receiver,
@@ -560,6 +566,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             audio_preferences: audio_preferences.clone(),
             audio_runtime: audio_runtime.clone(),
             intents: intents.clone(),
+            session_io: session_io.clone(),
         },
     ));
     let local_errors = send_update.clone();
@@ -1660,13 +1667,16 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     mic_test_ui.borrow_mut().close();
     stop.cancel();
     worker.abort();
-    runtime.block_on(async {
+    let session_io_result = runtime.block_on(async {
+        let _ = worker.await;
         let _ = local_settings_job.await;
         let _ = remote_settings_job.await;
         let _ = audio_runtime_job.await;
+        session_io.finish().await
     });
     runtime.shutdown_timeout(Duration::from_secs(2));
     ui_result?;
+    session_io_result?;
     if let Some(error) = capture_error.borrow_mut().take() {
         return Err(error.into());
     }
@@ -1687,6 +1697,7 @@ async fn worker(
         audio_preferences,
         audio_runtime,
         intents,
+        session_io,
     } = media;
     let audio_controls = audio_preferences.controls.clone();
     let signing = match Attestation::from_environment(zabor_native::release::TARGET_BETA_VERSION) {
@@ -1699,16 +1710,8 @@ async fn worker(
     let mut hub: Option<HubConnection> = None;
     let mut events: Option<mpsc::Receiver<HubEvent>> = None;
     let mut current_user: Option<zabor_native::auth::User> = None;
-    let mut saved_credentials = profile
-        .as_ref()
-        .and_then(|profile| profile.load_session().ok().flatten())
-        .map(|session| Credentials {
-            username: session.username,
-            password: session.password,
-        });
-    let mut retry_at = saved_credentials
-        .as_ref()
-        .map(|_| tokio::time::Instant::now());
+    let mut saved_credentials = None;
+    let mut retry_at = None;
     let mut retry_attempt = 0_u32;
     let mut session_ready = false;
     let mut voice: Option<VoiceSession> = None;
@@ -1772,6 +1775,16 @@ async fn worker(
                 .run_with_leave($future, &mut voice_leave_state!(), hub.as_ref())
                 .await
         };
+    }
+    let startup_work = SessionWork::new(&intents, intents.ticket(), &stop, update.as_ref());
+    if let Some(Ok(Some(session))) = run_session!(startup_work, session_io.load()) {
+        startup_work.commit(|| {
+            saved_credentials = Some(Credentials {
+                username: session.username,
+                password: session.password,
+            });
+            retry_at = Some(tokio::time::Instant::now());
+        });
     }
     loop {
         if stop.is_cancelled() {
@@ -2346,15 +2359,11 @@ async fn worker(
             saved_credentials = None;
             retry_at = None;
             session_ready = false;
-            if let Some(profile) = &profile {
-                if profile.clear_session().is_err() {
-                    update(UiEvent::Toast("validation.sessionSaveError"));
-                }
-            }
             voice = None;
             media_events = None;
             update(UiEvent::VoiceEnded);
             update(UiEvent::SignedOut);
+            let clearing = session_io.clear(command_ticket);
             if let Some(connection) = old_connection {
                 if end_call {
                     tokio::select! {
@@ -2363,6 +2372,10 @@ async fn worker(
                     }
                 }
                 connection.close();
+            }
+            let logout_work = SessionWork::new(&intents, command_ticket, &stop, update.as_ref());
+            if matches!(run_session!(logout_work, clearing), Some(Err(_))) {
+                logout_work.publish(UiEvent::Toast("validation.sessionSaveError"));
             }
             continue;
         }
@@ -2710,11 +2723,14 @@ async fn worker(
                         engine.fail_downloads(None, now_ms());
                     }
                     drop((disposed.0, disposed.2, disposed.3, disposed.4));
-                    if let Some(profile) = &profile {
-                        auth_work.commit(|| profile.clear_session());
-                    }
                     auth_work.publish(UiEvent::VoiceEnded);
                     auth_work.publish(UiEvent::SignedOut);
+                    if matches!(
+                        run_session!(auth_work, session_io.clear(command_ticket)),
+                        Some(Err(_))
+                    ) {
+                        auth_work.publish(UiEvent::Toast("validation.sessionSaveError"));
+                    }
                     continue;
                 }
                 Err(error) => {
@@ -2755,26 +2771,25 @@ async fn worker(
                     work.publish(UiEvent::MissingAccount)
                 }
                 Ok(MainResult::Authentication(LoginOutcome::SignedIn(data), credentials)) => {
-                    if let Some(profile) = &profile {
-                        let preparing_profile = profile.clone();
-                        let preparing_credentials = credentials.clone();
-                        let owner = data.user.id.clone();
+                    if profile.is_some() {
                         let prepared = run_session!(
                             work,
-                            tokio::task::spawn_blocking(move || preparing_profile
-                                .prepare_session(&owner, &preparing_credentials))
+                            session_io.prepare(data.user.id.clone(), credentials.clone())
                         );
                         match prepared {
-                            Some(Ok(Ok(prepared))) => {
-                                match work.commit(|| profile.commit_session(prepared)) {
-                                    Some(Ok(())) => {}
+                            Some(Ok(prepared)) => {
+                                match run_session!(work, session_io.save(command_ticket, prepared))
+                                {
+                                    Some(Ok(true)) => {}
                                     Some(Err(_)) => {
                                         work.publish(UiEvent::Toast("validation.sessionSaveError"))
                                     }
-                                    None => continue,
+                                    Some(Ok(false)) | None => continue,
                                 }
                             }
-                            Some(_) => work.publish(UiEvent::Toast("validation.sessionSaveError")),
+                            Some(Err(_)) => {
+                                work.publish(UiEvent::Toast("validation.sessionSaveError"))
+                            }
                             None => continue,
                         }
                     }

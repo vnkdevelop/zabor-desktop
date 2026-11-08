@@ -669,8 +669,39 @@ mainSessionWorkChecked/guardedSessionCommitChecked=true are narrow component
 acceptance. Final filesystem/critical-lock commit bounds, chat/file final-save
 races, native OS resource timing and full worker/audio/call/client gates remain
 unaccepted. workerResponsivenessAccepted/audioIntegrationAccepted/
-callIntegrationAccepted/nativeClientReady stayfalse. Save milestone/post-save
-Graphify/guard and compact; no push/release/shutdown.
+callIntegrationAccepted/nativeClientReady stayfalse. Saved `457552c3d115bed4e50f26de9f9d2ce781376863`;
+post-save Graphify/source/evidence/clean-tree guard passed, compact completed;
+no push/release/shutdown.
+
+### Session filesystem commits: components checked locally
+
+Session-only Profile resource serialization and tracked off-worker startup/save/
+clear jobs remove filesystem I/O from production intent-state commit closures.
+A provisional save is accepted by its original owner/window guard or rolled back
+to encrypted previous bytes; revoked owner cleanup clears credentials without
+changing identity/settings. Readers and next-owner saves use the same resource
+gate; application close drains registered jobs, including DPAPI preparation.
+Initial development stopped on a new test's Receiver Send/Sync error; ownership
+fixture corrected.438-source v2development passed, including5profile +6SessionIo
+local cancellation/rollback/lock/sharing tests. Explicit Logout clear registration
+survives an unpolled future, old EndCall does not await disk, legacy invalid-session
+startup fallback preserved. v2development89tests/fmt/Clippy passed,438/3hashes match.
+Late rollback Logout recheck and removal-on-restore-failure added; ciphertext-only
+pending-session journal blocks auto-login after reopen if native rollback/removal
+both fail. Original encrypted backup retained, current session.enc DPAPI format
+unchanged. v3development91tests/fmt/Clippy passed; independent438/3hashes/counts match.
+Final `native-calls/session-filesystem-final-2026-11-08/` passed238default/
+228neural-disabled tests, both Clippy modes/fmt/pinned/9HTTP/neural/freshbuild/
+8inert RUEN/DPI interactions; protected neural metrics unchanged. Independent
+438primary+3reference/all24evidence/current+frozen executable+ONNX DLL audit found
+0mismatches; verified2existing changes+2new modules and10profile/6SessionIo/
+10main-session tests plus retained voice/Leave/protocol controls in both modes.
+Actual/frozen executable SHA-256:
+`407bcd45195fc919fcaaf4d60d76d43f69d9e64990f6d104c442610db0ae195f`.
+sessionFilesystemWorkChecked=true is narrow component acceptance only.
+Save milestone/post-save Graphify/guard and compact; no push/release/shutdown.
+Final native syscall/resource-lock duration, audio restoration gate and whole
+worker/audio/call/client readiness remainunaccepted.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
