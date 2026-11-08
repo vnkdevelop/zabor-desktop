@@ -886,10 +886,38 @@ Exact source scope/generation/resource-release/legacy drop-order audit passed.
 Executable SHA-256:
 `7f0e4fcb76ec07e2572cfc358ee9c46ff48cc3eb5b47e02636bf9d06fd190db5`.
 voiceMaintenanceOwnershipChecked=true and healthyCurrentRevokeMaintenanceRaceChecked=true
-are narrow healthy-path component acceptance; save/post-save Graphify/guard/compact next.
+are narrow healthy-path component acceptance;saved1245d6b7934d1a719241da69fb007e1241d179f6/
+post-save Graphify/438/3/24/binary/proof/clean-tree guard passed,compact done.
 Resource/health/unknown-poison/general-maintenance/token/watch/destructor waits and
 actual native cleanup completion remain open. No off-thread/worker/native/full-client
 readiness claim; no push/release/merge/shutdown.
+
+### Native owning-thread join and registered cleanup: components checked locally
+
+DeviceStream shared/idempotent join retains owning thread handles and sticky panic/
+poison failure;lock-free completion health does not wait for the join mutex.
+NativeAudio joins capture and render independently even after one error with live
+device/source/mixer Arcs. SharedAudio registers retirement before synchronous cancel,
+tracks finish_shutdown and owned-Arc destruction plus all scheduled factories through
+late rejected-device retirement;unsupported completion/errors/panics stay failures.
+Wait cancellation leaves jobs tracked;multiple waiters register Notify before zero
+check. Shell close waits registered native work before final runtime disposal.
+Final `native-calls/native-cleanup-final-2026-11-08/` passed277default/
+267neural-disabled tests,both Clippy/fmt/pinned/9HTTP/neural/freshbuild/8inert
+RUEN/four-DPI interactions;protected neural metrics unchanged. Independent
+438primary/3reference/24evidence/current+frozen executable+ONNX audit found0mismatches;
+all prior269/259full test names retained with unchanged multiplicity,new8tests/
+runtime16/device13/native1/MicTest4/voice1/main20/Leave10/SessionIo6/preferences10/
+Profile10 suites and original owner/protocol/quarantine/partial-poison controls passed.
+19new markers and32retained Voice/MicTest maintenance markers verified in each mode;
+exact source scope/lifecycle registration/owned-Drop/legacy owner-ticket order passed.
+Executable SHA-256:
+`c7d1d39ed311805f5c47a4fc2404ab4442d0d74f0e35022c92017b514a3843e6`.
+nativeAudioThreadJoinChecked=true/registeredAudioCleanupChecked=true are narrow
+component acceptance;save/post-save Graphify/guard/compact next.
+No sealed future admission/external last-Arc source/RTC/physical endpoint completion
+or native responsiveness accepted;normal worker/UI/Leave/disconnect/cancel/resource/
+unknown-poison/general callback/native/system/filesystem/drain gates remain open.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

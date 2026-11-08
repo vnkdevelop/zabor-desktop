@@ -1,7 +1,8 @@
 use crate::audio_device::{DeviceError, DeviceStream};
 use crate::audio_mix::{AudioControls, AudioMixer};
 use crate::audio_runtime::{
-    AudioDemand, AudioFlow, CaptureInput, ProcessorRetry, SharedAudio, SharedAudioDevice,
+    AudioCleanupError, AudioDemand, AudioFlow, CaptureInput, ProcessorRetry, SharedAudio,
+    SharedAudioDevice,
 };
 use crate::media::MediaError;
 use crate::mic_test::MicTest;
@@ -293,6 +294,14 @@ impl SharedAudioDevice for NativeAudio {
     fn processor_recovering(&self) -> bool {
         self.processor_retry.recovering()
     }
+
+    fn finish_shutdown(&self) -> Result<(), AudioCleanupError> {
+        let capture = self.capture.join_shutdown();
+        let render = self.render.join_shutdown();
+        capture
+            .and(render)
+            .map_err(|_| AudioCleanupError::Incomplete)
+    }
 }
 
 impl SharedAudio<NativeAudio> {
@@ -305,5 +314,96 @@ impl SharedAudio<NativeAudio> {
                 stop,
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio_mix::AudioMixer;
+    use crate::audio_settings::AudioSettings;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn tracked_native_shutdown_joins_both_owner_threads_even_after_capture_panic_with_live_arcs(
+    ) {
+        for capture_panics in [false, true] {
+            let controls = Arc::new(AudioControls::new(AudioSettings::default()));
+            let stop = CancellationToken::new();
+            let (capture_release, capture_blocked) = mpsc::channel();
+            let (capture_done, capture_finished) = mpsc::channel();
+            let capture = DeviceStream::test_worker(stop.child_token(), move |_, ready| {
+                ready.send(Ok(())).unwrap();
+                capture_blocked
+                    .recv_timeout(Duration::from_secs(3))
+                    .unwrap();
+                capture_done.send(()).unwrap();
+                if capture_panics {
+                    panic!("Expected native capture fixture panic");
+                }
+                Ok(())
+            })
+            .unwrap();
+            let (render_release, render_blocked) = mpsc::channel();
+            let (render_done, render_finished) = mpsc::channel();
+            let render = DeviceStream::test_worker(stop.child_token(), move |_, ready| {
+                ready.send(Ok(())).unwrap();
+                render_blocked.recv_timeout(Duration::from_secs(3)).unwrap();
+                render_done.send(()).unwrap();
+                Ok(())
+            })
+            .unwrap();
+            let audio = NativeAudio {
+                source: audio_source(),
+                mixer: Arc::new(AudioMixer::new(controls.clone())),
+                demand: Arc::new(AudioDemand::new(controls.clone())),
+                legacy_generation: None,
+                processor_retry: Arc::new(ProcessorRetry::new(stop.clone())),
+                stop,
+                capture,
+                render,
+                controls: controls.clone(),
+            };
+            let prepared = Arc::new(Mutex::new(Some(audio)));
+            let shared = SharedAudio::new(controls, CancellationToken::new(), move |_, _, _| {
+                let audio = prepared.lock().unwrap().take().unwrap();
+                Box::pin(async move { Ok(audio) })
+            });
+            let monitor = shared.monitor(true);
+            let device = monitor.ready().await.unwrap();
+            let retained_source = device.source.clone();
+            let retained_mixer = device.mixer.clone();
+            shared.reset();
+            assert!(device.capture.is_cancelled());
+            assert!(device.render.is_cancelled());
+            capture_release.send(()).unwrap();
+            capture_finished
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), shared.wait_for_cleanup())
+                    .await
+                    .is_err()
+            );
+            assert!(render_finished.try_recv().is_err());
+            render_release.send(()).unwrap();
+            let result = tokio::time::timeout(Duration::from_secs(1), shared.wait_for_cleanup())
+                .await
+                .unwrap();
+            assert_eq!(result.is_err(), capture_panics);
+            render_finished
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap();
+            assert_eq!(device.capture.join_shutdown().is_err(), capture_panics);
+            assert!(device.render.join_shutdown().is_ok());
+            assert_eq!(shared.wait_for_cleanup().await.is_err(), capture_panics);
+            assert!(Arc::ptr_eq(&retained_mixer, &device.mixer));
+            drop(retained_source);
+            drop(retained_mixer);
+            drop(device);
+            drop(monitor);
+            println!("native shutdown capture_panics={capture_panics} live_device_source_mixer=true both_owner_threads_joined=true held_render_waited=true failure_sticky=true source_destructor_bounds=false physical_audio=false");
+        }
     }
 }

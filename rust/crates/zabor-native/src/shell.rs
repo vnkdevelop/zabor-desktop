@@ -1667,16 +1667,24 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     mic_test_ui.borrow_mut().close();
     stop.cancel();
     worker.abort();
-    let session_io_result = runtime.block_on(async {
+    let (session_io_result, audio_cleanup_result) = runtime.block_on(async {
         let _ = worker.await;
         let _ = local_settings_job.await;
         let _ = remote_settings_job.await;
-        let _ = audio_runtime_job.await;
-        session_io.finish().await
+        let audio_runtime_result = audio_runtime_job.await;
+        let session_result = session_io.finish().await;
+        let audio_result = audio_runtime.wait_for_cleanup().await;
+        (
+            session_result,
+            audio_runtime_result
+                .map_err(|_| zabor_native::audio_runtime::AudioCleanupError::Incomplete)
+                .and(audio_result),
+        )
     });
     runtime.shutdown_timeout(Duration::from_secs(2));
     ui_result?;
     session_io_result?;
+    audio_cleanup_result?;
     if let Some(error) = capture_error.borrow_mut().take() {
         return Err(error.into());
     }

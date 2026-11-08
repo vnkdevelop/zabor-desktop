@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `b785277`: healthy current Voice
-post-revoke maintenance с повторной проверкой Voice/monitor после подготовки ресурсов.
-Final `voice-maintenance-final-2026-11-08` прошёл269default/259neural-disabled tests
+Последний проверенный компонентный этап после `1245d6b`: native owning-thread
+join и учёт factory/retirement cleanup с сохранением Voice/monitor ownership.
+Final `native-cleanup-final-2026-11-08` прошёл277default/267neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`7f0e4fcb76ec07e2572cfc358ee9c46ff48cc3eb5b47e02636bf9d06fd190db5`.
+`c7d1d39ed311805f5c47a4fc2404ab4442d0d74f0e35022c92017b514a3843e6`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
-compact; actual saved commit брать из Git и
-`native-calls/voice-maintenance-post-save-2026-11-08/saved-boundary.json`.
+compact;actual saved commit брать из Git и
+`native-calls/native-cleanup-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Исторический86d91dfd… stale Voice binary не заменяет
+visual/physical gates. Исторический7f0e4fcb… Voice maintenance binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,114 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Native owning-thread join and registered cleanup — checked locally 2026-11-08
+
+- Healthy Voice post-save **sh_1b921f45c001AGCGnGcYAX6V62 completed/passed**:
+  saved **1245d6b7934d1a719241da69fb007e1241d179f6**,438primary/3reference/
+  24evidence/current+frozen7f0e4fcb… executable+ONNX DLL match; finalProof
+  0b7242d9…,independentProof4e9a95ed…,sourceScopeProof568acd0c…;clean tree.
+  Graphify5843/14171/250 unchanged;labelb7852777 reflects topology-build boundary,
+  post-save actual saved-boundary authoritative. Existing7metadata warnings/
+  HTML5000node limit, no push/release/merge/shutdown.
+- Exactly4existing sources:audio_device.rs/audio_runtime.rs/native_audio.rs/shell.rs,
+  no new source files. DeviceStream retains its OS worker handle behind a mutex
+  and supports shared-reference/idempotent join_shutdown, preserving sticky panic/
+  poisoned-lock failures without recovering poison. Lock-free worker-finished
+  health flag avoids acquiring the held join mutex during health sampling.
+  Owning-thread callback/processor/session/COM cleanup precedes successful join;
+  no physical endpoint, stop_stream result or fatal/syscall deadline acceptance.
+  Legacy DeviceStream Drop still cancels and joins;two existing fixtures use private
+  noncancelling join to retain original auto-completing worker behavior.
+- NativeAudio SharedAudioDevice.finish_shutdown attempts capture and render joins
+  independently, even after capture error, while external device/source/mixer Arcs
+  remain alive. Default trait completion is unsupported, never presumed successful.
+  SharedAudio retirement registers before original synchronous device.cancel,
+  then finish_shutdown/owned-Arc destruction runs on a tracked blocking job, or
+  synchronous no-runtime fallback. Every factory registers before scheduling and
+  retains registration through nested future/capture destruction; rejected late
+  device retirement registers before factory completion so there is no zero-job gap.
+  Canceled/unstarted/panicking/unsupported/incomplete jobs retain sticky failure;
+  canceled waiters do not cancel jobs,Notify is registered before zero-count read.
+  Shell close waits registered work after worker/settings/supervisor/session drain,
+  reports supervisor/cleanup failure before final runtime shutdown.
+- Eight new tests:shared owning DeviceStream join/held non-Send owner destruction/
+  two concurrent joiners/health sampling with live Arc;worker panic/runtime-error/
+  sticky repeated join and joined-worker poison;failed startup waits owner Drop;
+  actual NativeAudio both-thread joining with held render/live source+mixer and
+  success/capture-panic;registry held join/owned Drop/abandoned and two waiters with
+  and without external Arc;revoked late factory with fresh demand/monitor and after
+  SharedAudio destruction;seven failure/unsupported/panic/unstarted cases;no-runtime
+  fallback. Initial104neural-disabled library tests and Clippy passed; then strengthened
+  nested factory capture lifetime,poison/unstarted/two-waiter cases and scheduling
+  fixture without relaxing any old tests/deadlines. No physical devices/prod services.
+- **Sole pending frozen full sh_1b92b4ef1001naPh0v1Y5n9Jrg**,artifacts
+  `native-calls/native-cleanup-final-2026-11-08/`:438primary+3reference,
+  expect267neural-disabled/277default tests,both Clippy/fmt/pinned/9HTTP/
+  protected neural metrics/freshbuild/8inert RUEN/four-DPI interactions,then Graphify.
+  Do not poll/duplicate jobs/edit consumed sources until automatic completion.
+  On pass independently audit438/3/24/current+frozen executable+ONNX/proofs,
+  retained269/259full names/new8tests/runtime16/device13/native1/MicTest4 and
+  all previous owner/quarantine/partial-poison/protocol/main/Leave/SessionIo suites;
+  exact source scope,unchanged legacy cancel/owner/drop/ticket linearization.
+  No nativeAudioThreadJoinChecked/registeredAudioCleanupChecked acceptance/commit yet.
+- Read-only `native-cleanup-source-audit-2026-11-08.json` passed:all source text
+  outside approved lifecycle helpers/new8tests/two private join fixture adapters
+  equals saved1245d6b after newline normalization. All7retirement paths tracked;
+  same healthy Voice final mutation gate,legacy Voice/monitor/reset/cancel ordering,
+  registration-before-cancel/schedule,unconditional both-thread join,owned Drop and
+  nested factory capture destruction before completion,registered Notify-before-zero
+  read,lock-free health/unrecovered poison and final close ordering checked.
+  Audit reconstruction adjusted only a separator newline and fmt-wrapped .and;
+  frozen sources unchanged;temporary source-audit .cjs immediately deleted.
+- Read-only next-stage constraint:VoiceLeave still resets demand and synchronously
+  drops Voice/media/video objects before hint waits;Subscription::drop cancels,
+  pointer-removes lane and aborts without awaiting native-stream task completion.
+  Peer::drop invalidates lifetime/token then clears callbacks/closes connection.
+  Tracked WASAPI join is not permission to defer any of these on fresh owner:
+  need original worker-ticket guarded extraction plus peer/lane/callback ownership,
+  tracked native-stream termination and current Voice/MicTest-independent detachment.
+- Full final **sh_1b92b4ef1001naPh0v1Y5n9Jrg completed/passed**:
+  277default/267neural-disabled tests,both Clippy/fmt/pinned/9HTTP/neural/freshbuild/
+  8inert RUEN/four-DPI auth/roster/audio/MicTest interactions;neural metrics unchanged.
+  Actual/frozen executable **c7d1d39ed311805f5c47a4fc2404ab4442d0d74f0e35022c92017b514a3843e6**.
+  Independent `native-cleanup-final-independent-2026-11-08.json` verified438primary/
+  3reference/24evidence/current+frozen executable+ONNX DLL/4existing source changes/
+  zero new sources;all previous269/259passed names retained with unchanged multiplicity.
+  All8new tests/runtime16/device13/native1/MicTest4/voice1/main20/Leave10/SessionIo6/
+  preferences10/Profile10 suites and original protocol/quarantine/partial-poison/
+  Voice-monitor-generation/RTP controls passed in both modes. Each mode verified
+  19new evidence markers:5owning-worker join/poison/startup cases,2actual NativeAudio
+  both-thread/live-Arc cases,2registered retirement/two-waiter/held-drop cases,
+  2late revoked factory/shared-drop cases,7failure/unstarted cases,no-runtime fallback;
+  all prior32Voice/MicTest maintenance markers and11older controls retained.
+  Source lifecycle audit rechecked exact text outside approved lifecycle helpers/
+  new tests/two private fixture join adapters after newline normalization;all7retire
+  paths registered,original synchronous cancel/Voice-MicTest/ticket/reset/drop ordering,
+  untouched healthy final Voice mutation gate,registered factory capture drain/
+  late retirement,unconditional both-thread joins,owned Drop-before-completion,
+  registered Notify/lock-free health/unrecovered poison/final-close order passed.
+  FinalProof SHA-256 **a6897277d8ae6cee89206ee16d6a86f531c93e3aec5230c9c09ab669567db94c**.
+  0mismatches;Graphify5882nodes/14300edges/257communities,existing7metadata warnings/
+  HTML5000node limit. Temporary independent-audit .cjs immediately deleted;
+  no helper/profile cleanup debt. All jobs complete;save narrow
+  nativeAudioThreadJoinChecked=true/registeredAudioCleanupChecked=true,then post-save
+  Graphify/frozen-source/evidence/current+frozen binary/proof/clean-tree guard and compact.
+  Acceptance covers registered jobs and synthetic owning joins,not sealed future
+  admission,external last-Arc source/RTC destruction or physical endpoint/syscall/
+  fatal/hotplug/worker/UI/OS completion bounds. No push/release/merge/shutdown.
+- Remaining:no new worker-ticket Voice/playback/resource detachment,unknown poisoned
+  Voice ownership remains legacy synchronous;general supervisor/MonitorLease/start/
+  native callback acceptance races remain separate. Retirement cancellation still
+  synchronous;native thread joins,resource locks,notifications/filesystem/drain can
+  wait indefinitely. Tracking covers registered factory and retirement work,not
+  sealed future admission or all external last-Arc source/mixer/RTC destruction;
+  merely successfully joining synthetic workers does not prove physical Windows
+  endpoint shutdown/hung-driver/fatal/hotplug/long-session bounds. Keep original
+  worker/peer/RTP tickets,Voice-MicTest independence and pending quarantine.
+  Downstream ChatEngine::set_friends/SQLite/file-save gates and all remaining
+  media/SFU/control/UI/profile/import/packaging/visual/physical/two-device/full-client
+  work remain open. Full readiness=false;no push/release/merge/shutdown.
 
 ## Healthy Voice post-revoke maintenance — checked locally 2026-11-08
 

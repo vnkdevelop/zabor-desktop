@@ -2,7 +2,7 @@ use crate::audio_route::{DeviceInventory, DeviceRecovery};
 use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
+    mpsc, Arc, Mutex,
 };
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -278,7 +278,21 @@ where
 pub struct DeviceStream {
     stop: CancellationToken,
     failed: Arc<AtomicBool>,
+    finished: Arc<AtomicBool>,
+    worker: Mutex<DeviceWorker>,
+}
+
+struct DeviceWorker {
     thread: Option<JoinHandle<()>>,
+    join_failed: bool,
+}
+
+struct DeviceWorkerFinished(Arc<AtomicBool>);
+
+impl Drop for DeviceWorkerFinished {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 impl DeviceStream {
@@ -568,11 +582,14 @@ impl DeviceStream {
         let worker_stop = stop.clone();
         let failed = Arc::new(AtomicBool::new(false));
         let worker_failed = failed.clone();
+        let finished = Arc::new(AtomicBool::new(false));
+        let worker_finished = finished.clone();
         let (ready, status) = mpsc::sync_channel(1);
         let thread = std::thread::Builder::new()
             .name(name.into())
             .stack_size(16 * 1024 * 1024)
             .spawn(move || {
+                let _finished = DeviceWorkerFinished(worker_finished);
                 if run(worker_stop, ready).is_err() {
                     worker_failed.store(true, Ordering::Release);
                 }
@@ -581,7 +598,11 @@ impl DeviceStream {
         let stream = Self {
             stop,
             failed,
-            thread: Some(thread),
+            finished,
+            worker: Mutex::new(DeviceWorker {
+                thread: Some(thread),
+                join_failed: false,
+            }),
         };
         match status.recv_timeout(Duration::from_secs(30)) {
             Ok(Ok(())) => Ok(stream),
@@ -591,11 +612,7 @@ impl DeviceStream {
 
     pub fn failed(&self) -> bool {
         self.failed.load(Ordering::Acquire)
-            || (self
-                .thread
-                .as_ref()
-                .is_some_and(|thread| thread.is_finished())
-                && !self.stop.is_cancelled())
+            || (self.finished.load(Ordering::Acquire) && !self.stop.is_cancelled())
     }
     pub fn is_cancelled(&self) -> bool {
         self.stop.is_cancelled()
@@ -603,33 +620,199 @@ impl DeviceStream {
     pub fn cancel(&self) {
         self.stop.cancel();
     }
+
+    pub fn join_shutdown(&self) -> Result<(), DeviceError> {
+        self.cancel();
+        self.join()
+    }
+
+    fn join(&self) -> Result<(), DeviceError> {
+        let mut worker = self.worker.lock().map_err(|_| DeviceError)?;
+        if let Some(thread) = worker.thread.take() {
+            worker.join_failed = thread.join().is_err();
+        }
+        if worker.join_failed {
+            Err(DeviceError)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_worker(
+        stop: CancellationToken,
+        run: impl FnOnce(
+                CancellationToken,
+                mpsc::SyncSender<Result<(), DeviceError>>,
+            ) -> Result<(), DeviceError>
+            + Send
+            + 'static,
+    ) -> Result<Self, DeviceError> {
+        Self::spawn("zabor-join-fixture", stop, run)
+    }
 }
 
 impl Drop for DeviceStream {
     fn drop(&mut self) {
-        self.stop.cancel();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        let _ = self.join_shutdown();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+
+    struct OwnerDrop {
+        owner: std::thread::ThreadId,
+        entered: mpsc::Sender<std::thread::ThreadId>,
+        release: mpsc::Receiver<()>,
+        state: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+
+    impl Drop for OwnerDrop {
+        fn drop(&mut self) {
+            assert_eq!(std::thread::current().id(), self.owner);
+            self.state.set(true);
+            self.entered.send(self.owner).unwrap();
+            self.release.recv_timeout(Duration::from_secs(3)).unwrap();
+        }
+    }
+
+    #[test]
+    fn shared_shutdown_join_waits_for_owner_destruction_and_all_concurrent_joiners() {
+        let parent = CancellationToken::new();
+        let (owner_entered, owner_waiting) = mpsc::channel();
+        let (owner_release, owner_blocked) = mpsc::channel();
+        let (run_release, run_blocked) = mpsc::channel();
+        let stream = Arc::new(
+            DeviceStream::test_worker(parent.child_token(), move |_, ready| {
+                let _owner = OwnerDrop {
+                    owner: std::thread::current().id(),
+                    entered: owner_entered,
+                    release: owner_blocked,
+                    state: std::rc::Rc::new(std::cell::Cell::new(false)),
+                };
+                ready.send(Ok(())).unwrap();
+                run_blocked.recv_timeout(Duration::from_secs(3)).unwrap();
+                Ok(())
+            })
+            .unwrap(),
+        );
+        let (started, waiting) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                let stream = stream.clone();
+                let started = started.clone();
+                let done = done.clone();
+                scope.spawn(move || {
+                    started.send(()).unwrap();
+                    done.send(stream.join_shutdown().is_ok()).unwrap();
+                });
+            }
+            waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+            waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+            run_release.send(()).unwrap();
+            let owner = owner_waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert_ne!(owner, std::thread::current().id());
+            assert!(stream.is_cancelled());
+            assert!(!parent.is_cancelled());
+            assert!(!stream.failed());
+            assert_eq!(
+                finished.recv_timeout(Duration::from_millis(30)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            );
+            assert!(!stream.finished.load(Ordering::Acquire));
+            owner_release.send(()).unwrap();
+            assert!(finished.recv_timeout(Duration::from_secs(1)).unwrap());
+            assert!(finished.recv_timeout(Duration::from_secs(1)).unwrap());
+        });
+        assert!(stream.finished.load(Ordering::Acquire));
+        assert!(stream.join_shutdown().is_ok());
+        assert!(stream.worker.lock().unwrap().thread.is_none());
+        println!("device shutdown live_arc=true concurrent_joiners=2 owner_drop_held=true joined_after_owner_drop=true health_nonblocking=true parent_unchanged=true physical_audio=false");
+    }
+
+    #[test]
+    fn shutdown_join_failure_is_sticky_and_runtime_failure_is_not_a_join_failure() {
+        for panics in [false, true] {
+            let (release, blocked) = mpsc::channel();
+            let stream = DeviceStream::test_worker(CancellationToken::new(), move |_, ready| {
+                ready.send(Ok(())).unwrap();
+                blocked.recv_timeout(Duration::from_secs(3)).unwrap();
+                if panics {
+                    panic!("Expected owning device worker panic");
+                }
+                Err(DeviceError)
+            })
+            .unwrap();
+            release.send(()).unwrap();
+            assert_eq!(stream.join_shutdown().is_err(), panics);
+            assert_eq!(stream.join_shutdown().is_err(), panics);
+            assert!(stream.finished.load(Ordering::Acquire));
+            assert_eq!(stream.failed.load(Ordering::Acquire), !panics);
+            assert!(!stream.worker.is_poisoned());
+            println!("device shutdown worker_panics={panics} repeated_join_sticky=true runtime_error_distinct=true poison_not_recovered=true physical_audio=false");
+        }
+        let stream = DeviceStream::test_worker(CancellationToken::new(), |stop, ready| {
+            ready.send(Ok(())).unwrap();
+            stop.cancel();
+            Ok(())
+        })
+        .unwrap();
+        stream.join().unwrap();
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _worker = stream.worker.lock().unwrap();
+            panic!("Expected joined worker fixture poison");
+        }))
+        .is_err());
+        assert!(stream.join_shutdown().is_err());
+        assert!(stream.worker.is_poisoned());
+        println!("device shutdown poisoned_worker=true joined_before_poison=true failure_reported=true poison_retained=true physical_audio=false");
+    }
+
+    #[test]
+    fn failed_startup_does_not_return_before_owning_worker_destruction() {
+        let (owner_entered, owner_waiting) = mpsc::channel();
+        let (owner_release, owner_blocked) = mpsc::channel();
+        let (done, finished) = mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let result =
+                    DeviceStream::test_worker(CancellationToken::new(), move |_, ready| {
+                        let _owner = OwnerDrop {
+                            owner: std::thread::current().id(),
+                            entered: owner_entered,
+                            release: owner_blocked,
+                            state: std::rc::Rc::new(std::cell::Cell::new(false)),
+                        };
+                        ready.send(Err(DeviceError)).unwrap();
+                        Err(DeviceError)
+                    });
+                done.send(result.is_err()).unwrap();
+            });
+            owner_waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert_eq!(
+                finished.recv_timeout(Duration::from_millis(30)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            );
+            owner_release.send(()).unwrap();
+            assert!(finished.recv_timeout(Duration::from_secs(1)).unwrap());
+        });
+        println!("device shutdown failed_startup=true owner_drop_held=true returned_after_owner_join=true physical_audio=false");
+    }
 
     #[test]
     fn owning_processing_stop_is_visible_even_without_os_failure_or_parent_cancellation() {
         let parent = CancellationToken::new();
         let child = parent.child_token();
-        let mut stream = DeviceStream::spawn("zabor-stop-fixture", child, |stop, ready| {
+        let stream = DeviceStream::spawn("zabor-stop-fixture", child, |stop, ready| {
             ready.send(Ok(())).map_err(|_| DeviceError)?;
             stop.cancel();
             Ok(())
         })
         .unwrap();
-        stream.thread.take().unwrap().join().unwrap();
+        stream.join().unwrap();
         assert!(!parent.is_cancelled());
         assert!(!stream.failed());
         assert!(stream.is_cancelled());
@@ -718,7 +901,7 @@ mod tests {
         let observed = Arc::new(Mutex::new(Vec::new()));
         let output = observed.clone();
         let stop = CancellationToken::new();
-        let mut stream = DeviceStream::spawn("zabor-route-fixture", stop, move |stop, ready| {
+        let stream = DeviceStream::spawn("zabor-route-fixture", stop, move |stop, ready| {
             let owner = std::rc::Rc::new(std::cell::Cell::new(0));
             let selection = selected.clone();
             let route = fake_route(selected);
@@ -740,7 +923,7 @@ mod tests {
             })
         })
         .unwrap();
-        stream.thread.take().unwrap().join().unwrap();
+        stream.join().unwrap();
         assert!(!stream.failed());
         let observed = observed.lock().unwrap();
         assert_eq!(observed.len(), 3);
