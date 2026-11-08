@@ -181,6 +181,58 @@ pub(crate) struct MicTestDispose<'a> {
     applied: bool,
 }
 
+pub(crate) struct MicTestMaintenance<'a> {
+    state: MutexGuard<'a, State>,
+    replaced: State,
+    now: Instant,
+    failure: Option<MicTestFailure>,
+    applied: bool,
+}
+
+impl MicTestMaintenance<'_> {
+    pub(crate) fn has_demand(&self) -> bool {
+        self.state.enabled
+            && (self.state.visible
+                || self.failure.is_none() && (self.state.capture.is_some() || self.state.playing))
+    }
+
+    pub(crate) fn apply(&mut self, processor_failed: bool) {
+        if self.applied {
+            return;
+        }
+        if let Some(failure) = self.failure {
+            self.replaced.issue = Some(MicTestIssue::Failed);
+            self.replaced.failure = Some(failure);
+            std::mem::swap(&mut *self.state, &mut self.replaced);
+        } else {
+            self.state.advance(self.now);
+        }
+        if processor_failed
+            && self.state.enabled
+            && (self.state.visible
+                || self
+                    .state
+                    .capture
+                    .as_ref()
+                    .is_some_and(|capture| capture.attached.is_some()))
+        {
+            if self.state.capture.is_some() {
+                self.replaced.issue = Some(MicTestIssue::Failed);
+                self.replaced.failure = Some(MicTestFailure::Processor);
+                std::mem::swap(&mut *self.state, &mut self.replaced);
+            } else {
+                if self.state.failure != Some(MicTestFailure::Processor) {
+                    self.state.input_revision = self.state.input_revision.wrapping_add(1);
+                }
+                self.state.meter_db = -100.0;
+                self.state.issue = Some(MicTestIssue::Failed);
+                self.state.failure = Some(MicTestFailure::Processor);
+            }
+        }
+        self.applied = true;
+    }
+}
+
 impl MicTestDispose<'_> {
     pub(crate) fn apply(&mut self) {
         if !self.applied {
@@ -244,6 +296,35 @@ impl MicTest {
             replaced,
             applied: false,
         }))
+    }
+
+    pub(crate) fn prepare_maintenance(&self, now: Instant) -> Option<MicTestMaintenance<'_>> {
+        let state = self.state.lock().ok()?;
+        let failure = state.capture.as_ref().and_then(|capture| {
+            if let Some(attached) = capture.attached {
+                (now.saturating_duration_since(attached) >= CAPTURE_TIMEOUT)
+                    .then_some(MicTestFailure::CaptureTimeout)
+            } else {
+                (now >= capture.preparation_deadline).then_some(MicTestFailure::PreparationTimeout)
+            }
+        });
+        let replaced = State {
+            generation: state.generation.wrapping_add(1),
+            input_revision: state.input_revision,
+            enabled: state.enabled,
+            visible: state.visible,
+            playback_revision: state.playback_revision.wrapping_add(1),
+            render_sequence: state.render_sequence,
+            meter_db: -100.0,
+            ..State::default()
+        };
+        Some(MicTestMaintenance {
+            state,
+            replaced,
+            now,
+            failure,
+            applied: false,
+        })
     }
 
     pub fn begin(&self, now: Instant) -> Option<CaptureToken> {
@@ -601,5 +682,94 @@ mod tests {
         assert!(!test.validate_playback(ticket, 7));
         assert!(!test.capture(token, &[0.1; 480], -20.0, now));
         assert_eq!(test.snapshot(now), MicTestSnapshot::default());
+    }
+
+    #[test]
+    fn prepared_maintenance_matches_legacy_timing_and_failure_with_deferred_buffer_destruction() {
+        for mode in [
+            "arming",
+            "recording",
+            "preparation-timeout",
+            "capture-timeout",
+            "hidden",
+            "ready",
+            "disabled",
+        ] {
+            for processor_failed in [false, true] {
+                let legacy = MicTest::default();
+                let guarded = MicTest::default();
+                let now = Instant::now();
+                for test in [&legacy, &guarded] {
+                    test.configure(true, true);
+                    let token = test.begin(now).unwrap();
+                    if ["recording", "capture-timeout", "hidden", "ready"].contains(&mode) {
+                        assert!(test.prepared(token, now));
+                    }
+                    if mode == "ready" {
+                        test.snapshot(now + MONITOR_SETTLE);
+                        for index in 0..500 {
+                            assert!(test.capture(
+                                token,
+                                &[0.1; 480],
+                                -20.0,
+                                now + MONITOR_SETTLE
+                                    + PIPELINE_FLUSH
+                                    + Duration::from_millis(index * 10)
+                            ));
+                        }
+                    } else if mode == "hidden" {
+                        test.configure(true, false);
+                    } else if mode == "disabled" {
+                        test.configure(false, false);
+                    }
+                }
+                let time = match mode {
+                    "preparation-timeout" => now + PREPARATION_TIMEOUT,
+                    "capture-timeout" => now + CAPTURE_TIMEOUT,
+                    _ => now + MONITOR_SETTLE,
+                };
+                let original = guarded.snapshot(now);
+                let token = guarded.capture_token();
+                drop(guarded.prepare_maintenance(time).unwrap());
+                assert_eq!(guarded.snapshot(now), original);
+                assert_eq!(guarded.capture_token(), token);
+                let mut plan = guarded.prepare_maintenance(time).unwrap();
+                let buffer = plan
+                    .state
+                    .capture
+                    .as_ref()
+                    .map(|capture| capture.buffer.as_ptr());
+                legacy.snapshot(time);
+                assert_eq!(plan.has_demand(), legacy.has_demand());
+                if processor_failed {
+                    if let Some(token) = legacy.capture_token() {
+                        legacy.fail(token, MicTestFailure::Processor);
+                    }
+                }
+                plan.apply(processor_failed);
+                let generation = plan.state.generation;
+                plan.apply(processor_failed);
+                assert_eq!(plan.state.generation, generation);
+                if let Some(buffer) = buffer {
+                    if plan.state.capture.is_none() {
+                        let retired = plan.replaced.capture.as_ref().unwrap();
+                        assert_eq!(retired.buffer.as_ptr(), buffer);
+                        assert_eq!(retired.buffer.len(), CLIP_SAMPLES);
+                    }
+                }
+                let state = legacy.state.lock().unwrap();
+                assert_eq!(plan.state.generation, state.generation);
+                assert_eq!(plan.state.input_revision, state.input_revision);
+                assert_eq!(plan.state.playback_revision, state.playback_revision);
+                assert_eq!(plan.state.render_sequence, state.render_sequence);
+                assert_eq!(plan.state.pending, state.pending);
+                assert_eq!(plan.state.route, state.route);
+                drop(state);
+                drop(plan);
+                assert_eq!(guarded.snapshot(time), legacy.snapshot(time));
+                assert_eq!(guarded.capture_token(), legacy.capture_token());
+                println!("mic maintenance mode={mode} processor_failed={processor_failed} abandoned_unchanged=true apply_once=true legacy_result=true buffer_destruction_deferred=true physical_audio=false");
+            }
+        }
     }
 }

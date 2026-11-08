@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `0315f56`: generation-scoped
-Voice status clearing и known-stale VoiceLease shared-maintenance rejection.
-Final `stale-voice-cleanup-final-2026-11-08` прошёл264default/254neural-disabled tests
+Последний проверенный компонентный этап после `b785277`: healthy current Voice
+post-revoke maintenance с повторной проверкой Voice/monitor после подготовки ресурсов.
+Final `voice-maintenance-final-2026-11-08` прошёл269default/259neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`86d91dfd719b3d5a579620bc2ecc1f171e93c25ff3fa0585154c476f5dee86a8`.
+`7f0e4fcb76ec07e2572cfc358ee9c46ff48cc3eb5b47e02636bf9d06fd190db5`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
 compact; actual saved commit брать из Git и
-`native-calls/stale-voice-cleanup-post-save-2026-11-08/saved-boundary.json`.
+`native-calls/voice-maintenance-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Исторический14b0f8a9… normal Logout binary не заменяет
+visual/physical gates. Исторический86d91dfd… stale Voice binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,90 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Healthy Voice post-revoke maintenance — checked locally 2026-11-08
+
+- Stale-Voice post-save **sh_1b90a022e001Z7z42BgnZ8ZoIk completed/passed**:
+  saved **b78527771433c98fd38b265e05df50bbff8c7f2c**,438primary/3reference/
+  24evidence/current+frozen86d91dfd… executable+ONNX DLL match; finalProof
+  a2048bf8…, independentProofb45bc3e9…; clean tree. Graphify5828/14094/249
+  unchanged; report label0315f56d reflects unchanged topology, saved-boundary
+  authoritative. Existing7metadata warnings/HTML5000node limit, no push/release/shutdown.
+- Exactly2existing source changes:audio_runtime.rs/mic_test.rs, no new sources.
+  Healthy current VoiceLease drop still revokes synchronously, then prepares runtime
+  and MicTest guards plus native-health snapshot outside the short voice mutex.
+  Before any mutation it rechecks original revoked Voice generation/zero reservation
+  and the monitor generation captured before revoke. Replaced Voice or monitor
+  rejects the old timing/failure/idle/device/pending mutations and notification.
+  Accepted pending cancellation first marks revoked under resource+voice guards,
+  retaining pending factory quarantine; token/watch/native retire/Notify happen
+  after all guards release. Public revoke/status/drop ordering unchanged;
+  known-stale rejection unchanged, unknown poisoned ownership still uses legacy
+  synchronous maintenance without poison recovery. General maintain/reset/start,
+  MonitorLease/VoiceSession/worker/intent/Profile/SessionIo/WASAPI/DSP/UI unchanged.
+- Prepared MicTest maintenance predicts time advance without mutation, preserves
+  enabled/visible/input/playback/render revisions, swaps any retired capture buffer
+  into owned replacement state, and applies once. Destruction follows voice and
+  runtime guard release, preserving one memory-only5second/240000sample clip.
+- Five new tests: post-revoke new Voice/monitor versus held MicTest/runtime resources;
+  actual current lease drop held native-health with fresh Voice and free voice gate;
+  accepted pending quarantine/held native cancel after all guards with fresh leases;
+  12healthy/MicTest/runtime partial-poison idle/timeout/DSP/endpoint legacy parity
+  cases;14MicTest arming/recording/two deadlines/hidden/ready/disabled and processor
+  cases, discarded plans unchanged/idempotent apply/retired buffer pointer retained.
+  Development no-neural lib96tests passed. Initial Clippy found only test fixture
+  type-complexity; corrected new fixture to named MaintenanceCheck, no lint bypass.
+- **Sole pending frozen full sh_1b9131785001ss4nNvStz1jSvH**, artifacts
+  `native-calls/voice-maintenance-final-2026-11-08/`:438primary+3reference,
+  expected259neural-disabled/269default tests,both Clippy/fmt/pinned/9HTTP/
+  protected neural metrics/freshbuild/8inert RUEN/four-DPI interactions,then Graphify.
+  Do not poll/duplicate jobs/edit consumed sources before automatic completion.
+  On pass independently verify all438/3/24/current+frozen executable+ONNX/proofs,
+  retained264/254full test names/new5tests/runtime12/MicTest4 and previous suites,
+  exact source scope/generation guards/resource and destruction order/poison path.
+  No voiceMaintenanceOwnershipChecked or healthyCurrentRevokeMaintenanceRaceChecked
+  acceptance/commit yet; tests do not establish physical/native endpoint bounds.
+- Read-only source audit `voice-maintenance-source-audit-2026-11-08.json` passed:
+  exact source text outside new helpers/drop/new tests equals savedb785277 after
+  newline normalization; native health before voice mutex, original Voice+monitor
+  rechecks and pending quarantine before any deferred cancel/retire/Notify verified.
+  Audit anchor initially retained one added separator newline at the MicTest tail;
+  corrected reconstruction only, no consumed-source changes. No temporary helpers.
+- Full final **sh_1b9131785001ss4nNvStz1jSvH completed/passed**:
+  269default/259neural-disabled tests,both Clippy/fmt/pinned/9HTTP/neural/freshbuild/
+  8inert RUEN/four-DPI auth/roster/audio/MicTest interactions. Neural metrics unchanged.
+  Actual/frozen executable **7f0e4fcb76ec07e2572cfc358ee9c46ff48cc3eb5b47e02636bf9d06fd190db5**.
+  Independent `voice-maintenance-final-independent-2026-11-08.json` verified438primary/
+  3reference/24evidence/current+frozen executable+ONNX DLL/2existing source changes/
+  zero new sources; all previous264/254passed names retained with unchanged multiplicity.
+  All5new tests/runtime12/MicTest4/voice1/main20/Leave10/SessionIo6/preferences10/
+  Profile10 suites and prior protocol/pending-quarantine/poison/original-ticket controls
+  passed in both modes. Each mode includes32new evidence markers:4post-revoke resource/
+  replacement cases,actual held native-health lease drop,accepted quarantined pending/
+  held cancel,12partial-poison legacy parity and14MicTest timer/failure/abandoned/
+  idempotent/deferred-buffer cases. Source-owner audit rechecked exact byte-equivalence
+  outside approved helpers/drop/new tests after newline normalization, no native work/
+  resource-lock acquisition/buffer destruction inside healthy accepted voice gate;
+  original Voice+monitor checks, quarantine-before-cancel and all-guard release before
+  token/watch/retire/Notify preserved. Unknown poisoned Voice path remains legacy;
+  public revoke/status/VoiceSession order and general maintain/reset/start/MonitorLease
+  unchanged. FinalProof SHA-256 **0b7242d97e144dbab33219debe714430a3c7a7b86a3dd3ed98cbe7318400c23a**.
+  0mismatches; Graphify5843nodes/14171edges/250communities,existing7metadata warnings/
+  HTML5000node limit. Temporary audit .cjs immediately removed, no cleanup debt.
+  All jobs complete; save narrow voiceMaintenanceOwnershipChecked=true and
+  healthyCurrentRevokeMaintenanceRaceChecked=true, then post-save Graphify/frozen-input/
+  clean-tree/proof guard and compact. These supersede only the healthy current
+  post-revoke mutation race, not unknown-poison/general/native completion boundaries.
+  No push/release/merge/shutdown.
+- Remaining: resource locks and native-health sampling hold runtime/MicTest resources
+  synchronously outside the voice gate, native cancel/watch/Notify/destruction and
+  last-Arc-drop remain unbounded/untracked. Unknown poisoned Voice ownership and
+  general supervisor/MonitorLease/reset/start/factory callback acceptance races
+  remain separate; do not infer safe generalized off-thread cleanup. Need explicit
+  original worker-ticket detachment and tracked cleanup/drain for worker/UI/Leave/
+  disconnect, actual Windows endpoint/thread/fatal/hotplug/filesystem/journal timing,
+  downstream chat/SQLite/file-save and remaining media/UI/profile/import/packaging/
+  visual/physical/two-device/full-client gates. Readiness flags remainfalse.
 
 ## Stale Voice audio cleanup continuation — checked locally 2026-11-08
 

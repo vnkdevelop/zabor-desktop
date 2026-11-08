@@ -554,6 +554,74 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
         }
     }
 
+    fn maintain_after_voice(&self, generation: u64, monitor: u64, now: Instant) -> bool {
+        let mut state = self.state.lock().ok();
+        let mut mic_test = self.mic_test.prepare_maintenance(now);
+        let wanted = mic_test
+            .as_ref()
+            .is_some_and(|mic_test| mic_test.has_demand())
+            && !self.stop.is_cancelled();
+        let device = state.as_ref().and_then(|state| state.device.as_ref());
+        let runtime_failed = wanted && device.is_some_and(|device| device.runtime_failed());
+        let processor_failed = wanted
+            && (runtime_failed
+                || device.is_some_and(|device| device.failed() && !device.processor_recovering()));
+        let voice = match self.demand.voice.lock() {
+            Ok(voice) => voice,
+            Err(error) => {
+                drop(error);
+                drop(mic_test);
+                drop(state);
+                self.maintain(now);
+                return true;
+            }
+        };
+        if generation == 0
+            || voice.next != generation
+            || voice.reserved != 0
+            || self.monitor.load(Ordering::Acquire) != monitor
+        {
+            return false;
+        }
+        let wanted = wanted && !self.stop.is_cancelled();
+        if let Some(mic_test) = &mut mic_test {
+            mic_test.apply(wanted && state.is_some() && processor_failed);
+        }
+        let mut retired = None;
+        let mut pending = None;
+        if let Some(state) = &mut state {
+            if !wanted {
+                if let Some(start) = &state.pending {
+                    start.revoked.store(true, Ordering::Release);
+                    pending = Some(start.clone());
+                }
+                let idle = state.idle_since.get_or_insert(now);
+                if self.stop.is_cancelled() || now.saturating_duration_since(*idle) >= IDLE_RELEASE
+                {
+                    retired = state.device.take();
+                    state.failed = false;
+                }
+            } else {
+                state.idle_since = None;
+                if runtime_failed {
+                    retired = state.device.take();
+                    state.failed = true;
+                }
+            }
+        }
+        drop(voice);
+        drop(state);
+        drop(mic_test);
+        if let Some(pending) = pending {
+            pending.stop.cancel();
+            pending.ready.send_replace(Some(Err(())));
+        }
+        if let Some(device) = retired {
+            Self::retire(device);
+        }
+        true
+    }
+
     pub async fn run(self: Arc<Self>) {
         let mut tick = tokio::time::interval(std::time::Duration::from_millis(50));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -658,8 +726,19 @@ impl<D: SharedAudioDevice> VoiceLease<D> {
 
 impl<D: SharedAudioDevice> Drop for VoiceLease<D> {
     fn drop(&mut self) {
-        if self.shared.demand.revoke_if_current(self.generation) != Some(false) {
-            self.shared.maintain(Instant::now());
+        let monitor = self.shared.monitor.load(Ordering::Acquire);
+        let maintained = match self.shared.demand.revoke_if_current(self.generation) {
+            Some(false) => false,
+            Some(true) => {
+                self.shared
+                    .maintain_after_voice(self.generation, monitor, Instant::now())
+            }
+            None => {
+                self.shared.maintain(Instant::now());
+                true
+            }
+        };
+        if maintained {
             self.shared.changed.notify_one();
         }
     }
@@ -1145,6 +1224,373 @@ mod tests {
             assert!(monitor.is_current());
             assert_eq!(shared.mic_test.snapshot(Instant::now()), snapshot);
             println!("current voice cleanup poison={poisoned} status_before_revoke=true monitor_unchanged=true legacy_partial=true physical_audio=false");
+        }
+    }
+
+    struct MaintenanceCheck {
+        entered: std::sync::mpsc::Sender<()>,
+        release: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    }
+
+    struct MaintenanceDevice {
+        failed: bool,
+        runtime_failed: bool,
+        check: Option<MaintenanceCheck>,
+        cancelled: AtomicBool,
+    }
+
+    impl SharedAudioDevice for MaintenanceDevice {
+        fn failed(&self) -> bool {
+            self.failed
+        }
+
+        fn runtime_failed(&self) -> bool {
+            if let Some(check) = &self.check {
+                if let Some(release) = check.release.lock().unwrap().take() {
+                    check.entered.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(3)).unwrap();
+                }
+            }
+            self.runtime_failed
+        }
+
+        fn cancel(&self) {
+            self.cancelled.store(true, Ordering::Release);
+        }
+    }
+
+    #[test]
+    fn post_revoke_maintenance_rejects_new_voice_and_monitor_after_resource_acquisition() {
+        for resource in ["mic-test", "runtime"] {
+            for replacement in ["voice", "monitor"] {
+                let shared = reset_runtime();
+                let old_monitor = shared.monitor(true);
+                let monitor = shared.monitor.load(Ordering::Acquire);
+                let generation = shared.demand.reserve().unwrap();
+                assert!(shared.demand.activate(generation));
+                assert_eq!(shared.demand.revoke_if_current(generation), Some(true));
+                let current_voice = (replacement == "voice").then(|| {
+                    let current = shared.demand.reserve().unwrap();
+                    assert!(shared.demand.activate(current));
+                    current
+                });
+                let current_monitor = (replacement == "monitor").then(|| shared.monitor(true));
+                let now = Instant::now();
+                let token = shared.mic_test.begin(now).unwrap();
+                let snapshot = shared.mic_test.snapshot(now);
+                let pending = Arc::new(Pending {
+                    stop: CancellationToken::new(),
+                    ready: watch::channel(None).0,
+                    revoked: AtomicBool::new(false),
+                });
+                {
+                    let mut state = shared.state.lock().unwrap();
+                    state.pending = Some(pending.clone());
+                    state.failed = true;
+                    state.idle_since = Some(now);
+                }
+                let epoch = shared.demand.controls.capture_epoch.load(Ordering::Acquire);
+                shared
+                    .demand
+                    .controls
+                    .speaking
+                    .store(true, Ordering::Release);
+                shared
+                    .demand
+                    .controls
+                    .mic_db
+                    .store((-17.0_f32).to_bits(), Ordering::Release);
+                let mic_test = (resource == "mic-test")
+                    .then(|| shared.mic_test.try_prepare_dispose().unwrap().unwrap());
+                let state = (resource == "runtime").then(|| shared.state.lock().unwrap());
+                let (entered, waiting) = std::sync::mpsc::channel();
+                let (done, finished) = std::sync::mpsc::channel();
+                std::thread::scope(|scope| {
+                    scope.spawn(|| {
+                        entered.send(()).unwrap();
+                        done.send(shared.maintain_after_voice(
+                            generation,
+                            monitor,
+                            now + PREPARATION_TIMEOUT * 2,
+                        ))
+                        .unwrap();
+                    });
+                    waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                    assert_eq!(
+                        finished.recv_timeout(Duration::from_millis(30)),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                    );
+                    assert!(shared.demand.voice.try_lock().is_ok());
+                    drop(mic_test);
+                    drop(state);
+                    assert!(!finished.recv_timeout(Duration::from_millis(1500)).unwrap());
+                });
+                assert_eq!(shared.demand.active(), current_voice.unwrap_or(0));
+                assert_eq!(
+                    shared.demand.controls.capture_epoch.load(Ordering::Acquire),
+                    epoch
+                );
+                assert!(shared.demand.controls.speaking.load(Ordering::Acquire));
+                assert_eq!(
+                    f32::from_bits(shared.demand.controls.mic_db.load(Ordering::Acquire)),
+                    -17.0
+                );
+                assert_eq!(shared.mic_test.capture_token(), Some(token));
+                assert_eq!(shared.mic_test.snapshot(now), snapshot);
+                assert!(!pending.revoked.load(Ordering::Acquire));
+                assert!(!pending.stop.is_cancelled());
+                assert!(pending.ready.borrow().is_none());
+                let state = shared.state.lock().unwrap();
+                assert!(state.failed);
+                assert_eq!(state.idle_since, Some(now));
+                assert!(Arc::ptr_eq(state.pending.as_ref().unwrap(), &pending));
+                drop(state);
+                assert_eq!(old_monitor.is_current(), replacement == "voice");
+                assert!(current_monitor
+                    .as_ref()
+                    .is_none_or(MonitorLease::is_current));
+                println!("voice maintenance held={resource} replacement={replacement} post_revoke=true original_generations=true rejected_after_resources=true fresh_state_unchanged=true physical_audio=false");
+            }
+        }
+    }
+
+    #[test]
+    fn current_lease_drop_rechecks_ownership_after_native_health_without_holding_voice_gate() {
+        let shared = SharedAudio::new(
+            Arc::new(AudioControls::new(AudioSettings::default())),
+            CancellationToken::new(),
+            |_, _, _| Box::pin(async { panic!("No device should start in a maintenance fixture") }),
+        );
+        let monitor = shared.monitor(true);
+        let now = Instant::now();
+        let token = shared.mic_test.begin(now).unwrap();
+        let snapshot = shared.mic_test.snapshot(now);
+        let generation = shared.demand.reserve().unwrap();
+        assert!(shared.demand.activate(generation));
+        let old = VoiceLease {
+            shared: shared.clone(),
+            generation,
+            device: None,
+        };
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let device = Arc::new(MaintenanceDevice {
+            failed: true,
+            runtime_failed: true,
+            check: Some(MaintenanceCheck {
+                entered,
+                release: Mutex::new(Some(blocked)),
+            }),
+            cancelled: AtomicBool::new(false),
+        });
+        shared.state.lock().unwrap().device = Some(device.clone());
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                drop(old);
+                done.send(()).unwrap();
+            });
+            waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert_eq!(shared.demand.active(), 0);
+            assert!(shared.demand.voice.try_lock().is_ok());
+            let current = shared.demand.reserve().unwrap();
+            assert!(shared.demand.activate(current));
+            let epoch = shared.demand.controls.capture_epoch.load(Ordering::Acquire);
+            shared
+                .demand
+                .controls
+                .speaking
+                .store(true, Ordering::Release);
+            shared
+                .demand
+                .controls
+                .mic_db
+                .store((-17.0_f32).to_bits(), Ordering::Release);
+            release.send(()).unwrap();
+            finished.recv_timeout(Duration::from_millis(1500)).unwrap();
+            assert_eq!(shared.demand.active(), current);
+            assert_eq!(
+                shared.demand.controls.capture_epoch.load(Ordering::Acquire),
+                epoch
+            );
+            assert!(shared.demand.controls.speaking.load(Ordering::Acquire));
+            assert_eq!(
+                f32::from_bits(shared.demand.controls.mic_db.load(Ordering::Acquire)),
+                -17.0
+            );
+            assert_eq!(shared.mic_test.capture_token(), Some(token));
+            assert_eq!(shared.mic_test.snapshot(now), snapshot);
+            assert!(monitor.is_current());
+            let state = shared.state.lock().unwrap();
+            assert!(Arc::ptr_eq(state.device.as_ref().unwrap(), &device));
+            assert!(!state.failed);
+            assert!(state.idle_since.is_none());
+            assert!(!device.cancelled.load(Ordering::Acquire));
+        });
+        println!("voice maintenance held=native-health actual_lease_drop=true voice_gate_free=true fresh_voice_unchanged=true native_snapshot_rejected=true physical_audio=false");
+    }
+
+    #[test]
+    fn accepted_voice_maintenance_quarantines_pending_and_retires_after_all_resource_release() {
+        let shared = reset_runtime();
+        let generation = shared.demand.reserve().unwrap();
+        assert!(shared.demand.activate(generation));
+        let lease = VoiceLease {
+            shared: shared.clone(),
+            generation,
+            device: None,
+        };
+        let pending = Arc::new(Pending {
+            stop: CancellationToken::new(),
+            ready: watch::channel(None).0,
+            revoked: AtomicBool::new(false),
+        });
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        {
+            let mut state = shared.state.lock().unwrap();
+            state.device = Some(Arc::new(ResetDevice {
+                entered,
+                release: Mutex::new(blocked),
+            }));
+            state.pending = Some(pending.clone());
+            state.idle_since = Some(Instant::now() - IDLE_RELEASE * 2);
+        }
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                drop(lease);
+                done.send(()).unwrap();
+            });
+            waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+            assert!(pending.revoked.load(Ordering::Acquire));
+            assert!(pending.stop.is_cancelled());
+            assert!(matches!(*pending.ready.borrow(), Some(Err(()))));
+            assert!(shared.demand.voice.try_lock().is_ok());
+            assert!(shared.state.try_lock().is_ok());
+            assert!(shared.mic_test.try_prepare_dispose().unwrap().is_some());
+            let monitor = shared.monitor(true);
+            let current = shared.demand.reserve().unwrap();
+            assert!(shared.demand.activate(current));
+            assert!(shared.start(true).is_err());
+            let epoch = shared.demand.controls.capture_epoch.load(Ordering::Acquire);
+            let snapshot = shared.mic_test.snapshot(Instant::now());
+            release.send(()).unwrap();
+            finished.recv_timeout(Duration::from_millis(1500)).unwrap();
+            assert!(monitor.is_current());
+            assert_eq!(shared.demand.active(), current);
+            assert_eq!(
+                shared.demand.controls.capture_epoch.load(Ordering::Acquire),
+                epoch
+            );
+            assert_eq!(shared.mic_test.snapshot(Instant::now()), snapshot);
+            let state = shared.state.lock().unwrap();
+            assert!(state.device.is_none());
+            assert!(!state.failed);
+            assert!(Arc::ptr_eq(state.pending.as_ref().unwrap(), &pending));
+            drop(state);
+        });
+        println!("voice maintenance held=device-cancel actual_lease_drop=true pending_quarantined=true resource_locks_released=true fresh_leases_unchanged=true physical_audio=false");
+    }
+
+    #[test]
+    fn prepared_voice_maintenance_preserves_legacy_idle_failure_and_partial_poison_results() {
+        for resource in ["healthy", "mic-test", "runtime"] {
+            for mode in ["idle", "timeout", "processor", "endpoint"] {
+                let mut fixtures = Vec::new();
+                let now = Instant::now();
+                for _ in 0..2 {
+                    let shared = SharedAudio::new(
+                        Arc::new(AudioControls::new(AudioSettings::default())),
+                        CancellationToken::new(),
+                        |_, _, _| {
+                            Box::pin(async { panic!("No device should start in a parity fixture") })
+                        },
+                    );
+                    let monitor = (mode != "idle").then(|| shared.monitor(true));
+                    if mode != "idle" {
+                        shared.mic_test.begin(now).unwrap();
+                    }
+                    let generation = shared.demand.reserve().unwrap();
+                    assert!(shared.demand.activate(generation));
+                    let device = Arc::new(MaintenanceDevice {
+                        failed: mode == "processor" || mode == "endpoint",
+                        runtime_failed: mode == "endpoint",
+                        check: None,
+                        cancelled: AtomicBool::new(false),
+                    });
+                    {
+                        let mut state = shared.state.lock().unwrap();
+                        state.device = Some(device.clone());
+                        state.idle_since = Some(now - IDLE_RELEASE * 2);
+                    }
+                    if resource != "healthy" {
+                        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            if resource == "mic-test" {
+                                let _held = shared.mic_test.try_prepare_dispose().unwrap().unwrap();
+                                panic!("Expected maintenance MicTest fixture poison");
+                            } else {
+                                let _held = shared.state.lock().unwrap();
+                                panic!("Expected maintenance runtime fixture poison");
+                            }
+                        }))
+                        .is_err());
+                    }
+                    fixtures.push((shared, generation, device, monitor));
+                }
+                let time = if mode == "timeout" {
+                    now + PREPARATION_TIMEOUT
+                } else {
+                    now
+                };
+                let (legacy, old, legacy_device, _) = &fixtures[0];
+                let (prepared, current, prepared_device, _) = &fixtures[1];
+                legacy.demand.revoke(*old);
+                legacy.maintain(time);
+                let monitor = prepared.monitor.load(Ordering::Acquire);
+                assert_eq!(prepared.demand.revoke_if_current(*current), Some(true));
+                assert!(prepared.maintain_after_voice(*current, monitor, time));
+                assert_eq!(prepared.demand.active(), legacy.demand.active());
+                assert_eq!(
+                    prepared
+                        .demand
+                        .controls
+                        .capture_epoch
+                        .load(Ordering::Acquire),
+                    legacy.demand.controls.capture_epoch.load(Ordering::Acquire)
+                );
+                assert_eq!(
+                    prepared.mic_test.snapshot(time),
+                    legacy.mic_test.snapshot(time)
+                );
+                assert_eq!(
+                    prepared.mic_test.capture_token(),
+                    legacy.mic_test.capture_token()
+                );
+                assert_eq!(
+                    prepared_device.cancelled.load(Ordering::Acquire),
+                    legacy_device.cancelled.load(Ordering::Acquire)
+                );
+                let before = legacy
+                    .state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                let after = prepared
+                    .state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                assert_eq!(after.failed, before.failed);
+                assert_eq!(after.idle_since, before.idle_since);
+                assert_eq!(after.device.is_some(), before.device.is_some());
+                assert_eq!(prepared.state.is_poisoned(), resource == "runtime");
+                assert_eq!(
+                    prepared.mic_test.try_prepare_dispose().is_err(),
+                    resource == "mic-test"
+                );
+                drop(after);
+                drop(before);
+                println!("voice maintenance parity resource={resource} mode={mode} legacy_result=true poison_retained=true physical_audio=false");
+            }
         }
     }
 

@@ -858,10 +858,38 @@ generation guard/poison/public revoke API/legacy drop order audited.
 Executable SHA-256:
 `86d91dfd719b3d5a579620bc2ecc1f171e93c25ff3fa0585154c476f5dee86a8`.
 staleVoiceAudioCleanupChecked=true is narrow known-stale component acceptance;
-source save/post-save Graphify/guard/compact next, no push/release/shutdown.
-Unknown poisoned ownership/current revoke-to-maintenance race and blocking voice/resource/native/
+savedb78527771433c98fd38b265e05df50bbff8c7f2c/post-save Graphify/438/3/24/
+current+frozen binary/proof/clean-tree guard passed, compact done; no publication.
+Unknown poisoned ownership/general cleanup races and blocking voice/resource/native/
 notification/destructor cleanup still require prepared detachment and tracked
 completion. No off-thread cleanup introduced or native responsiveness claimed.
+
+### Healthy current Voice post-revoke maintenance: components checked locally
+
+Current VoiceLease cleanup prepares runtime/MicTest guards and native-health
+snapshot before the short voice mutex, then rechecks original revoked Voice and
+captured monitor generation before any timing/failure/runtime/pending mutation.
+Accepted pending cancellation quarantines before deferred token/watch/native work;
+all cancellation/destruction/Notify follows resource+voice guard release.
+Prepared MicTest time/failure replacement retains retired buffers until outside
+that gate. Known-stale skip/public revoke/status/drop order and unknown-poison
+legacy synchronous behavior retained; general runtime/monitor/worker/UI unchanged.
+Final `native-calls/voice-maintenance-final-2026-11-08/` passed269default/
+259neural-disabled tests,both Clippy/fmt/pinned/9HTTP/neural/freshbuild/8inert
+RUEN/four-DPI interactions; protected neural metrics unchanged. Independent
+438primary/3reference/24evidence/current+frozen executable+ONNX audit found0mismatches;
+all prior264/254full test names retained with unchanged multiplicity,new5tests/
+runtime12/MicTest4/voice1/main20/Leave10/SessionIo6/preferences10/Profile10 passed.
+Each mode verified32new resource/replacement/native-health/quarantine/partial-poison/
+MicTest timer/failure/abandoned/idempotent/deferred-buffer evidence markers.
+Exact source scope/generation/resource-release/legacy drop-order audit passed.
+Executable SHA-256:
+`7f0e4fcb76ec07e2572cfc358ee9c46ff48cc3eb5b47e02636bf9d06fd190db5`.
+voiceMaintenanceOwnershipChecked=true and healthyCurrentRevokeMaintenanceRaceChecked=true
+are narrow healthy-path component acceptance; save/post-save Graphify/guard/compact next.
+Resource/health/unknown-poison/general-maintenance/token/watch/destructor waits and
+actual native cleanup completion remain open. No off-thread/worker/native/full-client
+readiness claim; no push/release/merge/shutdown.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
