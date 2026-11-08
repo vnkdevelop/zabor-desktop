@@ -2,6 +2,71 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
+## Latest source636db12 — import component integrated
+
+Checked source `636db12d9f6ab9c6b04e383a5a236e39eb0d7206` integrates43adbcd+e3a3ff5
+in14exactcandidatepaths/Gitblobs.176source/reference/pinhashesunchanged;58affected
+tests/fmt/syntax/helper+nativeClippy/build/Graphify passed. V1failedcountreceipt and
+separatev2mklink-countcorrection retained;58tests inherited,not rerun. Normalbinary
+3ca539664e368b69d9d94f7f4195dafffe3008328b6a95a5f8489ea7ecc7f617.
+Graph7693/19644/304,10warnings/HTML5000skip;no docsemanticclaim. Originaljobsdone,
+ownedTemp/helpertarget/runnersremoved,pinnedcachesretained. No primarycheckpending;
+threecoordinationdocs unsaved. Native/rootmanifest/lock/appseam untouched;helper
+workspace/dependency/account-key/consent/originalworker/recovery/Chromium gatesfalse.
+Next integrations wait for dataP2savedPathfix,RC/update reviews and app/media delivery.
+Whole-native readinessfalse;no push/publication/install/legacydeletion/shutdown.
+
+Reviews now completed:RC6d7b4cf has2P1(STOPaftercleanup,firstshowpassivestyleloss)+3P2
+(oldsubscription,oldACK,pilldrop-before-receipt);update41e0fec has3P1(verify/leaseTOCTOU,
+hostcancel,durablehealthdeadline)+2P2(preResume cancel/expiry,sourcevsstagedPEcheck).
+OriginalRC/updateowners resumed forcheckedfollowups;bothintegrationsblocked. DataP2
+savedPathfix continuesoriginalowner. No primary app/shell/Cargo/resource changes.
+App deliveredonlyclock19c1dcc+doc3968c29,3standaloneDSTtests,noruntimeacceptance;
+P1WIP existsbutuncompiled,misingoptionalSlinttestingindex anddurabilityblockers.
+Primarywillprepareexactofficial1.18.1buildcache,checksum01943d6c5ea5bc913d497bdaa423c309e7627afff47a6794bfd13be5c564209f,
+outsideworkspace(no version/manifest/lockchange),thenresumesoleappaffectedchecks.
+Fulltrust/physical/raster/motion/backend/twodevice/packaging gatesremainfalse.
+
+## Active resume from32cc1e7
+
+Current primary original job `sh_1bcea2b6a001lHgaEODUshKfB1` runs guarded import
+43adbcd+e3a3ff5 integration and58affected tests/fmt/syntax/Clippy/build/Graphify;
+evidence `migration-artifacts/native-data/profile-helper-integration-2026-11-08/checked-v1/`.
+Fourteen exact final Git blobs plus script working/Git/EOL provenance are guarded;
+real Chromium/trust approval/account consent are not supplied. Native/root manifests/
+lock/app renderer seam unchanged. Sources frozen until original automatic result;
+no polling,duplicate jobs or source save. Only coordination docs may change.
+
+User requested continued subagents and remaining gates. Old app resume failed
+pre-consume quota without execution; one fresh short-context sole app takeover
+`ses_e4317ba39ffeB5seOBOzCJYo0V` preserves original job/WIP/owners/joins/dev-seam.
+No retry loop. Data deliveredcheckedbc84383+docs3b9fef6/d25d6c2,42tests;RCdelivered
+checked6d7b4cf,54tests. Both treeclean/no pendingjobs,not integrated. Read-only
+reviews `ses_e43154780ffeQj01ftTNBrv1EM` data and `ses_e43154694ffezOCirYR8xEUzHl` RC
+are pending; no tests/edits delegated. Media/update-host continue original sessions.
+Exact current ownership/receipts/remaining primaryhooks in native-parallel-plan.md.
+Whole-readyfalse;no legacy removal/push/publication/liveinstallation/shutdown.
+
+Importv1 automatically stopped only at test-countguard:allcommands exit0,32profile
+tests passed;two mklink outputs split lines so parser counted30. Actualaggregate58,
+not56. Retainfailedv1receipt;ownedhelper-target/fixtures/runnerremoved. Original
+continuation `sh_1bcecd5c1001Vnl2jBTT6qZbUx`,checked-v2,guards exact source/index
+bytes and records separate count correction,thenunfinishednativeClippy/build/Graphify.
+No already passed tests/helperprocesses rerun.14candidatepaths stageduncommitted;
+sourcefreeze continues,no polling/duplicates/save before automatic result.
+
+Update-hostchecked41e0fec7ac32874aec0f27eb0ec3db2970c547ad+docs86aca29/6015bb4 delivered,
+13tests/staticCRT/fmt/Clippy/Graphify and19hashguard;treeclean,no pendingjobs.
+Staticreview `ses_e4312bdb5ffe6Yi7TPRbCILxKy` pending. Mainhost/health/drain/packaging
+hooks stillneeded;live attest_app_drain and realtrust/baseline/legal stayfailclosed.
+
+DatareviewcompletedoneP2chat.rs560-565:forget_saved_path during active retry changes
+SQLite but not originaldownload snapshots;valid completion/failure can be rejected
+and leave transferring stuck. Original dataowner fixes only ownedchat/store/tests
+with deterministicretry/clear/completion/failure regressions. bc84383integration
+blocked untilcheckedfollowup;no primarysource/importjob changes. Otherqualifying
+original-drain defects notfound,notwholeacceptance.
+
 ## Current parallel continuation — 2026-11-08
 
 Latest checked source is `cba6f348c08fd01b1cebf1d919d298db8d4d1c78`: exact-byte native

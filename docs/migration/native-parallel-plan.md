@@ -2,6 +2,117 @@
 
 Updated: 2026-11-08. Coordination plan, not complete-native acceptance.
 
+## Latest checked primary source636db12
+
+Import pair43adbcd -> e3a3ff5 is integrated and saved as
+`636db12d9f6ab9c6b04e383a5a236e39eb0d7206`,14scopedpaths with exact final candidate
+Git blobs;176source/reference/pin hashes unchanged. Original v1countguard failure
+and v2separate58test correction remain retained. All58unique affectedtests,
+fmt/syntax/helper+nativeClippy/normalbuild/Graphify passed;no tests repeated in v2.
+Normal executableSHA256 `3ca539664e368b69d9d94f7f4195dafffe3008328b6a95a5f8489ea7ecc7f617`.
+Graph7693nodes/19644edges/304communities,10zero-node warnings/HTML5000skip;semantic
+documentation refresh not claimed. Original checks/prep/helpers/reader descendants
+completed;owned fixtures/helpertarget/runners removed,pinned primary caches retained.
+No primary importcheck remains pending;only coordination docs remain unsaved.
+Native/root manifests/locks and app renderer seam unchanged;workspace/dependency,
+original worker/account-key/explicit consent/recovery bindings and Chromium approval
+remain missing. This is component acceptance,not whole-client readiness.
+Data candidate awaits savedPath-race P2followup. RC/update reviews completed with
+actionable findings;original owners fix narrow followups. Fresh sole app delivered
+only clock-source19c1dccc4f334f2ddd960c65212512dfe489ffdb+docs3968c29,3standalone tests
+including Windows DST,not Cargo/UI/runtime acceptance. P1transaction/drain/view-fence
+WIP exists but is uncompiled behind missing i-slint-backend-testing1.18.1 sparse index;
+metadata durability remains unproven. Manifest/lock and all WIP preserved. Official
+registry confirms exact1.18.1 checksum01943d6c5ea5bc913d497bdaa423c309e7627afff47a6794bfd13be5c564209f;
+primary prepares only this build cache outside project manifests,not a version bump.
+
+RC static review found2P1+3P2 in6d7b4cf:STOP after potentially hungcursor cleanup,
+Slintfirstshow resets passive EXSTYLE,oldretiredsubscription can be replaced before
+poll,oldACK may acknowledge new same-contextrequest,attachfailure receipt precedes
+pill-handle destruction. OriginalRCowner resumed for deterministic regressions and
+checkedfollowup;RCintegrationblocked. Physical no-activate/render/IME/UIPI remains
+separate acceptance,not proved by inert tests or Windows docs.
+Update static review found3P1+2P2 in41e0fec:leases acquired after launch verification,
+host cancel absent atdurablehealthgate,healthdeadline not enforced aftertreeverify,
+queuedcancel/expiry uncheckedbeforeResume,helperPEinspection reads mutable source
+instead of stagedcopy. Originalupdateowner fixesonlyownedpaths/affectedregressions,
+checkedfollowuprequired beforeintegration. attest_app_drain and allrealtrust gates
+remain failclosed. Media checked delivery remains pending;original owners preserved.
+
+## Active continuation after checkpoint32cc1e7
+
+Primary resumes checked import pair43adbcd99126d995b39a3edafc1be8bc3e08bc9c ->
+e3a3ff56e22bd4b5994a9b5817cc2e4d4a7f50d1. Original primary integration/check job
+`sh_1bcea2b6a001lHgaEODUshKfB1` is pending; evidence:
+`migration-artifacts/native-data/profile-helper-integration-2026-11-08/checked-v1/`.
+The guard verifies clean32cc1e7,parent relationships,13+3candidate path scopes,
+three common base blobs and14final Git blobs before affected checks. Script working
+bytes/Git/EOL hashes are recorded separately; checkout never inherits trust approval.
+Expected58local tests:32profile,13native Windows helper,6mocked exporter,7mocked
+command-admission. Scope includes fmt/syntax/helper+normalnative Clippy/build/Graphify,
+not real Chromium or a full unchanged matrix. Primary rust/target is separate from
+all child targets; helper target/fixtures are marker-owned approved Temp and cleaned
+after original completion. No polling,duplicate checks,source edits or source save
+before the original result. Only coordination docs may change outside source freeze.
+Root/native manifests/locks,app dev-only renderer seam and other owners remain untouched.
+
+Original primary import-v1 `sh_1bcea2b6a001lHgaEODUshKfB1` automatically completed
+with a count-guard failure,not a failing test:every command exited0;Rust reported
+32profile passed/0failed,while the parser counted30because two mklink subprocess
+outputs split the test-name/final-ok lines. The original failed receipt is retained.
+All58tests actually passed (32+13+6+7);helperClippy/fmt/syntax also passed. V1marker
+owned helper target/fixtures/runner removed. The candidate14paths remain staged,
+uncommitted,with exact final candidate Git blobs;source freeze remains.
+Current original continuation `sh_1bcecd5c1001Vnl2jBTT6qZbUx`,checked-v2,is pending:
+it verifies unchanged source/index hashes,records a separate32profile/58aggregate
+count correction,then only unfinished nativeClippy/normalbuild/Graphify. No test,
+helper process or unchanged matrix is repeated. Own approved-temp runner self-cleans.
+
+The owner again requested continuation with subagents and a remaining-work summary.
+Old app continuation failed pre-consume quota before execution; no source/owner/job
+completion is inferred. A single fresh-context app takeover was admitted as
+`ses_e4317ba39ffeB5seOBOzCJYo0V`, preserving original app job/WIP/joins and sole
+manifest/dev-seam ownership. No quota retry loop is scheduled. Original data/media/
+RC/update-host sessions were resumed with their existing jobs,not new duplicate work.
+
+Checked deliveries now awaiting primary integration:
+- Data sourcebc84383f26032c51c7fd25d7907eddc638965e18;docs3b9fef6f01c0ae1111c77cfdcf9f094b943301d3
+  andd25d6c241cadddc147e9d21604f7eab672b20d1a;42unique tests/fmt/bothClippy/build/Graphify,
+  14hashes exact,treeclean,no pendingjobs. Original failed check and finalV5 receipts
+  are retained. Shell split-revocation/original FileJobs drain/final-worker publication
+  authority remain primary gates. Read-only candidate review
+  `ses_e43154780ffeQj01ftTNBrv1EM` is pending; no tests/edits delegated.
+- RC6d7b4cf11c3d6c00024282d98ccd876f6b1dd278,11paths,54unique tests/fmt/all-targetcompile/
+  strictClippy/Graphify;14hashes exact,treeclean,own targets/fixtures removed,no jobs.
+  Main frame/ACK/viewport/focus/activity/host-pill hooks and physical/two-device gates
+  stay open. Read-only candidate review `ses_e43154694ffezOCirYR8xEUzHl` is pending.
+
+App/media/update-host checked deliveries remain pending. Whole-native readiness=false;
+import authenticated account/key/explicit consent/recovery/registered worker wiring,
+certified update baseline/drain,packaging/native-only launcher/CI/immutable reference,
+final RUEN/raster/motion/accessibility/localbackend/SFU/physical/longsession acceptance
+precede bounded legacy cleanup,push beta3.8.0-rust and non-forced shutdown.
+
+Update-host now delivered source41e0fec7ac32874aec0f27eb0ec3db2970c547ad (13paths),
+initialdocs86aca29 and reconciledreceipt-doc6015bb4a19286545a201bd132ce0bdb3be6b54a6.
+13unique tests (9Rust+4Python),staticCRT/W4WX/fmt/Clippy,19current/17inheritedhashes,
+ownGraphify passed;treeclean,no pendingjobs or temporaryguards. Live app-drain
+attestation remains explicitly fail-closed;positivecertificate/publisher/manifest/
+baseline/legal/realstartup false. Primarymodule/health/originaldrain and narrow
+native-model packaging input hooks are not applied. Read-only source review
+`ses_e4312bdb5ffe6Yi7TPRbCILxKy` is pending;no tests/processes/edits delegated.
+
+Data static review `ses_e43154780ffeQj01ftTNBrv1EM` completed all7candidatepaths;
+one P2 at chat.rs560-565:forget_saved_path can clear SQLite savedPath during an
+active retry without updating original download.registered/metadata snapshots.
+The new whole-file conditional publication then rejects valid completion and its
+failure cleanup,leaving stored transferring state. Data candidate integration is
+blocked pending a narrow checked followup. Original data owner resumed for owned
+chat/store/regression changes only;primary import source/target remains untouched.
+No other qualifying drain/original-job defects found;static review is not runtime
+or power-loss/whole-native acceptance. Unchanged prior suites may be inherited with
+source guards;no unrelated full matrix is repeated for this race correction.
+
 The owner explicitly requested several agents to accelerate the full migration
 and eventual removal of the old client code. The final client has no Electron or
 WebView. Backend .NET, SFU Go and required native C/C++ libraries remain. Legacy

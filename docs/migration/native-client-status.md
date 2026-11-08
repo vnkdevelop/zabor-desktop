@@ -2,6 +2,44 @@
 
 Редакция / updated: 2026-11-08.
 
+Latest checked primarysource `636db12d9f6ab9c6b04e383a5a236e39eb0d7206` integrates
+importpair43adbcd+e3a3ff5:58affectedtests/fmt/syntax/helper+nativeClippy/build/Graphify,
+14exactGitblobs/176unchangedsourcehashes. Normalbinary3ca53966… is componentproof,
+notwholeacceptance. Originalcheckscomplete;ownedfixtures/runnersremoved. Helper
+workspace/native dependency/consent/accountkey/originalworker/recovery stillpending;
+appmanifest/renderer seam preserved and Chromiumapproval absent. DataP2followup,
+RC/update reviews,app/media deliveries remain open. Whole-readyfalse.
+
+Completedreviews blockRC6d7b4cf (2P1+3P2) and update41e0fec (3P1+2P2);original
+ownersfixcheckedfollowups,notprimaryintegration. DataP2savedPathfix remainsopen.
+App clock19c1dcc passed3standaloneDSTtests,not Cargo/UI/runtime acceptance. P1
+transaction WIP uncompiledbehindmissingSlintoptionalindex;Windowsmetadata durability
+notproved. Primaryprepares exactofficialSlint1.18.1cache,notdependencybump;manifest/
+lock/appseam untouched. Whole-native/liveupdate/physical/trust/readiness remainfalse.
+
+Current primary import-pair integration/check `sh_1bcea2b6a001lHgaEODUshKfB1` is pending
+from32cc1e7;58affected tests expected,not yet accepted. Exact candidate Git bytes and
+checkout/EOL provenance guarded;workspace/native dependency/consent/account-key/
+original worker/recovery wiring remain pending. Other app-owned manifests untouched.
+Data checkedbc84383 (42tests) and RCchecked6d7b4cf (54tests) delivered,not integrated;
+their staticreviews pending. App old resume failed pre-consume quota;one fresh
+short-context owner resumes preserved app WIP,not a quota retry loop. Media/update
+continue originals. Component deliveries do not establish whole-native readiness;
+final packaging/reference/runtime/physical/trust gates still block publication and shutdown.
+
+Importv1 countguard stopped after allcommands exited0:32profiletests actuallypassed,
+mklink output caused two parser misses;58aggregate passed,not56. Originalreceipt
+retained with separatecountcorrection. Continuation sh_1bcecd5c1001Vnl2jBTT6qZbUx
+pending for unfinishednativeClippy/build/Graphify only,source/indexfrozen. Import
+pair stageduncommitted,not sourceaccepted or runtime/account/consent-ready.
+Update-hostchecked41e0fec+docs6015bb4 delivered,13tests and pinned19hashes;static
+reviewpending. Live originalappdrain/startup/certificate/baseline/legal remainfalse.
+
+Data staticreview foundoneP2 savedPath clear vs active-download snapshot race,
+leading rejectedcompletion/stucktransferring. Originalowner resumed for narrow
+checkedfollowup/regressions;bc84383 integration blocked until resolution. Primary
+importchecks/sourcefreeze unchanged. No additional qualifyingdrain defects found.
+
 ## Решения владельца для полного переноса
 
 Подтверждено 2026-11-06: целевые ОС — Windows 10/11 x64. Приложение должно быть нативным Rust без Electron/WebView; сторонние нативные C/C++ медиабиблиотеки (включая libwebrtc и Opus) допустимы. Интерфейс и поведение сверяются с действующим React-клиентом. Beta использует отдельный профиль с импортом-копированием и сохранением исходного профиля. В автономном проходе разрешены только локальные интеграционные проверки. Этапы разрешено фиксировать коммитами в `rust/native-client`; после готовности полноценного клиента — push ветки и публикация GitHub beta `3.8.0-rust`. Автоматическое слияние в main не согласовано. Backend остаётся .NET, SFU — Go.
