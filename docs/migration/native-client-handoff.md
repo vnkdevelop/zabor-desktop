@@ -10,9 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **2108f866ce719a210bab679c7b81192094c20445**:
-nativeRCconsent/channel/owner/viewer/P2Poverrides,179uniqueaffectedtests/fmt/both
-Clippy/nativebuild/RUENinert/Graphifypassed. SFU2d254a2 andoriginalpeer/capture/mic retained.
+сборкой. Latest saved source commit — **f264f3cde6e5784f82a5fa16fa131af87475911d**:
+native profile/avatar/GIF,134 unique affected tests/fmt/both Clippy/native build/
+strict RUEN inert/Graphify passed. Normal executable9948b400… is component evidence,
+not full-client acceptance. RC2108f86, SFU2d254a2 and original peer/capture/mic retained.
 Picker **0dcfef7**,audio **5b8d656** and camera **df43be2** retained;physical camera/audio/
 complete client readiness=false. Metadata-only continuation save follows this source.
 no push/merge/release/shutdown.
@@ -53,6 +54,198 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
 
 ## Picker thumbnails — saved checked components 2026-11-08
+
+### Saved profile/avatar functional group and authorized parallel work
+
+- Primary work after `3ba1ad8`: native profile viewing/editing, separate setup/profile
+  avatar drafts, 200px min-fit crop/drag/keyboard/wheel/slider and 400px black-backed
+  static PNG, original packed GIF `{g,s,x,y}`, dominant-color calculation and bounded
+  native animation cache. Source/query/Session guards reject late results after
+  Logout, context changes or query replacement. `UpdateProfile` retains four arguments,
+  original owner and Session work across Leave; native jobs retain their joins.
+- Sources are checked and saved as `f264f3cde6e5784f82a5fa16fa131af87475911d`:
+  14 native paths/18 source+pin hashes, normal binary
+  `9948b4002ee685166f1b442f394000d5fdc16d008a064208794652332b4efa5c`.
+  Final V5 passed both Clippy modes/fmt/build/RUEN and all 134 distinct affected
+  tests (unchanged algorithms from V3, repeated shell tests counted once).
+  Graphify:7002 nodes/17423 edges/298 communities,7 prior zero-node warnings and
+  HTML5000 limit retained. No temporary diagnostic source/image remains.
+  No full-client, physical, exact-raster or release acceptance is claimed.
+  Initial Clippy `sh_1bb567abd001gQZaRafEy30NWj`
+  stopped on Slint role `group`; corrected to the supported `groupbox` without
+  suppressions. Intermediate normal Clippy `sh_1bb5d6b140016i4RuyUReCMzj5` passed.
+  First grouped verification `sh_1bb66788c00167oBVSfDenrqB2` was cancelled by server
+  restart. Saved partial evidence has fmt/fixture Clippy passed, but avatar test
+  compilation ended with interrupted exit `1073807364`; no tests passed in it.
+  V3 completed partially; its 134 tests/both Clippy modes/build passed, but RU
+  profile input interaction failed. The affected final verification passed as
+  `sh_1bbb205b4001uzvm02G4j3fM2b`: fmt, both Clippy modes, shell tests, normal
+  build, strict RU/EN inert interactions and final Graphify. Unchanged avatar/
+  protocol/auth/hub/roster algorithms retain V3 test evidence; no full neural,
+  visual or multi-hash regression was repeated. Sources were frozen during
+  this group; no exact raster or whole-client acceptance.
+  Main code Graphify `sh_1bb95c797001AY5pj9BEHRmdv3` passed the pre-Box snapshot;
+  V5 includes final code Graphify after checks. Never poll or duplicate it.
+  Details: `native-profile-avatar.md`; permanent evidence is under
+  `migration-artifacts/native-ui/profile-avatar-functional-2026-11-08/checked-v5/`;
+  interrupted v1 evidence remains unchanged.
+  A 30-second fmt attempt timed out under concurrent load; its 120-second retry
+  finished successfully. The grouped runner uses explicit cmd.exe and bounded
+  per-check timeouts, no temporary on-disk runner.
+- Follow-up fixes after cancellation: record bound is 8 MiB for a packed 5 MiB GIF
+  (~7 MiB Base64 plus JSON envelope); WebSocket bounds include the separator byte.
+  Fixtures check exact-limit rejection and a valid near-5-MiB two-frame GIF across
+  actual localhost WebSocket/UpdateProfile/UserUpdated without changed arguments
+  or flattening. This is not proof of real .NET/proxy limits. Profile queue retains
+  `query.ticket`; GIF color uses the current preview frame, display uses packed
+  quantized geometry, and leaving the crop retires dragging. Final tests passed.
+- V2 `sh_1bb90dd6c001pRgDqM47a69mHJ` stopped at fixture Clippy before tests:
+  new queue helper returned a 208-byte error. Boxed it consistently with existing
+  CommandQueue, no suppression or behavior change. Current grouped job is
+  `sh_1bb9d034c001uvZN5gM0u66LWI`, with permanent `checked-v3/` evidence and a
+  final `graphify update .` step after tests/build/RUEN. Do not poll or edit sources
+  until its automatic result. Main Graphify `sh_1bb95c797001AY5pj9BEHRmdv3` passed
+  the pre-Box snapshot: 7001 nodes/17422 edges/301 communities, existing seven
+  zero-node warnings/HTML5000 limit. Final resync is already in the v3 runner.
+- V3 `sh_1bb9d034c001uvZN5gM0u66LWI` completed partially: 134 affected tests
+  (10 avatar/5 protocol/3 auth/2 hub/4 hub_local/6 roster/104 shell), fmt, both
+  native-media Clippy modes and normal build passed. RU interaction failed at
+  `Profile display-name field did not enforce legacy maximum`; EN interaction and
+  final Graphify were not reached. Do not save this as a fully checked milestone.
+  Pending isolated diagnostic `sh_1bbaddd6d001H5KsuEZ9rTLb9K` rebuilds and reruns
+  the failed RU pointer/focus/length check, with a temporary failure snapshot in
+  the approved OpenCode temp folder. Do not poll or edit checked sources until
+  completion; remove temporary diagnostic code/image after investigation. Then
+  run only affected final checks, keep 20/150 UTF-16 assertions strict, resync
+  Graphify and save the primary profile milestone before integrating child commits.
+- Diagnostic `sh_1bbaddd6d001H5KsuEZ9rTLb9K` completed: the profile name/about
+  stayed empty because fixed pointer coordinates missed the stretched TextInput.
+  The temporary image also exposed the new profile header's unintended vertical
+  centering. Corrected only this new profile modal: explicit header x/y origin,
+  top-aligned natural-height labels/inner layouts. Original pointer/20/150 checks
+  remain strict and now also cover supplementary Unicode input in UTF-16 units.
+  Temporary diagnostic code/image are removed; diagnostic logs remain honest
+  development evidence. V4 `sh_1bbb0c9b3001EUISno0KdceXDZ` is pending with final
+  Graphify, no source edits/polling until its automatic completion.
+- V4 launch `sh_1bbb0c9b3001EUISno0KdceXDZ` had an inline-runner syntax error,
+  so no check started. Corrected runner `sh_1bbb174c9001pFY5fYL1jRgUC6` stopped
+  at fmt on the newly strengthened Unicode fixture, also before compilation/tests.
+  Ran fmt without changing assertions. Current V5 is
+  `sh_1bbb205b4001uzvm02G4j3fM2b`, `checked-v5/`; preserve V4 evidence unchanged.
+- User explicitly authorized subagents: «переноси дальше приложения вместе с
+  субагентами, чтобы было быстрее», then requested a retry. Three isolated worktrees
+  are created from the saved base; primary remains `rust/native-client` here:
+  - `native-profile-import`, General `ses_e44a7ac4cffeI1oF29tnNf75s2`: copy-import/
+    rollback; owns `profile.rs`, new import module/tests and its own documentation.
+  - `native-release-packaging`, General `ses_e44a7ac1affe2LEUB0pEp3Q4o3`: native
+    packaging/updater/licenses; owns `release.rs`/`update.rs`, separate scripts/docs.
+  - `native-rc-ui`, General `ses_e44a7ab1cffe4T8WKFIaW7g0ef`: standalone input/RC
+    desktop helpers and synthetic cursor-confinement/host-pill tests.
+- All first runs ended with provider pre-consume quota errors; no completed work
+  was returned. All three were explicitly restarted after «продолжи еще раз с
+  субагентами». Wait for automatic completion; no polling/status calls. Do not
+  duplicate their owned topics or edit their worktrees. Source integration, shared
+  Cargo/lib/shell/Slint changes and final checks stay with the primary agent.
+- Subagents cannot change reference React/Electron/locales, shared handoff/status,
+  dependency pins, frozen proofs or release approval; no actual user profiles,
+  production, physical input/capture, push/merge/release/shutdown. They must return
+  verified diffs/commits plus honest blockers; integration remains pending.
+- RC subagent returned a partial result: 27 synthetic input tests (18 new + 9
+  existing), fmt and Clippy passed; isolated desktop helpers and Slint pill are in
+  its worktree, main unchanged. Its Slint compile/Graphify were still pending and
+  no final commit/temporary cleanup was confirmed. A continuation was dispatched
+  to finish those existing checks and save the verified scope, without polling.
+  Read-only wiring review: `FrameUpdate` lacks original decoded timestamp and
+  selected P2P provenance; cached `VideoItem.frame` or a current viewer-ready bool
+  cannot authorize confinement. Integration must preserve original decoder/frame/
+  Voice/peer/channel leases and registered original cleanup joins. Details are in
+  the child's `docs/migration/native-remote-desktop.md`; no main wiring is added yet.
+- RC continuation reports isolated Slint compile passed using the saved native
+  binary's actual lint policy; pinned Slint generated macros do not support a
+  standalone blanket `forbid(unsafe_code)`, and that distinction is documented
+  rather than hidden. No production lint policy is changed. The child reports all
+  three of its temporary verification directories deleted and the staged scoped
+  diff checked. Its local Graphify and final verified commit remain pending;
+  wait for automatic completion. Main integration/physical acceptance stay false.
+- After the server restart, continuations were sent to the same three assigned
+  subagent sessions. They must resume only actually cancelled/incomplete checks,
+  not duplicate running work. RC reports guarded finalizer
+  `sh_1bb911142001sVBxEb0las2RSA` is already doing Graphify then scoped commit;
+  do not restart or poll it. Final commits/integration remain pending.
+- Primary avatar/profile/bounded protocol/hub code is saved as `f264f3c`; only
+  continuation documents remain modified. Preserve its immutable V3/V5/save
+  evidence. Next integrate the verified base child commits, then complete
+  missing profile/RC/app wiring. Original .NET/Go and
+  React/Electron/locales/dependency pins/frozen proofs remain unchanged. Publication,
+  main merge and shutdown remain prohibited until full acceptance.
+- Packaging child returned saved clean-tree commit
+  `3321ee4b3f207794175cde4e0b842fa1b58a4808` in `native-release-packaging`: nine
+  scoped paths, fail-closed release/update contracts and developer-only offline
+  package/signature/license validators. 43 unique local tests (19 Rust/17 Python/
+  7 Node) passed, fmt/syntax/Graphify passed, temporary targets/fixtures removed.
+  Main integration is pending. Its native-media build/Clippy lacked the exact
+  WebRTC cache after restart; no new native binary/package or Authenticode positive
+  acceptance is claimed. License audit: 559 components/1012 texts/24 missing
+  upstream notices, legal=false; publisher key/certificate/full-native receipt
+  absent. Native signed installer/helper with durable journal/drain/atomic switch/
+  health/recovery still needs primary integration, not proven by in-memory rollback.
+  Read `native-release-packaging/docs/migration/native-packaging.md` in that child.
+- After packaging returned its final saved commit, the same General session
+  `ses_e44a7ac1affe2LEUB0pEp3Q4o3` was assigned the next independent functional
+  phase: operation-owned bounded staging/download, protected durable update journal,
+  native helper version switch and restart/health/rollback recovery. It owns only
+  its new update/helper modules, existing release/update files and packaging docs/
+  scripts; shared Cargo/lib/shell/Slint wiring remains primary-owned. Local temporary
+  sandboxes/failure injection only, no live installation, production downloads or
+  fabricated trust/acceptance. Keep absent publisher pins/complete-native receipt
+  fail-closed. Do not poll or duplicate that new work. The already saved `3321ee4`
+  remains separately integrable after the primary profile milestone is checked.
+- Copy-import child returned clean-tree source commit
+  `dfb735a6fdcb49441c848c3a9b3292b142f55da6` and final documentation commit
+  `07cb3bd` on `native-profile-import-copy-rollback`, API
+  `zabor_native::profile::import`. 39 unique local tests passed (30 profile,
+  2 crypto, 1 owner/retention, 6 mocked Electron exporter); rustfmt and all-targets
+  `-D clippy::all` passed. Strict no-default `-D warnings` retains existing
+  mic_test dead-code blockers; no production lint suppression. Own graph sync:
+  13716 nodes/29741 edges/532 communities,8 zero-node warnings/HTML5000 limit;
+  both owned Cargo targets/fixtures cleaned, main graph untouched. Primary
+  integration of those saved commits is pending until the avatar milestone save.
+  Source profile is never mutated; existing beta never overwritten. Imported global
+  JWK still requires independent account/public-key proof, not exported userId.
+- After that final result, the same General session
+  `ses_e44a7ac4cffeI1oF29tnNf75s2` was assigned a new independent phase:
+  registered original helper-process/children ownership, private bounded zeroizing
+  export pipe, observed cancellation/exit/cleanup and actual synthetic Chromium
+  roundtrip if a trusted exact local runtime exists. It owns its profile/import/
+  exporter scope and any new isolated `zabor-profile-helper` crate, not shared
+  Cargo/lock/native Cargo/lib/shell/Slint. Independent account/key/consent and main
+  wiring remain gates. No live profiles or plaintext credential artifacts;
+  no polling or duplication. Saved dfb735a/07cb3bd remain separately integrable.
+- Remaining primary profile work after this checked subset: fresh peer-profile
+  `GetUserByUsername`/`ViewProfile`, login copy, full actions/loaded/pressed states
+  and all deferred exact motion/raster/RUEN comparisons. Reference lookup cache is
+  keyed by lowercase trimmed username, 15s TTL/100 entries and Session epoch;
+  native lookup must retain original owner/profile/query identities. Aggregate
+  multi-avatar roster records above the current 8 MiB bound still need a bounded
+  compatible intake strategy; a single 5 MiB GIF fixture is not full-roster proof.
+- Reference follow-up before the next profile group: `App.tsx:628-644` refreshes
+  a non-own selected profile with `getUserByUsername`, preserving selected ID/source;
+  `signalr.ts:1509-1527` deduplicates original pending requests and caches 15s/100
+  lowercase-trimmed keys within Session epoch. UserJoined/Updated/Left invalidate
+  those cached profiles (`signalr.ts:611-636`). `ViewProfile` is exposed by the
+  service at line 1508 but has no current renderer call site; do not silently add
+  an automatic RPC on modal opening without reference behavior. Login-copy feedback
+  lasts 2s (`App.tsx:4879-4890`); peer presence/last-online, channel invite/kick,
+  achievements, remove/add-friend and offline-call disabled states remain missing
+  native profile actions (`App.tsx:4892-5103`). Preserve current source/navigation
+  semantics and native owner guards when adding them; exact visuals remain deferred.
+- Primary next operation after saving these continuation documents: integrate
+  packaging base `3321ee4` and copy-import source/doc `dfb735a`/`07cb3bd` into this
+  clean source tree, with scoped native-media fmt/Clippy/affected import/release/
+  update/crypto/data checks and offline JS/Python tests. Main source has the exact
+  SDK available (V5 normal build passed), unlike the packaging child's interrupted
+  cache. This does not certify new helper/app wiring or permit an installer.
+  Do not include unfinished later child phases or fabricate trust/owner acceptance.
 
 ### Verified native RC components after b4b52bc
 

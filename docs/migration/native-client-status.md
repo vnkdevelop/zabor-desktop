@@ -47,6 +47,19 @@ original Voice/peer/channel/capture leases, registered input cleanup, реаль
 host pill/cursor capture/IME/latency parity и прежние ownership/data/release gates
 остаются открыты. Подробности: [native-remote-control.md](native-remote-control.md).
 
+После `3ba1ad8` сохранён native profile/avatar/GIF этап
+**`f264f3cde6e5784f82a5fa16fa131af87475911d`**: просмотр/редактирование собственного
+профиля, crop 200px/PNG 400px, исходный packed GIF, bounded native animation,
+20/150 UTF-16 и исходные Session/query/owner guards. Прошли 134 разных затронутых
+теста, fmt, оба режима Clippy, normal build и строгие RU/EN inert pointer/keyboard
+проверки. 8 MiB record bound проверен локальным near-5-MiB GIF roundtrip; настоящие
+.NET/proxy и aggregate roster limits этим не подтверждены. Graphify:7002 nodes/
+17423 edges/298 communities,7 прежних zero-node warnings/HTML5000 limit остаются.
+Подробности: [native-profile-avatar.md](native-profile-avatar.md). Fresh peer lookup,
+login-copy/full profile actions, интеграция copy-import/updater/RC helpers и все
+отложенные physical/full-client/visual/release gates ещё впереди. Готовность полного
+клиента=false; публикация и выключение компьютера не выполнялись.
+
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
 
 Рабочая ветка: `rust/native-client`. Checkpoint рабочего Electron/WASM-клиента перед переносом: `d088795`. Нативный код находится в `rust/crates/zabor-native`; состояние этой ветки не означает перенос в основную пользовательскую папку или публикацию релиза.
