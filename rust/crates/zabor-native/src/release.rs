@@ -1,6 +1,32 @@
 use semver::Version;
 
 pub const TARGET_BETA_VERSION: &str = "3.8.0-rust";
+pub const NATIVE_BETA_PROFILE: &str = "zabor-desktop-native-beta";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReleaseGate {
+    pub complete_native_acceptance: bool,
+    pub windows_10_11_x64_acceptance: bool,
+    pub two_device_acceptance: bool,
+    pub data_compatibility_acceptance: bool,
+    pub package_composition_verified: bool,
+    pub license_inventory_verified: bool,
+    pub manifest_key_pinned: bool,
+    pub publisher_certificate_pinned: bool,
+}
+
+impl ReleaseGate {
+    pub fn installation_allowed(self) -> bool {
+        self.complete_native_acceptance
+            && self.windows_10_11_x64_acceptance
+            && self.two_device_acceptance
+            && self.data_compatibility_acceptance
+            && self.package_composition_verified
+            && self.license_inventory_verified
+            && self.manifest_key_pinned
+            && self.publisher_certificate_pinned
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Channel {
@@ -47,10 +73,8 @@ pub fn upgrade_route(current: &str, channel: Channel, native: bool) -> UpgradeRo
     if native {
         return UpgradeRoute::NativeUpdater;
     }
-    match channel {
-        Channel::Beta => UpgradeRoute::LegacyBetaBridge,
-        Channel::Stable => UpgradeRoute::ExplicitBetaInstallation,
-    }
+    let _ = channel;
+    UpgradeRoute::ExplicitBetaInstallation
 }
 
 #[cfg(test)]
@@ -99,7 +123,7 @@ mod tests {
         );
         assert_eq!(
             upgrade_route("3.7.2-beta.rust.2", Channel::Beta, false),
-            UpgradeRoute::LegacyBetaBridge
+            UpgradeRoute::ExplicitBetaInstallation
         );
         assert_eq!(
             upgrade_route(TARGET_BETA_VERSION, Channel::Beta, true),
@@ -133,5 +157,21 @@ mod tests {
             Channel::Beta,
             Channel::Beta
         ));
+    }
+
+    #[test]
+    fn release_gate_is_closed_without_complete_acceptance_and_both_pins() {
+        assert!(!ReleaseGate::default().installation_allowed());
+        let local_checks = ReleaseGate {
+            package_composition_verified: true,
+            license_inventory_verified: true,
+            ..ReleaseGate::default()
+        };
+        assert!(!local_checks.installation_allowed());
+        assert_eq!(NATIVE_BETA_PROFILE, "zabor-desktop-native-beta");
+        assert_eq!(
+            upgrade_route("invalid", Channel::Beta, false),
+            UpgradeRoute::Unsupported
+        );
     }
 }

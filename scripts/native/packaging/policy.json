@@ -1,0 +1,30 @@
+{
+  "manifestVersion": 1,
+  "version": "3.8.0-rust",
+  "channel": "native-beta",
+  "profile": "zabor-desktop-native-beta",
+  "platform": "win32",
+  "architecture": "x64",
+  "target": "x86_64-pc-windows-msvc",
+  "executable": "zabor-native.exe",
+  "installationRoute": "explicit-native-installation",
+  "webRtcRevision": "a545de4",
+  "webRtcLibrarySha256": "3e5959b5320579814706848a0641224db22f03a374493e90cbd235948977f930",
+  "webRtcLicenseSha256": "118329b312ed24efd1ae1a7b16c1ce51f7890d30ddc7e7075a04a9cd30c096c2",
+  "libclangFiles": {
+    "licenses/LICENSE-0.txt": "3b6226c32e168c83b891d8d6f0d3c29c2116dc3ef93dc93c307b54f279ecf383",
+    "native/libclang.dll": "b13ec96d9a036d6c6c36dd09e00415ead7acc7fcfd40e721bf33ea86b3490f9d"
+  },
+  "onnxRuntimeVersion": "1.31.1",
+  "onnxRuntimeApi": 31,
+  "onnxFiles": {
+    "native/onnxruntime.dll": "cb2fa518b18356617f6f9f460c012501da2819ec7e5c1d80bd8f5de20492db0c",
+    "native/onnxruntime.lib": "8022d994b1abb84d4b8b25e37937dfa921ef1e2a2ebba66f5a9af1f8433fa05c",
+    "native/onnxruntime_providers_shared.dll": "8cea20be64259950cda8643af0ed42c2a424400fc3bb9bb29f9a35cee6b3419f",
+    "native/onnxruntime_providers_shared.lib": "04e1ee653cbefa7ed5dd342747484d20422463710577bdc597d2b323d332bcee",
+    "licenses/LICENSE": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+    "licenses/ThirdPartyNotices.txt": "c53a76501ef60db6f865f20599f220761201ac4057683acefdab37d861b86622"
+  },
+  "forbiddenNames": ["electron.exe", "chrome_elf.dll", "libcef.dll", "webview2loader.dll", "msedgewebview2.exe", "app.asar", "zaborupdater.exe", "zaborinputsimulator.exe"],
+  "systemDlls": ["advapi32.dll", "avrt.dll", "bcrypt.dll", "bcryptprimitives.dll", "cfgmgr32.dll", "comctl32.dll", "comdlg32.dll", "crypt32.dll", "d2d1.dll", "d3d11.dll", "d3d12.dll", "dcomp.dll", "dbghelp.dll", "dnsapi.dll", "dwmapi.dll", "dwrite.dll", "dxgi.dll", "gdi32.dll", "hid.dll", "imm32.dll", "iphlpapi.dll", "kernel32.dll", "ksuser.dll", "mf.dll", "mfplat.dll", "mfreadwrite.dll", "mfuuid.dll", "mmdevapi.dll", "msimg32.dll", "msvcrt.dll", "ncrypt.dll", "netapi32.dll", "ntdll.dll", "ole32.dll", "oleacc.dll", "oleaut32.dll", "opengl32.dll", "powrprof.dll", "propsys.dll", "psapi.dll", "rpcrt4.dll", "secur32.dll", "setupapi.dll", "shell32.dll", "shlwapi.dll", "user32.dll", "userenv.dll", "usp10.dll", "uxtheme.dll", "version.dll", "windowscodecs.dll", "winhttp.dll", "wininet.dll", "winmm.dll", "winnsi.dll", "winspool.drv", "wintrust.dll", "wldap32.dll", "ws2_32.dll", "wtsapi32.dll"]
+}
