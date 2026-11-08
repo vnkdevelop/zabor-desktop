@@ -50,6 +50,10 @@ impl AudioPlayback {
         lifetime: PeerLifetime,
         stream: bool,
     ) -> Result<(), MediaError> {
+        let prepared = self
+            .cleanup
+            .prepare_task()
+            .map_err(|_| MediaError::Backend)?;
         self.retain_alive();
         if !lifetime.is_alive() {
             return Err(MediaError::UnauthorizedPeer);
@@ -75,7 +79,7 @@ impl AudioPlayback {
         let stop = CancellationToken::new();
         let cancel = stop.clone();
         let output = lane.clone();
-        let task = self.cleanup.spawn_task(stop.clone(), async move {
+        let task = prepared.spawn(stop.clone(), async move {
             let mut tick = tokio::time::interval(Duration::from_millis(50));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
@@ -203,11 +207,13 @@ mod tests {
             release: drop_blocked,
             finished: finished.clone(),
         };
-        let task = cleanup.spawn_task(stop.clone(), async move {
-            let _probe = probe;
-            task_started.add_permits(1);
-            std::future::pending::<()>().await;
-        });
+        let task = cleanup
+            .spawn_task(stop.clone(), async move {
+                let _probe = probe;
+                task_started.add_permits(1);
+                std::future::pending::<()>().await;
+            })
+            .unwrap();
         let subscription = Subscription {
             id: "lane".into(),
             lane: lane.clone(),
@@ -266,6 +272,80 @@ mod tests {
         assert_eq!(controls.capture_epoch.load(Ordering::Acquire), epoch);
         engine.close();
         println!("playback cleanup held_task_drop=true original_lane_only=true fresh_lane_voice_monitor_unchanged=true shared_drain_waited=true peer_ticket_unchanged=true physical_audio=false");
+    }
+
+    #[tokio::test]
+    async fn sealed_shared_playback_rejects_attachment_before_replacing_existing_native_stream_or_lane(
+    ) {
+        let controls = Arc::new(AudioControls::new(AudioSettings::default()));
+        let shared =
+            SharedAudio::<Device>::new(controls.clone(), CancellationToken::new(), |_, _, _| {
+                Box::pin(async { panic!("Sealed playback fixture must not start physical audio") })
+            });
+        let mixer = Arc::new(AudioMixer::new(controls.clone()));
+        let factory = PeerConnectionFactory::default();
+        let source = audio_source();
+        let track = factory.create_audio_track("sealed-playback", source.clone());
+        let (mut engine, lifetime) = peer();
+        let mut playback = AudioPlayback::with_cleanup(mixer, shared.cleanup_tracker());
+        playback
+            .attach("remote", track.clone(), lifetime.clone(), false)
+            .unwrap();
+        let lane = playback.subscriptions.values().next().unwrap().lane.clone();
+        let stop = playback.subscriptions.values().next().unwrap().stop.clone();
+        let monitor = shared.monitor(true);
+        let generation = shared.demand.reserve().unwrap();
+        assert!(shared.demand.activate(generation));
+        controls.speaking.store(true, Ordering::Release);
+        controls
+            .mic_db
+            .store((-17.0_f32).to_bits(), Ordering::Release);
+        let epoch = controls.capture_epoch.load(Ordering::Acquire);
+        let snapshot = shared.mic_test.snapshot(Instant::now());
+        shared.seal_cleanup().unwrap();
+        shared.seal_cleanup().unwrap();
+        assert_eq!(
+            playback.attach("remote", track.clone(), lifetime.clone(), false),
+            Err(MediaError::Backend)
+        );
+        assert_eq!(playback.subscription_count(), 1);
+        assert!(Arc::ptr_eq(
+            &playback.subscriptions.values().next().unwrap().lane,
+            &lane
+        ));
+        assert!(lane.is_active());
+        assert!(!stop.is_cancelled());
+        assert!(lifetime.is_alive());
+        assert_eq!(shared.demand.active(), generation);
+        assert!(shared.demand.is_reserved(generation));
+        assert!(monitor.is_current());
+        assert_eq!(shared.mic_test.snapshot(Instant::now()), snapshot);
+        assert!(controls.speaking.load(Ordering::Acquire));
+        assert_eq!(
+            f32::from_bits(controls.mic_db.load(Ordering::Acquire)),
+            -17.0
+        );
+        assert_eq!(controls.capture_epoch.load(Ordering::Acquire), epoch);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), shared.wait_for_cleanup())
+                .await
+                .is_err()
+        );
+        playback.clear();
+        tokio::time::timeout(Duration::from_secs(2), shared.wait_for_cleanup())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stop.is_cancelled());
+        assert!(!lane.is_active());
+        assert_eq!(
+            playback.attach("remote", track.clone(), lifetime.clone(), false),
+            Err(MediaError::Backend)
+        );
+        assert_eq!(playback.subscription_count(), 0);
+        assert!(shared.wait_for_cleanup().await.is_ok());
+        engine.close();
+        println!("audio admission playback=true sealed_before_attach=true old_stream_lane_untouched=true voice_monitor_status_unchanged=true admitted_clear_join_waited=true late_attach_rejected=true physical_audio=false");
     }
 
     #[tokio::test]

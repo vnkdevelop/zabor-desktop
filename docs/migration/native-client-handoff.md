@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `5255b3b`: наблюдаемое завершение
-playback/native-stream задач с общим audio cleanup и сохранением Voice/monitor ownership.
-Final `playback-cleanup-final-2026-11-08` прошёл282default/272neural-disabled tests
+Последний проверенный компонентный этап после `dc4344c`: закрытие приёма новых
+фоновых audio-cleanup задач с сохранением зарегистрированных factory descendants.
+Final `sealed-cleanup-final-2026-11-08` прошёл287default/277neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`30245c3d8b4c71afd8553848d4a41bc17c7737723cad4e082396a2657587b56f`.
+`13dbfec2475a869c3f1dbe8c8b0312b6ff7503b6703d6b071a442f6c28edab69`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
 compact;actual saved commit брать из Git и
-`native-calls/playback-cleanup-post-save-2026-11-08/saved-boundary.json`.
+`native-calls/sealed-cleanup-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Историческийc7d1d39e… native cleanup binary не заменяет
+visual/physical gates. Исторический30245c3d… playback cleanup binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,103 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Sealed audio-cleanup root admission — checked locally 2026-11-08
+
+- Post-save **sh_1b9508492001gqUGdBYAZsCcQF completed/passed**:saved
+  **dc4344c9983a0e0c3b7eef955a02bc36a454eb03**,438primary/3reference/24evidence/
+  current+frozen30245c3d… executable+ONNX DLL/3SDK implementation hashes/proofs match;
+  clean tree. FinalProof8b1e0aa5…,independentProof60a433c9…,sourceScopeProof5d8c0b13….
+  Graphify5907nodes/14386edges/257communities unchanged;label5255b3b6 topology boundary.
+- Exactly3existing sources:audio_runtime.rs/audio_playback.rs/shell.rs,no new sources.
+  Root admission/closure share short Mutex<bool>;root count increments while its guard
+  remains held,no callbacks/await/intent mutations inside this gate. Seal is permanent/
+  idempotent;poison remains poison and marks sticky failure. Existing unsealed waits
+  still wait admitted work,not future admission;final shell closes root admission after
+  worker/settings/audio-supervisor joins and SessionIo.finish,then still awaits cleanup
+  even if seal/supervisor failed. No earlier window/worker cancellation reordering.
+- AudioCleanupTask preparation registers before playback retain/replacement/lane/native
+  stream setup. A pre-seal preparation can spawn after seal while keeping drain open;
+  unused preparation succeeds on ordinary Drop,unwind marks sticky failure. Existing
+  original playback future/observed JoinHandle/stop-token-before-registration-release
+  code unchanged. Late attach rejects before touching old subscription/lane/stream.
+  Test-only spawn_task wraps fallible preparation;four existing test call sites add
+  unwrap without changing fixture operations/assertions or evidence markers.
+- Factory root registration precedes old-device retirement/pending publication. Its
+  borrowed original job registers descendant retirement even after seal before parent
+  release;future/capture destruction still precedes factory completion. Rejected late
+  unaffiliated retirement never schedules background work:sticky failure first,then
+  synchronous cancel/finish_shutdown/owned-Arc drop on caller. That path is intentionally
+  not successful drain acceptance;it is not bounded/off-thread/last-Arc/native completion.
+- Five new regressions:pre-seal preparation/post-seal task spawn/observed abort join/
+  canceled waiter/64root-admission races;revoked factory late result after seal with
+  held join+owned destruction/two waiters/shared-drop cases;rejected same-thread
+  retirement success/unsupported/panic plus poisoned seal/unused preparation/unwind;
+  actual SharedAudio.run supervisor join before sealed drain with held retirement;
+  actual native playback same-key rejected attachment preserving old lane/stop/
+  current Voice/monitor/status/epoch and successful admitted clear. Development114
+  neural-disabled library tests and Clippy passed;fmt/diff-check clean.
+- Full final **sh_1b9585c520011clqsEc5HOe4A1 completed/passed**,artifacts
+  `native-calls/sealed-cleanup-final-2026-11-08/`:287default/277neural-disabled,
+  both Clippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI auth/roster/
+  audio/MicTest interactions;protected neural metrics unchanged. Independent
+  `sealed-cleanup-final-independent-2026-11-08.json` verified438primary/3reference/
+  24evidence/current+frozen executable+ONNX DLL/3SDK hashes/3existing source changes/
+  zero new sources,0mismatches. All prior282/272passed names retained with unchanged
+  multiplicity;new5tests/runtime23/playback3/device13/native1/MicTest4/voice1/main20/
+  Leave10/SessionIo6/preferences10/Profile10 suites passed in both modes. Each mode
+  verified9new markers:prepared/post-seal join/64root races,2late factory/shared-drop
+  cases,3same-thread rejected retirement results,poison/unused preparation/unwind,
+  actual supervisor-final-drain and actual native playback rejection/current Voice/
+  monitor/state preservation. All prior15playback/19native-cleanup/32Voice-MicTest
+  markers and11older owner/RTP/quarantine/protocol controls retained. Two original
+  Voice wait diagnostics (Leave/Logout,tail_runs=0) verified and stripped only from
+  pass-name parsing:one line interleaved in neural-disabled queued_voice_ui status;
+  raw logs and passed names unchanged,no source or evidence rewrite to fit audit.
+  Exact source reconstruction outside admission helpers/new5tests/four fallible
+  fixture adapters matches dc4344c;root/descendant/gate/observer/native cancellation/
+  owned drop/original Subscription/worker/Voice/peer/RTP/Logout order audited again.
+  Actual/frozen executable **13dbfec2475a869c3f1dbe8c8b0312b6ff7503b6703d6b071a442f6c28edab69**.
+  FinalProof SHA-256 **4091505dc306d9d85d8646daf6b2ce9c6add79e1676b04684234c1c36fe00ced**.
+  Temporary independent-audit helper immediately deleted,no helper/profile debt.
+  Graphify5927nodes/14503edges/251communities unchanged;existing7metadata warnings/
+  HTML5000node limit. All jobs complete;save narrow sealedAudioCleanupAdmissionChecked
+  acceptance,then post-save Graphify/frozen sources/evidence/current+frozen executable+
+  ONNX/dependency/proof/clean-tree guard and compact. Full-client/worker/physical and
+  generalized sealedFutureAdmissionAccepted remain false;no push/merge/release/shutdown.
+- `sealed-cleanup-source-audit-2026-11-08.json` passed:exact newline-normalized
+  source outside admission helpers/new5tests/four fallible test adapters equals saved
+  dc4344c. Root/descendant/registration/seal/error/capture/observer order audited;
+  registered retirement cancel/join/owned drop and Subscription cancel/lane/abort
+  unchanged. Shell only gains seal-before-final-drain/error composition;all original
+  worker/Voice/peer/RTP/normal Logout extraction/drop order remains unchanged.
+  All other primary/reference/dependency sources match;temporary helper immediately
+  deleted,no helper/profile cleanup debt. Graphify5927nodes/14503edges/251communities,
+  existing7metadata warnings/HTML5000node limit.
+- Next ownership map inspected read-only while frozen:VoiceWork currently has run/
+  run_peer/is_current but no commit;SessionWork.commit checks stop inside original
+  CriticalIntents.commit closure. Any new Voice extraction must use equivalent strict
+  original-ticket linearization,not an is_current check followed by arbitrary mutation.
+  Leave's newly accepted intent ticket is not permission to reticket old Voice/peer/
+  RTP resources;retain captured worker voice_ticket/resource generations. Normal
+  Logout shell extraction remains pre-chat/FileJobs disposal → ChatEngine.fail_downloads
+  → remaining objects,including Voice/media;current edit only changed final run drain.
+  Leave still synchronously demand.reset/Voice/video cleanup,VoiceSession Drop still
+  status → playback → VoiceLease then engine Drop,and Peer Drop still invalidates
+  lifetime/token before callback removal/close. No safe off-thread ownership proof
+  established by root seal;do not alter those operations until separately prepared/
+  accepted/rechecked under original owner and real-worker/RTP tests.
+- This seals new background audio cleanup roots only,not all future operations:
+  existing admitted factories/preparations can produce tracked descendants after
+  seal;all external last-Arc/source/mixer/RTC/native-syscall/destructor/physical
+  endpoint and late synchronous cleanup remain outside full completion/bounds.
+  General SharedAudio supervisor/start/reset/MonitorLease/resource acceptance races
+  remain separate. Original worker-ticket Voice/peer/shared-resource extraction and
+  lifecycle ownership not started;no new off-thread native/Voice/peer teardown.
+  Unknown poison/worker/UI/Leave/disconnect/socket,downstream chat/SQLite/file-save,
+  Windows journal/SessionIo/filesystem/media/SFU/UI/profile/import/packaging/physical/
+  two-device/full-client gates open. sealedFutureAdmissionAccepted=false,
+  nativeClientReady=false;no push/merge/release/shutdown.
 
 ## Playback/native-stream observed task cleanup — checked locally 2026-11-08
 

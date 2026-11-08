@@ -1673,11 +1673,13 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let _ = remote_settings_job.await;
         let audio_runtime_result = audio_runtime_job.await;
         let session_result = session_io.finish().await;
+        let audio_seal_result = audio_runtime.seal_cleanup();
         let audio_result = audio_runtime.wait_for_cleanup().await;
         (
             session_result,
             audio_runtime_result
                 .map_err(|_| zabor_native::audio_runtime::AudioCleanupError::Incomplete)
+                .and(audio_seal_result)
                 .and(audio_result),
         )
     });

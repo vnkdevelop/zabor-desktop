@@ -940,9 +940,38 @@ exact source/lifecycle/legacy playback/Voice/drop ordering and SDK hashes matche
 Executable SHA-256:
 `30245c3d8b4c71afd8553848d4a41bc17c7737723cad4e082396a2657587b56f`.
 playbackTaskJoinChecked=true is narrow observed-task cleanup acceptance;
-save/post-save Graphify/guard/compact next.
+saved dc4344c9983a0e0c3b7eef955a02bc36a454eb03/post-save Graphify/438/3/24/
+binary/dependency/proof/clean-tree guard passed.
 No generalized off-thread teardown/native destructor/physical endpoint/UI/worker
 bounds or sealed future admission/external last-Arc/full-client acceptance.
+
+### Sealed audio-cleanup root admission: components checked locally
+
+Final shell closes audio-cleanup root admission after producer joins/SessionIo.finish,
+then drains admitted jobs even on seal/supervisor error. New roots and seal linearize
+on a short mutex without native callbacks/await;poison stays poison. Playback registers
+preparation before old-lane/native-stream mutation;after seal attach rejects without
+touching the current subscription/Voice/monitor controls. Previously admitted
+preparations/factories keep drain open and may register descendant retirement after
+seal before parent release. Late unaffiliated retirement is never deferred:sticky
+failure plus same-thread cancellation/finish/owned disposal. Legacy task-join/
+Subscription/Voice/peer/worker/RTP/Logout order unchanged.
+Final `native-calls/sealed-cleanup-final-2026-11-08/` passed287default/
+277neural-disabled tests,both Clippy/fmt/pinned/9HTTP/neural/freshbuild/8inert
+RUEN/four-DPI interactions;protected neural metrics unchanged. Independent438primary/
+3reference/24evidence/current+frozen executable+ONNX/SDK audit found0mismatches;
+all prior282/272full names retained with unchanged multiplicity,new5tests/runtime23/
+playback3/device13/native1/MicTest4/voice1/main20/Leave10/SessionIo6/preferences10/
+Profile10 and original-ticket/RTP/quarantine/partial-poison/protocol controls passed.
+9new and66retained playback/native-cleanup/Voice-MicTest markers verified per mode;
+exact source/lifecycle/order audit passed. Original Voice wait stdout diagnostic
+interleave normalized only for pass-name parsing;both Leave/Logout tail=0 checked.
+Executable SHA-256:
+`13dbfec2475a869c3f1dbe8c8b0312b6ff7503b6703d6b071a442f6c28edab69`.
+sealedAudioCleanupAdmissionChecked=true is narrow background-audio root acceptance;
+save/post-save Graphify/guard/compact next.
+This is not sealed admission for all operations/external last-Arc/physical native
+completion or generalized off-thread Voice/peer/worker/UI bounds;full readiness=false.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

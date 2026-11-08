@@ -159,11 +159,16 @@ pub(crate) struct AudioCleanup {
     pending: AtomicUsize,
     failed: AtomicBool,
     changed: Notify,
+    sealed: Mutex<bool>,
 }
 
 struct AudioCleanupJob {
     cleanup: Arc<AudioCleanup>,
     completed: bool,
+}
+
+pub(crate) struct AudioCleanupTask {
+    job: Option<AudioCleanupJob>,
 }
 
 impl AudioCleanup {
@@ -173,6 +178,32 @@ impl AudioCleanup {
             cleanup: self.clone(),
             completed: false,
         }
+    }
+
+    fn try_register(self: &Arc<Self>) -> Result<AudioCleanupJob, AudioCleanupError> {
+        let sealed = self.sealed.lock().map_err(|_| {
+            self.failed.store(true, Ordering::Release);
+            AudioCleanupError::Incomplete
+        })?;
+        if *sealed {
+            return Err(AudioCleanupError::Incomplete);
+        }
+        Ok(self.register())
+    }
+
+    pub(crate) fn seal(&self) -> Result<(), AudioCleanupError> {
+        let mut sealed = self.sealed.lock().map_err(|_| {
+            self.failed.store(true, Ordering::Release);
+            AudioCleanupError::Incomplete
+        })?;
+        *sealed = true;
+        Ok(())
+    }
+
+    pub(crate) fn prepare_task(self: &Arc<Self>) -> Result<AudioCleanupTask, AudioCleanupError> {
+        Ok(AudioCleanupTask {
+            job: Some(self.try_register()?),
+        })
     }
 
     pub(crate) async fn wait(&self) -> Result<(), AudioCleanupError> {
@@ -191,12 +222,51 @@ impl AudioCleanup {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn spawn_task(
         self: &Arc<Self>,
         stop: CancellationToken,
         future: impl std::future::Future<Output = ()> + Send + 'static,
+    ) -> Result<tokio::task::AbortHandle, AudioCleanupError> {
+        Ok(self.prepare_task()?.spawn(stop, future))
+    }
+
+    fn retire<D: SharedAudioDevice>(self: &Arc<Self>, device: Arc<D>) {
+        let job = match self.try_register() {
+            Ok(job) => job,
+            Err(_) => {
+                self.failed.store(true, Ordering::Release);
+                device.cancel();
+                let _ = device.finish_shutdown();
+                drop(device);
+                return;
+            }
+        };
+        Self::retire_registered(device, job);
+    }
+
+    fn retire_registered<D: SharedAudioDevice>(device: Arc<D>, job: AudioCleanupJob) {
+        device.cancel();
+        let finish = move || {
+            let result = device.finish_shutdown();
+            drop(device);
+            job.complete(result);
+        };
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn_blocking(finish);
+        } else {
+            finish();
+        }
+    }
+}
+
+impl AudioCleanupTask {
+    pub(crate) fn spawn(
+        mut self,
+        stop: CancellationToken,
+        future: impl std::future::Future<Output = ()> + Send + 'static,
     ) -> tokio::task::AbortHandle {
-        let job = self.register();
+        let job = self.job.take().unwrap();
         let task = tokio::spawn(async move {
             future.await;
         });
@@ -212,24 +282,25 @@ impl AudioCleanup {
         });
         abort
     }
+}
 
-    fn retire<D: SharedAudioDevice>(self: &Arc<Self>, device: Arc<D>) {
-        let job = self.register();
-        device.cancel();
-        let finish = move || {
-            let result = device.finish_shutdown();
-            drop(device);
-            job.complete(result);
-        };
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn_blocking(finish);
-        } else {
-            finish();
+impl Drop for AudioCleanupTask {
+    fn drop(&mut self) {
+        if let Some(job) = self.job.take() {
+            job.complete(if std::thread::panicking() {
+                Err(AudioCleanupError::Incomplete)
+            } else {
+                Ok(())
+            });
         }
     }
 }
 
 impl AudioCleanupJob {
+    fn retire<D: SharedAudioDevice>(&self, device: Arc<D>) {
+        AudioCleanup::retire_registered(device, self.cleanup.register());
+    }
+
     fn complete(mut self, result: Result<(), AudioCleanupError>) {
         if result.is_err() {
             self.cleanup.failed.store(true, Ordering::Release);
@@ -443,6 +514,10 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
         self.cleanup.wait().await
     }
 
+    pub fn seal_cleanup(&self) -> Result<(), AudioCleanupError> {
+        self.cleanup.seal()
+    }
+
     pub(crate) fn cleanup_tracker(&self) -> Arc<AudioCleanup> {
         self.cleanup.clone()
     }
@@ -474,8 +549,12 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
         if state.failed && !retry {
             return Err(MediaError::Microphone);
         }
+        let factory_job = self
+            .cleanup
+            .try_register()
+            .map_err(|_| MediaError::Microphone)?;
         if let Some(device) = state.device.take() {
-            self.cleanup.retire(device);
+            factory_job.retire(device);
         }
         state.failed = false;
         let (ready, receiver) = watch::channel(None);
@@ -489,9 +568,8 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
         let factory = self.factory.clone();
         let demand = self.demand.clone();
         let mic_test = self.mic_test.clone();
-        let cleanup = self.cleanup.clone();
-        let factory_job = cleanup.register();
         tokio::spawn(async move {
+            let factory_cleanup = &factory_job;
             async move {
                 let future = factory(demand, mic_test, pending.stop.clone());
                 tokio::pin!(future);
@@ -537,7 +615,7 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
                 pending.stop.cancel();
                 pending.ready.send_replace(Some(Err(())));
                 if let Some(device) = device {
-                    cleanup.retire(device);
+                    factory_cleanup.retire(device);
                 }
             }
             .await;
@@ -1229,11 +1307,13 @@ mod tests {
             };
             let task_started = started.clone();
             let task_release = release.clone();
-            let task = cleanup.spawn_task(stop.clone(), async move {
-                let _probe = probe;
-                task_started.add_permits(1);
-                task_release.acquire().await.unwrap().forget();
-            });
+            let task = cleanup
+                .spawn_task(stop.clone(), async move {
+                    let _probe = probe;
+                    task_started.add_permits(1);
+                    task_release.acquire().await.unwrap().forget();
+                })
+                .unwrap();
             started.acquire().await.unwrap().forget();
             assert_eq!(cleanup.pending.load(Ordering::Acquire), 1);
             assert!(
@@ -1299,11 +1379,13 @@ mod tests {
             let task_polled = polled.clone();
             let task = {
                 let _enter = runtime.enter();
-                cleanup.spawn_task(stop.clone(), async move {
-                    let _probe = probe;
-                    task_polled.store(true, Ordering::Release);
-                    std::future::pending::<()>().await;
-                })
+                cleanup
+                    .spawn_task(stop.clone(), async move {
+                        let _probe = probe;
+                        task_polled.store(true, Ordering::Release);
+                        std::future::pending::<()>().await;
+                    })
+                    .unwrap()
             };
             assert_eq!(cleanup.pending.load(Ordering::Acquire), 1);
             stop.cancel();
@@ -1362,14 +1444,16 @@ mod tests {
             let stop = CancellationToken::new();
             let started = Arc::new(tokio::sync::Semaphore::new(0));
             let task_started = started.clone();
-            let task = cleanup.spawn_task(stop.clone(), async move {
-                let _probe = TaskPanicDrop(mode == "drop-panic" || mode == "cancel-drop-panic");
-                task_started.add_permits(1);
-                if mode.ends_with("abort") || mode == "cancel-drop-panic" {
-                    std::future::pending::<()>().await;
-                }
-                assert_ne!(mode, "body-panic", "Expected tracked playback task panic");
-            });
+            let task = cleanup
+                .spawn_task(stop.clone(), async move {
+                    let _probe = TaskPanicDrop(mode == "drop-panic" || mode == "cancel-drop-panic");
+                    task_started.add_permits(1);
+                    if mode.ends_with("abort") || mode == "cancel-drop-panic" {
+                        std::future::pending::<()>().await;
+                    }
+                    assert_ne!(mode, "body-panic", "Expected tracked playback task panic");
+                })
+                .unwrap();
             started.acquire().await.unwrap().forget();
             if mode == "expected-abort" || mode == "cancel-drop-panic" {
                 stop.cancel();
@@ -1689,6 +1773,321 @@ mod tests {
         assert_eq!(cleanup.pending.load(Ordering::Acquire), 0);
         assert!(!cleanup.failed.load(Ordering::Acquire));
         println!("audio cleanup runtime=false synchronous_fallback=true registered_job_drained=true physical_audio=false");
+    }
+
+    #[tokio::test]
+    async fn sealed_cleanup_linearizes_root_admission_and_waits_for_prepared_tasks_after_seal() {
+        let cleanup = Arc::new(AudioCleanup::default());
+        let prepared = cleanup.prepare_task().unwrap();
+        assert_eq!(cleanup.pending.load(Ordering::Acquire), 1);
+        cleanup.seal().unwrap();
+        cleanup.seal().unwrap();
+        assert!(cleanup.prepare_task().is_err());
+        assert!(cleanup.try_register().is_err());
+        assert!(!cleanup.failed.load(Ordering::Acquire));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), cleanup.wait())
+                .await
+                .is_err()
+        );
+        let stop = CancellationToken::new();
+        let started = Arc::new(tokio::sync::Semaphore::new(0));
+        let task_started = started.clone();
+        let task = prepared.spawn(stop.clone(), async move {
+            task_started.add_permits(1);
+            std::future::pending::<()>().await;
+        });
+        started.acquire().await.unwrap().forget();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), cleanup.wait())
+                .await
+                .is_err()
+        );
+        stop.cancel();
+        task.abort();
+        tokio::time::timeout(Duration::from_secs(1), cleanup.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(task.is_finished());
+        assert!(cleanup.prepare_task().is_err());
+        assert!(cleanup.wait().await.is_ok());
+        for _ in 0..64 {
+            let cleanup = Arc::new(AudioCleanup::default());
+            let barrier = std::sync::Barrier::new(2);
+            let admission = std::thread::scope(|scope| {
+                let admitted = scope.spawn(|| {
+                    barrier.wait();
+                    cleanup.prepare_task()
+                });
+                barrier.wait();
+                cleanup.seal().unwrap();
+                admitted.join().unwrap()
+            });
+            assert!(cleanup.prepare_task().is_err());
+            assert_eq!(
+                cleanup.pending.load(Ordering::Acquire),
+                usize::from(admission.is_ok())
+            );
+            if admission.is_ok() {
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(1), cleanup.wait())
+                        .await
+                        .is_err()
+                );
+            }
+            drop(admission);
+            assert!(cleanup.wait().await.is_ok());
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 0);
+        }
+        println!("audio admission sealed=true idempotent=true prepared_before_seal=true spawned_after_seal=true observed_join_waited=true canceled_waiter_preserved=true root_race_repeats=64 root_after_seal_rejected=true physical_audio=false");
+    }
+
+    #[tokio::test]
+    async fn sealed_factory_keeps_descendant_retirement_registered_through_late_result_and_destruction(
+    ) {
+        for shared_dropped in [false, true] {
+            let started = Arc::new(tokio::sync::Semaphore::new(0));
+            let released = Arc::new(tokio::sync::Semaphore::new(0));
+            let entered = started.clone();
+            let release = released.clone();
+            let (join_entered, join_waiting) = std::sync::mpsc::channel();
+            let (join_release, join_blocked) = std::sync::mpsc::channel();
+            let (drop_entered, drop_waiting) = std::sync::mpsc::channel();
+            let (drop_release, drop_blocked) = std::sync::mpsc::channel();
+            let device = Arc::new(Mutex::new(Some(CleanupDevice {
+                mode: "ok",
+                cancelled: AtomicBool::new(false),
+                finish: Some(CleanupCheck {
+                    entered: join_entered,
+                    release: Mutex::new(join_blocked),
+                }),
+                destruction: Some(CleanupCheck {
+                    entered: drop_entered,
+                    release: Mutex::new(drop_blocked),
+                }),
+            })));
+            let shared = SharedAudio::new(
+                Arc::new(AudioControls::new(AudioSettings::default())),
+                CancellationToken::new(),
+                move |_, _, _| {
+                    let started = entered.clone();
+                    let released = release.clone();
+                    let device = device.clone();
+                    Box::pin(async move {
+                        started.add_permits(1);
+                        released.acquire().await.unwrap().forget();
+                        Ok(device.lock().unwrap().take().unwrap())
+                    })
+                },
+            );
+            let monitor = shared.monitor(true);
+            let ready = shared.start(true).unwrap().0;
+            started.acquire().await.unwrap().forget();
+            shared.stop.cancel();
+            shared.reset();
+            shared.seal_cleanup().unwrap();
+            let cleanup = shared.cleanup.clone();
+            assert!(cleanup.prepare_task().is_err());
+            assert!(shared.start(true).is_err());
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 1);
+            assert!(matches!(*ready.borrow(), Some(Err(()))));
+            drop(monitor);
+            let retained = if shared_dropped {
+                drop(shared);
+                None
+            } else {
+                Some(shared)
+            };
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), cleanup.wait())
+                    .await
+                    .is_err()
+            );
+            let first = cleanup.clone();
+            let second = cleanup.clone();
+            let first = tokio::spawn(async move { first.wait().await });
+            let second = tokio::spawn(async move { second.wait().await });
+            released.add_permits(1);
+            tokio::task::spawn_blocking(move || join_waiting.recv_timeout(Duration::from_secs(1)))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(cleanup.pending.load(Ordering::Acquire) >= 1);
+            assert!(!cleanup.failed.load(Ordering::Acquire));
+            assert!(
+                tokio::time::timeout(Duration::from_millis(30), cleanup.wait())
+                    .await
+                    .is_err()
+            );
+            assert!(!first.is_finished());
+            assert!(!second.is_finished());
+            join_release.send(()).unwrap();
+            tokio::task::spawn_blocking(move || drop_waiting.recv_timeout(Duration::from_secs(1)))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 1);
+            assert!(!first.is_finished());
+            assert!(!second.is_finished());
+            drop_release.send(()).unwrap();
+            tokio::time::timeout(Duration::from_secs(1), first)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(1), second)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(cleanup.wait().await.is_ok());
+            assert!(cleanup.try_register().is_err());
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 0);
+            drop(retained);
+            assert!(cleanup.wait().await.is_ok());
+            println!("audio admission factory=true shared_dropped={shared_dropped} sealed_before_late_result=true descendant_registered_before_parent_release=true owned_join_drop_waited=true concurrent_waiters=2 root_after_seal_rejected=true physical_audio=false");
+        }
+    }
+
+    struct SealedRetirementDevice {
+        owner: std::thread::ThreadId,
+        calls: Arc<AtomicUsize>,
+        mode: &'static str,
+    }
+
+    impl SharedAudioDevice for SealedRetirementDevice {
+        fn failed(&self) -> bool {
+            false
+        }
+
+        fn cancel(&self) {
+            assert_eq!(std::thread::current().id(), self.owner);
+            self.calls.fetch_add(1, Ordering::AcqRel);
+        }
+
+        fn finish_shutdown(&self) -> Result<(), AudioCleanupError> {
+            assert_eq!(std::thread::current().id(), self.owner);
+            self.calls.fetch_add(1, Ordering::AcqRel);
+            assert_ne!(
+                self.mode, "panic",
+                "Expected sealed retirement shutdown panic"
+            );
+            if self.mode == "unsupported" {
+                Err(AudioCleanupError::Unsupported)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl Drop for SealedRetirementDevice {
+        fn drop(&mut self) {
+            assert_eq!(std::thread::current().id(), self.owner);
+            self.calls.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    #[tokio::test]
+    async fn sealed_cleanup_rejects_new_retirement_without_deferring_owned_disposal_and_retains_poison(
+    ) {
+        for mode in ["ok", "unsupported", "panic"] {
+            let cleanup = Arc::new(AudioCleanup::default());
+            cleanup.seal().unwrap();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let device = Arc::new(SealedRetirementDevice {
+                owner: std::thread::current().id(),
+                calls: calls.clone(),
+                mode,
+            });
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cleanup.retire(device)));
+            assert_eq!(result.is_err(), mode == "panic");
+            assert_eq!(calls.load(Ordering::Acquire), 3);
+            assert_eq!(cleanup.pending.load(Ordering::Acquire), 0);
+            assert!(cleanup.wait().await.is_err());
+            assert!(cleanup.wait().await.is_err());
+            assert!(cleanup.prepare_task().is_err());
+            println!("audio admission retirement={mode} root_after_seal_rejected=true owned_disposal_same_thread=true no_deferred_work=true failure_sticky=true physical_audio=false");
+        }
+        let cleanup = Arc::new(AudioCleanup::default());
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _sealed = cleanup.sealed.lock().unwrap();
+            panic!("Expected audio admission lock poison");
+        }));
+        assert!(cleanup.seal().is_err());
+        assert!(cleanup.prepare_task().is_err());
+        assert!(cleanup.wait().await.is_err());
+        assert!(cleanup.sealed.is_poisoned());
+        let clean = Arc::new(AudioCleanup::default());
+        let prepared = clean.prepare_task().unwrap();
+        clean.seal().unwrap();
+        drop(prepared);
+        assert!(clean.wait().await.is_ok());
+        let broken = Arc::new(AudioCleanup::default());
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _prepared = broken.prepare_task().unwrap();
+            broken.seal().unwrap();
+            panic!("Expected admitted preparation panic");
+        }));
+        assert!(broken.wait().await.is_err());
+        assert_eq!(broken.pending.load(Ordering::Acquire), 0);
+        println!("audio admission poison_retained=true seal_failure_reported=true unused_preparation_drained=true preparation_panic_sticky=true physical_audio=false");
+    }
+
+    #[tokio::test]
+    async fn supervisor_shutdown_preserves_registered_retirement_before_sealed_final_drain() {
+        let shared = SharedAudio::new(
+            Arc::new(AudioControls::new(AudioSettings::default())),
+            CancellationToken::new(),
+            |_, _, _| {
+                Box::pin(async {
+                    panic!("Supervisor shutdown fixture must not start physical audio")
+                })
+            },
+        );
+        let monitor = shared.monitor(true);
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        shared.state.lock().unwrap().device = Some(Arc::new(CleanupDevice {
+            mode: "ok",
+            cancelled: AtomicBool::new(false),
+            finish: Some(CleanupCheck {
+                entered,
+                release: Mutex::new(blocked),
+            }),
+            destruction: None,
+        }));
+        let supervisor = tokio::spawn(shared.clone().run());
+        shared.stop.cancel();
+        tokio::time::timeout(Duration::from_secs(1), supervisor)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::task::spawn_blocking(move || waiting.recv_timeout(Duration::from_secs(1)))
+            .await
+            .unwrap()
+            .unwrap();
+        shared.seal_cleanup().unwrap();
+        assert!(shared.cleanup.prepare_task().is_err());
+        assert!(!monitor.is_current());
+        assert!(shared.state.lock().unwrap().device.is_none());
+        assert_eq!(shared.cleanup.pending.load(Ordering::Acquire), 1);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), shared.wait_for_cleanup())
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), shared.wait_for_cleanup())
+            .await
+            .unwrap()
+            .unwrap();
+        shared.seal_cleanup().unwrap();
+        assert!(shared.wait_for_cleanup().await.is_ok());
+        drop(monitor);
+        assert!(shared.wait_for_cleanup().await.is_ok());
+        println!("audio admission supervisor_joined=true retirement_before_seal=true final_drain_waited=true late_roots_rejected=true external_last_arc_bounds=false physical_audio=false");
     }
 
     struct ResetDevice {
