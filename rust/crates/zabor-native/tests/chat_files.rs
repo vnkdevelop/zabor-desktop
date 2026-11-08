@@ -76,6 +76,194 @@ fn header(id: &str, transfer: &str, kind: &str, offset: Option<u64>) -> ChunkHea
     }
 }
 
+fn retry_saved_file(root: &Path, bytes: &[u8]) -> (ChatEngine, ChatStore, String) {
+    let mut alice = engine(root, "alice", "bob");
+    let mut bob = engine(root, "bob", "alice");
+    let id = metadata(&mut alice, &mut bob, root, bytes);
+    bob.request_file("alice", &id, NOW).unwrap();
+    for (kind, payload, offset) in [
+        ("file-begin", &[][..], None),
+        ("file-chunk", bytes, Some(0)),
+        ("file-complete", &[][..], None),
+    ] {
+        bob.receive_file(
+            "alice",
+            &encode_frame(&header(&id, "initial", kind, offset), payload).unwrap(),
+            NOW,
+        )
+        .unwrap();
+    }
+    let (_, info) = bob.cached_file("alice", &id, NOW).unwrap();
+    let target = root.join("previous-destination.bin");
+    std::fs::write(&target, bytes).unwrap();
+    bob.saved_file("alice", &id, &info.stored_name, &target, NOW)
+        .unwrap();
+    bob.file_broker()
+        .unwrap()
+        .delete(&info.stored_name)
+        .unwrap();
+    std::fs::remove_file(&target).unwrap();
+    bob.request_file("alice", &id, NOW).unwrap();
+    for (kind, payload, offset) in [
+        ("file-begin", &[][..], None),
+        ("file-chunk", &bytes[..2], Some(0)),
+    ] {
+        bob.receive_file(
+            "alice",
+            &encode_frame(&header(&id, "retry", kind, offset), payload).unwrap(),
+            NOW,
+        )
+        .unwrap();
+    }
+    let store = ChatStore::open(&root.join("bob.sqlite")).unwrap();
+    let registered = store.message("bob", "alice", &id, NOW).unwrap().unwrap();
+    let registered = registered.file.unwrap();
+    assert_eq!(registered["savedPath"], json!(target.to_string_lossy()));
+    assert_eq!(registered["progress"], 0);
+    assert!(
+        bob.messages("alice", NOW).unwrap()[0]
+            .file
+            .as_ref()
+            .unwrap()["progress"]
+            .as_f64()
+            .unwrap()
+            > 0.0
+    );
+    (bob, store, id)
+}
+
+#[test]
+fn forget_saved_path_during_active_retry_preserves_valid_completion() {
+    let root = tempfile::tempdir().unwrap();
+    let bytes = b"verified retry";
+    let (mut bob, store, id) = retry_saved_file(root.path(), bytes);
+    bob.forget_saved_path("alice", &id, NOW).unwrap();
+    bob.forget_saved_path("alice", &id, NOW).unwrap();
+    bob.receive_file(
+        "alice",
+        &encode_frame(&header(&id, "retry", "file-chunk", Some(2)), &bytes[2..]).unwrap(),
+        NOW,
+    )
+    .unwrap();
+    assert!(
+        bob.receive_file(
+            "alice",
+            &encode_frame(&header(&id, "retry", "file-complete", None), &[]).unwrap(),
+            NOW
+        )
+        .unwrap()
+        .2
+    );
+    assert!(!bob.has_downloads());
+    let completed = store.message("bob", "alice", &id, NOW).unwrap().unwrap();
+    let completed = completed.file.unwrap();
+    assert_eq!(completed["savedPath"], json!(null));
+    assert_eq!(completed["transferState"], "available");
+    assert_eq!(completed["sourceAvailable"], true);
+    assert_eq!(completed["progress"].as_f64(), Some(1.0));
+    let (mut file, info) = bob.cached_file("alice", &id, NOW).unwrap();
+    let mut received = Vec::new();
+    file.read_to_end(&mut received).unwrap();
+    assert_eq!(received, bytes);
+    assert_eq!(info.sha256, format!("{:x}", Sha256::digest(bytes)));
+}
+
+#[test]
+fn forget_saved_path_during_active_retry_allows_failed_transfer_cleanup() {
+    let root = tempfile::tempdir().unwrap();
+    let bytes = b"verified retry";
+    let (mut bob, store, id) = retry_saved_file(root.path(), bytes);
+    bob.forget_saved_path("alice", &id, NOW).unwrap();
+    let mut corrupt = bytes[2..].to_vec();
+    corrupt[0] ^= 1;
+    bob.receive_file(
+        "alice",
+        &encode_frame(&header(&id, "retry", "file-chunk", Some(2)), &corrupt).unwrap(),
+        NOW,
+    )
+    .unwrap();
+    assert!(bob
+        .receive_file(
+            "alice",
+            &encode_frame(&header(&id, "retry", "file-complete", None), &[]).unwrap(),
+            NOW
+        )
+        .is_err());
+    assert!(!bob.has_downloads());
+    assert_eq!(
+        std::fs::read_dir(root.path().join("bob")).unwrap().count(),
+        0
+    );
+    let failed = store.message("bob", "alice", &id, NOW).unwrap().unwrap();
+    let failed = failed.file.unwrap();
+    assert_eq!(failed["savedPath"], json!(null));
+    assert_eq!(failed["storedName"], json!(null));
+    assert_eq!(failed["transferState"], "failed");
+    assert_eq!(failed["sourceAvailable"], false);
+    assert_eq!(failed["progress"], 0);
+    bob.request_file("alice", &id, NOW).unwrap();
+}
+
+#[test]
+fn forget_saved_path_during_active_retry_rejects_replacement_or_deleted_message() {
+    for replacement in ["file", "peer", "deleted"] {
+        for fail in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let bytes = b"verified retry";
+            let (mut bob, store, id) = retry_saved_file(root.path(), bytes);
+            let mut changed = store.message("bob", "alice", &id, NOW).unwrap().unwrap();
+            match replacement {
+                "file" => {
+                    let file = changed.file.as_mut().unwrap();
+                    file["name"] = json!("replacement.bin");
+                    file["savedPath"] = json!("replacement-destination.bin");
+                    assert!(store.save(&changed, NOW).unwrap());
+                }
+                "peer" => {
+                    changed.conversation_id = "replacement-peer".into();
+                    assert!(store.save(&changed, NOW).unwrap());
+                }
+                "deleted" => store.delete_from_conversation("bob", "alice", &id).unwrap(),
+                _ => unreachable!(),
+            }
+            bob.forget_saved_path("alice", &id, NOW).unwrap();
+            let mut remaining = bytes[2..].to_vec();
+            if fail {
+                remaining[0] ^= 1;
+            }
+            bob.receive_file(
+                "alice",
+                &encode_frame(&header(&id, "retry", "file-chunk", Some(2)), &remaining).unwrap(),
+                NOW,
+            )
+            .unwrap();
+            assert!(bob
+                .receive_file(
+                    "alice",
+                    &encode_frame(&header(&id, "retry", "file-complete", None), &[]).unwrap(),
+                    NOW
+                )
+                .is_err());
+            assert!(!bob.has_downloads());
+            assert_eq!(
+                std::fs::read_dir(root.path().join("bob")).unwrap().count(),
+                0
+            );
+            if replacement == "deleted" {
+                assert!(store.message("bob", "alice", &id, NOW).unwrap().is_none());
+            } else {
+                assert_eq!(
+                    store
+                        .message("bob", &changed.conversation_id, &id, NOW)
+                        .unwrap()
+                        .unwrap(),
+                    changed
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn requested_files_cancel_retry_verify_hash_and_preserve_read_receipts() {
     let root = tempfile::tempdir().unwrap();
@@ -333,4 +521,272 @@ fn abandoned_and_cancelled_staging_preserve_the_source() {
         0
     );
     assert_eq!(std::fs::read(source).unwrap(), b"original");
+}
+
+#[test]
+fn final_transfer_cannot_overwrite_a_concurrent_file_deletion_or_replacement() {
+    for replacement in ["deleted", "available"] {
+        let root = tempfile::tempdir().unwrap();
+        let mut alice = engine(root.path(), "alice", "bob");
+        let mut bob = engine(root.path(), "bob", "alice");
+        let bytes = b"verified fixture";
+        let id = metadata(&mut alice, &mut bob, root.path(), bytes);
+        bob.request_file("alice", &id, NOW).unwrap();
+        for (kind, payload, offset) in [
+            ("file-begin", &[][..], None),
+            ("file-chunk", &bytes[..], Some(0)),
+        ] {
+            bob.receive_file(
+                "alice",
+                &encode_frame(&header(&id, "original", kind, offset), payload).unwrap(),
+                NOW,
+            )
+            .unwrap();
+        }
+        let store = ChatStore::open(&root.path().join("bob.sqlite")).unwrap();
+        let mut changed = store
+            .message("bob", "alice", &id, NOW)
+            .unwrap()
+            .unwrap()
+            .file
+            .unwrap();
+        changed["transferState"] = json!(replacement);
+        changed["storedName"] = json!("replacement.bin");
+        assert!(store.set_file("bob", "alice", &id, &changed, NOW).unwrap());
+        assert!(bob
+            .receive_file(
+                "alice",
+                &encode_frame(&header(&id, "original", "file-complete", None), &[]).unwrap(),
+                NOW
+            )
+            .is_err());
+        assert!(!bob.has_downloads());
+        assert_eq!(
+            store
+                .message("bob", "alice", &id, NOW)
+                .unwrap()
+                .unwrap()
+                .file
+                .unwrap(),
+            changed
+        );
+        assert_eq!(
+            std::fs::read_dir(root.path().join("bob")).unwrap().count(),
+            0
+        );
+    }
+}
+
+#[test]
+fn stale_saved_file_cannot_publish_a_path_for_deleted_replaced_expired_or_other_owner_data() {
+    let root = tempfile::tempdir().unwrap();
+    let mut alice = engine(root.path(), "alice", "bob");
+    let mut bob = engine(root.path(), "bob", "alice");
+    let bytes = b"verified fixture";
+    let id = metadata(&mut alice, &mut bob, root.path(), bytes);
+    bob.request_file("alice", &id, NOW).unwrap();
+    for (kind, payload, offset) in [
+        ("file-begin", &[][..], None),
+        ("file-chunk", &bytes[..], Some(0)),
+        ("file-complete", &[][..], None),
+    ] {
+        bob.receive_file(
+            "alice",
+            &encode_frame(&header(&id, "original", kind, offset), payload).unwrap(),
+            NOW,
+        )
+        .unwrap();
+    }
+    let store = ChatStore::open(&root.path().join("bob.sqlite")).unwrap();
+    let original = store.message("bob", "alice", &id, NOW).unwrap().unwrap();
+    let name = original.file.as_ref().unwrap()["storedName"]
+        .as_str()
+        .unwrap();
+    let target = root.path().join("user-chosen.bin");
+    bob.saved_file("alice", &id, name, &target, NOW).unwrap();
+    let mut saved = original.file.clone().unwrap();
+    saved["savedPath"] = json!(target.to_string_lossy());
+    assert_eq!(
+        store
+            .message("bob", "alice", &id, NOW)
+            .unwrap()
+            .unwrap()
+            .file
+            .unwrap(),
+        saved
+    );
+    assert!(bob
+        .saved_file("alice", &id, "other.bin", &target, NOW)
+        .is_err());
+    assert!(bob
+        .saved_file("alice", &id, name, &target, NOW + RETENTION_MS)
+        .is_err());
+    let mut other = original.clone();
+    other.owner_id = "other".into();
+    assert!(store.save(&other, NOW).unwrap());
+    let mut replaced = original.file.clone().unwrap();
+    replaced["storedName"] = json!("replacement.bin");
+    assert!(store.set_file("bob", "alice", &id, &replaced, NOW).unwrap());
+    assert!(bob.saved_file("alice", &id, name, &target, NOW).is_err());
+    let mut deleted = original.file.clone().unwrap();
+    deleted["transferState"] = json!("deleted");
+    assert!(store.set_file("bob", "alice", &id, &deleted, NOW).unwrap());
+    assert!(bob.saved_file("alice", &id, name, &target, NOW).is_err());
+    assert_eq!(
+        store.message("other", "alice", &id, NOW).unwrap().unwrap(),
+        other
+    );
+    assert_eq!(
+        store
+            .message("bob", "alice", &id, NOW)
+            .unwrap()
+            .unwrap()
+            .file
+            .unwrap(),
+        deleted
+    );
+}
+
+#[test]
+fn split_friend_revocation_is_storage_free_until_original_cleanup_and_root_cannot_be_replaced() {
+    let root = tempfile::tempdir().unwrap();
+    let mut alice = engine(root.path(), "alice", "bob");
+    let mut bob = engine(root.path(), "bob", "alice");
+    let id = metadata(&mut alice, &mut bob, root.path(), b"fixture");
+    bob.request_file("alice", &id, NOW).unwrap();
+    bob.receive_file(
+        "alice",
+        &encode_frame(&header(&id, "original", "file-begin", None), &[]).unwrap(),
+        NOW,
+    )
+    .unwrap();
+    let store = ChatStore::open(&root.path().join("bob.sqlite")).unwrap();
+    let revoked = bob.replace_friends(Vec::new());
+    assert!(!bob.is_friend("alice"));
+    assert!(!bob.has_downloads());
+    assert_eq!(
+        store
+            .message("bob", "alice", &id, NOW)
+            .unwrap()
+            .unwrap()
+            .file
+            .unwrap()["transferState"],
+        "transferring"
+    );
+    assert_eq!(
+        std::fs::read_dir(root.path().join("bob")).unwrap().count(),
+        1
+    );
+    assert!(bob.set_file_root(&root.path().join("replacement")).is_err());
+    assert!(!root.path().join("replacement").exists());
+    bob.finish_friend_revocations(revoked).unwrap();
+    assert_eq!(
+        std::fs::read_dir(root.path().join("bob")).unwrap().count(),
+        0
+    );
+    assert_eq!(
+        store
+            .message("bob", "alice", &id, NOW)
+            .unwrap()
+            .unwrap()
+            .file
+            .unwrap()["transferState"],
+        "failed"
+    );
+}
+
+#[test]
+fn delayed_friend_cleanup_keeps_the_new_original_transfer_even_with_reused_peer_message_and_transfer_id(
+) {
+    let root = tempfile::tempdir().unwrap();
+    let mut alice = engine(root.path(), "alice", "bob");
+    let mut bob = engine(root.path(), "bob", "alice");
+    let bytes = b"fixture";
+    let id = metadata(&mut alice, &mut bob, root.path(), bytes);
+    bob.request_file("alice", &id, NOW).unwrap();
+    let begin = encode_frame(&header(&id, "reused", "file-begin", None), &[]).unwrap();
+    bob.receive_file("alice", &begin, NOW).unwrap();
+    let revoked = bob.replace_friends(Vec::new());
+    bob.set_friends(["alice".into()]);
+    let packet = alice.open("bob").unwrap();
+    deliver(&mut alice, &mut bob, true, vec![packet]);
+    bob.request_file("alice", &id, NOW).unwrap();
+    bob.receive_file("alice", &begin, NOW).unwrap();
+    assert_eq!(
+        std::fs::read_dir(root.path().join("bob")).unwrap().count(),
+        2
+    );
+    bob.finish_friend_revocations(revoked).unwrap();
+    assert_eq!(
+        std::fs::read_dir(root.path().join("bob")).unwrap().count(),
+        1
+    );
+    assert!(bob.is_downloading("alice", &id));
+    let store = ChatStore::open(&root.path().join("bob.sqlite")).unwrap();
+    assert_eq!(
+        store
+            .message("bob", "alice", &id, NOW)
+            .unwrap()
+            .unwrap()
+            .file
+            .unwrap()["transferState"],
+        "transferring"
+    );
+    bob.receive_file(
+        "alice",
+        &encode_frame(&header(&id, "reused", "file-chunk", Some(0)), bytes).unwrap(),
+        NOW,
+    )
+    .unwrap();
+    assert!(
+        bob.receive_file(
+            "alice",
+            &encode_frame(&header(&id, "reused", "file-complete", None), &[]).unwrap(),
+            NOW
+        )
+        .unwrap()
+        .2
+    );
+    assert_eq!(
+        store
+            .message("bob", "alice", &id, NOW)
+            .unwrap()
+            .unwrap()
+            .file
+            .unwrap()["transferState"],
+        "available"
+    );
+}
+
+#[test]
+fn revocation_cleanup_rejects_a_replacement_engine_with_the_same_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let mut alice = engine(root.path(), "alice", "bob");
+    let mut bob = engine(root.path(), "bob", "alice");
+    let id = metadata(&mut alice, &mut bob, root.path(), b"fixture");
+    bob.request_file("alice", &id, NOW).unwrap();
+    bob.receive_file(
+        "alice",
+        &encode_frame(&header(&id, "original", "file-begin", None), &[]).unwrap(),
+        NOW,
+    )
+    .unwrap();
+    let revoked = bob.replace_friends(Vec::new());
+    let store = ChatStore::open(&root.path().join("bob.sqlite")).unwrap();
+    let mut replacement = ChatEngine::new("bob".into(), ChatIdentity::generate(), store);
+    assert!(replacement.finish_friend_revocations(revoked).is_err());
+    assert_eq!(
+        std::fs::read_dir(root.path().join("bob")).unwrap().count(),
+        0
+    );
+    let store = ChatStore::open(&root.path().join("bob.sqlite")).unwrap();
+    assert_eq!(
+        store
+            .message("bob", "alice", &id, NOW)
+            .unwrap()
+            .unwrap()
+            .file
+            .unwrap()["transferState"],
+        "transferring"
+    );
 }

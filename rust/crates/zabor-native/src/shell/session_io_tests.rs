@@ -384,3 +384,118 @@ async fn unreadable_startup_session_keeps_legacy_fallback_but_write_failure_rema
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn cancelled_drain_retains_original_clear_join_until_actual_filesystem_completion() {
+    timeout(Duration::from_secs(10), async {
+        let root = tempfile::tempdir().unwrap();
+        let profile = Arc::new(Profile::open(root.path()).unwrap());
+        profile
+            .save_session("original-owner", &credentials())
+            .unwrap();
+        let (release, holder) = resource_holder(profile.clone()).await;
+        let intents = Arc::new(CriticalIntents::default());
+        let io = SessionIo::new(
+            Some(profile.clone()),
+            intents.clone(),
+            CancellationToken::new(),
+        );
+        drop(io.clear(intents.ticket()));
+        assert!(timeout(Duration::from_millis(20), io.finish())
+            .await
+            .is_err());
+        let finishing = {
+            let io = io.clone();
+            tokio::spawn(async move { io.finish().await })
+        };
+        assert!(timeout(Duration::from_millis(20), async {
+            while !finishing.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_err());
+        release.send(()).unwrap();
+        holder.await.unwrap();
+        finishing.await.unwrap().unwrap();
+        assert!(profile.load_session().unwrap().is_none());
+        io.finish().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn concurrent_drains_observe_one_original_join_and_jobs_admitted_during_drain() {
+    timeout(Duration::from_secs(10), async {
+        let root = tempfile::tempdir().unwrap();
+        let profile = Arc::new(Profile::open(root.path()).unwrap());
+        let (release, holder) = resource_holder(profile.clone()).await;
+        let intents = Arc::new(CriticalIntents::default());
+        let ticket = intents.ticket();
+        let io = SessionIo::new(Some(profile.clone()), intents, CancellationToken::new());
+        drop(io.clear(ticket));
+        let entered = Arc::new(Notify::new());
+        let first = {
+            let io = io.clone();
+            let entered = entered.clone();
+            tokio::spawn(async move { started(io.finish(), &entered).await })
+        };
+        entered.notified().await;
+        let second = {
+            let io = io.clone();
+            tokio::spawn(async move { io.finish().await })
+        };
+        drop(io.clear(ticket));
+        release.send(()).unwrap();
+        holder.await.unwrap();
+        first.await.unwrap().unwrap();
+        second.await.unwrap().unwrap();
+        assert!(profile.load_session().unwrap().is_none());
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn interrupted_session_journal_is_fail_closed_until_original_ticket_clear_is_observed() {
+    timeout(Duration::from_secs(10), async {
+        let root = tempfile::tempdir().unwrap();
+        let profile = Arc::new(Profile::open(root.path()).unwrap());
+        profile
+            .save_session("previous-owner", &credentials())
+            .unwrap();
+        let journal = root.path().join(".session-commit.pending");
+        std::fs::write(&journal, b"ZNR1\x00").unwrap();
+        let intents = Arc::new(CriticalIntents::default());
+        let old = intents.ticket();
+        let io = SessionIo::new(
+            Some(profile.clone()),
+            intents.clone(),
+            CancellationToken::new(),
+        );
+        assert!(io.load().await.is_err());
+        io.finish().await.unwrap();
+        intents.request(CriticalAction::Logout);
+        assert_eq!(intents.next().await, CriticalAction::Logout);
+        assert!(!io.clear(old).await.unwrap());
+        assert!(journal.exists());
+        let next = intents.ticket();
+        drop(io.clear(next));
+        io.finish().await.unwrap();
+        assert!(!journal.exists());
+        assert!(profile.load_session().unwrap().is_none());
+        let prepared = io
+            .prepare("next-owner".into(), credentials())
+            .await
+            .unwrap();
+        assert!(io.save(next, prepared).await.unwrap());
+        io.finish().await.unwrap();
+        assert_eq!(
+            profile.load_session().unwrap().unwrap().user_id,
+            "next-owner"
+        );
+    })
+    .await
+    .unwrap();
+}

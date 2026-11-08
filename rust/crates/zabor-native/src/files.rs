@@ -80,6 +80,14 @@ pub struct FileBroker {
     incoming: BTreeMap<String, Incoming>,
 }
 
+pub(crate) struct FileRevocations(Vec<Incoming>);
+
+impl FileRevocations {
+    pub(crate) fn finish(self) {
+        drop(self.0);
+    }
+}
+
 impl FileBroker {
     pub fn new(root: &Path) -> Result<Self, FileError> {
         std::fs::create_dir_all(root).map_err(|_| FileError)?;
@@ -113,11 +121,7 @@ impl FileBroker {
         let stored_name = format!("{}.bin", random_id()?);
         let temporary = self.root.join(format!(".{stored_name}.part"));
         let result = (|| {
-            let mut output = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)
-                .map_err(|_| FileError)?;
+            let mut output = open_partial(&temporary).map_err(|_| FileError)?;
             let mut buffer = vec![0_u8; 1024 * 1024];
             let mut digest = Sha256::new();
             let mut size = 0_u64;
@@ -141,6 +145,9 @@ impl FileBroker {
             }
             output.sync_all().map_err(|_| FileError)?;
             drop(output);
+            if stop.is_cancelled() {
+                return Err(FileError);
+            }
             std::fs::rename(&temporary, self.root.join(&stored_name)).map_err(|_| FileError)?;
             Ok(FileInfo {
                 name,
@@ -203,11 +210,7 @@ impl FileBroker {
         let name = random_id()?;
         let temporary = self.root.join(format!(".{name}.part"));
         let target = self.root.join(format!("{name}.bin"));
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .map_err(|_| FileError)?;
+        let file = open_partial(&temporary).map_err(|_| FileError)?;
         self.incoming.insert(
             transfer.into(),
             Incoming {
@@ -303,6 +306,24 @@ impl FileBroker {
             .retain(|_, transfer| peers.contains(&transfer.peer));
     }
 
+    pub(crate) fn revoke_peers(
+        &mut self,
+        peers: &std::collections::BTreeSet<String>,
+    ) -> FileRevocations {
+        let transfers: Vec<_> = self
+            .incoming
+            .iter()
+            .filter(|(_, transfer)| !peers.contains(&transfer.peer))
+            .map(|(id, _)| id.clone())
+            .collect();
+        FileRevocations(
+            transfers
+                .into_iter()
+                .filter_map(|id| self.incoming.remove(&id))
+                .collect(),
+        )
+    }
+
     pub fn recover_partials(&self) -> Result<(), FileError> {
         for entry in std::fs::read_dir(&self.root).map_err(|_| FileError)? {
             let entry = entry.map_err(|_| FileError)?;
@@ -318,11 +339,15 @@ impl FileBroker {
             if id.len() != 32 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
                 continue;
             }
+            if self
+                .incoming
+                .values()
+                .any(|incoming| incoming.temporary == entry.path())
+            {
+                continue;
+            }
             if let Err(error) = std::fs::remove_file(entry.path()) {
-                if !matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
-                ) {
+                if error.kind() != std::io::ErrorKind::NotFound {
                     return Err(FileError);
                 }
             }
@@ -472,12 +497,37 @@ pub async fn send_file(
 }
 
 pub fn save_verified(
-    mut source: File,
+    source: File,
     target: &Path,
     size: u64,
     sha256: &str,
     stop: &CancellationToken,
 ) -> Result<PathBuf, FileError> {
+    save_verified_if(source, target, size, sha256, stop, || true)
+}
+
+fn open_partial(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(0);
+    }
+    options.open(path)
+}
+
+pub fn save_verified_if(
+    mut source: File,
+    target: &Path,
+    size: u64,
+    sha256: &str,
+    stop: &CancellationToken,
+    accept: impl Fn() -> bool,
+) -> Result<PathBuf, FileError> {
+    if !accept() || stop.is_cancelled() {
+        return Err(FileError);
+    }
     let parent = target
         .parent()
         .filter(|parent| parent.is_dir())
@@ -507,6 +557,9 @@ pub fn save_verified(
         return Err(FileError);
     }
     temporary.as_file().sync_all().map_err(|_| FileError)?;
+    if !accept() || stop.is_cancelled() {
+        return Err(FileError);
+    }
     temporary.persist(target).map_err(|_| FileError)?;
     Ok(target.to_owned())
 }
@@ -598,5 +651,88 @@ mod tests {
         assert!(files.complete("alice", "other", "corrupt").is_err());
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
         assert!(files.open_source("../session.enc").is_err());
+    }
+
+    #[test]
+    fn cancellation_at_post_sync_acceptance_preserves_destination_and_removes_only_own_temporary() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.bin");
+        let target = root.path().join("target.bin");
+        std::fs::write(&source, b"verified").unwrap();
+        std::fs::write(&target, b"previous destination").unwrap();
+        let stop = CancellationToken::new();
+        let checks = AtomicUsize::new(0);
+        assert!(save_verified_if(
+            File::open(&source).unwrap(),
+            &target,
+            8,
+            &format!("{:x}", Sha256::digest(b"verified")),
+            &stop,
+            || {
+                if checks.fetch_add(1, Ordering::Relaxed) == 1 {
+                    stop.cancel();
+                }
+                true
+            }
+        )
+        .is_err());
+        assert_eq!(checks.load(Ordering::Relaxed), 2);
+        assert_eq!(std::fs::read(&target).unwrap(), b"previous destination");
+        assert_eq!(std::fs::read(&source).unwrap(), b"verified");
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn recovery_never_unlinks_registered_active_partial_and_keeps_unrelated_files() {
+        let root = tempfile::tempdir().unwrap();
+        let mut broker = FileBroker::new(root.path()).unwrap();
+        broker
+            .begin(
+                "peer",
+                "message",
+                "transfer",
+                1,
+                &format!("{:x}", Sha256::digest(b"a")),
+            )
+            .unwrap();
+        let active = broker.incoming["transfer"].temporary.clone();
+        let abandoned = root.path().join(format!(".{}.part", "a".repeat(32)));
+        let unrelated = root.path().join("unrelated.part");
+        std::fs::write(&abandoned, b"abandoned").unwrap();
+        std::fs::write(&unrelated, b"keep").unwrap();
+        broker.recover_partials().unwrap();
+        assert!(active.exists());
+        assert!(!abandoned.exists());
+        assert_eq!(std::fs::read(&unrelated).unwrap(), b"keep");
+        #[cfg(windows)]
+        assert!(FileBroker::new(root.path())
+            .unwrap()
+            .recover_partials()
+            .is_err());
+        assert!(active.exists());
+        broker.abort("transfer");
+        assert!(!active.exists());
+    }
+
+    #[test]
+    fn dropping_revocations_cleans_only_the_detached_original_partial() {
+        let root = tempfile::tempdir().unwrap();
+        let mut broker = FileBroker::new(root.path()).unwrap();
+        let hash = format!("{:x}", Sha256::digest(b"a"));
+        broker
+            .begin("peer", "message", "transfer", 1, &hash)
+            .unwrap();
+        let original = broker.incoming["transfer"].temporary.clone();
+        let revoked = broker.revoke_peers(&std::collections::BTreeSet::new());
+        broker
+            .begin("peer", "message", "transfer", 1, &hash)
+            .unwrap();
+        let current = broker.incoming["transfer"].temporary.clone();
+        drop(revoked);
+        assert!(!original.exists());
+        assert!(current.exists());
+        broker.abort("transfer");
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
     }
 }

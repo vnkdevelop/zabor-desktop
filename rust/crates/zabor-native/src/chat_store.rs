@@ -124,6 +124,46 @@ impl ChatStore {
         Ok(())
     }
 
+    pub fn set_file_if(
+        &self,
+        owner: &str,
+        peer: &str,
+        id: &str,
+        expected: &serde_json::Value,
+        file: &serde_json::Value,
+        now: i64,
+    ) -> Result<bool, StoreError> {
+        let expected = serde_json::to_string(expected).map_err(|_| StoreError)?;
+        let file = serde_json::to_string(file).map_err(|_| StoreError)?;
+        self.connection.execute("UPDATE messages SET body=json_set(body,'$.file',json(?1)) WHERE owner=?2 AND conversation=?3 AND id=?4 AND created>?5 AND json_extract(body,'$.kind')='file' AND json_extract(body,'$.file')=json(?6)", params![file, owner, peer, id, now.saturating_sub(RETENTION_MS), expected]).map(|count| count == 1).map_err(|_| StoreError)
+    }
+
+    pub fn set_delivery(
+        &self,
+        owner: &str,
+        peer: &str,
+        id: &str,
+        delivery: &str,
+        now: i64,
+    ) -> Result<bool, StoreError> {
+        if !["pending", "sent", "delivered", "read", "failed"].contains(&delivery) {
+            return Err(StoreError);
+        }
+        self.connection.execute("UPDATE messages SET body=json_set(body,'$.delivery',?1) WHERE owner=?2 AND conversation=?3 AND id=?4 AND created>?5 AND json_extract(body,'$.delivery')!='read'", params![delivery, owner, peer, id, now.saturating_sub(RETENTION_MS)]).map(|count| count == 1).map_err(|_| StoreError)
+    }
+
+    pub fn set_saved_path(
+        &self,
+        owner: &str,
+        peer: &str,
+        id: &str,
+        stored: &str,
+        path: &Path,
+        now: i64,
+    ) -> Result<bool, StoreError> {
+        self.connection.execute("UPDATE messages SET body=json_set(body,'$.file.savedPath',?1) WHERE owner=?2 AND conversation=?3 AND id=?4 AND created>?5 AND json_extract(body,'$.kind')='file' AND json_extract(body,'$.file.storedName')=?6 AND json_extract(body,'$.file.transferState')='available' AND json_extract(body,'$.file.sourceAvailable')=1", params![path.to_string_lossy(), owner, peer, id, now.saturating_sub(RETENTION_MS), stored]).map(|count| count == 1).map_err(|_| StoreError)
+    }
+
     pub fn recover_transfers(&self, owner: &str) -> Result<(), StoreError> {
         self.connection.execute("UPDATE messages SET body=json_set(body,'$.file.transferState','failed','$.file.progress',0) WHERE owner=?1 AND json_extract(body,'$.file.transferState')='transferring'", params![owner]).map_err(|_| StoreError)?;
         Ok(())
@@ -315,5 +355,62 @@ mod tests {
         ] {
             assert!(!valid_stored_name(name));
         }
+    }
+
+    #[test]
+    fn delivery_updates_preserve_registered_file_and_read_state_with_owner_peer_and_retention_guards(
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let store = ChatStore::open(&root.path().join("chat.sqlite")).unwrap();
+        let now = RETENTION_MS * 3;
+        let registered = serde_json::json!({"transferState":"transferring","progress":0});
+        let message = ChatMessage {
+            id: "message".into(),
+            owner_id: "owner".into(),
+            conversation_id: "peer".into(),
+            sender_id: "peer".into(),
+            target_id: "owner".into(),
+            kind: "file".into(),
+            text: String::new(),
+            created_at: now,
+            sequence: 1,
+            delivery: "delivered".into(),
+            file: Some(registered.clone()),
+        };
+        assert!(store.save(&message, now).unwrap());
+        assert!(!store
+            .set_delivery("other", "peer", "message", "read", now)
+            .unwrap());
+        assert!(!store
+            .set_delivery("owner", "other", "message", "read", now)
+            .unwrap());
+        assert!(!store
+            .set_delivery("owner", "peer", "message", "read", now + RETENTION_MS)
+            .unwrap());
+        assert!(store
+            .set_delivery("owner", "peer", "message", "invalid", now)
+            .is_err());
+        assert!(store
+            .set_delivery("owner", "peer", "message", "read", now)
+            .unwrap());
+        assert!(!store
+            .set_delivery("owner", "peer", "message", "delivered", now)
+            .unwrap());
+        let read = store
+            .message("owner", "peer", "message", now)
+            .unwrap()
+            .unwrap();
+        assert_eq!(read.file.as_ref().unwrap(), &registered);
+        assert_eq!(read.delivery, "read");
+        let completed = serde_json::json!({"transferState":"available","progress":1});
+        assert!(store
+            .set_file_if("owner", "peer", "message", &registered, &completed, now)
+            .unwrap());
+        let saved = store
+            .message("owner", "peer", "message", now)
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.file.unwrap(), completed);
+        assert_eq!(saved.delivery, "read");
     }
 }

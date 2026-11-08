@@ -1,3 +1,4 @@
+use futures_util::FutureExt;
 use std::future::Future;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -14,8 +15,13 @@ pub(super) struct SessionIo {
     profile: Option<Arc<Profile>>,
     intents: Arc<CriticalIntents>,
     stop: CancellationToken,
-    jobs: Mutex<Vec<JoinHandle<()>>>,
+    jobs: Mutex<Vec<Arc<SessionJob>>>,
+    drain: tokio::sync::Mutex<()>,
     failed: Arc<AtomicBool>,
+}
+
+struct SessionJob {
+    join: tokio::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
 struct JobFailure(Arc<AtomicBool>);
@@ -39,6 +45,7 @@ impl SessionIo {
             intents,
             stop,
             jobs: Mutex::new(Vec::new()),
+            drain: tokio::sync::Mutex::new(()),
             failed: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -50,6 +57,21 @@ impl SessionIo {
     ) -> oneshot::Receiver<Result<T, ProfileError>> {
         let (sender, receiver) = oneshot::channel();
         let failed = self.failed.clone();
+        let mut jobs = self.jobs.lock().unwrap_or_else(|error| error.into_inner());
+        jobs.retain(|job| {
+            let Ok(mut join) = job.join.try_lock() else {
+                return true;
+            };
+            if let Some(handle) = join.as_mut().filter(|handle| handle.is_finished()) {
+                if let Some(result) = handle.now_or_never() {
+                    if result.is_err() {
+                        failed.store(true, Ordering::Release);
+                    }
+                    join.take();
+                }
+            }
+            join.is_some()
+        });
         let job = tokio::task::spawn_blocking(move || {
             let _failure = JobFailure(failed.clone());
             let result = operation();
@@ -58,9 +80,9 @@ impl SessionIo {
             }
             let _ = sender.send(result);
         });
-        let mut jobs = self.jobs.lock().unwrap_or_else(|error| error.into_inner());
-        jobs.retain(|job| !job.is_finished());
-        jobs.push(job);
+        jobs.push(Arc::new(SessionJob {
+            join: tokio::sync::Mutex::new(Some(job)),
+        }));
         receiver
     }
 
@@ -139,19 +161,54 @@ impl SessionIo {
     }
 
     pub(super) async fn finish(&self) -> Result<(), ProfileError> {
-        let jobs = {
-            let mut jobs = self.jobs.lock().unwrap_or_else(|error| error.into_inner());
-            std::mem::take(&mut *jobs)
-        };
-        for job in jobs {
-            if job.await.is_err() {
-                self.failed.store(true, Ordering::Release);
+        let _drain = self.drain.lock().await;
+        loop {
+            let jobs = self
+                .jobs
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone();
+            if jobs.is_empty() {
+                break;
             }
+            for job in &jobs {
+                let mut join = job.join.lock().await;
+                if let Some(handle) = join.as_mut() {
+                    if handle.await.is_err() {
+                        self.failed.store(true, Ordering::Release);
+                    }
+                    join.take();
+                }
+            }
+            self.jobs
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .retain(|job| !jobs.iter().any(|finished| Arc::ptr_eq(job, finished)));
         }
         if self.failed.load(Ordering::Acquire) {
             Err(ProfileError::Storage)
         } else {
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn completed_panic_is_observed_before_dispatch_prunes_the_original_join() {
+        let intents = Arc::new(CriticalIntents::default());
+        let io = SessionIo::new(None, intents, CancellationToken::new());
+        assert!(io
+            .dispatch(false, || -> Result<(), ProfileError> {
+                panic!("synthetic SessionIo failure")
+            })
+            .await
+            .is_err());
+        assert!(io.dispatch(false, || Ok(())).await.unwrap().is_ok());
+        assert!(io.finish().await.is_err());
+        assert!(io.finish().await.is_err());
     }
 }
