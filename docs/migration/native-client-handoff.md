@@ -1,6 +1,6 @@
 # Контекст продолжения нативного переноса
 
-Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
+Редакция: 2026-11-09. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
 ## Latest source636db12 — import component integrated
 
@@ -26,6 +26,24 @@ P1WIP existsbutuncompiled,misingoptionalSlinttestingindex anddurabilityblockers.
 Primarywillprepareexactofficial1.18.1buildcache,checksum01943d6c5ea5bc913d497bdaa423c309e7627afff47a6794bfd13be5c564209f,
 outsideworkspace(no version/manifest/lockchange),thenresumesoleappaffectedchecks.
 Fulltrust/physical/raster/motion/backend/twodevice/packaging gatesremainfalse.
+
+Source636db12+coordination9641382 saved,primarycleanbeforecacheprep. Current original
+jobsh_1bcf51d8f001E2168nZrKWWw87 cache-onlyprep pending:exactofficialSlinttesting1.18.1,
+workspace-freeCargoinfo,officialchecksum/archive verify;176primary+3appmanifest/lock
+hashesguarded. No build/install/projectresolve/pinchange. OwnapprovedTemp/runner
+selfclean afteroriginalexit,requiredcache retained. Do not poll/duplicate/editfrozen
+manifests or retry appcheck before preparation result. Evidence in primary
+migration-artifacts/native-ui/slint-testing-cache-2026-11-08/checked-v1/.
+
+Cacheoriginalsh_1bcf51d8f001E2168nZrKWWw87 completedpassed:exactofficialSlint1.18.1
+index/archive checksumverified,179unchangedsource/manifest/lockhashes,no build/install/
+projectresolve. Temp/runnerremoved,requiredCargocache retained. Primaryjobsnone.
+Freshsoleappowner resumesP1/headless/worker/clock affectedchecks/normalfeatureproof;
+metadata durability/unrunCargoUIacceptance stayblocked until actualproofs. DataP2,
+RC2P1+3P2,update3P1+2P2 checkedfollowups and media retirement continueownoriginals.
+Do notcompilemovingchildsource/poll/duplicatetheirjobs or editappmanifest/lock in
+parallel. Source636db12checked;coordination9641382saved beforecachecontinuation,
+threecurrentcoorddocsawaitguardedsave. Whole-ready/push/release/install/shutdownfalse.
 
 ## Active resume from32cc1e7
 

@@ -1,6 +1,6 @@
 # Нативный клиент Rust / native Rust client
 
-Редакция / updated: 2026-11-08.
+Редакция / updated: 2026-11-09.
 
 Latest checked primarysource `636db12d9f6ab9c6b04e383a5a236e39eb0d7206` integrates
 importpair43adbcd+e3a3ff5:58affectedtests/fmt/syntax/helper+nativeClippy/build/Graphify,
@@ -16,6 +16,17 @@ App clock19c1dcc passed3standaloneDSTtests,not Cargo/UI/runtime acceptance. P1
 transaction WIP uncompiledbehindmissingSlintoptionalindex;Windowsmetadata durability
 notproved. Primaryprepares exactofficialSlint1.18.1cache,notdependencybump;manifest/
 lock/appseam untouched. Whole-native/liveupdate/physical/trust/readiness remainfalse.
+
+Source636db12+handoff9641382 saved. Currentcache-onlysh_1bcf51d8f001E2168nZrKWWw87
+prepares exactofficialSlinttesting1.18.1 outsideworkspace;no build/install/resolve/
+versionchange,179source/manifest/pinhashes guarded. Resultpending,no appCargo retry
+or readiness claim before originalresult. Othercheckedfollowups remain independent.
+
+Slintcacheoriginal completedpassed:exactofficial1.18.1entry/archive hashverified,
+179source/manifest/lockhashesunchanged,no projectresolve/build/install. Soleappowner
+resumes affectedlockedoffline checks;cache!=Cargo/UI/storage acceptance. Data/RC/update
+P1P2followups remainpending originalowners;mediaretirement WIPpreserved. Primary
+jobsnone,source636db12checked. Whole-native/readiness/liveinstallationfalse.
 
 Current primary import-pair integration/check `sh_1bcea2b6a001lHgaEODUshKfB1` is pending
 from32cc1e7;58affected tests expected,not yet accepted. Exact candidate Git bytes and

@@ -1,6 +1,6 @@
 # Native completion and legacy cutover
 
-Updated: 2026-11-08. Coordination plan, not complete-native acceptance.
+Updated: 2026-11-09. Coordination plan, not complete-native acceptance.
 
 ## Latest checked primary source636db12
 
@@ -38,6 +38,28 @@ queuedcancel/expiry uncheckedbeforeResume,helperPEinspection reads mutable sourc
 instead of stagedcopy. Originalupdateowner fixesonlyownedpaths/affectedregressions,
 checkedfollowuprequired beforeintegration. attest_app_drain and allrealtrust gates
 remain failclosed. Media checked delivery remains pending;original owners preserved.
+
+Current source636db12 and coordination96413823fa1a49fdbec71ca91eaec3409a2fda83 are
+saved;primary tree was clean. Original cache-only job `sh_1bcf51d8f001E2168nZrKWWw87`
+is now pending; evidence `migration-artifacts/native-ui/slint-testing-cache-2026-11-08/checked-v1/`.
+It runs exact `cargo info i-slint-backend-testing@1.18.1 --registry crates-io` from
+marker-owned approved Temp outside any workspace,then verifies the official index
+checksum and archive hash. No project resolve/build/install/version change. Primary
+176source/pin hashes and app3manifest/lock hashes are guarded;do not edit them or
+retry blocked app Cargo until the original preparation result. Cache artifacts are
+required build inputs;only owned Temp/runner are cleaned after command completion.
+No polling/duplicate preparation;RC/data/update followups use separate owned source.
+
+Originalcachejobsh_1bcf51d8f001E2168nZrKWWw87 completedpassed:officialexact1.18.1
+sparseindex+archive verified,179source/manifest/lockhashesunchanged. No project
+resolve/build/install performed;ownedTemp/runnerremoved,requiredCargo cache retained.
+No primary preparation/check job remains pending. Sole freshappowner
+ses_e4317ba39ffeB5seOBOzCJYo0V resumes lockedoffline P1/headless/worker/clock/normal
+featuretree checks;no completed app acceptance is inferred from cache provisioning.
+Further missing exact entries require explicit one-time preparation,not retries.
+DataP2/RC2P1+3P2/update3P1+2P2 followups continueoriginalowners,not duplicate tasks.
+Media original retirement WIP remains preserved. Primary does not compile moving
+child source or overwrite app manifests. Whole-native readiness and live gatesfalse.
 
 ## Active continuation after checkpoint32cc1e7
 
