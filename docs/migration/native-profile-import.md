@@ -187,7 +187,7 @@ Verified functional results on this worktree:
   changed. Existing Slint `viewport-y` deprecation at `ui/app.slint:453` remains.
 - Early profile runs failed on the new drive-prefix validation, directory-sharing
   mask and hashing an open attachment writer. Those implementation defects were
-  corrected; the final complete 29-test profile run passed after explicit snapshot
+   corrected; the earlier complete 29-test profile run passed after explicit snapshot
   cleanup was added. The initial interrupted Clippy attempt is not a passed check.
 
 Total: 39 distinct passing tests, not full-client acceptance. No real profile,
@@ -205,6 +205,13 @@ Cargo targets are cleaned after their last checks, not shared with another workt
 
 The first own-worktree `graphify update .` attempted a fresh code-only graph and
 timed out after AST extraction; it is not a completed graph sync. Its warning count
-included generated artifacts in the then-present isolated Cargo target. Final graph
-status is reported separately after cleanup; the primary worktree graph was only
-queried read-only at task entry and was never updated here.
+included generated artifacts in the then-present isolated Cargo target. The final
+code-only sync completed after cleanup and source save: 13,716 nodes, 29,741 edges,
+532 communities. It updated this worktree's `graphify-out/graph.json` and
+`GRAPH_REPORT.md`; 8 zero-node warnings remain, and HTML was skipped because the
+graph exceeds the 5,000-node visualization limit. The primary worktree graph was
+only queried read-only at task entry and was never updated here.
+
+Verified source commit: `dfb735a6fdcb49441c848c3a9b3292b142f55da6`. This final
+documentation update does not change the tested Rust or helper sources. No pending
+verification jobs, real-profile access, production, push, merge, release or shutdown.
