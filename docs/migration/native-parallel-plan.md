@@ -2,6 +2,32 @@
 
 Updated: 2026-11-09. Coordination plan, not complete-native acceptance.
 
+## Checked workspace registration after636db12
+
+Originalprimary `sh_1bd044f3f001WeZF53SAsFQgd0` completedpassed:13helper tests,
+locked/offline metadata/fmt/strictClippy/normalfeaturetree/native-media library types/
+Graphify. Only3manifest/lock paths change;778old lock records/default members exact.
+Native/app manifest,renderer seam,helper library/source/script/resource pins unchanged.
+The historical standalone helper lock is retained;test-source absent from checked
+normal tree.176source hashes stayed exact during group;afterward only scoped helper
+documentation records the checked step. Guarded source save includes3manifestpaths
+plus that doc;coordination is separate. Evidence in profile-workspace-2026-11-09/checked-v1.
+No primary check/preparation job remains pending. Native production dependency and
+actual import account/consent/worker/recovery wiring are still deferred,not accepted.
+Data checkedP2followupbe6476f and updatecheckedfollowup99b8b79 are awaiting their
+read-only followup reviews;RC originalsh_1bcfe3947001Yu38Ee1wnubJFH remains pending,
+not a checked followup. Freshapp/media preserveownWIP/jobs/targets. Whole-readyfalse.
+
+Workspace source saved as `6b87a04a9c6b78d61f631057983b962d6baa9d69`,4scopedpaths;
+175checked source hashes unchanged plus post-check documentation-only update.
+Defaultmembers/778existing lock records/native manifest/app seam remain intact.
+Data followup staticreview completed:be6476f P2resolved,no qualifying new findings;
+guarded integrationbc84383+be6476f with its scoped docs is now permitted. Update
+followup99b8b79's five fixes are statically confirmed,but newP2case-sensitiveheld
+launchlookup rejects otherwise validmixedcase executable afteractivation. Original
+updateowner resumed for narrowlycheckedcasingfix/regression;updateintegrationclosed.
+RC originalaffectedgroup remains pending;no parentpoll/duplicate/integration.
+
 ## Latest checked primary source636db12
 
 Import pair43adbcd -> e3a3ff5 is integrated and saved as

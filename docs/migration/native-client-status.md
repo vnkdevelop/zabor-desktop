@@ -2,6 +2,17 @@
 
 Редакция / updated: 2026-11-09.
 
+Importhelper rootworkspace group passed13tests/metadata/fmt/strictClippy/featuretree/
+nativetypes/Graphify.778oldlockrecords/defaultmembers unchanged;onlyrootmembership/
+onepackage record/standalone-workspace removal. Native/appmanifest unchanged,test-source
+notselected. Source saved6b87a04;productiondependency/UI/account/consent/recovery
+stillmissing. Data/updatecheckedfollowups awaitreviews,RCoriginalcheckpending,
+app/mediaWIPpreserved. Whole-native readinessfalse.
+
+Datafollowupbe6476f staticreviewcomplete,no findings/priorP2resolved;guardedprimary
+sourceintegration next. Update99b8b79 fivefixesverified,newP2mixedcaseheldlaunchlookup
+awaitsnarrowcheckedfollowup;updateintegrationclosed. RC originalgroupstillpending.
+
 Latest checked primarysource `636db12d9f6ab9c6b04e383a5a236e39eb0d7206` integrates
 importpair43adbcd+e3a3ff5:58affectedtests/fmt/syntax/helper+nativeClippy/build/Graphify,
 14exactGitblobs/176unchangedsourcehashes. Normalbinary3ca53966… is componentproof,

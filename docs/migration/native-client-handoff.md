@@ -2,6 +2,26 @@
 
 Редакция: 2026-11-09. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
+## Workspace registration checked after636db12
+
+Originalsh_1bd044f3f001WeZF53SAsFQgd0 passed13helper tests/lockedoffline metadata/
+fmt/strictClippy/normalfeaturetree/nativetypes/Graphify.3manifestpaths only;778prior
+lockrecords/defaultmembers preserved,176sourcehashes stable. Native/app manifest
+and renderer seam untouched;historical helperlock retained,test-source not selected.
+Scoped helperdoc added only afterchecks. Guarded save4paths,coordinationseparately;
+proof profile-workspace-2026-11-09/checked-v1. No primary check/prepjobpending.
+Native dependency/account-key/consent/originalworker/recovery/Chromium missing.
+DataP2be6476f+update99b8b79 delivered,followupstaticreviews pending;RCoriginal
+sh_1bcfe3947001Yu38Ee1wnubJFH pending,no checkedfollowup. App/mediaownWIP remains.
+Whole-native/readiness/liveupdate/physical/release/shutdownfalse.
+
+Workspace saved6b87a04a9c6b78d61f631057983b962d6baa9d69,4paths/13tests/types;
+175stablehashes+doc-onlypostcheckupdate,778lockrecords/defaultmembers/appseam retained.
+Datareviewbe6476f nowcompletedno findings,P2resolved;nextguardedintegrationbc84383+
+be6476f+scope/docs allowed. Update99b8b79 prior5fixesconfirmed,newP2case-sensitive
+heldlaunchlookup pendingownerfix;no updateintegrationyet. RC originalcheckpending.
+Only3coorddocsunsaved;savebeforedata sourceintegration. No primaryjobpending.
+
 ## Latest source636db12 — import component integrated
 
 Checked source `636db12d9f6ab9c6b04e383a5a236e39eb0d7206` integrates43adbcd+e3a3ff5
