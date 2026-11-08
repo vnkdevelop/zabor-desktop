@@ -1,5 +1,6 @@
 mod protocol;
 pub use protocol::{key_safe, Packet, Signal, CHANNEL_ID, CHANNEL_LABEL};
+pub mod desktop;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};

@@ -1,0 +1,39 @@
+export component RemoteControlPillWindow inherits Window {
+    in property <string> controller-name;
+    width: 160px;
+    height: 32px;
+    no-frame: true;
+    background: transparent;
+    Rectangle {
+        x: 2px;
+        y: 2px;
+        width: parent.width - 4px;
+        height: parent.height - 4px;
+        border-radius: 14px;
+        background: #121214e0;
+        border-width: 1px;
+        border-color: #ffffff14;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            spacing: 7px;
+            alignment: center;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: white;
+                vertical-stretch: 0;
+            }
+            Text {
+                text: root.controller-name;
+                color: #ffffffe6;
+                font-size: 11px;
+                font-weight: 600;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+}
