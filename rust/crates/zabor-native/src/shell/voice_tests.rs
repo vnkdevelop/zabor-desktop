@@ -515,6 +515,377 @@ fn voice_commit_holds_original_intent_gate_and_rechecks_window_stop_after_waitin
     println!("voice extraction gate=window stop_after_gate_wait_rechecked=true stale_mutation_rejected=true physical_audio=false");
 }
 
+#[tokio::test]
+async fn resource_metadata_commit_rejects_missing_reticketed_and_revoked_ready_results() {
+    for phase in [
+        "sent-audio",
+        "speaking",
+        "sent-speaking",
+        "join-reset",
+        "call-connected",
+        "call-session",
+        "call-suspended",
+        "call-disconnected",
+        "resume-poll",
+        "resume-retry",
+        "resume-ended",
+        "resume-restored",
+    ] {
+        for mode in [
+            "live",
+            "leave-pending",
+            "leave-consumed",
+            "logout-pending",
+            "logout-consumed",
+            "window",
+            "missing",
+            "reticket",
+        ] {
+            let intents = CriticalIntents::default();
+            let original = intents.ticket();
+            let stop = CancellationToken::new();
+            let update = |_| panic!("Resource metadata must not publish inside the intent gate");
+            let ready = VoiceWork::new(&intents, original, &stop, &update);
+            assert_eq!(ready.run(async { 42 }).await, Some(42));
+            match mode {
+                "leave-pending" | "leave-consumed" | "reticket" => {
+                    intents.request(CriticalAction::Leave)
+                }
+                "logout-pending" | "logout-consumed" => intents.request(CriticalAction::Logout),
+                "window" => stop.cancel(),
+                _ => {}
+            }
+            if mode.ends_with("consumed") || mode == "reticket" {
+                intents.next().await;
+            }
+            let ticket = if mode == "reticket" {
+                intents.ticket()
+            } else {
+                original
+            };
+            let resource_ticket = (mode != "missing").then_some(original);
+            let work = VoiceWork::new(&intents, ticket, &stop, &update);
+            let mut values = (
+                Some((false, false)),
+                false,
+                Some(tokio::time::Instant::now()),
+                false,
+            );
+            let before = values;
+            let mut mutations = 0;
+            let result = work.commit_resource(resource_ticket, || {
+                values = (None, true, None, true);
+                mutations += 1;
+                42
+            });
+            assert_eq!(result, (mode == "live").then_some(42));
+            assert_eq!(mutations, usize::from(mode == "live"));
+            assert_eq!(
+                values,
+                if mode == "live" {
+                    (None, true, None, true)
+                } else {
+                    before
+                }
+            );
+            assert_eq!(resource_ticket, (mode != "missing").then_some(original));
+            if mode != "live" {
+                assert!(work
+                    .commit_resource(resource_ticket, || panic!("Rejected metadata tail ran"))
+                    .is_none());
+            }
+            println!("resource metadata phase={phase} mode={mode} ready_result=true original_ticket=true accepted={} physical_audio=false", mode == "live");
+        }
+    }
+}
+
+#[test]
+fn resource_metadata_commit_keeps_fnmut_capture_drop_and_unwind_outside_strict_gate() {
+    struct Probe {
+        intents: Arc<CriticalIntents>,
+        drops: Arc<AtomicUsize>,
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let _ = self.intents.ticket();
+            self.drops.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    for mode in [
+        "live", "leave", "logout", "window", "missing", "reticket", "panic",
+    ] {
+        let intents = Arc::new(CriticalIntents::default());
+        let original = intents.ticket();
+        let stop = CancellationToken::new();
+        if mode == "leave" || mode == "reticket" {
+            intents.request(CriticalAction::Leave);
+        }
+        if mode == "logout" {
+            intents.request(CriticalAction::Logout);
+        }
+        if mode == "window" {
+            stop.cancel();
+        }
+        if mode == "reticket" {
+            assert!(intents.take_leave(original).is_some());
+        }
+        let ticket = if mode == "reticket" {
+            intents.ticket()
+        } else {
+            original
+        };
+        let drops = Arc::new(AtomicUsize::new(0));
+        let probe = Probe {
+            intents: intents.clone(),
+            drops: drops.clone(),
+        };
+        let update = |_| {};
+        let work = VoiceWork::new(&intents, ticket, &stop, &update);
+        let mut accepted = false;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            work.commit_resource((mode != "missing").then_some(original), move || {
+                let _ = &probe;
+                assert_ne!(mode, "panic", "Expected resource metadata callback unwind");
+                42
+            })
+        }));
+        assert_eq!(drops.load(Ordering::Acquire), 1);
+        assert_eq!(result.is_err(), mode == "panic");
+        if let Ok(result) = result {
+            assert_eq!(result, (mode == "live").then_some(42));
+        }
+        if matches!(mode, "live" | "panic") {
+            assert_eq!(
+                work.commit_resource(Some(original), || {
+                    accepted = true;
+                    43
+                }),
+                Some(43)
+            );
+            assert!(accepted);
+        }
+        println!("resource metadata capture={mode} drop_gate_reentry=true fnmut_borrowed=true physical_audio=false");
+    }
+    for mode in ["leave", "logout", "window"] {
+        let intents = CriticalIntents::default();
+        let ticket = intents.ticket();
+        let stop = CancellationToken::new();
+        let update = |_| {};
+        let work = VoiceWork::new(&intents, ticket, &stop, &update);
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let (started, starting) = std::sync::mpsc::channel();
+        let (done, finished) = std::sync::mpsc::channel();
+        let value = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            let intents = &intents;
+            let work = &work;
+            let value = &value;
+            if mode == "window" {
+                let holder = scope.spawn(move || {
+                    intents.commit(ticket, IntentScope::Session, || {
+                        entered.send(()).unwrap();
+                        held.recv_timeout(Duration::from_secs(3)).unwrap();
+                    })
+                });
+                waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                let commit = scope.spawn(move || {
+                    started.send(()).unwrap();
+                    let result = work.commit_resource(Some(ticket), || {
+                        panic!("Window stop after gate wait accepted metadata")
+                    });
+                    done.send(result).unwrap();
+                });
+                starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                stop.cancel();
+                release.send(()).unwrap();
+                holder.join().unwrap().unwrap();
+                assert_eq!(
+                    finished.recv_timeout(Duration::from_secs(1)).unwrap(),
+                    None::<()>
+                );
+                commit.join().unwrap();
+            } else {
+                let commit = scope.spawn(move || {
+                    work.commit_resource(Some(ticket), || {
+                        entered.send(()).unwrap();
+                        held.recv_timeout(Duration::from_secs(3)).unwrap();
+                        value.store(1, Ordering::Release);
+                    })
+                });
+                waiting.recv_timeout(Duration::from_secs(1)).unwrap();
+                let requester = scope.spawn(move || {
+                    started.send(()).unwrap();
+                    intents.request(if mode == "leave" {
+                        CriticalAction::Leave
+                    } else {
+                        CriticalAction::Logout
+                    });
+                    assert_eq!(value.load(Ordering::Acquire), 1);
+                    done.send(None).unwrap();
+                });
+                starting.recv_timeout(Duration::from_secs(1)).unwrap();
+                assert!(finished.recv_timeout(Duration::from_millis(30)).is_err());
+                release.send(()).unwrap();
+                assert_eq!(commit.join().unwrap(), Some(()));
+                finished.recv_timeout(Duration::from_secs(1)).unwrap();
+                requester.join().unwrap();
+            }
+        });
+        assert!(work
+            .commit_resource(Some(ticket), || panic!(
+                "Priority-revoked metadata accepted"
+            ))
+            .is_none());
+        println!("resource metadata gate={mode} strict_linearization=true stop_after_gate_wait=true physical_audio=false");
+    }
+}
+
+#[tokio::test]
+async fn native_call_restore_resource_commit_keeps_retired_video_drop_outside_gate() {
+    use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+    use zabor_native::call_recovery::CallRecovery;
+    const SESSION: &str = "0123456789abcdef0123456789abcdef";
+    struct SinkProbe {
+        intents: Arc<CriticalIntents>,
+        drops: Arc<AtomicUsize>,
+    }
+    impl Drop for SinkProbe {
+        fn drop(&mut self) {
+            let _ = self.intents.ticket();
+            self.drops.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    let (mut engine, lifetime) = peer();
+    let factory = libwebrtc::peer_connection_factory::PeerConnectionFactory::default();
+    let source = NativeVideoSource::new(
+        VideoResolution {
+            width: 160,
+            height: 96,
+        },
+        true,
+    );
+    for path in ["event", "command"] {
+        for mode in [
+            "live",
+            "leave-pending",
+            "leave-consumed",
+            "logout-pending",
+            "logout-consumed",
+            "window",
+            "missing",
+            "reticket",
+            "panic",
+            "expired",
+            "wrong-peer",
+            "failed",
+        ] {
+            let intents = Arc::new(CriticalIntents::default());
+            let original = intents.ticket();
+            let stop = CancellationToken::new();
+            let now = Instant::now();
+            let mut recovery = CallRecovery::default();
+            recovery.begin("peer");
+            assert!(recovery.connected("peer"));
+            assert!(recovery.suspended(SESSION, 45_000, now));
+            let deadline = recovery.next_deadline();
+            let drops = Arc::new(AtomicUsize::new(0));
+            let probe = SinkProbe {
+                intents: intents.clone(),
+                drops: drops.clone(),
+            };
+            let receiver = VideoReceiver::new(
+                factory.create_video_track("metadata-fixture", source.clone()),
+                lifetime.clone(),
+                Arc::new(move |_| {
+                    let _ = &probe;
+                }),
+            );
+            assert!(!receiver.is_playing());
+            let mut videos = std::collections::BTreeMap::from([("peer".to_owned(), receiver)]);
+            let mut paused = std::collections::BTreeSet::from(["peer".to_owned()]);
+            let mut grace = zabor_native::video::StreamDropGrace::default();
+            grace.schedule("peer".into(), now);
+            let update = |_| panic!("Call restoration must publish outside the acceptance gate");
+            let ready = VoiceWork::new(&intents, original, &stop, &update);
+            assert_eq!(ready.run(async { 42 }).await, Some(42));
+            match mode {
+                "leave-pending" | "leave-consumed" | "reticket" => {
+                    intents.request(CriticalAction::Leave)
+                }
+                "logout-pending" | "logout-consumed" => intents.request(CriticalAction::Logout),
+                "window" => stop.cancel(),
+                _ => {}
+            }
+            if mode.ends_with("consumed") || mode == "reticket" {
+                intents.next().await;
+            }
+            let work = VoiceWork::new(
+                &intents,
+                if mode == "reticket" {
+                    intents.ticket()
+                } else {
+                    original
+                },
+                &stop,
+                &update,
+            );
+            let resource_ticket = (mode != "missing").then_some(original);
+            let restored_at = now + Duration::from_secs(if mode == "expired" { 45 } else { 1 });
+            let mut retired_video = None;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                work.commit_resource(resource_ticket, || {
+                    if mode != "failed"
+                        && recovery.restored(
+                            SESSION,
+                            if mode == "wrong-peer" {
+                                "other"
+                            } else {
+                                "peer"
+                            },
+                            restored_at,
+                        )
+                    {
+                        retired_video = videos.remove("peer");
+                        paused.remove("peer");
+                        assert_ne!(mode, "panic", "Expected restored video metadata unwind");
+                        true
+                    } else {
+                        recovery.retry(restored_at);
+                        false
+                    }
+                })
+            }));
+            let extracted = matches!(mode, "live" | "panic");
+            assert_eq!(result.is_err(), mode == "panic");
+            assert_eq!(retired_video.is_some(), extracted);
+            assert_eq!(videos.is_empty(), extracted);
+            assert_eq!(paused.is_empty(), extracted);
+            assert_eq!(drops.load(Ordering::Acquire), 0);
+            assert_eq!(grace.next_deadline(), Some(now + Duration::from_secs(30)));
+            if let Ok(Some(restored)) = result {
+                assert_eq!(restored, mode == "live");
+                drop(retired_video.take());
+                if restored {
+                    grace.cancel("peer");
+                }
+                assert_eq!(grace.next_deadline().is_none(), restored);
+            } else if mode != "panic" {
+                assert_eq!(recovery.next_deadline(), deadline);
+                assert!(recovery.can_restore(SESSION, "peer", now));
+            }
+            drop(retired_video);
+            drop(videos);
+            assert_eq!(drops.load(Ordering::Acquire), 1);
+            assert!(lifetime.is_alive());
+            assert_eq!(resource_ticket, (mode != "missing").then_some(original));
+            println!("resource metadata video path={path} mode={mode} receiver_drop_gate_reentry=true extracted={extracted} grace_cancel_outside_gate=true physical_audio=false");
+        }
+    }
+    engine.close();
+}
+
 fn frame_sink(
     sender: mpsc::Sender<FrameUpdate>,
     ticket: IntentTicket,

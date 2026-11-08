@@ -1059,10 +1059,39 @@ gate/original-ticket/owned-tuple/Answer-receiver/hint/drop-order reconstruction 
 only3existing source changes,no new sources. Executable SHA-256:
 `a74128687159206326a5d9bc1879d78d0bf80ae9fa8288b5b9ead43f11a55e17`.
 previousVoiceResourceExtractionChecked=true is narrow3site old-resource extraction;
-save/post-save Graphify/guard/compact next. All temporary helpers deleted.
+saved3ac1e18b57d2526848c836415725995156bcda87/post-save Graphify/438/3/24/current+
+frozen binary+ONNX/dependency/proof/clean-tree guard passed. Temporary helpers deleted.
 Reused Voice/join errors/other
 call-audio-resume-video/peer/shared/acquisition/native-worker bounds still open;
 no full-client readiness,no generalized off-thread teardown.
+
+### Original-resource worker metadata: components checked locally
+
+14metadata sites now use original stored resource-ticket acceptance,borrowed FnMut
+captures outside unchanged strict VoiceWork mutex. Join flags/native wait/new-error
+extraction,CheckAudio sent/local-user-speaking/original350ms release and call recovery
+connected/session/suspended/disconnected/poll/ended/retry/restored flags covered.
+Two successful restoration callbacks extract old VideoReceiver to outer locals;
+receiver Drop,stream-drop grace cancellation,publication and native waits remain
+outside gate. General peer/video/shared native lifecycle acceptance remains open.
+Six new tests cover96generic metadata cases,7capture/3heldgate,8native-mute/local-wire,
+12configured Join,8recovery contract and24configured receiver retirement cases;
+71native-bin tests/source scope audit passed. No physical audio/active video subscriptions
+or real successful native Join/call restoration proven. Final
+`native-calls/resource-metadata-final-2026-11-08/` passed304default/294neural-disabled,
+both Clippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI interactions;
+protected neural metrics unchanged. Independent438primary/3reference/24evidence/
+current+frozen executable+ONNX/3SDK/proofs matched0mismatches;all298/288previous
+test names/multiplicity retained,six new tests/main32/VoiceWork11/previous suites
+verified in both modes.158new/267prior markers and previous diagnostic signatures/
+multiplicity verified;raw logs/source/deadlines unchanged. Source reconstruction
+outside1helper/6new tests/7worker metadata scopes exactly equals saved3ac1e18;
+four existing sources changed,no new sources. Tested executable SHA-256:
+`d2f889d682fbba98d97205cdd613826d61c4be696e08a3aaf874be05108d8c07`.
+voiceResourceMetadataChecked=true is narrow worker metadata/two old-video extraction
+acceptance. Save/post-save Graphify/guard/compact next;all temporary helpers removed.
+General VideoReceiver/peer-exclusive/shared/native-resource/worker/UI bounds and
+full-client/worker/audio/call readiness remain false,no generalized off-thread teardown.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

@@ -2136,6 +2136,221 @@ async fn native_previous_voice_cleanup_preserves_hint_contract_and_rejects_revok
     }).await.unwrap();
 }
 
+#[tokio::test]
+async fn native_resource_metadata_rechecks_actual_mute_result_and_preserves_monitor() {
+    timeout(Duration::from_secs(15), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        for mode in ["live", "leave-pending", "leave-consumed", "logout-pending", "logout-consumed", "window", "missing", "reticket"] {
+            let intents = CriticalIntents::default();
+            let original = intents.ticket();
+            let stop = CancellationToken::new();
+            let audio = audio(&stop);
+            let monitor = audio.monitor(true);
+            let snapshot = audio.mic_test.snapshot(Instant::now());
+            let (mut session, events) = VoiceSession::new(&hub, &user(), false, AudioPreferences::new(&json!({})).controls.clone(), audio.clone()).await.unwrap();
+            let update = |_| panic!("Mute metadata must publish outside the acceptance gate");
+            let ready = VoiceWork::new(&intents, original, &stop, &update);
+            assert!(ready.run(session.mute(&hub, true, false)).await.unwrap().is_ok());
+            match mode {
+                "leave-pending" | "leave-consumed" | "reticket" => intents.request(CriticalAction::Leave),
+                "logout-pending" | "logout-consumed" => intents.request(CriticalAction::Logout),
+                "window" => stop.cancel(),
+                _ => {},
+            }
+            if mode.ends_with("consumed") || mode == "reticket" { intents.next().await; }
+            let ticket = if mode == "reticket" { intents.ticket() } else { original };
+            let work = VoiceWork::new(&intents, ticket, &stop, &update);
+            let mut sent = Some((false, true));
+            assert_eq!(work.commit_resource((mode != "missing").then_some(original), || sent = Some((true, false))).is_some(), mode == "live");
+            assert_eq!(sent, Some(if mode == "live" { (true, false) } else { (false, true) }));
+            assert_eq!(audio.demand.active(), 1);
+            assert_eq!(monitor.is_current(), mode != "window");
+            assert_eq!(audio.mic_test.snapshot(Instant::now()), snapshot);
+            assert!(!events.is_closed());
+            drop(session);
+            assert!(events.is_closed());
+            drop(events);
+            audio.wait_for_cleanup().await.unwrap();
+            println!("resource metadata mute={mode} actual_native_mute=true wire_shape_unchanged=true monitor_preserved=true physical_audio=false");
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), ["GetIceServers", "UpdateUserState"].repeat(8));
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn native_join_resource_metadata_keeps_reused_channel_and_guarded_new_error_cleanup() {
+    timeout(Duration::from_secs(20), async {
+        let fixture = fixture("unused").await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None).await.unwrap();
+        for reused in [false, true] {
+            for mode in ["live", "leave", "logout", "window", "missing", "reticket"] {
+                let intents = CriticalIntents::default();
+                let original = intents.ticket();
+                let stop = CancellationToken::new();
+                let audio = audio(&stop);
+                let monitor = audio.monitor(true);
+                let (mut session, receiver) = VoiceSession::new(&hub, &user(), false, AudioPreferences::new(&json!({})).controls.clone(), audio.clone()).await.unwrap();
+                if reused { session.channel = Some("original-channel".into()); }
+                let (mut voice, mut events) = (Some(session), Some(receiver));
+                let resource_ticket = (mode != "missing").then_some(original);
+                let update = |_| {};
+                let ready = VoiceWork::new(&intents, original, &stop, &update);
+                assert_eq!(ready.run(async { 42 }).await, Some(42));
+                match mode {
+                    "leave" | "reticket" => { intents.request(CriticalAction::Leave); intents.next().await; },
+                    "logout" => { intents.request(CriticalAction::Logout); intents.next().await; },
+                    "window" => stop.cancel(),
+                    _ => {},
+                }
+                let work = VoiceWork::new(&intents, if mode == "reticket" { intents.ticket() } else { original }, &stop, &update);
+                let mut flags = (Some((true, false)), true, Some(tokio::time::Instant::now()));
+                let before = flags;
+                let accepted = work.commit_resource(resource_ticket, || flags = (None, false, None));
+                assert_eq!(accepted.is_some(), mode == "live");
+                assert_eq!(flags, if mode == "live" { (None, false, None) } else { before });
+                if mode != "live" && mode != "missing" {
+                    let resource_work = VoiceWork::new(&intents, original, &stop, &update);
+                    assert!(resource_work.run(voice.as_mut().unwrap().join(&hub, "forbidden-channel")).await.is_none());
+                }
+                let disposed = if !reused { work.take_voice(&mut voice, &mut events, resource_ticket, |_| {}) } else { None };
+                assert_eq!(disposed.is_some(), mode == "live" && !reused);
+                assert_eq!(voice.is_some(), mode != "live" || reused);
+                if reused { assert_eq!(voice.as_ref().unwrap().channel.as_deref(), Some("original-channel")); }
+                assert_eq!(events.is_some(), mode != "live" || reused);
+                assert_eq!(resource_ticket, (mode != "missing").then_some(original));
+                drop(disposed);
+                drop(voice);
+                drop(events);
+                assert_eq!(monitor.is_current(), mode != "window");
+                assert_eq!(audio.demand.active(), 1);
+                audio.wait_for_cleanup().await.unwrap();
+                println!("resource metadata join reused={reused} mode={mode} original_ticket=true stale_native_join_not_polled=true configured_error_cleanup=true physical_audio=false");
+            }
+        }
+        hub.close();
+        assert_eq!(fixture.server.await.unwrap(), vec!["GetIceServers"; 12]);
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn resource_call_recovery_metadata_keeps_original_session_deadline_and_retry_contract() {
+    for mode in [
+        "live",
+        "leave-pending",
+        "leave-consumed",
+        "logout-pending",
+        "logout-consumed",
+        "window",
+        "missing",
+        "reticket",
+    ] {
+        let intents = CriticalIntents::default();
+        let original = intents.ticket();
+        let stop = CancellationToken::new();
+        let update = |_| {};
+        let ready = VoiceWork::new(&intents, original, &stop, &update);
+        assert_eq!(ready.run(async { 42 }).await, Some(42));
+        let now = Instant::now();
+        let mut recovery = CallRecovery::default();
+        recovery.begin("peer");
+        assert!(recovery.connected("peer"));
+        assert!(recovery.suspended(RESUME_SESSION, 45_000, now));
+        let deadline = recovery.next_deadline();
+        match mode {
+            "leave-pending" | "leave-consumed" | "reticket" => {
+                intents.request(CriticalAction::Leave)
+            }
+            "logout-pending" | "logout-consumed" => intents.request(CriticalAction::Logout),
+            "window" => stop.cancel(),
+            _ => {}
+        }
+        if mode.ends_with("consumed") || mode == "reticket" {
+            intents.next().await;
+        }
+        let work = VoiceWork::new(
+            &intents,
+            if mode == "reticket" {
+                intents.ticket()
+            } else {
+                original
+            },
+            &stop,
+            &update,
+        );
+        let resource_ticket = (mode != "missing").then_some(original);
+        let action = work.commit_resource(resource_ticket, || {
+            recovery.poll(now + Duration::from_secs(1), true)
+        });
+        if mode == "live" {
+            assert_eq!(
+                action,
+                Some(zabor_native::call_recovery::RecoveryAction::Resume {
+                    session: RESUME_SESSION.into(),
+                    peer: "peer".into(),
+                    timeout: Duration::from_secs(5)
+                })
+            );
+            assert_eq!(
+                recovery.remaining(now + Duration::from_secs(1)),
+                Duration::from_secs(44)
+            );
+            work.commit_resource(resource_ticket, || {
+                recovery.retry(now + Duration::from_secs(1))
+            })
+            .unwrap();
+            assert_eq!(recovery.next_deadline(), Some(now + Duration::from_secs(2)));
+            assert_eq!(
+                work.commit_resource(resource_ticket, || recovery.restored(
+                    RESUME_SESSION,
+                    "other",
+                    now
+                )),
+                Some(false)
+            );
+            assert_eq!(
+                work.commit_resource(resource_ticket, || recovery.restored(
+                    RESUME_SESSION,
+                    "peer",
+                    now
+                )),
+                Some(true)
+            );
+            assert_eq!(recovery.next_deadline(), None);
+        } else {
+            assert!(action.is_none());
+            assert!(work
+                .commit_resource(resource_ticket, || recovery.set_session(RESUME_SESSION))
+                .is_none());
+            assert!(work
+                .commit_resource(resource_ticket, || recovery.suspended(
+                    RESUME_SESSION,
+                    1,
+                    now
+                ))
+                .is_none());
+            assert!(work
+                .commit_resource(resource_ticket, || recovery.disconnected(now))
+                .is_none());
+            assert!(work
+                .commit_resource(resource_ticket, || recovery.retry(now))
+                .is_none());
+            assert!(work
+                .commit_resource(resource_ticket, || recovery.restored(
+                    RESUME_SESSION,
+                    "peer",
+                    now
+                ))
+                .is_none());
+            assert_eq!(recovery.next_deadline(), deadline);
+            assert!(recovery.can_restore(RESUME_SESSION, "peer", now));
+            assert_eq!(recovery.session_for_login(now), Some(RESUME_SESSION));
+        }
+        println!("resource metadata recovery={mode} session_deadline_retry_preserved=true accepted={} physical_audio=false", mode == "live");
+    }
+}
+
 async fn hold_logout_preferences(
     preferences: Arc<AudioPreferences>,
 ) -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>) {

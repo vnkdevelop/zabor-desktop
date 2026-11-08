@@ -43,6 +43,15 @@ impl<'a> VoiceWork<'a> {
             .flatten()
     }
 
+    pub(super) fn commit_resource<T>(
+        &self,
+        resource_ticket: Option<IntentTicket>,
+        mut accepted: impl FnMut() -> T,
+    ) -> Option<T> {
+        self.commit(|| (resource_ticket == Some(self.ticket)).then(&mut accepted))
+            .flatten()
+    }
+
     pub(super) fn take_voice(
         &self,
         voice: &mut Option<VoiceSession>,
