@@ -1204,9 +1204,42 @@ and Call protocol/preparation/StartCall/install tail byte-for-byte unchanged.
 Tested executable SHA-256:
 `aa6298239c160e9c0e4e15324f2eb623360093d05819229b7945fad53678e87f`.
 callMediaTransitionChecked=true covers only one Call prefix with separate accepted
-whole-owner/rejected-original-Voice-preserving retirement;save/post-saveGraphify/guard/
-compact next,temporary launcher removed immediately. Leave/idle/worker-end/video subscription task join/native
+whole-owner/rejected-original-Voice-preserving retirement;Saved a97cbcb/post-save
+Graphify/438/3/24/current-frozen exe+ONNX/3SDK/proofs/clean-tree guard passed;
+temporary launcher removed immediately. Leave/idle/worker-end/video subscription task join/native
 sink callbacks/syscalls/shared resources/physical/full-client readiness remain false.
+
+### Idle media retirement: components checked locally
+
+One idle prefix/one helper/three tests only. Absent Voice required;original stored
+Voice ticket retained before extraction and until original optional media events
+are absent. Unchanged original-ticket take_previous_media with retain_events=true
+refuses live/live-poisoned orphan receivers;only monotonic-dead map transfers.
+Empty native slots preserve missing-ticket/fresh-epoch behavior. Idle metadata
+reset linearized under original intent;extracted tuple/FnMut captures dispose
+outside gates on rejection/unwind. No reticket/recreated events. Source438/3/3SDK/
+predecessor audit passed;all previous helpers/native implementations/fixtures/tests/
+other worker branches including Call/Leave/Logout/worker-end exactly saved a97cbcb.
+New fixture compile inference and inactive recovery deadline errors corrected;
+latest74case filtered job sh_1ba056e53001h129kHa5NqpjGC passed3,74unique markers
+independently counted. Full `native-calls/idle-media-retirement-final-2026-11-08/`
+passed325default/315neural-disabled/bothClippy/fmt/pinned/9HTTP/neural/freshbuild/
+8inert RUEN/four-DPI auth-roster-audio-MicTest/Graphify;neural metrics unchanged.
+FinalGraphify6000nodes/14828edges/257communities,existing warnings retained.
+Independent438/3/24/current-frozen exe+ONNX/3SDK/proofs matched0mismatches. All322/312
+previous full test names/multiplicity/979diagnostic signatures and main42-Voice19-
+media3/all previous suites retained.948prior component diagnostics measured per
+explicit regex,all previous component/video/Call subsets unchanged. Each60take/
+6held gate/8native local invalidation case exactly once per mode,74new markers.
+Separate evidence recheck passed,all previous Checked flags retained. Existing
+helpers/native implementations/tests/fixtures/Call-Leave-Logout-worker-end scopes
+byte-for-byte unchanged outside idle prefix/helper/three new tests.
+Tested executable SHA-256:
+`18dce57d9bb5646646633f9e4861d24e3aedf10028e49fa647e3c56bade58b53`.
+idleMediaRetirementChecked=true covers only one original-ticket idle prefix;
+save/post-saveGraphify/guard/compact next,temporary launcher removed immediately.
+Priority revoked-owner retirement/native sink/task/
+syscall/shared-resource/worker/physical/full-client readiness remains false.
 
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and

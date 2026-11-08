@@ -295,6 +295,20 @@ impl<'a> VoiceWork<'a> {
         None
     }
 
+    pub(super) fn take_idle_media(
+        &self,
+        voice: &mut Option<VoiceSession>,
+        events: &mut Option<mpsc::Receiver<MediaEvent>>,
+        videos: &mut BTreeMap<String, VideoReceiver>,
+        resource_ticket: Option<IntentTicket>,
+        mut accepted: impl FnMut(),
+    ) -> Option<VoiceMediaResources> {
+        if voice.is_some() {
+            return None;
+        }
+        self.take_previous_media(voice, events, videos, resource_ticket, true, |_| accepted())
+    }
+
     pub(super) fn install_voice(
         &self,
         voice: &mut Option<VoiceSession>,

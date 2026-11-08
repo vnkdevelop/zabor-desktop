@@ -1803,23 +1803,39 @@ async fn worker(
         let iteration_ticket = intents.ticket();
         let session_work = SessionWork::new(&intents, iteration_ticket, &stop, update.as_ref());
         if voice.is_none() {
-            voice_ticket = None;
-            call_recovery.clear();
-            sent_audio_state = None;
-            sent_speaking = false;
-            speaking_release = None;
-            local_speaking = false;
-            audio_controls.speaking.store(false, Ordering::Release);
-        }
-        if voice.is_none()
-            && (!video_jobs.is_empty()
+            let work = VoiceWork::new(
+                &intents,
+                voice_ticket.unwrap_or(iteration_ticket),
+                &stop,
+                update.as_ref(),
+            );
+            let retain_events = media_events.is_some();
+            let clear_video = !video_jobs.is_empty()
                 || !paused_video.is_empty()
-                || stream_drops.next_deadline().is_some())
-        {
-            video_generation.fetch_add(1, Ordering::AcqRel);
-            video_jobs.clear();
-            paused_video.clear();
-            stream_drops.clear();
+                || stream_drops.next_deadline().is_some();
+            let retired = work.take_idle_media(
+                &mut voice,
+                &mut media_events,
+                &mut video_jobs,
+                voice_ticket,
+                || {
+                    if !retain_events {
+                        voice_ticket = None;
+                    }
+                    call_recovery.clear();
+                    sent_audio_state = None;
+                    sent_speaking = false;
+                    speaking_release = None;
+                    local_speaking = false;
+                    audio_controls.speaking.store(false, Ordering::Release);
+                    if clear_video {
+                        video_generation.fetch_add(1, Ordering::AcqRel);
+                        paused_video.clear();
+                        stream_drops.clear();
+                    }
+                },
+            );
+            drop(retired);
         }
         if session_work.is_current() && chat.is_none() && !chat_failed {
             if let (Some(user), Some(profile)) = (current_user.as_ref(), profile.as_ref()) {

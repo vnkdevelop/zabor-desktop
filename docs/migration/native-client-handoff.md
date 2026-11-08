@@ -2,21 +2,21 @@
 
 Редакция: 2026-11-08. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
-Последний проверенный компонентный этап после `54519c7`: Call media transition;
-invalid friend retains Voice/events,valid friend retains whole owner through waits.
-Final `call-media-transition-final-2026-11-08` прошёл322default/312neural-disabled tests
+Последний проверенный компонентный этап после `a97cbcb`: idle media retirement;
+original ticket/events retained,live orphan refused,dead-map Drop outside gates.
+Final `idle-media-retirement-final-2026-11-08` прошёл325default/315neural-disabled tests
 и8inert RUEN/four-DPI interactions;438primary+3reference sources,24evidence files
 иactual/frozen executable+ONNX DLL сверены
 независимо без расхождений. Binary SHA-256:
-`aa6298239c160e9c0e4e15324f2eb623360093d05819229b7945fad53678e87f`.
+`18dce57d9bb5646646633f9e4861d24e3aedf10028e49fa647e3c56bade58b53`.
 Все final/GUI jobs завершены; независимый438/3/24/binary/source-scope audit passed.
 После сохранения — post-save Graphify/clean-tree/frozen source+evidence guard и
 compact;actual saved commit брать из Git и
-`native-calls/call-media-transition-post-save-2026-11-08/saved-boundary.json`.
+`native-calls/idle-media-retirement-post-save-2026-11-08/saved-boundary.json`.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
 chat/file final-save races и все remaining media/UI/profile/import/packaging/
-visual/physical gates. Исторический803c9ea2… voice-media-bundle binary не заменяет
+visual/physical gates. Историческийaa629823… Call-transition binary не заменяет
 новый final proof. Same-peer network reconnect
 messages без protocol voice epochs отдельно остаются неподтверждёнными.
 Worker responsiveness/physical/call/audio/full-client acceptance=false;
@@ -38,6 +38,78 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Graphify сначала: `graphify-out/GRAPH_REPORT.md` / graph query; после правок `graphify update .`. Завершающее обновление запускать с автоматическим уведомлением о завершении, не опрашивать процесс.
 - Не сбрасывать и не переписывать существующий рабочий код; не добавлять комментарии. Существующие комментарии, включая лицензии vendor-кода, сохранять.
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
+
+## Idle media retirement — checked locally 2026-11-08
+
+- Saved a97cbcb/post-save **sh_1b9fcd1d8001JYJC3J9Dna086Z completed/passed**:
+  clean tree,438/3/24/current-frozen exe+ONNX/3SDK/final-independent-source-exactcase/
+  predecessor proofs matched. Existing7Graphify metadata warnings retained.
+  No previous jobs/helpers/profile cleanup debt. No push/merge/release/shutdown.
+- Worker idle previously cleared voice_ticket before video_jobs.clear,losing resource
+  authority. New take_idle_media refuses an occupied Voice,then delegates unchanged
+  original-ticket take_previous_media with retain_events=true. Live/live-poisoned
+  orphan video maps refused;only monotonic-dead original map can transfer. All
+  nonempty native slots require original stored Voice ticket;empty slots preserve
+  missing-ticket/fresh-epoch behavior. No reticket/recreated receiver or events.
+- One idle prefix constructs VoiceWork from original voice_ticket before any reset.
+  Exact optional media_events remains in slot;original ticket cleared only after
+  admitted extraction and absent events. Recovery/speaking/audio-send metadata and
+  conditional video generation/paused/grace reset linearized under original intent.
+  Extracted dead-map tuple and borrowed FnMut captures dispose outside gates on
+  rejection/unwind. No native start/stop/close/UI publication inside gates.
+- Three existing sources only;source reconstruction outside one helper/three tests/
+  idle prefix exactly equals saved a97cbcb. Previous strict intent/Session/Voice/
+  PeerLifetime/audio/video/bundle/Call helpers and native implementations,fixtures/
+  tests/Call-Join-Answer-reconnect-Leave-Logout-worker-end branches unchanged.
+  Revised source audit `native-calls/idle-media-retirement-source-audit-revision-
+  2026-11-08.json` passed438primary/3reference/3SDK/predecessor proofs.
+- Initial **sh_1ba022f83001aiHBKW4a4J9Jt7 failed compilation**:one new isolated
+  orphan test lacked inferred SharedAudio generic;fixed to SharedAudio<NativeAudio>.
+  **sh_1ba03b006001Zc6uVu3Ie5K8Wl passed2/failed1**:new metadata test had only
+  begun recovery without a suspended deadline;fixture now sets connected/suspended
+  state before asserting retention/reset. Production unchanged for both test fixes.
+  Original logs/initial source audit retained,not overwritten. Latest filtered job
+  **sh_1ba056e53001h129kHa5NqpjGC completed/passed3**:60take/6held intent gate/
+  8configured-active local native orphan-invalidation cases,74unique markers
+  independently counted in development-final-revision/cases.json. Clip240000
+  retained/monitor independent;active sink release is not native task join proof.
+- Development Graphify **sh_1ba04af55001RBynwboErwIsWp completed/passed**:
+  6000nodes/14828edges/255communities,existing7metadata warnings/HTML5000limit retained.
+- Full **sh_1ba063cbc001TEqTwhZ7T9Wc6K completed/passed**:
+  `native-calls/idle-media-retirement-final-2026-11-08/`;325default/315neural-disabled/
+  bothClippy/fmt/pinned/9HTTP/neural/freshbuild/8inert RUEN/four-DPI auth/roster/audio/
+  MicTest/Graphify. Protected neural metrics unchanged. Final Graphify6000nodes/
+  14828edges/257communities;existing7metadata warnings/HTML5000limit retained.
+- Independent `native-calls/idle-media-retirement-final-independent-2026-11-08.json`
+  passed438primary/3reference/24evidence/current-frozen exe+ONNX/3SDK/predecessor
+  chain0mismatches. All322/312previous full pass names/multiplicity retained;979prior
+  diagnostic signatures/multiplicity retained with only measured _ms normalized.
+  Explicit component-diagnostic regex measures948prior markers per mode;all former
+  component/video/Call subsets retained without rewriting predecessor raw logs,
+  flags or thresholds. Three new tests/main42-Voice19-media3/all previous suites
+  checked;each60take/6held gate/8configured-active native invalidation case appears
+  exactly once per default/neural-disabled log,74new markers per mode.
+- Exact-case proof `native-calls/idle-media-retirement-cases-independent-2026-11-08.json`
+  and separate `native-calls/idle-media-retirement-evidence-recheck-2026-11-08.json`
+  passed. Source/evidence/SDK/current-frozen exe+ONNX/all proofs rehashed0mismatches;
+  all prior Checked flags retained. No raw log/source/count/deadline modifications.
+  Independent source reconstruction outside one helper/three tests/idle prefix
+  exactly saved a97cbcb;previous Call/Leave/Logout/worker-end/native scopes unchanged.
+- Executable **18dce57d9bb5646646633f9e4861d24e3aedf10028e49fa647e3c56bade58b53**.
+  FinalProof **0d8e8e9e8a8385fc231bb29ccc9acfb40c2a2a38fb831ffbb1152f3ef64d1304**.
+  IndependentProoffa20b95f…;SourceScopeProof2144e5c0…;ExactCasesProofe94dcf8c…;
+  RecheckProofcec736d2…. Temporary launcher deleted immediately,no helper/profile
+  cleanup debt. Save narrow idleMediaRetirementChecked=true then post-saveGraphify/
+  clean-tree/frozen438/3/24/exe+ONNX/3SDK/final-independent-source-exactcases-recheck/
+  predecessor proofs guard/compact. No next source patch before saved guard passes.
+- This is idle-only admission,not priority revoked-resource retirement. Leave/Logout
+  must still dispose revoked owners and must not reuse current VoiceWork to skip
+  cleanup. Leave/worker-end Voice-before-receiver map ownership/gates and native
+  subscription/task/sink completion remain open. No generalized off-thread teardown
+  authority,driver/syscall/worker/physical/full-client readiness claim. Continue those
+  scopes then shared runtime/monitor acquisition/maintenance/reset/start/factory and
+  all remaining filesystem-SessionIo-journal/chat-final-save/media-SFU-control/UI-
+  profile-import-packaging/visual/two-device/full-client acceptance gates.
 
 ## Call media transition — checked locally 2026-11-08
 
@@ -93,10 +165,9 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Executable **aa6298239c160e9c0e4e15324f2eb623360093d05819229b7945fad53678e87f**.
   FinalProof **6e343fb281f881e4bb3b2dd4be7d2f9db953aaf6696cdbb274e38df67cfe6e8e**.
   IndependentProof3983fed7…;SourceScopeProof55b605d1…;ExactCasesProof6411a9e4….
-  Temporary launcher deleted immediately,no helper/profile cleanup debt. Save narrow
-  callMediaTransitionChecked=true then post-saveGraphify/clean-tree/frozen438/3/24/
-  exe+ONNX/3SDK/final-independent-source-exactcases+predecessor proofs guard/compact.
-  No next source patch before saved guard passes.
+  Temporary launcher deleted immediately,no helper/profile cleanup debt. Saved
+  a97cbcb/post-saveGraphify/clean-tree/frozen438/3/24/exe+ONNX/3SDK/final-independent-
+  source-exactcases+predecessor proofs guard passed;callMediaTransitionChecked narrow.
 - Next:Leave/idle/worker-end map cleanup and generalized video subscription/native
   sink/task lifecycle ownership,then shared runtime/monitor acquisition/maintenance/
   reset/start/factory. Task.abort/remove_sink/lease/Notify/sink capture Drop are not
