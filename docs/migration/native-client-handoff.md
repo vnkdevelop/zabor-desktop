@@ -10,10 +10,10 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **df43be2e329a8db4cf6a7cffae002fdd6e8e35f4**:
-camera/Voice/picker/app cleanup integration,134targeted tests/fmt/normal+feature
+сборкой. Latest saved source commit — **5b8d6563e46827e60b25c03d103752e8e7a40588**:
+isolated desktop/window stream audio,180targeted tests/fmt/normal+fixture
 Clippy/normal native build/RUEN inert picker и Graphify passed,clean tree confirmed.
-Camera linked into native app;physical camera/complete client readiness=false.
+Camera source **df43be2** retained;physical camera/audio/complete client readiness=false.
 no push/merge/release/shutdown.
 Далее normal-worker/UI cleanup и оставшиеся external-resource intent-lock bounds,
 native filesystem/resource timing,
@@ -53,7 +53,10 @@ push/merge/release/shutdown не выполнялись. После каждог
 
 ## Isolated stream audio — verified functional stage 2026-11-08
 
-- Resumed source **df43be2**,metadata HEAD **9985c45**,clean tree confirmed.
+- Resumed source **df43be2**,metadata baseline **9985c45**,clean tree confirmed.
+  New saved source **5b8d6563e46827e60b25c03d103752e8e7a40588**,24 scoped paths,
+  180targetedchecks/21sourcehashes/normalbinary/RUEN/Graphify guarded save passed.
+  Clean tree confirmed after source commit;save-verification.json records scope.
 - Added zabor-stream-audio boundary with pinned wasapi0.26/windows0.62.2:screen
   excludes actual application process tree,window resolves exact HWND PID/includes
   tree,no endpoint/system fallback. Native COM/client/buffer/event/Stop/Drop stay
@@ -113,16 +116,25 @@ push/merge/release/shutdown не выполнялись. После каждог
   Source21hashesunchanged and normalbinaryfixturemarkersabsent,SHA256
   0fd77bc79320671cc24949bbf82c7b12b0fc98fd02f241aa3b8d42e63476a8de. Stage-only,
   notnewwholeclientattestation. Temporaryrunner self-deleted;removalcheckedafter
-  completion. No pending jobs. Guarded scoped save next;nativeClientReady=false.
+  completion. No pending jobs. Guarded scoped save **5b8d656** passed;nativeClientReady=false.
 - **sh_1babfdbe7001MN02dPdmnzDfBq passed** Graphifyreceive-slot sync:
   6448nodes/15985edges/285communities,existing7warnings/HTML5000limit.
-  No pending jobs. Source/binary unchanged verified after run;save next.
+  No pending jobs. Source/binary unchanged verified after run and saved **5b8d656**.
   No physical/prod/push/publication/shutdown;release/fullnativeacceptance=false.
 - Next picker/thumbnails stage also needs unchanged reference own-window exclusion:
   current native ScreenCapture::sources maps SDK window list without explicit own
   HWND filter. Do not claim full picker/privacy parity from synthetic include/exclude
   audio tests. Address own-window filtering together with source thumbnails and
   current-window identity before final physical/release acceptance.
+- Continue from saved **5b8d656** after post-save metadata/Graphify sync and compact.
+  Next functional group:picker thumbnails/own-window exclusion,then adaptive
+  bitrate/SFU/remote control. Preserve pinned dependencies,original Voice/Session/
+  peer/UI tickets,registered native owner joins and separate stream/mic/monitor
+  ownership. Do not repeat full/default/neural/visual regression before functional
+  completion. Remaining UI/profile/GIF/crop/avatar/import/rollback/packaging/updater/
+  licenses/signatures plus ownership/data-integrity gates stay open. Physical/audio/
+  camera/privacy/hotplug/clock/long-session/general native driver/last-Arc and exact
+  parity still must pass before push3.8.0-rust/publication/non-forced shutdown.
   Normal Clippy/RUEN inert audio-picker/normal executable fixture exclusion and
   final scoped save follow successful complete targeted results.
 - No physical devices/production/push/merge/publication/shutdown;complete readiness

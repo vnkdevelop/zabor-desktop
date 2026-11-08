@@ -1479,6 +1479,18 @@ regression acceptance remainsfalse,nextsourcepicker/thumbnails/own-windowfilter,
 adaptive bitrate/SFU/RC and remainingfullUI/profile/import/packaging/data-integrity.
 No push/merge/publication/shutdown,nativeClientReady=false.
 
+Saved isolated-audio source **5b8d6563e46827e60b25c03d103752e8e7a40588** on
+rust/native-client after guarded24path/21sourcehash/binary/180tests/RUEN/Graphify
+checks;post-commit tree clean. Source stage includes the retained camera milestone,
+separate window/process-loopback stream audio,second receiver-only-until-start
+audio slot and unchanged old microphone/SCTP behavior. Evidence:isolated-audio-
+functional-2026-11-08/final-checked/verification.json and save-verification.json.
+No pending build/test jobs;post-save metadata/graph sync only. Next missinggroup:
+picker thumbnails/own-windowfilter,adaptive bitrate/SFU/RC,then remaining full
+UI/profile/import/packaging and ownership/data-integrity issues. Native physical/
+privacy/hotplug/clock/long-session/driver/last-Arc and exact parity acceptance remain
+false. No push/merge/publication/shutdown,nativeClientReady=false.
+
 Functional Slint panel/local-meter wiring passed144default and135neural-disabled
 tests,409matching source hashes, nine HTTP/pinned-artifact checks, fmt, Clippy and
 build. All56native/reference pairs,64settings and24auth captures share the final
