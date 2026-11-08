@@ -37,6 +37,16 @@ Graphify 6645 nodes/16503 edges/290 communities,9 native paths/13 checked hashes
 RC input/consent/UI ещё не
 перенесены. Подробности: [native-stream-delivery.md](native-stream-delivery.md).
 
+После `b4b52bc` проверены функциональные компоненты native RC: standalone `zabor-input`,
+ordered negotiated `zabor-rc-v1`/4243, явное согласие/один контроллер/ACK v2 и v1,
+original Voice/peer/channel/capture leases, registered input cleanup, реальная
+геометрия кадров и Slint viewer/revoke controls. Прошли 179 уникальных затронутых
+тестов, fmt, оба режима Clippy, normal build и RU/EN inert interactions. Источник
+сохранён **`2108f866ce719a210bab679c7b81192094c20445`**, Graphify 6870 nodes/
+17027 edges/289 communities;23nativepaths/24checkedhashes. Это не физическая или whole-client приёмка; topmost
+host pill/cursor capture/IME/latency parity и прежние ownership/data/release gates
+остаются открыты. Подробности: [native-remote-control.md](native-remote-control.md).
+
 Сессия «Миграция zabor на Rust» перешла от WASM voicing beta к полному нативному клиенту. Последнее подтверждённое действие — съёмка шести Slint-кадров updater при 100% DPI в `migration-artifacts/native-ui/native-v3`. Итогового сравнения и завершённых проверок нативного этапа не было.
 
 Рабочая ветка: `rust/native-client`. Checkpoint рабочего Electron/WASM-клиента перед переносом: `d088795`. Нативный код находится в `rust/crates/zabor-native`; состояние этой ветки не означает перенос в основную пользовательскую папку или публикацию релиза.

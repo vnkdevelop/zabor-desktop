@@ -10,9 +10,9 @@
 Последний full-verified predecessor — **2ccbc7575913a66ef67a170b5e211f42025d48d2**:
 328/318tests/8inert interactions/438primary+3ref+24evidence/3SDK/proofs и clean-tree
 post-save guard passed. Его frozen executable58b1418a… не является новой video-join
-сборкой. Latest saved source commit — **2d254a2243dd478bc0f33c2fb0da9648dedeb16c**:
-adaptivevideo/viewerinterest/isolatedSFUdelivery,153uniqueaffectedtests/fmt/both
-Clippy/nativebuild/RUENinert/Graphifypassed. Originalpeer/capture/mic ownership retained.
+сборкой. Latest saved source commit — **2108f866ce719a210bab679c7b81192094c20445**:
+nativeRCconsent/channel/owner/viewer/P2Poverrides,179uniqueaffectedtests/fmt/both
+Clippy/nativebuild/RUENinert/Graphifypassed. SFU2d254a2 andoriginalpeer/capture/mic retained.
 Picker **0dcfef7**,audio **5b8d656** and camera **df43be2** retained;physical camera/audio/
 complete client readiness=false. Metadata-only continuation save follows this source.
 no push/merge/release/shutdown.
@@ -53,6 +53,78 @@ push/merge/release/shutdown не выполнялись. После каждог
 - Не менять локализацию/стили/соседние компоненты без необходимости переноса. Все новые UI-строки из RU/EN каталогов; UI — lowercase, кроме технических обозначений.
 
 ## Picker thumbnails — saved checked components 2026-11-08
+
+### Verified native RC components after b4b52bc
+
+- New `zabor-input` boundary: strict LE parser/legacy3bytekeys, safe VK/shortcuts,
+  actual-held/physical modifiers, negative capture/virtual geometry, owned release,
+  registered owner with hooks/host priority/panic/cursor restore/15s fail-safe.
+  Original Voice/peer/channel/capture leases fence the owner; no managed helper.
+  Native9unit tests passed; must-use TranslateMessage warning corrected.
+- Application functional wiring checked: `media/remote_control.rs` negotiated ordered4243
+  channel and metadata, `remote_input.rs` registered blocking owner, Voice consent/
+  exclusivity/v2ACCEPT/v1START/P2P override, actual ScreenCapture frame geometry,
+  native Slint viewer/consent/revoke controls. Existing reference/locales/pins kept.
+  Lockfile diff only adds local zabor-input and native dependency. No physical input.
+- Application check **sh_1bb2d3bf8001hrEMYcH4zlhrIU**failednewtestPartialEq and6
+  String/SharedString UI compares;correctedexactvariantmatch/strborrows,no coretypes
+  orlintsettingschanged. FirstClippy**sh_1bb320b34001C69r6l5kjkqB1e**native/input
+  alltargetsClippy. Added4mediaRC+3VoiceRC localSCTP/consent/versionedACK/exclusivity/
+  originaltargets/freshP2P tests,3registeredinputtests,2viewerkey/letterboxtests.
+  Native acquisition tests use synthetic registered owner,not real SendInput/hooks.
+  Native9tests passed again in the final combined run,not doublecounted.
+- Grouped checks initially stopped before tests: `sh_1bb340963001Mq7xk9JaR2OVL1`
+  newstopconditionClippynesting; `sh_1bb37556b001JVl682dQ6rBVuS`newqueueguardtest
+  missed2imports. Both corrected without suppression/assertion removal. Final
+  **sh_1bb3a02730010hkv6cpfVeKGB3 passed179uniqueaffectedtests**bothClippy/fmt/build/
+  RUENinert. 9input/30media/19Voice/3inputowner/2viewer/4screen/4playback/7video/
+  3localRTP/98shell. No pendingjobs or temporaryrunners. No tests
+  doublecounted;earlier full153SFU onlypriorunchangedcomponent evidence.
+  Inert picker nowchecks explicitcontrolconsent andcamera prohibition; audio-toggle
+  fixture coordinates account for the added consent row. RCwheel ignoresletterbox.
+- User asked whether multiple agents can accelerate migration. Answered yes,3–4
+  independent scopes (UI/profile/assets, copy-import/rollback, packaging/updater/
+  licenses, primary media/RC/integration). No additional agents were launched and
+  no explicit parallel-work decision has been received yet; do not claim otherwise.
+- **sh_1bb320b34001C69r6l5kjkqB1e**foundidenticalstopbranches,mergedshortcircuit
+  withoutsuppression. Initialgroupedjob**sh_1bb340963001Mq7xk9JaR2OVL1**fmt/both
+  Clippy/input/media/Voice/registeredowner/viewer/screen/playback/video/localRTP/
+  shell/build/RUEN stopped beforetests;finalcombinedpassedabove. No physicalinput.
+- Original-channel close/revoke now immediately cancels input lease, retiredRC
+  channels recreate under originalpeer with freshmetadata; queue state-input
+  overflow STOP/revokes originaltarget (movesonlydroppable). RepeatedACKdoesnot
+  restartfreshP2Pprobe;actualcapturefailure revokesgeometry immediately. Consent
+  resetsfalseeachpickeropen,cameraalwaysfalse,controllerkeepsP2Pshareactive/full
+  resolution60fpswithoutmic/SFUchanges. Knownphysical/latency/perreceiverzero-delay/
+  keyframe/IME/topmostpill/cursorconfinement/themeparitystillnotaccepted.
+  Local SCTP/consent/ACK/exclusivity/stale ownership andaffectednative tests/Clippy/
+  build/RUENinert passed. Graphify/scopedsave passed,notfullclient/physicalacceptance.
+  Reviewfixes: set_viewer_state preservescontrolleroverride;channelcloserevokesinput;
+  repeatedACKkeepsP2Pprobe;host-active ignoresnewinput;queueoverflowfailsclosed;
+  cameraalwaysfalse. Nativeglobalcursor/driver/performancefinalproofstillopen.
+  Sources/geometry/owner proof details `native-remote-control.md`.
+- Savedsource**2108f866ce719a210bab679c7b81192094c20445**,job
+  **sh_1bb48447a001AE2Y79jcn49rWh passed**:23native/workspacepaths,24scope/pin hashes,
+  normalexe653c41fe2b755f335434d0752e92becbc86e272437dc5a9bb95ea184aa10d670,
+  normalfixturemarkersabsent;unrelatedSFUpredecessorhashesunchanged. Graphify
+  6870nodes/17027edges/289communities,existing7zero-nodewarnings/HTML5000limit.
+  Only3continuationdocsremainedaftersourcesave. EvidenceRCstage/save-verification.json.
+  Sourcechecksnotwholeclientattestation. No pendingjobs/physicalinput orcapture.
+- Continue after metadata/compact from2108f86: nextfunctionalgroupUI/profile/GIF/
+  crop/avatar,thenimport-copy/rollback/updater/packaging/
+  signatures/licenses and all prior data-integrity/native ownership/final gates.
+  Never declare full client ready from targeted tests; no push/release/shutdown yet.
+- Next UI/avatar reference map reviewed without edits: App.tsx2653-2684dominant
+  color(pixelstep16,skipalpha<128/nearlyblack/white,saturationcluster32,HSLboost),
+  2687-2733crop400x400blackbackground/min-fit/scale/pixeloffset/PNG-or-packedGIF,
+  setup/profile contexts;2735-27665MiBfilelimit;2777-2853round200preview/drag/
+  slider0.5..3step0.05/wheel0.5..5. avatar.ts12-29packed{g,s,x,y},scale0.001/offset0.1
+  precision;AvatarImg.tsx25-38animatedmin-fit/cropoffset*size/200,44staticpreview.
+  signalr.ts1376-1377UpdateProfile(displayName,avatarBase64,avatarColor,aboutMe).
+  Nativeshellchoose-avatar858-900currentlycentercrop256PNG/GIFflattening/16MiB,
+  decode_image5322-5343rawdataURLonly/4MiB anddoesnotdecodepackedGIF. Need scoped
+  completecrop/animatedavatar/profileUXwithboundedmemory/originalSession/query
+  tickets,nolateravatarpublishafterLogout/contextchange. Reference/localesunchanged.
 
 ### Verified functional components: adaptive video/SFU after 5e4430b
 
