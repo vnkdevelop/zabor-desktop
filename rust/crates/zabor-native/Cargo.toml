@@ -68,6 +68,7 @@ default = ["native-media", "neural-dsp"]
 native-media = ["dep:libwebrtc", "dep:zabor-camera", "dep:zabor-stream-audio", "dep:zabor-input"]
 camera-test-source = ["native-media", "zabor-camera/test-source"]
 stream-audio-test-source = ["native-media", "zabor-stream-audio/test-source"]
+audio-test-source = ["native-media"]
 neural-dsp = ["dep:df", "dep:ndarray", "dep:rnnoise2", "dep:ort", "dep:tract-core", "dep:tract-data", "dep:tract-hir", "dep:tract-linalg", "dep:tract-nnef", "dep:tract-onnx", "dep:tract-onnx-opl", "dep:tract-pulse", "dep:tract-pulse-opl"]
 
 [build-dependencies]

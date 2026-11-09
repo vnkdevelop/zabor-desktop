@@ -138,6 +138,13 @@ impl Cache {
         }
     }
 
+    pub(super) fn is_current(&self, owner: &str, intents: &CriticalIntents) -> bool {
+        self.owner == owner
+            && self
+                .ticket
+                .is_some_and(|ticket| intents.is_current(ticket, IntentScope::Session))
+    }
+
     pub(super) fn prepare(
         &mut self,
         owner: &str,

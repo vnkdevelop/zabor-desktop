@@ -3,6 +3,7 @@ use crate::hub::{HubConnection, HubError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -243,13 +244,26 @@ pub enum AchievementTarget {
     Peer(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct AchievementQuery {
     owner: String,
     target: AchievementTarget,
     generation: u64,
     ticket: IntentTicket,
+    stop: Arc<CancellationToken>,
 }
+
+impl PartialEq for AchievementQuery {
+    fn eq(&self, other: &Self) -> bool {
+        self.owner == other.owner
+            && self.target == other.target
+            && self.generation == other.generation
+            && self.ticket == other.ticket
+            && Arc::ptr_eq(&self.stop, &other.stop)
+    }
+}
+
+impl Eq for AchievementQuery {}
 
 impl AchievementQuery {
     pub fn owner(&self) -> &str {
@@ -266,6 +280,14 @@ impl AchievementQuery {
 
     pub fn ticket(&self) -> IntentTicket {
         self.ticket
+    }
+
+    pub fn alive(&self) -> bool {
+        !self.stop.is_cancelled()
+    }
+
+    pub async fn cancelled(&self) {
+        self.stop.cancelled().await;
     }
 }
 
@@ -292,16 +314,23 @@ async fn load_timed(
     let response = tokio::select! {
         biased;
         _ = shutdown.cancelled() => return Err(AchievementError::Cancelled),
+        _ = query.stop.cancelled() => return Err(AchievementError::Cancelled),
         response = intents.run(query.ticket, IntentScope::Session, hub.invoke(method, arguments, timeout)) => response,
     };
-    if shutdown.is_cancelled() || !intents.is_current(query.ticket, IntentScope::Session) {
+    if shutdown.is_cancelled()
+        || !query.alive()
+        || !intents.is_current(query.ticket, IntentScope::Session)
+    {
         return Err(AchievementError::Cancelled);
     }
     let result = response
         .ok_or(AchievementError::Cancelled)?
         .map_err(AchievementError::Hub)?;
     let parsed = parse_result(&result);
-    if shutdown.is_cancelled() || !intents.is_current(query.ticket, IntentScope::Session) {
+    if shutdown.is_cancelled()
+        || !query.alive()
+        || !intents.is_current(query.ticket, IntentScope::Session)
+    {
         return Err(AchievementError::Cancelled);
     }
     parsed
@@ -347,11 +376,15 @@ impl AchievementsView {
             .generation
             .checked_add(1)
             .ok_or(AchievementError::Limit)?;
+        if let Some(query) = &self.query {
+            query.stop.cancel();
+        }
         let query = AchievementQuery {
             owner: owner.to_owned(),
             target,
             generation: self.generation,
             ticket,
+            stop: Arc::new(CancellationToken::new()),
         };
         self.query = Some(query.clone());
         self.data = None;
@@ -361,6 +394,9 @@ impl AchievementsView {
     }
 
     pub fn close(&mut self) {
+        if let Some(query) = &self.query {
+            query.stop.cancel();
+        }
         self.query = None;
         self.data = None;
         self.error = None;
@@ -385,7 +421,7 @@ impl AchievementsView {
         query: &AchievementQuery,
         result: Result<AchievementData, AchievementError>,
     ) -> bool {
-        if self.query.as_ref() != Some(query) || !self.pending {
+        if self.query.as_ref() != Some(query) || !query.alive() || !self.pending {
             return false;
         }
         intents
@@ -466,6 +502,7 @@ impl HiddenCatalog {
         };
         if query.target != AchievementTarget::Own
             || query.owner != self.owner
+            || !query.alive()
             || view.error.is_some()
             || view.pending
         {
@@ -492,6 +529,19 @@ impl HiddenCatalog {
             json,
         }))
     }
+
+    pub fn prepare_response(
+        &self,
+        query: &AchievementQuery,
+        data: &AchievementData,
+    ) -> Result<Option<HiddenPersistence>, AchievementError> {
+        self.prepare(&AchievementsView {
+            query: Some(query.clone()),
+            data: Some(data.clone()),
+            pending: false,
+            ..Default::default()
+        })
+    }
 }
 
 pub struct HiddenPersistence {
@@ -509,18 +559,20 @@ impl HiddenPersistence {
         &self.json
     }
 
-    pub fn commit_if_current<E>(
+    pub fn commit_if_current(
         self,
         intents: &CriticalIntents,
         view: &AchievementsView,
-        primary_durable_accept: impl FnOnce(&str) -> Result<(), E>,
-    ) -> Option<Result<HiddenCatalog, E>> {
+    ) -> Option<HiddenCatalog> {
         if view.query.as_ref() != Some(&self.query) || view.pending || view.error.is_some() {
             return None;
         }
-        intents.commit(self.query.ticket, IntentScope::Session, || {
-            primary_durable_accept(&self.json).map(|()| self.catalog)
-        })
+        intents
+            .commit(self.query.ticket, IntentScope::Session, || {
+                self.query.alive()
+            })
+            .filter(|alive| *alive)
+            .map(|_| self.catalog)
     }
 }
 

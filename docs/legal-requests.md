@@ -1,6 +1,6 @@
 # Запросы уполномоченных органов и раскрытие данных / Legal requests and data disclosure
 
-> Редакция от 11 сентября 2026 года.
+> Редакция от 9 ноября 2026 года. Предыдущая редакция — от 11 сентября 2026 года.
 > Технический и организационный документ. Русская версия является основной.
 
 Документ описывает порядок рассмотрения запросов уполномоченных государственных органов и порядок раскрытия данных пользователей. Он публикуется добровольно, в интересах прозрачности, и не является юридической консультацией.
@@ -30,6 +30,14 @@
 | Содержимое переданных файлов | **Нет** | Передаются напрямую между участниками |
 | Записи голосовых каналов, звонков, видео, трансляции экрана | **Нет** | Оператор не ведёт запись и не пропускает трафик через себя при прямом соединении |
 | Ключи шифрования переписки | **Нет** | Хранятся только на устройствах пользователей |
+
+Native member/profile actions получают уже предусмотренные сведения учётной записи, присутствия, достижений и членства канала через сервер сигнализации. Их ограниченные UI-кэши находятся только в памяти клиента, очищаются при выходе и не создают отдельный архив или журнал Оператора. Обычный выход сохраняет локальную hidden-achievement историю; её новая durable publication в разрабатываемом native клиенте ещё заблокирована. Эти изменения не расширяют техническую возможность раскрытия содержимого переписки, файлов или медиа. Подробные ограничения и текущая степень проверки указаны в [карте данных](chat-data-flow.md).
+
+Native member/profile actions obtain existing account, presence, achievement, and channel-membership metadata through the signaling server. Their bounded UI caches exist only in client memory, clear on sign-out, and create no separate Controller archive or log. Normal sign-out retains local hidden-achievement history; new durable publication in the developing native client remains blocked. These changes do not expand the technical ability to disclose message, file, or media contents. See the [data map](chat-data-flow.md) for limits and the current verification scope.
+
+Отсутствующее в принятом свежем профиле время присутствия не восстанавливается из старого UI-кэша. Коррекции отображения и исходящих запросов не создают новый архив, журнал или категорию доступных Оператору сведений.
+
+A missing last-presence timestamp in an accepted fresh profile is not restored from an older UI cache. Display and outgoing-request corrections create no new archive, log, or category of data available to the Controller.
 
 ---
 

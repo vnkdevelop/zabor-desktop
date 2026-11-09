@@ -317,6 +317,9 @@ impl SharedAudio<NativeAudio> {
     }
 }
 
+#[cfg(feature = "audio-test-source")]
+pub mod test_source;
+
 #[cfg(test)]
 mod tests {
     use super::*;

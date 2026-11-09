@@ -343,6 +343,26 @@ impl AvatarUi {
         }
     }
 
+    pub(super) fn profile_snapshot(
+        &self,
+        ui: &NativeApp,
+        intents: &CriticalIntents,
+    ) -> Option<&User> {
+        if !ui.get_authenticated()
+            || ui.get_modal() != 9
+            || ui.get_profile_editing()
+            || !self
+                .profile_cache
+                .is_current(ui.get_user_id().as_str(), intents)
+        {
+            return None;
+        }
+        self.profile.as_ref().filter(|user| {
+            user.id == ui.get_profile_id().as_str()
+                && user.username == ui.get_profile_login().as_str()
+        })
+    }
+
     pub(super) fn refresh(
         &mut self,
         ui: &NativeApp,
