@@ -7,3 +7,8 @@
 *.icns binary
 *.png binary
 /rust/crates/zabor-native/assets/catalogs/*.json -text whitespace=cr-at-eol
+/licenses/native/texts/** -text
+/licenses/native/*.json -text
+/tests/native-delivery/*.json -text
+/tests/native-delivery/electron-SHASUMS256.txt -text
+/tests/native-delivery/reference.css -text whitespace=cr-at-eol

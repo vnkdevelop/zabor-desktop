@@ -312,8 +312,17 @@ def collect_licenses(destination, data, cache, neural, supplements_path=None):
     inventory.append({"name": "zabor-notices", "version": POLICY["version"],
                       "source": "repository notices: Phosphor, Silero, DFN/RNNoise models, SQLite",
                       "licenseExpression": "see individual component notices; not legal approval",
-                      "texts": [copy_text(ROOT / "THIRD-PARTY-NOTICES.md", "ZABOR-THIRD-PARTY-NOTICES.md"),
-                                copy_text(ROOT / "LICENSE", "ZABOR-LICENSE")]})
+                       "texts": [copy_text(ROOT / "THIRD-PARTY-NOTICES.md", "ZABOR-THIRD-PARTY-NOTICES.md"),
+                                 copy_text(ROOT / "LICENSE", "ZABOR-LICENSE"),
+                                 copy_text(ROOT / "TRADEMARK.md", "ZABOR-TRADEMARK.md"),
+                                 copy_text(ROOT / "PRIVACY.md", "ZABOR-PRIVACY.md"),
+                                 copy_text(ROOT / "build/license_en.txt", "ZABOR-AGREEMENT-EN.txt"),
+                                 copy_text(ROOT / "build/license_ru.txt", "ZABOR-AGREEMENT-RU.txt")]})
+    if supplements_path:
+        copy_text(supplements_path, "NATIVE-LICENSE-SUPPLEMENTS.json")
+        attributions = ROOT / "licenses/native/attributions.json"
+        if attributions.is_file():
+            copy_text(attributions, "NATIVE-COPYRIGHT-ATTRIBUTIONS.json")
     rustc = str(Path(cargo_path()).with_name("rustc.exe"))
     sysroot = Path(run([rustc, "--print", "sysroot"]).strip())
     rust_licenses = sysroot / "share/doc/rust/licenses"
@@ -599,7 +608,7 @@ def main():
     command.add_argument("--release", action="store_true")
     command.add_argument("--neural-disabled", action="store_true")
     command.add_argument("--clippy", action="store_true")
-    command.add_argument("--license-supplements", type=Path)
+    command.add_argument("--license-supplements", type=Path, default=ROOT / "licenses/native/supplements.json")
     command.add_argument("--update-helper", type=Path, required=True)
     command.add_argument("--publisher-certificate-sha256", required=True)
     command = commands.add_parser("build-binary")
@@ -614,11 +623,15 @@ def main():
     command.add_argument("--cache-root", type=Path, required=True)
     command.add_argument("--output", type=Path, required=True)
     command.add_argument("--neural-disabled", action="store_true")
-    command.add_argument("--license-supplements", type=Path)
+    command.add_argument("--license-supplements", type=Path, default=ROOT / "licenses/native/supplements.json")
     args = parser.parse_args()
     try:
         if os.name != "nt":
             raise ValueError("Native packaging requires Windows")
+        if (args.command in ("build", "inventory") and args.license_supplements.resolve()
+                == (ROOT / "licenses/native/supplements.json").resolve()):
+            from check_supplements import verify
+            verify(args.license_supplements)
         if args.command == "build":
             result = build(args)
         elif args.command == "build-binary":

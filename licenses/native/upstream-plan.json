@@ -1,0 +1,37 @@
+{
+  "planVersion": 1,
+  "officialRepositoryMoves": {"brendanzab/gl-rs": "rust-windowing/gl-rs"},
+  "crates": {
+    "accesskit": ["LICENSE-APACHE", "LICENSE-MIT", "LICENSE.chromium"],
+    "accesskit_consumer": ["LICENSE-APACHE", "LICENSE-MIT", "LICENSE.chromium"],
+    "accesskit_windows": ["LICENSE-APACHE", "LICENSE-MIT", "LICENSE.chromium"],
+    "accesskit_winit": ["LICENSE-APACHE", "LICENSE.chromium"],
+    "clipboard-win": ["LICENSE"],
+    "const-field-offset": ["LICENSES/Apache-2.0.txt", "LICENSES/MIT.txt"],
+    "const-field-offset-macro": ["LICENSES/Apache-2.0.txt", "LICENSES/MIT.txt"],
+    "gl_generator": ["LICENSE"],
+    "khronos_api": ["LICENSE"],
+    "libwebrtc": ["LICENSE", "NOTICE"],
+    "lyon_algorithms": ["LICENSE-APACHE", "LICENSE-MIT"],
+    "lyon_extra": ["LICENSE-APACHE", "LICENSE-MIT"],
+    "lyon_geom": ["LICENSE-APACHE", "LICENSE-MIT"],
+    "lyon_path": ["LICENSE-APACHE", "LICENSE-MIT"],
+    "profiling": ["LICENSE-APACHE", "LICENSE-MIT"],
+    "rspolib": ["LICENSE"],
+    "skia-bindings": ["LICENSE"],
+    "skia-safe": ["LICENSE"],
+    "spirv": ["LICENSE"],
+    "taffy": ["LICENSE.md"],
+    "vtable-macro": ["LICENSES/Apache-2.0.txt", "LICENSES/MIT.txt"],
+    "vtable": ["LICENSES/Apache-2.0.txt", "LICENSES/MIT.txt"],
+    "webrtc-sys-build": ["LICENSE", "NOTICE"]
+  },
+  "silero": {
+    "repository": "snakers4/silero-vad",
+    "revision": "bfdc0193023f121ea5b3cc7b176dbed570a68a59",
+    "licensePath": "LICENSE",
+    "modelPath": "src/silero_vad/data/silero_vad.onnx",
+    "modelGitBlob": "80c5592ef1f4c9ede3e357bbd02eb863358a6a9d",
+    "modelSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "texts": 42,
+  "components": 24,
+  "copyrightAttributions": 4,
+  "manifestSha256": "f7f35f0a926c785cafba2600815a0f4a0984d5af2209c97de60f7928d3f7b710",
+  "publishedCrateProvenance": "checked",
+  "legalApproval": false,
+  "nativeClientReady": false,
+  "inventoryComponents": 559,
+  "missingUpstreamTexts": [],
+  "textCollectionComplete": true,
+  "uniquePayloadTexts": 1058,
+  "cargoLockSha256": "48db95ccb660a6d1e48a4056ee8dbf0855f640e33ec78de42e6075a289c9c31c",
+  "nativeCachePins": "checked"
+}

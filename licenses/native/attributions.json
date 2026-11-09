@@ -1,0 +1,70 @@
+{
+  "attributionVersion": 1,
+  "scope": "exact first two upstream source-header lines; no licence template modification",
+  "attributions": [
+    {
+      "package": "const-field-offset",
+      "version": "0.2.1",
+      "registryChecksum": "d535c69e75b4e3c69e17205b5b37a91936c54086cecd339b70071500786acb9c",
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/helper_crates/const-field-offset/src/lib.rs",
+      "cratePath": "src/lib.rs",
+      "sourceSize": 4624,
+      "sourceSha256": "2d9e23375f513b03853155d6821b664441c455e1ac212bbb7213e4db264fb44b",
+      "sourceGitBlob": "29b137ca0921acc3e9387e631d540343f672d8d0",
+      "headerBase64": "Ly8gQ29weXJpZ2h0IMKpIFNpeHR5RlBTIEdtYkggPGluZm9Ac2xpbnQuZGV2PgovLyBTUERYLUxpY2Vuc2UtSWRlbnRpZmllcjogTUlUIE9SIEFwYWNoZS0yLjAK",
+      "headerSha256": "634b1ba4e93564b3b4e13421f45704352c29af059a7577231908ff6c961a71cf",
+      "byteRange": [
+        0,
+        93
+      ]
+    },
+    {
+      "package": "const-field-offset-macro",
+      "version": "0.2.1",
+      "registryChecksum": "93d5848843a221ac268cfdd6bfd14e68d5d3dfa79d52c880aafab93f9517fb74",
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/helper_crates/const-field-offset/macro/macro.rs",
+      "cratePath": "macro.rs",
+      "sourceSize": 7454,
+      "sourceSha256": "99253b3e6d2a64e876c9793ce0bf00797675ae30e9fe6d6687a5ce2043170b5e",
+      "sourceGitBlob": "e13efd414928815fa4f034d13601a410c6ba660a",
+      "headerBase64": "Ly8gQ29weXJpZ2h0IMKpIFNpeHR5RlBTIEdtYkggPGluZm9Ac2xpbnQuZGV2PgovLyBTUERYLUxpY2Vuc2UtSWRlbnRpZmllcjogTUlUIE9SIEFwYWNoZS0yLjAK",
+      "headerSha256": "634b1ba4e93564b3b4e13421f45704352c29af059a7577231908ff6c961a71cf",
+      "byteRange": [
+        0,
+        93
+      ]
+    },
+    {
+      "package": "vtable",
+      "version": "0.5.0",
+      "registryChecksum": "515a4b5b1399cc46fb0dc4081436cb40a3852a2d3e94fd1fa50bb68a334896eb",
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/helper_crates/vtable/src/lib.rs",
+      "cratePath": "src/lib.rs",
+      "sourceSize": 18756,
+      "sourceSha256": "037e817a9ab642fefab8f085942e03d773de2e7d67df5c1d0e9d77940fd303b4",
+      "sourceGitBlob": "b3dab4623dcae20063af10ed4f74981c08b2b19d",
+      "headerBase64": "Ly8gQ29weXJpZ2h0IMKpIFNpeHR5RlBTIEdtYkggPGluZm9Ac2xpbnQuZGV2PgovLyBTUERYLUxpY2Vuc2UtSWRlbnRpZmllcjogTUlUIE9SIEFwYWNoZS0yLjAK",
+      "headerSha256": "634b1ba4e93564b3b4e13421f45704352c29af059a7577231908ff6c961a71cf",
+      "byteRange": [
+        0,
+        93
+      ]
+    },
+    {
+      "package": "vtable-macro",
+      "version": "0.5.0",
+      "registryChecksum": "8191d73ececf73fc94e65809bf0e667525a0bcff9aeeb8d042a4173a508332a1",
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/helper_crates/vtable/macro/macro.rs",
+      "cratePath": "macro.rs",
+      "sourceSize": 30940,
+      "sourceSha256": "efe33b14a03c000a079857bd3743469b6ec60f078c9fd234de4e6f3cc7b360c4",
+      "sourceGitBlob": "0a18b52d5768dd01d639b33c70b6fbf9b91ce6bc",
+      "headerBase64": "Ly8gQ29weXJpZ2h0IMKpIFNpeHR5RlBTIEdtYkggPGluZm9Ac2xpbnQuZGV2PgovLyBTUERYLUxpY2Vuc2UtSWRlbnRpZmllcjogTUlUIE9SIEFwYWNoZS0yLjAK",
+      "headerSha256": "634b1ba4e93564b3b4e13421f45704352c29af059a7577231908ff6c961a71cf",
+      "byteRange": [
+        0,
+        93
+      ]
+    }
+  ]
+}

@@ -118,6 +118,49 @@ Windows x64 PyPI wheel (Apache-2.0 с LLVM exceptions); его лицензия 
 Для атомарного сохранения полученных файлов и локальных тестов используется tempfile
 (MIT OR Apache-2.0). Это локальная библиотека, не внешний получатель данных.
 
+## Native licence-text supplement (2026-11-09)
+
+`licenses/native/supplements.json` supplies the 23 crate texts missing from the
+previous packaging inventory and the exact Silero VAD model licence. Each entry
+retains package/version, Cargo.lock checksum, published crate VCS revision,
+immutable official URL, upstream Git blob, byte length and SHA-256. The native
+package collector includes these texts by default; it also preserves the product
+GPL licence, trademark notice, privacy notice and both original RU/EN agreements.
+The offline checker is `scripts/native/packaging/check_supplements.py`.
+
+The Slint helper crates const-field-offset/const-field-offset-macro 0.2.1 and
+vtable/vtable-macro 0.5.0 use MIT OR Apache-2.0, Copyright © SixtyFPS GmbH.
+Their upstream REUSE licence templates are preserved verbatim, including their
+template placeholders; this attribution comes from the corresponding source
+headers, not an invented copyright replacement. The main Slint framework remains
+under ZABOR's GPL-3.0-only option. LiveKit's Apache NOTICE and AccessKit's Chromium
+BSD notice are retained in addition to their licence texts. skia-bindings 0.153.3
+was published with `dirty: true` in its VCS metadata; this is recorded, not hidden
+or treated as proof that its entire archive equals that Git commit.
+
+Silero's retained model is the exact official blob
+`80c5592ef1f4c9ede3e357bbd02eb863358a6a9d` at upstream revision
+`bfdc0193023f121ea5b3cc7b176dbed570a68a59`; its MIT licence is Copyright (c) 2020-present
+Silero Team. The existing model SHA-256 and GPL/trademark obligations are unchanged.
+Text completeness is not legal approval, publisher trust, installation permission
+or complete-native acceptance; those gates remain closed.
+
+`licenses/native/supplements.json` содержит отсутствовавшие тексты для 23 crates
+и точную MIT-лицензию модели Silero. Сохранены версии, Cargo.lock checksums,
+VCS-ревизии опубликованных crates, неизменяемые официальные URL, Git blobs,
+размеры и SHA-256. Нативный сборщик включает supplement по умолчанию, а также
+исходные GPL, товарный знак, уведомление о конфиденциальности и оба RU/EN соглашения.
+Проверка выполняется локально, без установки зависимостей и без обращения к профилю.
+
+Вспомогательные Slint crates используют MIT OR Apache-2.0, Copyright © SixtyFPS
+GmbH; upstream REUSE-шаблоны сохранены без изменения. Основной Slint остаётся
+по выбранному GPL-3.0-only варианту. Apache NOTICE LiveKit и BSD-уведомление
+Chromium/AccessKit сохранены. `dirty: true` у опубликованного skia-bindings
+учтён в provenance, а не скрыт. Модель Silero точно совпадает с указанным
+официальным blob; её лицензия — MIT, Copyright (c) 2020-present Silero Team.
+Полнота собранных текстов не означает юридического разрешения, доверия издателю,
+разрешения на установку или полной приёмки нативного клиента.
+
 ## Rust client voicing module
 
 - File: `src/renderer/public/rust-voicing/zabor_voicing.wasm`; size and SHA-256 are recorded in its adjacent `manifest.json`

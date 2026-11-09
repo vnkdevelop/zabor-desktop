@@ -1,0 +1,716 @@
+{
+  "supplementVersion": 1,
+  "legalApproval": false,
+  "texts": [
+    {
+      "package": "accesskit",
+      "version": "0.24.1",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320",
+      "publishedVcs": {
+        "git": {
+          "sha1": "a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969"
+        },
+        "path_in_vcs": "common"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-APACHE",
+      "gitBlob": "1b5ec8b78e237b5c3b3d812a7c0a6589d0f7161d",
+      "size": 9723,
+      "file": "texts/AccessKit_accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+    },
+    {
+      "package": "accesskit",
+      "version": "0.24.1",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320",
+      "publishedVcs": {
+        "git": {
+          "sha1": "a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969"
+        },
+        "path_in_vcs": "common"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-MIT",
+      "gitBlob": "31aa79387f27e730e33d871925e152e35e428031",
+      "size": 1023,
+      "file": "texts/AccessKit_accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    },
+    {
+      "package": "accesskit",
+      "version": "0.24.1",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320",
+      "publishedVcs": {
+        "git": {
+          "sha1": "a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969"
+        },
+        "path_in_vcs": "common"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE.chromium",
+      "gitBlob": "a32e00ce6be3620adca152e53734f7de8fda38cf",
+      "size": 1559,
+      "file": "texts/AccessKit_accesskit/a55d3e1a18bb9ef0e4bccc9083fb13c3e0ad8969/LICENSE.chromium",
+      "sha256": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+    },
+    {
+      "package": "accesskit_consumer",
+      "version": "0.38.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "5d10a236f96f87d70732e44520046785431ef01d5bcd6b041317bfadd2f88245",
+      "publishedVcs": {
+        "git": {
+          "sha1": "c88605b96d04431f9c3c792464a0f2f253480e94"
+        },
+        "path_in_vcs": "consumer"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-APACHE",
+      "gitBlob": "1b5ec8b78e237b5c3b3d812a7c0a6589d0f7161d",
+      "size": 9723,
+      "file": "texts/AccessKit_accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+    },
+    {
+      "package": "accesskit_consumer",
+      "version": "0.38.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "5d10a236f96f87d70732e44520046785431ef01d5bcd6b041317bfadd2f88245",
+      "publishedVcs": {
+        "git": {
+          "sha1": "c88605b96d04431f9c3c792464a0f2f253480e94"
+        },
+        "path_in_vcs": "consumer"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-MIT",
+      "gitBlob": "31aa79387f27e730e33d871925e152e35e428031",
+      "size": 1023,
+      "file": "texts/AccessKit_accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    },
+    {
+      "package": "accesskit_consumer",
+      "version": "0.38.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "5d10a236f96f87d70732e44520046785431ef01d5bcd6b041317bfadd2f88245",
+      "publishedVcs": {
+        "git": {
+          "sha1": "c88605b96d04431f9c3c792464a0f2f253480e94"
+        },
+        "path_in_vcs": "consumer"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE.chromium",
+      "gitBlob": "a32e00ce6be3620adca152e53734f7de8fda38cf",
+      "size": 1559,
+      "file": "texts/AccessKit_accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE.chromium",
+      "sha256": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+    },
+    {
+      "package": "accesskit_windows",
+      "version": "0.34.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "106c2b961215864d1c2e703ee63269c25c4e80a577ffb2c1017b9c17dcdf83a1",
+      "publishedVcs": {
+        "git": {
+          "sha1": "c88605b96d04431f9c3c792464a0f2f253480e94"
+        },
+        "path_in_vcs": "platforms/windows"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-APACHE",
+      "gitBlob": "1b5ec8b78e237b5c3b3d812a7c0a6589d0f7161d",
+      "size": 9723,
+      "file": "texts/AccessKit_accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+    },
+    {
+      "package": "accesskit_windows",
+      "version": "0.34.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "106c2b961215864d1c2e703ee63269c25c4e80a577ffb2c1017b9c17dcdf83a1",
+      "publishedVcs": {
+        "git": {
+          "sha1": "c88605b96d04431f9c3c792464a0f2f253480e94"
+        },
+        "path_in_vcs": "platforms/windows"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-MIT",
+      "gitBlob": "31aa79387f27e730e33d871925e152e35e428031",
+      "size": 1023,
+      "file": "texts/AccessKit_accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    },
+    {
+      "package": "accesskit_windows",
+      "version": "0.34.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "106c2b961215864d1c2e703ee63269c25c4e80a577ffb2c1017b9c17dcdf83a1",
+      "publishedVcs": {
+        "git": {
+          "sha1": "c88605b96d04431f9c3c792464a0f2f253480e94"
+        },
+        "path_in_vcs": "platforms/windows"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE.chromium",
+      "gitBlob": "a32e00ce6be3620adca152e53734f7de8fda38cf",
+      "size": 1559,
+      "file": "texts/AccessKit_accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE.chromium",
+      "sha256": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+    },
+    {
+      "package": "accesskit_winit",
+      "version": "0.33.2",
+      "licenseExpression": "Apache-2.0",
+      "registryChecksum": "d5b41e63a69f36d9f1f41e70464c7e5f72eee485ef26aab19f0b4f86e6c0a84c",
+      "publishedVcs": {
+        "git": {
+          "sha1": "c88605b96d04431f9c3c792464a0f2f253480e94"
+        },
+        "path_in_vcs": "platforms/winit"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-APACHE",
+      "gitBlob": "1b5ec8b78e237b5c3b3d812a7c0a6589d0f7161d",
+      "size": 9723,
+      "file": "texts/AccessKit_accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+    },
+    {
+      "package": "accesskit_winit",
+      "version": "0.33.2",
+      "licenseExpression": "Apache-2.0",
+      "registryChecksum": "d5b41e63a69f36d9f1f41e70464c7e5f72eee485ef26aab19f0b4f86e6c0a84c",
+      "publishedVcs": {
+        "git": {
+          "sha1": "c88605b96d04431f9c3c792464a0f2f253480e94"
+        },
+        "path_in_vcs": "platforms/winit"
+      },
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE.chromium",
+      "gitBlob": "a32e00ce6be3620adca152e53734f7de8fda38cf",
+      "size": 1559,
+      "file": "texts/AccessKit_accesskit/c88605b96d04431f9c3c792464a0f2f253480e94/LICENSE.chromium",
+      "sha256": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
+    },
+    {
+      "package": "clipboard-win",
+      "version": "5.4.3",
+      "licenseExpression": "BSL-1.0",
+      "registryChecksum": "052af7878466feccda12ba7a6a67d019d712f296809559b47c12c8cc196d3a9a",
+      "publishedVcs": {
+        "git": {
+          "sha1": "ed27008ae5d1f10cfbb266de039f0fb35fd05a56"
+        },
+        "path_in_vcs": ""
+      },
+      "source": "https://raw.githubusercontent.com/DoumanAsh/clipboard-win/ed27008ae5d1f10cfbb266de039f0fb35fd05a56/LICENSE",
+      "gitBlob": "36b7cd93cdfbac762f5be4c6ce276df2ea6305c2",
+      "size": 1338,
+      "file": "texts/DoumanAsh_clipboard-win/ed27008ae5d1f10cfbb266de039f0fb35fd05a56/LICENSE",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    },
+    {
+      "package": "const-field-offset",
+      "version": "0.2.1",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "d535c69e75b4e3c69e17205b5b37a91936c54086cecd339b70071500786acb9c",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b0fc6a7287a062fefb30133e6aecf0303f76357d"
+        },
+        "path_in_vcs": "helper_crates/const-field-offset"
+      },
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/Apache-2.0.txt",
+      "gitBlob": "137069b823873b8bcf42979bcf8e9371052d26a2",
+      "size": 10280,
+      "file": "texts/slint-ui_slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+    },
+    {
+      "package": "const-field-offset",
+      "version": "0.2.1",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "d535c69e75b4e3c69e17205b5b37a91936c54086cecd339b70071500786acb9c",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b0fc6a7287a062fefb30133e6aecf0303f76357d"
+        },
+        "path_in_vcs": "helper_crates/const-field-offset"
+      },
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/MIT.txt",
+      "gitBlob": "2071b23b0e08594ea6bc99ac71129ef992abf498",
+      "size": 1078,
+      "file": "texts/slint-ui_slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/MIT.txt",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+    },
+    {
+      "package": "const-field-offset-macro",
+      "version": "0.2.1",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "93d5848843a221ac268cfdd6bfd14e68d5d3dfa79d52c880aafab93f9517fb74",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b0fc6a7287a062fefb30133e6aecf0303f76357d"
+        },
+        "path_in_vcs": "helper_crates/const-field-offset/macro"
+      },
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/Apache-2.0.txt",
+      "gitBlob": "137069b823873b8bcf42979bcf8e9371052d26a2",
+      "size": 10280,
+      "file": "texts/slint-ui_slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+    },
+    {
+      "package": "const-field-offset-macro",
+      "version": "0.2.1",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "93d5848843a221ac268cfdd6bfd14e68d5d3dfa79d52c880aafab93f9517fb74",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b0fc6a7287a062fefb30133e6aecf0303f76357d"
+        },
+        "path_in_vcs": "helper_crates/const-field-offset/macro"
+      },
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/MIT.txt",
+      "gitBlob": "2071b23b0e08594ea6bc99ac71129ef992abf498",
+      "size": 1078,
+      "file": "texts/slint-ui_slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/MIT.txt",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+    },
+    {
+      "package": "gl_generator",
+      "version": "0.14.0",
+      "licenseExpression": "Apache-2.0",
+      "registryChecksum": "1a95dfc23a2b4a9a2f5ab41d194f8bfda3cabec42af4e39f08c339eb2a0c124d",
+      "publishedVcs": {
+        "git": {
+          "sha1": "ea503e8d5fb6d73c6030e6191ce738cd3bf3433e"
+        }
+      },
+      "source": "https://raw.githubusercontent.com/rust-windowing/gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/LICENSE",
+      "gitBlob": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "size": 11358,
+      "file": "texts/brendanzab_gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "package": "khronos_api",
+      "version": "3.1.0",
+      "licenseExpression": "Apache-2.0",
+      "registryChecksum": "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc",
+      "publishedVcs": {
+        "git": {
+          "sha1": "f150967b1c44ae888e6676f93f639ebc82771bdc"
+        }
+      },
+      "source": "https://raw.githubusercontent.com/rust-windowing/gl-rs/f150967b1c44ae888e6676f93f639ebc82771bdc/LICENSE",
+      "gitBlob": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "size": 11358,
+      "file": "texts/brendanzab_gl-rs/f150967b1c44ae888e6676f93f639ebc82771bdc/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "package": "libwebrtc",
+      "version": "0.4.0",
+      "licenseExpression": "Apache-2.0",
+      "registryChecksum": "65444d0d6a96c9574bfaefb49829ef8cb112d611d77e888cf4e0081486084e8f",
+      "publishedVcs": {
+        "git": {
+          "sha1": "88705b15086ecbe2c26ee91ede6203f974a0fc62"
+        },
+        "path_in_vcs": "libwebrtc"
+      },
+      "source": "https://raw.githubusercontent.com/livekit/rust-sdks/88705b15086ecbe2c26ee91ede6203f974a0fc62/LICENSE",
+      "gitBlob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+      "size": 11357,
+      "file": "texts/livekit_rust-sdks/88705b15086ecbe2c26ee91ede6203f974a0fc62/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "package": "libwebrtc",
+      "version": "0.4.0",
+      "licenseExpression": "Apache-2.0",
+      "registryChecksum": "65444d0d6a96c9574bfaefb49829ef8cb112d611d77e888cf4e0081486084e8f",
+      "publishedVcs": {
+        "git": {
+          "sha1": "88705b15086ecbe2c26ee91ede6203f974a0fc62"
+        },
+        "path_in_vcs": "libwebrtc"
+      },
+      "source": "https://raw.githubusercontent.com/livekit/rust-sdks/88705b15086ecbe2c26ee91ede6203f974a0fc62/NOTICE",
+      "gitBlob": "692adc99215eab510e2f4617a132cdcdb5cda026",
+      "size": 553,
+      "file": "texts/livekit_rust-sdks/88705b15086ecbe2c26ee91ede6203f974a0fc62/NOTICE",
+      "sha256": "6d0f7c5e0deb284362296c5da110dd353831da2e67ca77cb5abc051b951b0fac"
+    },
+    {
+      "package": "lyon_algorithms",
+      "version": "1.0.22",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "f3a6b9d4e8b48acd531fbf1241ad9b270df6e60b6b92bdea1469f4f40899d805",
+      "publishedVcs": {
+        "git": {
+          "sha1": "db98d26a1a90076a7a894262dcb51117eef643c8"
+        },
+        "path_in_vcs": "crates/algorithms"
+      },
+      "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-APACHE",
+      "gitBlob": "47f4fd0e8982271e9b7662380fae36a1ac007cf1",
+      "size": 554,
+      "file": "texts/nical_lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-APACHE",
+      "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+    },
+    {
+      "package": "lyon_algorithms",
+      "version": "1.0.22",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "f3a6b9d4e8b48acd531fbf1241ad9b270df6e60b6b92bdea1469f4f40899d805",
+      "publishedVcs": {
+        "git": {
+          "sha1": "db98d26a1a90076a7a894262dcb51117eef643c8"
+        },
+        "path_in_vcs": "crates/algorithms"
+      },
+      "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-MIT",
+      "gitBlob": "e6d4b179949c58d7a4143d661ccdfecabcebcf54",
+      "size": 1080,
+      "file": "texts/nical_lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-MIT",
+      "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+    },
+    {
+      "package": "lyon_extra",
+      "version": "1.1.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "7755f08423275157ad1680aaecc9ccb7e0cc633da3240fea2d1522935cc15c72",
+      "publishedVcs": {
+        "git": {
+          "sha1": "56219c95c658d4f39de7b190d98e57d5773ba241"
+        },
+        "path_in_vcs": "crates/extra"
+      },
+      "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-APACHE",
+      "gitBlob": "47f4fd0e8982271e9b7662380fae36a1ac007cf1",
+      "size": 554,
+      "file": "texts/nical_lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-APACHE",
+      "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+    },
+    {
+      "package": "lyon_extra",
+      "version": "1.1.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "7755f08423275157ad1680aaecc9ccb7e0cc633da3240fea2d1522935cc15c72",
+      "publishedVcs": {
+        "git": {
+          "sha1": "56219c95c658d4f39de7b190d98e57d5773ba241"
+        },
+        "path_in_vcs": "crates/extra"
+      },
+      "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-MIT",
+      "gitBlob": "e6d4b179949c58d7a4143d661ccdfecabcebcf54",
+      "size": 1080,
+      "file": "texts/nical_lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-MIT",
+      "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+    },
+    {
+      "package": "lyon_geom",
+      "version": "1.0.20",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "d82dd26aa4dc0b5b70b9115de59824842bcb43cf4a28e1b1e6d0ad148c93f93e",
+      "publishedVcs": {
+        "git": {
+          "sha1": "db98d26a1a90076a7a894262dcb51117eef643c8"
+        },
+        "path_in_vcs": "crates/geom"
+      },
+      "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-APACHE",
+      "gitBlob": "47f4fd0e8982271e9b7662380fae36a1ac007cf1",
+      "size": 554,
+      "file": "texts/nical_lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-APACHE",
+      "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+    },
+    {
+      "package": "lyon_geom",
+      "version": "1.0.20",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "d82dd26aa4dc0b5b70b9115de59824842bcb43cf4a28e1b1e6d0ad148c93f93e",
+      "publishedVcs": {
+        "git": {
+          "sha1": "db98d26a1a90076a7a894262dcb51117eef643c8"
+        },
+        "path_in_vcs": "crates/geom"
+      },
+      "source": "https://raw.githubusercontent.com/nical/lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-MIT",
+      "gitBlob": "e6d4b179949c58d7a4143d661ccdfecabcebcf54",
+      "size": 1080,
+      "file": "texts/nical_lyon/db98d26a1a90076a7a894262dcb51117eef643c8/LICENSE-MIT",
+      "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+    },
+    {
+      "package": "lyon_path",
+      "version": "1.0.19",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "5c463f9c428b7fc5ec885dcd39ce4aa61e29111d0e33483f6f98c74e89d8621e",
+      "publishedVcs": {
+        "git": {
+          "sha1": "56219c95c658d4f39de7b190d98e57d5773ba241"
+        },
+        "path_in_vcs": "crates/path"
+      },
+      "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-APACHE",
+      "gitBlob": "47f4fd0e8982271e9b7662380fae36a1ac007cf1",
+      "size": 554,
+      "file": "texts/nical_lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-APACHE",
+      "sha256": "216486f29671a4262efe32af6d84a75bef398127f8c5f369b5c8305983887a06"
+    },
+    {
+      "package": "lyon_path",
+      "version": "1.0.19",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "5c463f9c428b7fc5ec885dcd39ce4aa61e29111d0e33483f6f98c74e89d8621e",
+      "publishedVcs": {
+        "git": {
+          "sha1": "56219c95c658d4f39de7b190d98e57d5773ba241"
+        },
+        "path_in_vcs": "crates/path"
+      },
+      "source": "https://raw.githubusercontent.com/nical/lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-MIT",
+      "gitBlob": "e6d4b179949c58d7a4143d661ccdfecabcebcf54",
+      "size": 1080,
+      "file": "texts/nical_lyon/56219c95c658d4f39de7b190d98e57d5773ba241/LICENSE-MIT",
+      "sha256": "80f275e90d799911ed3830a7f242a2ef5a4ade2092fe0aa07bfb2d2cf2f2b95e"
+    },
+    {
+      "package": "profiling",
+      "version": "1.0.18",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5",
+      "publishedVcs": {
+        "git": {
+          "sha1": "8271551172eb6fa4cba47369aedd93790c623df9"
+        },
+        "path_in_vcs": "profiling"
+      },
+      "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+      "gitBlob": "139dce95d473c201a8561ef17536314d8b8cda65",
+      "size": 10818,
+      "file": "texts/aclysma_profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+      "sha256": "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551"
+    },
+    {
+      "package": "profiling",
+      "version": "1.0.18",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5",
+      "publishedVcs": {
+        "git": {
+          "sha1": "8271551172eb6fa4cba47369aedd93790c623df9"
+        },
+        "path_in_vcs": "profiling"
+      },
+      "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+      "gitBlob": "6a84e059ad8b43e03c2b06bc2af4dc1d8442808d",
+      "size": 1093,
+      "file": "texts/aclysma_profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+      "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333"
+    },
+    {
+      "package": "rspolib",
+      "version": "0.1.2",
+      "licenseExpression": "MIT",
+      "registryChecksum": "4fda9a7796aff63a7b1b39ccc93fffaaf65e20042984b4843041a49ca4677535",
+      "publishedVcs": {
+        "git": {
+          "sha1": "8170d99ebad29d894712ccb3dc6d0be2198d3055"
+        },
+        "path_in_vcs": "rust"
+      },
+      "source": "https://raw.githubusercontent.com/mondeja/rspolib/8170d99ebad29d894712ccb3dc6d0be2198d3055/LICENSE",
+      "gitBlob": "4d8bcb91a6e404cfb3b421744c6edf5e934bfe3c",
+      "size": 1085,
+      "file": "texts/mondeja_rspolib/8170d99ebad29d894712ccb3dc6d0be2198d3055/LICENSE",
+      "sha256": "4fe9b5fce8fd028261959d039d19ef66182be088ab48ffa97dbeaef7b35e39c3"
+    },
+    {
+      "package": "skia-bindings",
+      "version": "0.153.3",
+      "licenseExpression": "MIT",
+      "registryChecksum": "eb325787c91b3f6c34a7c6f2b8a2297b20292d733ca53a08c233e5028aec49af",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b7f043e0b1e2a850e702245de811f01df1f6b0ff",
+          "dirty": true
+        },
+        "path_in_vcs": "skia-bindings"
+      },
+      "source": "https://raw.githubusercontent.com/rust-skia/rust-skia/b7f043e0b1e2a850e702245de811f01df1f6b0ff/LICENSE",
+      "gitBlob": "837d5bec443f55b54936748712ce8255f97331bd",
+      "size": 1123,
+      "file": "texts/rust-skia_rust-skia/b7f043e0b1e2a850e702245de811f01df1f6b0ff/LICENSE",
+      "sha256": "4b33ed5b329a3a79eb1243fd91373c68b0ae0b9df7503bfc50d0c5253adf1b9a"
+    },
+    {
+      "package": "skia-safe",
+      "version": "0.153.3",
+      "licenseExpression": "MIT",
+      "registryChecksum": "c61cb643dac43067f3eb76c866635a74377ac0abca0ff2590674e1e295514c3d",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b7f043e0b1e2a850e702245de811f01df1f6b0ff"
+        },
+        "path_in_vcs": "skia-safe"
+      },
+      "source": "https://raw.githubusercontent.com/rust-skia/rust-skia/b7f043e0b1e2a850e702245de811f01df1f6b0ff/LICENSE",
+      "gitBlob": "837d5bec443f55b54936748712ce8255f97331bd",
+      "size": 1123,
+      "file": "texts/rust-skia_rust-skia/b7f043e0b1e2a850e702245de811f01df1f6b0ff/LICENSE",
+      "sha256": "4b33ed5b329a3a79eb1243fd91373c68b0ae0b9df7503bfc50d0c5253adf1b9a"
+    },
+    {
+      "package": "spirv",
+      "version": "0.4.0+sdk-1.4.341.0",
+      "licenseExpression": "Apache-2.0",
+      "registryChecksum": "d9571ea910ebd84c86af4b3ed27f9dbdc6ad06f17c5f96146b2b671e2976744f",
+      "publishedVcs": {
+        "git": {
+          "sha1": "8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4"
+        },
+        "path_in_vcs": "spirv"
+      },
+      "source": "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE",
+      "gitBlob": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "size": 11358,
+      "file": "texts/gfx-rs_rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "package": "taffy",
+      "version": "0.10.1",
+      "licenseExpression": "MIT",
+      "registryChecksum": "aea22054047c16c3f34d3ac473a2170be1424b1115b2a3adcf28cfb067c88859",
+      "publishedVcs": {
+        "git": {
+          "sha1": "639f0acdd20f914f847abffbeaa903d66cae4882"
+        },
+        "path_in_vcs": ""
+      },
+      "source": "https://raw.githubusercontent.com/DioxusLabs/taffy/639f0acdd20f914f847abffbeaa903d66cae4882/LICENSE.md",
+      "gitBlob": "d45edd34912e6f6339bdce580c0c6c0300c4f6f6",
+      "size": 1420,
+      "file": "texts/DioxusLabs_taffy/639f0acdd20f914f847abffbeaa903d66cae4882/LICENSE.md",
+      "sha256": "a7083ef3dd41a65eeb2162c2c091b0082e2724fb4c6ed029b363c7840d244ecd"
+    },
+    {
+      "package": "vtable",
+      "version": "0.5.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "515a4b5b1399cc46fb0dc4081436cb40a3852a2d3e94fd1fa50bb68a334896eb",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b0fc6a7287a062fefb30133e6aecf0303f76357d"
+        },
+        "path_in_vcs": "helper_crates/vtable"
+      },
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/Apache-2.0.txt",
+      "gitBlob": "137069b823873b8bcf42979bcf8e9371052d26a2",
+      "size": 10280,
+      "file": "texts/slint-ui_slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+    },
+    {
+      "package": "vtable",
+      "version": "0.5.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "515a4b5b1399cc46fb0dc4081436cb40a3852a2d3e94fd1fa50bb68a334896eb",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b0fc6a7287a062fefb30133e6aecf0303f76357d"
+        },
+        "path_in_vcs": "helper_crates/vtable"
+      },
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/MIT.txt",
+      "gitBlob": "2071b23b0e08594ea6bc99ac71129ef992abf498",
+      "size": 1078,
+      "file": "texts/slint-ui_slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/MIT.txt",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+    },
+    {
+      "package": "vtable-macro",
+      "version": "0.5.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "8191d73ececf73fc94e65809bf0e667525a0bcff9aeeb8d042a4173a508332a1",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b0fc6a7287a062fefb30133e6aecf0303f76357d"
+        },
+        "path_in_vcs": "helper_crates/vtable/macro"
+      },
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/Apache-2.0.txt",
+      "gitBlob": "137069b823873b8bcf42979bcf8e9371052d26a2",
+      "size": 10280,
+      "file": "texts/slint-ui_slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/Apache-2.0.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+    },
+    {
+      "package": "vtable-macro",
+      "version": "0.5.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "registryChecksum": "8191d73ececf73fc94e65809bf0e667525a0bcff9aeeb8d042a4173a508332a1",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b0fc6a7287a062fefb30133e6aecf0303f76357d"
+        },
+        "path_in_vcs": "helper_crates/vtable/macro"
+      },
+      "source": "https://raw.githubusercontent.com/slint-ui/slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/MIT.txt",
+      "gitBlob": "2071b23b0e08594ea6bc99ac71129ef992abf498",
+      "size": 1078,
+      "file": "texts/slint-ui_slint/b0fc6a7287a062fefb30133e6aecf0303f76357d/LICENSES/MIT.txt",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+    },
+    {
+      "package": "webrtc-sys-build",
+      "version": "0.3.21",
+      "licenseExpression": "Apache-2.0",
+      "registryChecksum": "8d67326bcdd69af2a902c37d2f19101eaf4298fc81b699b89a2017a9a0c46267",
+      "publishedVcs": {
+        "git": {
+          "sha1": "ead3a6936e7e526c6853255e2a731ba7648dd63d"
+        },
+        "path_in_vcs": "webrtc-sys/build"
+      },
+      "source": "https://raw.githubusercontent.com/livekit/rust-sdks/ead3a6936e7e526c6853255e2a731ba7648dd63d/LICENSE",
+      "gitBlob": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+      "size": 11357,
+      "file": "texts/livekit_rust-sdks/ead3a6936e7e526c6853255e2a731ba7648dd63d/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "package": "webrtc-sys-build",
+      "version": "0.3.21",
+      "licenseExpression": "Apache-2.0",
+      "registryChecksum": "8d67326bcdd69af2a902c37d2f19101eaf4298fc81b699b89a2017a9a0c46267",
+      "publishedVcs": {
+        "git": {
+          "sha1": "ead3a6936e7e526c6853255e2a731ba7648dd63d"
+        },
+        "path_in_vcs": "webrtc-sys/build"
+      },
+      "source": "https://raw.githubusercontent.com/livekit/rust-sdks/ead3a6936e7e526c6853255e2a731ba7648dd63d/NOTICE",
+      "gitBlob": "692adc99215eab510e2f4617a132cdcdb5cda026",
+      "size": 553,
+      "file": "texts/livekit_rust-sdks/ead3a6936e7e526c6853255e2a731ba7648dd63d/NOTICE",
+      "sha256": "6d0f7c5e0deb284362296c5da110dd353831da2e67ca77cb5abc051b951b0fac"
+    },
+    {
+      "package": "silero-vad-model",
+      "version": "existing-local-model",
+      "licenseExpression": "MIT",
+      "source": "https://raw.githubusercontent.com/snakers4/silero-vad/bfdc0193023f121ea5b3cc7b176dbed570a68a59/LICENSE",
+      "gitBlob": "0bf5e90cac691b999d4a35044f97167d7bbbf0b9",
+      "size": 1075,
+      "file": "texts/snakers4_silero-vad/bfdc0193023f121ea5b3cc7b176dbed570a68a59/LICENSE",
+      "assetRevision": "bfdc0193023f121ea5b3cc7b176dbed570a68a59",
+      "assetPath": "src/silero_vad/data/silero_vad.onnx",
+      "assetGitBlob": "80c5592ef1f4c9ede3e357bbd02eb863358a6a9d",
+      "assetSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "sha256": "2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b"
+    }
+  ]
+}
