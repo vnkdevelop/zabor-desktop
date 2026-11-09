@@ -197,6 +197,10 @@ fn persist(
     else {
         return Event::Achievements(Box::new(result));
     };
+    if !policy.metadata_ordered {
+        result.storage_failed = true;
+        return Event::Achievements(Box::new(result));
+    }
     let store = match HiddenStore::open(profile, query.owner()) {
         Ok(store) => store,
         Err(_) => {
@@ -228,11 +232,6 @@ fn persist(
             return Event::Achievements(Box::new(result));
         }
     };
-    if !policy.metadata_ordered {
-        result.catalog = Some(catalog);
-        result.storage_failed = true;
-        return Event::Achievements(Box::new(result));
-    }
     let prepared = match store.prepare(&plan) {
         Ok(prepared) => prepared,
         Err(_) => {

@@ -438,7 +438,7 @@ async fn production_constructor_without_metadata_ordering_preserves_history_and_
             .unwrap();
         let previous = std::fs::read(&path).unwrap();
         let (_, reply) = fixture(&intents);
-        let io = AchievementIo::new(Some(profile.clone()), intents, stop);
+        let io = AchievementIo::new(Some(profile.clone()), intents.clone(), stop);
         let (updates, mut events) = mpsc::unbounded_channel();
         let job = io.start(
             reply,
@@ -450,13 +450,28 @@ async fn production_constructor_without_metadata_ordering_preserves_history_and_
             panic!("missing metadata ordering fabricated a durable completion")
         };
         assert!(result.storage_failed);
-        assert_eq!(result.catalog, Some(HiddenCatalog::empty("owner").unwrap()));
+        assert!(result.catalog.is_none());
         assert!(result.result.is_ok());
         assert!(events.try_recv().is_err());
         assert!(io.join(job.id).await.is_err());
         assert!(io.finish().await.is_err());
         assert_eq!(std::fs::read(&path).unwrap(), previous);
         assert!(!path.with_extension("journal").exists());
+        let journal = path.with_extension("journal");
+        std::fs::write(&journal, b"ZNH1\x00").unwrap();
+        let (_, reply) = fixture(&intents);
+        let job = io.start(
+            reply,
+            Arc::new(|_| panic!("unverified recovery must not propose UI success")),
+        );
+        let UiEvent::App(Event::Achievements(result)) = job.receiver.await.unwrap() else {
+            panic!("unverified recovery fabricated durable completion")
+        };
+        assert!(result.storage_failed && result.catalog.is_none());
+        assert!(io.join(job.id).await.is_err());
+        assert!(io.finish().await.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), previous);
+        assert_eq!(std::fs::read(&journal).unwrap(), b"ZNH1\x00");
         assert!(!std::fs::read_dir(path.parent().unwrap())
             .unwrap()
             .any(|entry| entry
