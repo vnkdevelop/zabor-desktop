@@ -20,6 +20,7 @@ pub(super) fn is_session_command(command: &Command) -> bool {
             | Command::LookupProfile(..)
             | Command::ProfileAddFriend(..)
             | Command::Achievements(..)
+            | Command::MemberAction(..)
             | Command::Notification(
                 NotificationKind::Friend | NotificationKind::Channel,
                 _,

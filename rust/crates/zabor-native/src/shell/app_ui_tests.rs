@@ -254,3 +254,57 @@ fn actual_app_storage_ack_is_view_owner_and_logout_guarded_and_catalog_waits_for
         }
     }
 }
+
+#[test]
+fn call_failure_is_owner_selection_scoped_for_three_seconds_and_fresh_member_presence_stays_redacted(
+) {
+    let (ui, state, _queue, _receiver, intents, _timer) = fixture();
+    ui.set_profile_id("peer".into());
+    ui.set_profile_source("channelMembers".into());
+    ui.set_profile_online(false);
+    let mut data = Bootstrap::default();
+    data.friends.push(User {
+        id: "peer".into(),
+        last_online: Some("2024-03-10T09:59:59Z".into()),
+        ..Default::default()
+    });
+    state.borrow_mut().tick(&ui, &data, Instant::now());
+    state.borrow_mut().member_profile = Some(User {
+        id: "peer".into(),
+        last_online: None,
+        ..Default::default()
+    });
+    state.borrow_mut().tick(&ui, &data, Instant::now());
+    assert_eq!(
+        ui.get_profile_presence().as_str(),
+        Strings::new(ui.get_language().as_str())
+            .unwrap()
+            .text("presence.offline")
+    );
+    for (owner, peer) in [("replacement", "peer"), ("owner", "other")] {
+        state.borrow_mut().handle(
+            &ui,
+            Event::CallFailed {
+                owner: owner.into(),
+                peer: peer.into(),
+            },
+            &intents,
+        );
+        assert!(ui.get_app_feedback().is_empty());
+    }
+    state.borrow_mut().handle(
+        &ui,
+        Event::CallFailed {
+            owner: "owner".into(),
+            peer: "peer".into(),
+        },
+        &intents,
+    );
+    let until = state.borrow().feedback_until.unwrap();
+    state
+        .borrow_mut()
+        .tick(&ui, &data, until - Duration::from_nanos(1));
+    assert!(!ui.get_app_feedback().is_empty());
+    state.borrow_mut().tick(&ui, &data, until);
+    assert!(ui.get_app_feedback().is_empty());
+}

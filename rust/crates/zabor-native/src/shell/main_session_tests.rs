@@ -166,7 +166,11 @@ async fn fixture_with_response(
                              if method == "UpdateProfile" { assert_eq!(request["arguments"], json!(["New Name", null, "#123abc", "about me"])); }
                               if method == "GetUserByUsername" { assert_eq!(request["arguments"], json!(["Fixture"])); }
                               if method == "GetMyAchievements" { assert_eq!(request["arguments"], json!([])); }
-                              if method == "GetUserAchievements" { assert_eq!(request["arguments"], json!(["fixture-peer"])); }
+                               if method == "GetUserAchievements" { assert_eq!(request["arguments"], json!(["fixture-peer"])); }
+                               if method == "GetChannelMembersList" { assert_eq!(request["arguments"], json!(["fixture-channel"])); }
+                               if method == "CallToChannel" { assert_eq!(request["arguments"], json!(["fixture-peer", "fixture-channel", "Fixture"])); }
+                               if method == "KickFromChannel" { assert_eq!(request["arguments"], json!(["fixture-channel", "fixture-peer"])); }
+                               if method == "RemoveFriend" { assert_eq!(request["arguments"], json!(["fixture-peer"])); }
                             if matches!(method, "AcceptFriendRequest" | "DeclineFriendRequest" | "DeclineChannelInvite") { assert_eq!(request["arguments"], json!(["fixture-id"])); }
                             if method == hold {
                                 assert!(waiting.is_none());
@@ -804,6 +808,208 @@ async fn achievements_actual_worker_services_leave_and_drains_held_storage_ack_b
             assert!(!methods.iter().any(|method| method == "ViewProfile"));
         }
     }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn member_session_wire_arguments_and_literal_true_actions_never_grant_roster_permissions() {
+    use super::member_actions::{execute, Operation, Request, Response};
+    timeout(Duration::from_secs(20), async {
+        let channel = zabor_native::auth::Channel {
+            id: "fixture-channel".into(),
+            name: "Fixture".into(),
+            owner_id: "fixture-owner".into(),
+            ..Default::default()
+        };
+        let peer = User {
+            id: "fixture-peer".into(),
+            username: "Fixture".into(),
+            display_name: "Peer".into(),
+            is_online: true,
+            ..Default::default()
+        };
+        for (method, operation) in [
+            ("GetChannelMembersList", Operation::Members(channel.clone())),
+            (
+                "CallToChannel",
+                Operation::Invite {
+                    channel: channel.clone(),
+                    target: Box::new(peer.clone()),
+                },
+            ),
+            (
+                "KickFromChannel",
+                Operation::Kick {
+                    channel: channel.clone(),
+                    target: peer.id.clone(),
+                },
+            ),
+            ("RemoveFriend", Operation::RemoveFriend(peer.id.clone())),
+        ] {
+            for reply in [json!(true), json!(false), Value::Null] {
+                let wire = if method == "GetChannelMembersList" {
+                    json!([peer.clone()])
+                } else {
+                    reply.clone()
+                };
+                let fixture = fixture_with_response(method, json!(user()), Some(wire)).await;
+                let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+                    .await
+                    .unwrap();
+                let intents = Arc::new(CriticalIntents::default());
+                let request = Request::new("fixture-owner", operation.clone(), &intents).unwrap();
+                let original = request.clone();
+                let mut owner = user();
+                owner.current_channel_id = Some(channel.id.clone());
+                let connection = hub.clone();
+                let controls = intents.clone();
+                let task = tokio::spawn(async move {
+                    (
+                        request.clone(),
+                        execute(&request, &connection, &owner, true, &controls).await,
+                    )
+                });
+                fixture.held.notified().await;
+                fixture.release.notify_one();
+                let (request, result) = task.await.unwrap();
+                assert!(request.same(&original));
+                assert_eq!(request.ticket, original.ticket);
+                assert_eq!(
+                    matches!(result, Ok(Response::Members(_)) | Ok(Response::Confirmed)),
+                    method == "GetChannelMembersList" || reply == true
+                );
+                hub.close();
+                assert_eq!(fixture.server.await.unwrap(), [method]);
+            }
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn members_actual_worker_uses_original_session_request_once_across_leave_and_rejects_logout_or_view(
+) {
+    use super::member_actions::{Operation, Request, Response};
+    timeout(Duration::from_secs(20), async {
+        for mode in ["leave", "logout", "view"] {
+            let fixture = fixture_with_response(
+                "GetChannelMembersList",
+                json!(user()),
+                Some(json!([{"id":"fixture-peer","username":"Fixture","displayName":"Peer"}])),
+            )
+            .await;
+            let intents = Arc::new(CriticalIntents::default());
+            let stop = CancellationToken::new();
+            let session_io = SessionIo::new(None, intents.clone(), stop.clone());
+            let achievement_io =
+                super::achievement_io::AchievementIo::new(None, intents.clone(), stop.clone());
+            let (sender, commands) = mpsc::channel(8);
+            let queue = CommandQueue {
+                sender,
+                intents: intents.clone(),
+            };
+            queue
+                .try_send(Command::Authenticate {
+                    credentials: credentials(),
+                    registration: None,
+                })
+                .unwrap_or_else(|_| panic!("member authentication queue failed"));
+            let (updates, mut events) = mpsc::unbounded_channel();
+            let task = tokio::spawn(worker(
+                fixture.endpoint.clone(),
+                commands,
+                Arc::new(move |event| {
+                    let _ = updates.send(event);
+                }),
+                stop.clone(),
+                None,
+                WorkerMedia {
+                    video_sink: Arc::new(|_| {
+                        panic!("member fixture must not produce physical video")
+                    }),
+                    video_generation: Arc::new(AtomicU64::new(1)),
+                    audio_preferences: AudioPreferences::new(&json!({})),
+                    audio_runtime: audio(&stop),
+                    intents: intents.clone(),
+                    session_io: session_io.clone(),
+                    achievement_io: achievement_io.clone(),
+                },
+            ));
+            loop {
+                if matches!(
+                    events.recv().await.unwrap().for_current(&intents),
+                    Some(UiEvent::SignedIn(_))
+                ) {
+                    break;
+                }
+            }
+            let request = Request::new(
+                "fixture-owner",
+                Operation::Members(zabor_native::auth::Channel {
+                    id: "fixture-channel".into(),
+                    name: "Fixture".into(),
+                    owner_id: "fixture-owner".into(),
+                    ..Default::default()
+                }),
+                &intents,
+            )
+            .unwrap();
+            queue
+                .sender
+                .try_send(super::QueuedCommand {
+                    ticket: request.ticket,
+                    command: Command::MemberAction(request.clone()),
+                })
+                .unwrap_or_else(|_| panic!("member original-ticket queue failed"));
+            fixture.held.notified().await;
+            match mode {
+                "leave" => queue
+                    .try_send(Command::Leave)
+                    .unwrap_or_else(|_| panic!("member Leave queue failed")),
+                "logout" => queue
+                    .try_send(Command::Logout)
+                    .unwrap_or_else(|_| panic!("member Logout queue failed")),
+                "view" => request.stop.cancel(),
+                _ => unreachable!(),
+            }
+            fixture.release.notify_one();
+            loop {
+                match events.recv().await.unwrap().for_current(&intents) {
+                    Some(UiEvent::Members(event)) => {
+                        assert!(event.request.same(&request));
+                        assert_eq!(event.request.ticket, request.ticket);
+                        assert_ne!(mode, "logout");
+                        assert_eq!(
+                            matches!(event.result, Ok(Response::Members(_))),
+                            mode == "leave"
+                        );
+                        break;
+                    }
+                    Some(UiEvent::SignedOut) => {
+                        assert_eq!(mode, "logout");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            stop.cancel();
+            task.await.unwrap();
+            session_io.finish().await.unwrap();
+            achievement_io.finish().await.unwrap();
+            assert_eq!(
+                fixture
+                    .server
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter(|method| method.as_str() == "GetChannelMembersList")
+                    .count(),
+                1
+            );
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

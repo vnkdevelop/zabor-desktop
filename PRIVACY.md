@@ -1,6 +1,6 @@
 # Политика в отношении обработки персональных данных ZABOR / ZABOR Privacy Policy
 
-> Редакция от 7 ноября 2026 года. Предыдущая редакция — от 6 ноября 2026 года.
+> Редакция от 9 ноября 2026 года. Предыдущая редакция — от 7 ноября 2026 года.
 > Русская версия является основной и имеет преимущественную силу при расхождении с переводом.
 > The Russian version is authoritative; the English translation follows below.
 
@@ -111,6 +111,8 @@
 Удаление сообщения в интерфейсе удаляет его **на устройстве пользователя**; копия, уже переданная собеседнику, удалению Оператором не подлежит.
 
 Обычный выход из учётной записи прекращает соединения и незавершённые передачи файлов, удаляет данные сессии, но не удаляет историю чата и сохранённые файлы. История повторно загружается для той же учётной записи в пределах срока хранения 14 суток. История разных учётных записей разделяется идентификатором владельца; незавершённая загрузка предыдущей сессии не должна заполнять интерфейс новой сессии. Кратковременный кэш профилей находится только в оперативной памяти, ограничен 100 профилями и сроком 15 секунд и очищается при выходе.
+
+В разрабатываемом native клиенте отдельный кэш списков зарегистрированных участников находится только в оперативной памяти: до 32 каналов, до 4096 пользователей и 2 МиБ JSON на ответ. Он очищается при выходе или смене владельца и не предоставляет разрешения чата/RTC. Списки и profile actions используют прежние команды сервера без нового маршрута медиа, записи или телеметрии. Локальная hidden-achievement история сохраняется при выходе; запись новых определений пока блокируется до доказанной crash-durability Windows metadata ordering. Проверки synthetic/headless/loopback не являются полной клиентской или физической приёмкой.
 
 ### 7. Передача третьим лицам
 
@@ -271,6 +273,8 @@ The experimental beta build uses a separate `zabor-desktop-beta` profile in the 
 Deleting a message in the interface deletes it **on the user's device**; a copy already delivered to the other participant is not subject to deletion by the Controller.
 
 Normal sign-out terminates connections and unfinished file transfers and removes session data, but does not delete chat history or saved files. History is reloaded for the same account within its 14-day retention period. Histories of different accounts are separated by owner identifier; an unfinished load from a previous session must not populate a new session's interface. The short-lived profile cache exists only in memory, is limited to 100 profiles and 15 seconds, and is cleared on sign-out.
+
+The developing native client keeps a separate registered-member-list cache only in memory: up to 32 channels, with each response limited to 4096 users and 2 MiB JSON. It clears on sign-out or owner replacement and grants no chat/RTC permissions. Lists and profile actions use existing server commands without a new media route, recording, or telemetry. Local hidden-achievement history survives sign-out; new definitions remain write-blocked until Windows metadata crash durability is proven. Synthetic/headless/loopback checks do not establish complete client or physical acceptance.
 
 ### 7. Disclosure to third parties
 

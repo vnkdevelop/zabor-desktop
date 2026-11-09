@@ -57,6 +57,8 @@ mod avatar_ui;
 #[cfg(test)]
 mod critical_tests;
 mod leave_work;
+mod member_actions;
+mod member_ui;
 mod presence_clock;
 mod profile_lookup;
 use leave_work::{close_logout_connection, VoiceLeave};
@@ -96,6 +98,7 @@ enum Command {
     LookupProfile(profile_lookup::Request),
     ProfileAddFriend(profile_lookup::Request),
     Achievements(zabor_native::achievements::AchievementQuery),
+    MemberAction(member_actions::Request),
     Logout,
     Join(String),
     Leave,
@@ -261,6 +264,7 @@ enum UiEvent {
     SignedOut,
     Avatar(avatar_ui::Event),
     App(app_ui::Event),
+    Members(member_ui::Event),
     ProfileSaved(zabor_native::auth::User, avatar_ui::Query),
     ProfileError(avatar_ui::Query, AuthError),
     ProfileLookup(
@@ -627,6 +631,15 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         &ui,
         app_state.clone(),
         &commands,
+        intents.clone(),
+        latest.clone(),
+    );
+    let member_state = Rc::new(RefCell::new(member_ui::MemberUi::default()));
+    let member_timer = member_ui::bind(
+        &ui,
+        member_state.clone(),
+        app_state.clone(),
+        commands.clone(),
         intents.clone(),
         latest.clone(),
     );
@@ -1252,6 +1265,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let call_commands = commands.clone();
     let weak = ui.as_weak();
     let call_state = latest.clone();
+    let call_feedback = app_state.clone();
     ui.on_call_friend(move |peer| {
         let Some(ui) = weak
             .upgrade()
@@ -1273,6 +1287,11 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             friend.is_online
         };
         if !online {
+            call_feedback.borrow_mut().feedback(
+                &ui,
+                "profile.userOffline",
+                std::time::Instant::now(),
+            );
             return;
         }
         if call_commands
@@ -1759,6 +1778,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let update_stop = stop.clone();
     let updated_avatars = avatars.clone();
     let updated_app = app_state.clone();
+    let updated_members = member_state.clone();
     let control_frame_generation = video_generation.clone();
     let control_frame_stop = stop.clone();
     ui.on_process_updates(move || {
@@ -1852,6 +1872,13 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         .handle(event, &ui, &update_intents, &setup_avatar)
                 }
                 UiEvent::App(event) => updated_app.borrow_mut().handle(&ui, event, &update_intents),
+                UiEvent::Members(event) => updated_members.borrow_mut().handle(
+                    &ui,
+                    &updated_app,
+                    &latest.borrow(),
+                    event,
+                    &update_intents,
+                ),
                 UiEvent::ProfileSaved(user, query) => {
                     updated_avatars
                         .borrow_mut()
@@ -1872,12 +1899,29 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 UiEvent::ProfileError(query, error) => updated_avatars
                     .borrow_mut()
                     .profile_error(&ui, error, &query),
-                UiEvent::ProfileLookup(query, result) => updated_avatars
-                    .borrow_mut()
-                    .profile_lookup(&ui, &query, result, &update_intents),
-                UiEvent::ProfileFriendResult(query, sent) => updated_avatars
-                    .borrow_mut()
-                    .friend_result(&ui, &query, sent, &update_intents),
+                UiEvent::ProfileLookup(query, result) => {
+                    updated_avatars.borrow_mut().profile_lookup(
+                        &ui,
+                        &query,
+                        result.clone(),
+                        &update_intents,
+                    );
+                    updated_members.borrow_mut().profile_lookup(
+                        &ui,
+                        &updated_app,
+                        &query,
+                        result,
+                        &update_intents,
+                    );
+                }
+                UiEvent::ProfileFriendResult(query, sent) => {
+                    updated_avatars
+                        .borrow_mut()
+                        .friend_result(&ui, &query, sent, &update_intents);
+                    updated_members
+                        .borrow_mut()
+                        .friend_result(&ui, &query, sent, &update_intents);
+                }
                 UiEvent::Voice(channel, users) => {
                     {
                         let mut data = latest.borrow_mut();
@@ -2429,6 +2473,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     stop.cancel();
     avatar_timer.stop();
     app_timer.stop();
+    member_timer.stop();
     let (avatar_jobs, mut avatar_join_failed) = avatars.borrow_mut().take_jobs(&ui);
     worker.abort();
     let (session_io_result, achievement_io_result, audio_cleanup_result) =
@@ -3805,6 +3850,26 @@ async fn worker(
                         )
                         .await
                     }
+                    Command::MemberAction(request) => {
+                        let friend = matches!(&request.operation, member_actions::Operation::RemoveFriend(target) if friends.contains(target));
+                        let result = match current_user.as_ref() {
+                            Some(user) => {
+                                member_actions::execute(
+                                    &request,
+                                    &connection,
+                                    user,
+                                    friend,
+                                    &intents,
+                                )
+                                .await
+                            }
+                            None => Err(AuthError::Network),
+                        };
+                        Ok(MainResult::Event(UiEvent::Members(member_ui::Event {
+                            request,
+                            result,
+                        })))
+                    }
                     command => {
                         main_session::compute(command, &auth, &connection, current_user.clone())
                             .await
@@ -3969,6 +4034,16 @@ async fn worker(
         }
         let operation_scope = command.scope();
         let starting_call = matches!(command, Command::Call(_) | Command::AnswerCall(_, true));
+        let call_failure = match &command {
+            Command::Call(peer) => Some((
+                current_user
+                    .as_ref()
+                    .map(|user| user.id.clone())
+                    .unwrap_or_default(),
+                peer.clone(),
+            )),
+            _ => None,
+        };
         let voice_work = VoiceWork::new(&intents, command_ticket, &stop, update.as_ref());
         let previous_voice_work = VoiceWork::new(
             &intents,
@@ -3985,6 +4060,7 @@ async fn worker(
                 | Command::LookupProfile(..)
                 | Command::ProfileAddFriend(..)
                 | Command::Achievements(..)
+                | Command::MemberAction(..)
                 | Command::Audio => unreachable!(),
                 Command::Notification(kind, id, accept) => {
                     if !respond_notification(&connection, kind, &id, accept)
@@ -4500,6 +4576,14 @@ async fn worker(
             abandoned_call |= starting_call;
             continue;
         };
+        if result.is_err() || matches!(&result, Ok(UiEvent::VoiceEnded)) {
+            if let Some((owner, peer)) = call_failure {
+                update(
+                    UiEvent::App(app_ui::Event::CallFailed { owner, peer })
+                        .guarded(command_ticket, operation_scope),
+                );
+            }
+        }
         update(
             result
                 .unwrap_or_else(UiEvent::Error)

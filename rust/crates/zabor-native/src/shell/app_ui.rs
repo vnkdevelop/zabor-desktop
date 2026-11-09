@@ -8,7 +8,7 @@ use zabor_native::achievements::{
     AchievementData, AchievementError, AchievementQuery, AchievementTarget, AchievementsView,
     HiddenCatalog, HiddenPersistence, STANDARD,
 };
-use zabor_native::auth::Bootstrap;
+use zabor_native::auth::{Bootstrap, User};
 use zabor_native::critical_intents::{CriticalIntents, IntentScope};
 use zabor_native::presence::{format_last_online, PresenceLanguage, PresenceText};
 use zabor_native::strings::Strings;
@@ -21,6 +21,10 @@ pub(super) struct AchievementResult {
 }
 
 pub(super) enum Event {
+    CallFailed {
+        owner: String,
+        peer: String,
+    },
     Achievements(Box<AchievementResult>),
     AchievementProposal {
         result: Box<AchievementResult>,
@@ -41,6 +45,7 @@ pub(super) struct AppUi {
     language: String,
     copied: Option<(String, String, Instant)>,
     feedback_until: Option<Instant>,
+    pub(super) member_profile: Option<User>,
 }
 
 impl AppUi {
@@ -51,6 +56,7 @@ impl AppUi {
             self.owner = ui.get_user_id().to_string();
             self.copied = None;
             self.feedback_until = None;
+            self.member_profile = None;
             ui.set_app_feedback("".into());
         }
         if ui.get_modal() != 10
@@ -73,6 +79,15 @@ impl AppUi {
 
     pub(super) fn handle(&mut self, ui: &NativeApp, event: Event, intents: &CriticalIntents) {
         match event {
+            Event::CallFailed { owner, peer } => {
+                if ui.get_authenticated()
+                    && ui.get_user_id().as_str() == owner
+                    && (ui.get_modal() == 0
+                        || (ui.get_modal() == 9 && ui.get_profile_id().as_str() == peer))
+                {
+                    self.feedback(ui, "validation.connectionError", Instant::now());
+                }
+            }
             Event::Achievements(result) => {
                 self.accept_result(ui, *result, intents);
             }
@@ -216,11 +231,17 @@ impl AppUi {
             return;
         }
         let id = ui.get_profile_id();
-        let user = std::iter::once(&data.user)
-            .chain(data.friends.iter())
-            .chain(data.channel_users.values().flatten())
-            .chain(data.call_user.iter())
-            .find(|user| user.id == id.as_str());
+        let user = self
+            .member_profile
+            .as_ref()
+            .filter(|user| ui.get_profile_source() == "channelMembers" && user.id == id.as_str())
+            .or_else(|| {
+                std::iter::once(&data.user)
+                    .chain(data.friends.iter())
+                    .chain(data.channel_users.values().flatten())
+                    .chain(data.call_user.iter())
+                    .find(|user| user.id == id.as_str())
+            });
         let Ok(strings) = Strings::new(ui.get_language().as_str()) else {
             return;
         };
@@ -315,7 +336,11 @@ pub(super) fn bind(
     let weak = ui.as_weak();
     ui.on_close_app_modal(move || {
         if let Some(ui) = weak.upgrade() {
-            ui.set_modal(0);
+            if ui.get_profile_source() == "channelMembers" {
+                ui.invoke_close_member_profile();
+            } else {
+                ui.set_modal(0);
+            }
             ui.set_profile_restore_reset(ui.get_profile_restore_reset().wrapping_add(1));
         }
     });

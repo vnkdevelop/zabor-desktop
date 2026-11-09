@@ -42,7 +42,7 @@ releases dead profile-cache pending entries before reopening the same user,
 rechecks current owner/connection at kick confirmation, and revokes the older
 member refresh before optimistic kick. Reopening bumps the view revision so a
 late rollback cannot restore a superseded list. Added 3 synthetic headless tests;
-these new changes are WIP until the original current receipt below is complete.
+these changes are now checked by the original `sol-members-v5` receipt below.
 
 Original `sh_1bee945f4001YQj3iQY7t6vAYN` COMPLETED, frozen 20 source/manifest/lock
 paths, evidence `native-app-completion-2026-11-09/sol-members-v3/`. Uses only
@@ -68,8 +68,19 @@ member-list and kick-confirm scopes, preserving the reset handlers for later use
 Graphify correction original `sh_1bef3e8ed001UEzvuKWjlkUdBF` COMPLETED: 14631 nodes/
 34331 edges, same 9 zero-node warnings, code-only. Both FocusScope.init fixes now
 use the pinned official widget pattern. New original affected group
-`sh_1bef64751001QEA3610X9qcZIW` RUNNING, `sol-members-v5/`, frozen same 20 paths;
-no source edits/polls/duplicate checks before its original automatic receipt.
+`sh_1bef64751001QEA3610X9qcZIW` COMPLETED/PASSED, `sol-members-v5/`: all 20 frozen
+source/manifest/lock hashes still match. All 25 unique affected tests passed:
+member callbacks 5, app callbacks 4, member contracts 2, member wire/actual-worker 2,
+achievement IO 5, actual achievement-worker 4, native clock 3. All 15 checks passed,
+including fmt/diff-check, both native-media Clippy modes with `-D warnings`, normal
+library/native feature trees and builds. The first-open Return and safe kick-Cancel
+assertions passed unchanged; no headless/readiness guard was weakened. The original
+temporary runner and fixture directory self-cleaned; durable receipt/logs remain.
+Unchanged achievement/store library coverage retains the inherited passing receipt.
+Fresh own Graphify original `sh_1befba2ed001FqIAEcBSSjldOU` COMPLETED after the two
+Slint init corrections: 14631 nodes/34331 edges, same 9 zero-node warnings,
+code-only without semantic/docs/clustering refresh. No current job remains pending;
+neither original task was polled, duplicated, killed or detached.
 
 Original own Graphify `sh_1beea6399001cLime2JyXOfHPI` COMPLETED: `update . --no-cluster`,
 14630 nodes/34330 edges, 9 inherited zero-node warnings, code-only without
@@ -81,7 +92,7 @@ existing RPC metadata, no permission grants/content route, and blocked productio
 hidden-achievement durability. These notes do not claim complete native acceptance.
 Parent continues update-host; none of its files/worktrees is modified here.
 Windows metadata crash durability, full native/physical/accessibility/raster/motion
-and release gates remain FALSE. Pending stage delivery/commit and real API compact
+and release gates remain FALSE. Checked stage delivery/commit and real API compact
 must retain this handoff and exact original job results in the next context.
 
 Next bounded worker coverage must distinguish the existing stand-alone `execute`
