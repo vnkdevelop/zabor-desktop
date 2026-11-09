@@ -2,6 +2,47 @@
 
 Редакция / updated: 2026-11-09.
 
+## Current continuation: full native completion
+
+Continuation `ses_e40a15d13ffebrvSZmn2LyVGJc` restored original session
+`ses_e4120347cffea4wVcsios6UOkv`, primary branch `rust/native-client`, saved
+HEAD `1f8c4f7` and its uncommitted checked-candidate reference import. The original
+user project remains unchanged. The user explicitly requires full migration
+completion, not only another checkpoint. Current bounded tasks and safe order are
+in [native-completion-2026-11-09.md](native-completion-2026-11-09.md).
+
+Reference primary checks now have 45 unchanged JS passes plus 17 fresh Rust
+passes. Repeated module loading is corrected through one test-only root module;
+edition-2021 assertion formatting is reconciled. Strict Clippy/library test build
+passed in the native-media configuration. An overly broad tree guard mistook
+Slint build-time compiler features for a shipped software renderer; its failed
+receipt is preserved. A separate runtime-only tree passes with no testing backend,
+software renderer or test-source. No Cargo/pin or production MicTest changes.
+Receipts: `migration-artifacts/native-reference/primary-integration-2026-11-09/`.
+The checked 34-path integration is now saved as
+`e392f75c29724663a6fb3e6e8e97078afbfee849`; original failed receipts remain
+unchanged and the final Graphify command completed successfully. The untested
+FileIo scaffold is excluded from that commit. No reference job remains pending.
+
+Launcher cumulative `02f31b3 -> 173232b -> 7d47a8 -> 0ac8bb2` has an exact eleven-path
+contextual patch which passes primary `git apply --check`. The bounded-response
+read review reports no findings. Launcher code has not yet been applied or tested
+in primary. Prepared admission: `migration-artifacts/native-launch/primary-integration-2026-11-09/`.
+
+A new primary `src/shell/file_io.rs` scaffold retains original FileJobs cleanup
+joins through cancelled waiters. It is not yet connected to the shell or tested;
+do not treat it as checked active-file teardown or include it in a checked source
+commit. The callback candidate and primary constructor/drain integration remain
+separate steps.
+
+The provider stopped the new UI, RC and import executors with pre-consume quota
+errors; there is no checked delivery from those attempts. No quota failure is
+completion evidence. Previously saved worktrees, source and original receipts
+remain preserved. Other task outcomes must be consumed from their automatic
+notifications, not polled, duplicated or inferred from session admission.
+Save the two current coordination documents separately, then request actual
+compaction before applying and checking the prepared eleven-path launcher slice.
+
 ## Current post-compact App integration admission
 
 Restored primary `2b9c6180eaee3f810bf08de6042e6d6cf5fae204` was confirmed clean.
