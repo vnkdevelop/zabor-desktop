@@ -2,6 +2,30 @@
 
 Updated: 2026-11-09. Coordination plan, not complete-native acceptance.
 
+## Restored continuation — current ownership
+
+Recovery checkpoint `c8a622f` and exact active scopes are in
+[native-resume-2026-11-09.md](native-resume-2026-11-09.md). Primary update-host
+integration is checked and saved as `d331535bfd229491fbaa4fa94d6dd7baabac11a2`:
+fourteen paths, 18 Rust + 15 packaging tests, fmt, strict fixture/normal Clippy,
+native feature closure/build, static-CRT `/W4 /WX` helpers/fixtures and Graphify.
+Original `sh_1beeaa334001Ga4K0ETIdRhw0l` completed; 183 hashes matched and scoped
+save preserves 182 non-doc hashes/nine candidate source Git blobs. Review found no
+defects. Owned primary temporary resources/runners are removed; pinned caches retained.
+App/media retain original worktrees/resources. RC's preliminary docs-only result
+has no new checked commit and still awaits its original Graphify/save outcome.
+
+The completed read-only launcher/CI map identified a legacy release hazard for
+`v3.8.0-rust`. New isolated owner `ses_e410fd532ffen6wShAUWclGv49` implements
+launcher/build/CI routing in `native-launch-completion`; isolated owner
+`ses_e410ede58ffeBkURH8N3ycsl2M` implements immutable test-reference resolution in
+`native-reference-completion`. Both start from saved `c8a622f`; neither may edit
+primary/other owners, manifests/locks/pins or packaging. Admissions are not checked
+deliveries. No launcher/reference integration, deletion, release or installation
+follows yet. Media original red `sh_1beeca99d001fZrez83Ab7ZMsG` is pending; retain
+its frozen correction/runner/target. Next primary step is coordination save/compact,
+then checked child deliveries and common main/import/drain/startup hooks.
+
 ## Latest primary data source4ee243e
 
 Checked data chainbc84383 -> scopedreceipt docs -> be6476f ->944f3d8 is integrated

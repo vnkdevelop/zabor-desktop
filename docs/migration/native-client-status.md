@@ -2,6 +2,29 @@
 
 Редакция / updated: 2026-11-09.
 
+## Latest checked update integration
+
+Primary source **`d331535bfd229491fbaa4fa94d6dd7baabac11a2`** integrates the checked
+host chain, Windows module exposure and native-model packaging inventory pins in
+fourteen scoped paths. Original `sh_1beeaa334001Ga4K0ETIdRhw0l` passed 18 Rust + 15
+packaging tests, fmt, strict fixture/normal Clippy, normal native-media closure/build,
+static-CRT `/W4 /WX` native helpers/fixtures and Graphify; read-only review found no
+defects. All 183 checked hashes matched; nine source Git blobs and 182 non-document
+hashes stayed exact through save. Owned temporary resources/runners removed, required
+caches retained; no primary source check pending. Graph 7,907 nodes / 20,321 edges /
+301 communities, zero post-build integrity defects; ten zero-node/HTML5000 and
+doc-semantics/raw-producer-loss limits remain explicit.
+
+This is component integration, not whole-native readiness. Actual app/main drains,
+startup/health/baseline, account/key/consent/recovery, native-only launcher/CI/reference
+cutover and trust/legal/physical/two-device/long-session/full-client gates remain.
+Live `attest_app_drain` remains fail-closed. App/media/RC and new launcher/reference
+owners continue independently; their pending original jobs are not accepted results.
+Exact owners/receipts/next moves: [native-resume-2026-11-09.md](native-resume-2026-11-09.md).
+No publication, installation, legacy removal or shutdown occurred.
+
+## Earlier checkpoints retained
+
 Latest checkedsource4ee243e7eebb42c44519c80dc747429587f4fa46 integratesdataP2/original
 jobs/finalization in8exactGitpaths;45tests/fmt/bothClippy/normalbuild/Graphify passed,
 172stablehashes. Mainsharedshell revocation/storage/drain/publication hooksnotapplied.

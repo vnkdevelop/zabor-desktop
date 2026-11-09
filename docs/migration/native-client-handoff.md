@@ -2,6 +2,28 @@
 
 Редакция: 2026-11-09. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
+## Checked update integration — 2026-11-09
+
+Checked source **`d331535bfd229491fbaa4fa94d6dd7baabac11a2`** integrates candidate
+chain `41e0fec/86aca29/6015bb4/99b8b79/2b3b4e8` on recovery `c8a622f` in fourteen
+scoped paths, with Windows module exposure and pinned native-model inventory inputs.
+Original `sh_1beeaa334001Ga4K0ETIdRhw0l` passed 18 Rust + 15 packaging tests, fmt,
+strict fixture/normal Clippy, normal feature closure/build and Graphify. Static-CRT
+`/W4 /WX` helpers/fixtures passed; 183 hashes matched, 182 non-doc hashes and nine
+candidate source Git blobs remained exact through save. No review findings. Binary
+`c5a19290...e167b`; graph 7,907/20,321/301, post-build integrity zero, ten zero-node
+warnings/HTML5000/doc-semantics/raw-producer-loss limits remain. Owned primary
+temporary helpers/targets/sandboxes/check/guard/save runners are removed; caches retained.
+
+No primary check is pending. Exact scope, receipt directory, remaining owners and
+next steps are in [native-resume-2026-11-09.md](native-resume-2026-11-09.md). App/media
+remain independent; media original red `sh_1beeca99d001fZrez83Ab7ZMsG` and RC
+docs-only Graphify/save remain pending, not accepted. Launcher/CI and immutable
+reference implementation have separate owners/worktrees. Save coordination and
+perform real compact before next source stage. Live app drain/startup/baseline/trust,
+legal/physical/two-device/long-session/full-client gates remain false. No legacy
+deletion, push, publication, installation or shutdown occurred.
+
 ## Продолжение исходной сессии / restored original session
 
 Точная граница `2f9d7e6`, сохранённые этапы, свежие app/media/RC владельцы и
