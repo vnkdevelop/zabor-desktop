@@ -260,15 +260,23 @@ impl MicProcessor {
             self.failed = true;
             frame.pcm.fill(0);
             frame.local = None;
-            self.controls.speaking.store(false, Ordering::Release);
-            self.controls
-                .mic_db
-                .store((-100.0_f32).to_bits(), Ordering::Release);
+            if intent.publish {
+                self.controls.speaking.store(false, Ordering::Release);
+                self.controls
+                    .mic_db
+                    .store((-100.0_f32).to_bits(), Ordering::Release);
+            }
         }
-        self.controls
-            .processor_failed
-            .store(self.failed, Ordering::Release);
+        if intent.publish {
+            self.controls
+                .processor_failed
+                .store(self.failed, Ordering::Release);
+        }
         frame
+    }
+
+    pub(crate) fn failed(&self) -> bool {
+        self.failed
     }
 
     pub fn epoch(&self) -> u64 {

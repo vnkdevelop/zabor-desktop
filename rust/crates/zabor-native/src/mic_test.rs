@@ -376,6 +376,16 @@ impl MicTest {
         .then_some(CaptureToken(state.generation, state.input_revision))
     }
 
+    pub(crate) fn with_capture_token<T>(
+        &self,
+        token: CaptureToken,
+        accepted: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let state = self.state.lock().ok()?;
+        (state.enabled && state.generation == token.0 && state.input_revision == token.1)
+            .then(accepted)
+    }
+
     pub fn capture(&self, token: CaptureToken, pcm: &[f32; 480], db: f32, now: Instant) -> bool {
         let Ok(mut state) = self.state.try_lock() else {
             return false;

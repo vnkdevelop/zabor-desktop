@@ -18,6 +18,14 @@ struct Subscription {
     stream: bool,
 }
 
+struct LaneRetirement(Arc<AudioLane>);
+
+impl Drop for LaneRetirement {
+    fn drop(&mut self) {
+        self.0.stop();
+    }
+}
+
 impl Drop for Subscription {
     fn drop(&mut self) {
         self.stop.cancel();
@@ -55,6 +63,10 @@ impl AudioPlayback {
             .cleanup
             .prepare_task()
             .map_err(|_| MediaError::Backend)?;
+        let retirement = self
+            .cleanup
+            .prepare_task()
+            .map_err(|_| MediaError::Backend)?;
         self.retain_alive();
         if !lifetime.is_alive() {
             return Err(MediaError::UnauthorizedPeer);
@@ -73,24 +85,27 @@ impl AudioPlayback {
             .mixer
             .add(id.clone(), peer, lifetime.clone(), stream)
             .ok_or(MediaError::Backend)?;
-        let mut audio = NativeAudioStream::with_options(
+        let mut audio = retirement.hold(NativeAudioStream::with_options(
             track,
             48000,
             if stream { 2 } else { 1 },
             NativeAudioStreamOptions {
                 queue_size_frames: Some(4),
             },
-        );
+        ));
         let stop = CancellationToken::new();
         let cancel = stop.clone();
         let output = lane.clone();
+        let retired = LaneRetirement(output.clone());
         let task = prepared.spawn(stop.clone(), async move {
+            let _retired = retired;
             let mut tick = tokio::time::interval(Duration::from_millis(50));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tokio::select! {
                     biased;
                     _ = cancel.cancelled() => break,
+                    _ = lifetime.cancelled() => break,
                     _ = tick.tick() => { if !lifetime.is_alive() { break; } },
                     frame = audio.next() => {
                         let Some(frame) = frame else { break; };
@@ -102,8 +117,6 @@ impl AudioPlayback {
                     }
                 }
             }
-            output.stop();
-            audio.close();
         });
         self.subscriptions.insert(
             key,
@@ -125,6 +138,10 @@ impl AudioPlayback {
     }
     pub fn clear(&mut self) {
         self.subscriptions.clear();
+    }
+    pub(crate) fn remove_stream(&mut self, peer: &str) {
+        self.subscriptions
+            .retain(|(id, _), subscription| id != peer || !subscription.stream);
     }
     pub fn subscription_count(&self) -> usize {
         self.subscriptions.len()
@@ -216,6 +233,59 @@ mod tests {
         entered: std::sync::mpsc::Sender<()>,
         release: std::sync::mpsc::Receiver<()>,
         finished: Arc<AtomicBool>,
+    }
+
+    #[tokio::test]
+    async fn playback_worker_exit_retires_only_original_lane_before_subscription_is_removed() {
+        for mode in ["normal", "panic", "unexpected-abort"] {
+            let cleanup = Arc::new(AudioCleanup::default());
+            let controls = Arc::new(AudioControls::new(AudioSettings::default()));
+            let mixer = Arc::new(AudioMixer::new(controls));
+            let (mut engine, lifetime) = peer();
+            let lane = mixer
+                .add("retired".into(), "remote", lifetime.clone(), true)
+                .unwrap();
+            let fresh = mixer
+                .add("fresh".into(), "remote", lifetime.clone(), false)
+                .unwrap();
+            let retired = LaneRetirement(lane.clone());
+            let stop = CancellationToken::new();
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let task = cleanup
+                .prepare_task()
+                .unwrap()
+                .spawn(stop.clone(), async move {
+                    let _retired = retired;
+                    started.send(()).unwrap();
+                    match mode {
+                        "normal" => {}
+                        "panic" => panic!("Expected original playback worker panic"),
+                        _ => std::future::pending::<()>().await,
+                    }
+                });
+            let subscription = Subscription {
+                id: "retired".into(),
+                lane: lane.clone(),
+                mixer: mixer.clone(),
+                stop,
+                task,
+                stream: true,
+            };
+            ready.await.unwrap();
+            if mode == "unexpected-abort" {
+                subscription.task.abort();
+            }
+            let result = tokio::time::timeout(Duration::from_secs(2), cleanup.wait())
+                .await
+                .unwrap();
+            assert_eq!(result.is_err(), mode != "normal");
+            assert!(!lane.is_active());
+            assert!(fresh.is_active());
+            assert!(lifetime.is_alive());
+            drop(subscription);
+            assert_eq!(cleanup.wait().await.is_err(), result.is_err());
+            engine.close();
+        }
     }
 
     impl Drop for HeldDrop {

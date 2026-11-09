@@ -1,7 +1,8 @@
 use crate::audio_mix::{AudioControls, AudioMixer};
 use crate::media::MediaError;
 use crate::mic_test::{
-    MicTest, MicTestDispose, MicTestFailure, PlaybackTicket, IDLE_RELEASE, PREPARATION_TIMEOUT,
+    CaptureToken, MicTest, MicTestDispose, MicTestFailure, PlaybackTicket, IDLE_RELEASE,
+    PREPARATION_TIMEOUT,
 };
 use crate::microphone::{MicProcessor, MicSubmission, MonitoredMicFrame};
 use futures_util::future::BoxFuture;
@@ -171,6 +172,40 @@ pub(crate) struct AudioCleanupTask {
     job: Option<AudioCleanupJob>,
 }
 
+pub(crate) struct AudioCleanupOwner<T: Send + 'static> {
+    value: Option<T>,
+    retirement: Option<AudioCleanupTask>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl<T: Send + 'static> std::ops::Deref for AudioCleanupOwner<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        self.value.as_ref().unwrap()
+    }
+}
+
+impl<T: Send + 'static> std::ops::DerefMut for AudioCleanupOwner<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        self.value.as_mut().unwrap()
+    }
+}
+
+impl<T: Send + 'static> Drop for AudioCleanupOwner<T> {
+    fn drop(&mut self) {
+        let _runtime = self.runtime.enter();
+        let value = self.value.take().unwrap();
+        self.retirement
+            .take()
+            .unwrap()
+            .spawn_blocking_result(move || {
+                drop(value);
+                Ok(())
+            });
+    }
+}
+
 impl AudioCleanup {
     fn register(self: &Arc<Self>) -> AudioCleanupJob {
         self.pending.fetch_add(1, Ordering::AcqRel);
@@ -261,6 +296,14 @@ impl AudioCleanup {
 }
 
 impl AudioCleanupTask {
+    pub(crate) fn hold<T: Send + 'static>(self, value: T) -> AudioCleanupOwner<T> {
+        AudioCleanupOwner {
+            value: Some(value),
+            retirement: Some(self),
+            runtime: tokio::runtime::Handle::current(),
+        }
+    }
+
     pub(crate) fn spawn_blocking_result(
         mut self,
         work: impl FnOnce() -> Result<(), AudioCleanupError> + Send + 'static,
@@ -565,9 +608,7 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
             .cleanup
             .try_register()
             .map_err(|_| MediaError::Microphone)?;
-        if let Some(device) = state.device.take() {
-            factory_job.retire(device);
-        }
+        let retired = state.device.take();
         state.failed = false;
         let (ready, receiver) = watch::channel(None);
         let pending = Arc::new(Pending {
@@ -580,6 +621,10 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
         let factory = self.factory.clone();
         let demand = self.demand.clone();
         let mic_test = self.mic_test.clone();
+        drop(state);
+        if let Some(device) = retired {
+            factory_job.retire(device);
+        }
         tokio::spawn(async move {
             let factory_cleanup = &factory_job;
             async move {
@@ -600,7 +645,62 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
                 };
                 let device = result.ok().map(Arc::new);
                 if let Some(shared) = shared.upgrade() {
-                    let wanted = !pending.stop.is_cancelled() && shared.has_demand();
+                    let publish = shared.state.lock().is_ok_and(|state| {
+                        state
+                            .pending
+                            .as_ref()
+                            .is_some_and(|run| Arc::ptr_eq(run, &pending))
+                            && !pending.revoked.load(Ordering::Acquire)
+                            && !pending.stop.is_cancelled()
+                            && !shared.stop.is_cancelled()
+                            && shared.has_demand()
+                    });
+                    let failure_token = if publish && device.is_none() {
+                        shared.mic_test.capture_token()
+                    } else {
+                        None
+                    };
+                    let accepted = if publish {
+                        pending.ready.send_replace(Some(device.clone().ok_or(())));
+                        shared.state.lock().is_ok_and(|mut state| {
+                            if state
+                                .pending
+                                .as_ref()
+                                .is_some_and(|run| Arc::ptr_eq(run, &pending))
+                                && !pending.revoked.load(Ordering::Acquire)
+                                && !pending.stop.is_cancelled()
+                                && !shared.stop.is_cancelled()
+                                && shared.has_demand()
+                            {
+                                state.device = device.clone();
+                                state.failed = device.is_none();
+                                if device.is_some() {
+                                    state.pending = None;
+                                }
+                                true
+                            } else {
+                                false
+                            }
+                        })
+                    } else {
+                        false
+                    };
+                    if accepted && device.is_some() {
+                        shared.changed.notify_one();
+                        return;
+                    }
+                    if !accepted {
+                        pending.revoked.store(true, Ordering::Release);
+                    }
+                    pending.stop.cancel();
+                    if !accepted {
+                        pending.ready.send_replace(Some(Err(())));
+                    } else if let Some(token) = failure_token {
+                        shared.mic_test.fail(token, MicTestFailure::Processor);
+                    }
+                    if let Some(device) = device {
+                        factory_cleanup.retire(device);
+                    }
                     if let Ok(mut state) = shared.state.lock() {
                         if state
                             .pending
@@ -608,22 +708,12 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
                             .is_some_and(|run| Arc::ptr_eq(run, &pending))
                         {
                             state.pending = None;
-                            if wanted && !pending.revoked.load(Ordering::Acquire) {
-                                state.device = device.clone();
-                                state.failed = device.is_none();
-                                pending.ready.send_replace(Some(device.clone().ok_or(())));
-                                if device.is_none() {
-                                    pending.stop.cancel();
-                                    if let Some(token) = shared.mic_test.capture_token() {
-                                        shared.mic_test.fail(token, MicTestFailure::Processor);
-                                    }
-                                }
-                                shared.changed.notify_one();
-                                return;
-                            }
                         }
                     }
+                    shared.changed.notify_one();
+                    return;
                 }
+                pending.revoked.store(true, Ordering::Release);
                 pending.stop.cancel();
                 pending.ready.send_replace(Some(Err(())));
                 if let Some(device) = device {
@@ -717,18 +807,27 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
             return;
         };
         if !wanted {
-            if let Some(pending) = &state.pending {
+            let pending = state.pending.clone();
+            if let Some(pending) = &pending {
+                pending.revoked.store(true, Ordering::Release);
+            }
+            let idle = state.idle_since.get_or_insert(now);
+            let device = if self.stop.is_cancelled()
+                || now.saturating_duration_since(*idle) >= IDLE_RELEASE
+            {
+                let device = state.device.take();
+                state.failed = false;
+                device
+            } else {
+                None
+            };
+            drop(state);
+            if let Some(pending) = pending {
                 pending.stop.cancel();
                 pending.ready.send_replace(Some(Err(())));
             }
-            let idle = state.idle_since.get_or_insert(now);
-            if self.stop.is_cancelled() || now.saturating_duration_since(*idle) >= IDLE_RELEASE {
-                let device = state.device.take();
-                state.failed = false;
-                drop(state);
-                if let Some(device) = device {
-                    self.cleanup.retire(device);
-                }
+            if let Some(device) = device {
+                self.cleanup.retire(device);
             }
         } else {
             state.idle_since = None;
@@ -850,14 +949,18 @@ impl<D: SharedAudioDevice> SharedAudio<D> {
         self.monitor.fetch_add(1, Ordering::AcqRel);
         self.mic_test.dispose();
         if let Ok(mut state) = self.state.lock() {
-            if let Some(pending) = &state.pending {
-                pending.stop.cancel();
-                pending.ready.send_replace(Some(Err(())));
+            let pending = state.pending.clone();
+            if let Some(pending) = &pending {
+                pending.revoked.store(true, Ordering::Release);
             }
             let device = state.device.take();
             state.failed = false;
             state.idle_since = None;
             drop(state);
+            if let Some(pending) = pending {
+                pending.stop.cancel();
+                pending.ready.send_replace(Some(Err(())));
+            }
             if let Some(device) = device {
                 self.cleanup.retire(device);
             }
@@ -1049,6 +1152,7 @@ impl AudioFlow {
             return Ok(());
         }
         let route = self.controls.input_route_epoch.load(Ordering::Acquire);
+        let epoch = self.controls.capture_epoch.load(Ordering::Acquire);
         let changed = self.capture_voice.swap(voice, Ordering::AcqRel) != voice;
         let started = Instant::now();
         let mut frame = processor.process_shared(
@@ -1058,7 +1162,9 @@ impl AudioFlow {
             token.is_some(),
             voice != 0,
         );
-        if self.stop.is_cancelled() {
+        if frame.epoch != epoch
+            || !self.publish_capture_health(voice, token, epoch, route, processor.failed())
+        {
             return Ok(());
         }
         if self.controls.processor_failed.load(Ordering::Acquire) {
@@ -1077,6 +1183,42 @@ impl AudioFlow {
             }
         }
         self.submit_frame(submit, &mut frame, voice)
+    }
+
+    fn publish_capture_health(
+        &self,
+        voice: u64,
+        token: Option<CaptureToken>,
+        epoch: u64,
+        route: u64,
+        failed: bool,
+    ) -> bool {
+        let Ok(state) = self.demand.voice.lock() else {
+            return false;
+        };
+        if state.active != voice || (voice != 0 && state.reserved != voice) {
+            return false;
+        }
+        let publish = || {
+            if self.stop.is_cancelled()
+                || self.controls.capture_epoch.load(Ordering::Acquire) != epoch
+                || self.controls.input_route_epoch.load(Ordering::Acquire) != route
+                || self.controls.input_device_epoch.load(Ordering::Acquire) != route
+            {
+                return false;
+            }
+            self.controls
+                .processor_failed
+                .store(failed, Ordering::Release);
+            true
+        };
+        if voice != 0 {
+            publish()
+        } else {
+            token
+                .and_then(|token| self.mic_test.with_capture_token(token, publish))
+                .unwrap_or(false)
+        }
     }
 
     fn submit_frame(
@@ -1209,6 +1351,97 @@ mod tests {
     }
 
     #[test]
+    fn shared_processor_success_and_failure_do_not_publish_before_original_capture_commit() {
+        let flow = flow();
+        let mut processor = MicProcessor::new(flow.controls.clone(), flow.mixer.clone()).unwrap();
+        flow.controls.speaking.store(true, Ordering::Release);
+        flow.controls
+            .mic_db
+            .store((-17.0_f32).to_bits(), Ordering::Release);
+        flow.controls
+            .processor_failed
+            .store(true, Ordering::Release);
+        let frame = processor.process_shared(&[0.2; 480], 1, false, true, true);
+        assert!(frame.pcm.iter().any(|sample| *sample != 0));
+        assert!(flow.controls.processor_failed.load(Ordering::Acquire));
+        flow.controls
+            .processor_failed
+            .store(false, Ordering::Release);
+        let frame = processor.process_shared(&[f32::NAN; 480], 1, false, true, true);
+        assert_eq!(frame.pcm, [0; 480]);
+        assert!(frame.local.is_none() && processor.failed());
+        assert!(!flow.controls.processor_failed.load(Ordering::Acquire));
+        assert!(flow.controls.speaking.load(Ordering::Acquire));
+        assert_eq!(
+            f32::from_bits(flow.controls.mic_db.load(Ordering::Acquire)),
+            -17.0
+        );
+    }
+
+    #[test]
+    fn shared_capture_health_rejects_replaced_voice_epoch_and_original_monitor_token() {
+        let flow = flow();
+        let voice = flow.demand.reserve().unwrap();
+        assert!(flow.demand.activate(voice));
+        let old_epoch = flow.controls.capture_epoch.load(Ordering::Acquire);
+        flow.demand.revoke(voice);
+        let current = flow.demand.reserve().unwrap();
+        assert!(flow.demand.activate(current));
+        let epoch = flow.controls.capture_epoch.load(Ordering::Acquire);
+        assert!(!flow.publish_capture_health(voice, None, epoch, 0, true));
+        assert!(!flow.publish_capture_health(current, None, old_epoch, 0, true));
+        assert!(!flow.controls.processor_failed.load(Ordering::Acquire));
+        assert!(flow.publish_capture_health(current, None, epoch, 0, true));
+        assert!(flow.controls.processor_failed.load(Ordering::Acquire));
+        flow.demand.revoke(current);
+        flow.controls
+            .processor_failed
+            .store(false, Ordering::Release);
+        flow.mic_test.configure(true, true);
+        let old = flow.mic_test.capture_token().unwrap();
+        flow.mic_test.dispose();
+        flow.mic_test.configure(true, true);
+        let fresh = flow.mic_test.capture_token().unwrap();
+        let epoch = flow.controls.capture_epoch.load(Ordering::Acquire);
+        assert_ne!(old, fresh);
+        assert!(!flow.publish_capture_health(0, Some(old), epoch, 0, true));
+        assert!(!flow.controls.processor_failed.load(Ordering::Acquire));
+        assert!(flow.publish_capture_health(0, Some(fresh), epoch, 0, true));
+        assert!(flow.controls.processor_failed.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn actual_shared_capture_reports_current_local_failure_without_voice_or_network_submission() {
+        let flow = flow();
+        let now = Instant::now();
+        flow.mic_test.configure(true, true);
+        let token = flow.mic_test.begin(now).unwrap();
+        let mut processor = MicProcessor::new(flow.controls.clone(), flow.mixer.clone()).unwrap();
+        let submit = MicSubmission::new(audio_source(), flow.controls.clone(), flow.stop.clone());
+        flow.capture(
+            &mut processor,
+            &submit,
+            CaptureInput {
+                samples: &[f32::NAN; 480],
+                channels: 1,
+                gap: false,
+            },
+            now,
+        )
+        .unwrap();
+        assert!(flow.controls.processor_failed.load(Ordering::Acquire));
+        assert!(!flow.controls.speaking.load(Ordering::Acquire));
+        assert_eq!(flow.demand.active(), 0);
+        assert_eq!(
+            flow.mic_test.snapshot(now).failure,
+            Some(MicTestFailure::Processor)
+        );
+        flow.mic_test.dispose();
+        flow.mic_test.configure(true, true);
+        assert_ne!(flow.mic_test.capture_token(), Some(token));
+    }
+
+    #[test]
     fn shared_dsp_cannot_publish_network_metrics_before_current_voice_commit() {
         let flow = flow();
         let voice = flow.demand.reserve().unwrap();
@@ -1287,6 +1520,355 @@ mod tests {
             .is_none());
     }
 
+    #[derive(Default)]
+    struct BoundaryObservation {
+        blocked: AtomicBool,
+        cancels: AtomicUsize,
+        joins: AtomicUsize,
+        drops: AtomicUsize,
+        wakes: AtomicUsize,
+        resets: AtomicUsize,
+    }
+
+    impl BoundaryObservation {
+        fn inspect(&self, shared: &std::sync::Weak<SharedAudio<BoundaryDevice>>) -> bool {
+            let available = shared
+                .upgrade()
+                .is_none_or(|shared| shared.state.try_lock().is_ok());
+            if !available {
+                self.blocked.store(true, Ordering::Release);
+            }
+            available
+        }
+    }
+
+    struct BoundaryDevice {
+        shared: std::sync::Weak<SharedAudio<Self>>,
+        observed: Arc<BoundaryObservation>,
+        failed: bool,
+    }
+
+    impl SharedAudioDevice for BoundaryDevice {
+        fn failed(&self) -> bool {
+            self.failed
+        }
+
+        fn cancel(&self) {
+            self.observed.inspect(&self.shared);
+            self.observed.cancels.fetch_add(1, Ordering::AcqRel);
+        }
+
+        fn finish_shutdown(&self) -> Result<(), AudioCleanupError> {
+            self.observed.inspect(&self.shared);
+            self.observed.joins.fetch_add(1, Ordering::AcqRel);
+            Ok(())
+        }
+    }
+
+    impl Drop for BoundaryDevice {
+        fn drop(&mut self) {
+            self.observed.inspect(&self.shared);
+            self.observed.drops.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    struct BoundaryWake {
+        shared: std::sync::Weak<SharedAudio<BoundaryDevice>>,
+        observed: Arc<BoundaryObservation>,
+        reset: AtomicBool,
+    }
+
+    impl std::task::Wake for BoundaryWake {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.observed.wakes.fetch_add(1, Ordering::AcqRel);
+            if self.observed.inspect(&self.shared) && self.reset.swap(false, Ordering::AcqRel) {
+                if let Some(shared) = self.shared.upgrade() {
+                    shared.reset();
+                    self.observed.resets.fetch_add(1, Ordering::AcqRel);
+                }
+            }
+        }
+    }
+
+    struct BoundaryFixture {
+        shared: Arc<SharedAudio<BoundaryDevice>>,
+        observed: Arc<BoundaryObservation>,
+        entered: Arc<tokio::sync::Semaphore>,
+        released: Arc<tokio::sync::Semaphore>,
+    }
+
+    fn boundary_runtime(fail: bool) -> BoundaryFixture {
+        let observed = Arc::new(BoundaryObservation::default());
+        let entered = Arc::new(tokio::sync::Semaphore::new(0));
+        let released = Arc::new(tokio::sync::Semaphore::new(0));
+        let owner = Arc::new(Mutex::new(std::sync::Weak::new()));
+        let factory_owner = owner.clone();
+        let factory_observed = observed.clone();
+        let factory_entered = entered.clone();
+        let factory_released = released.clone();
+        let shared = SharedAudio::new(
+            Arc::new(AudioControls::new(AudioSettings::default())),
+            CancellationToken::new(),
+            move |_, _, _| {
+                let owner = factory_owner.clone();
+                let observed = factory_observed.clone();
+                let entered = factory_entered.clone();
+                let released = factory_released.clone();
+                Box::pin(async move {
+                    entered.add_permits(1);
+                    released.acquire().await.unwrap().forget();
+                    if fail {
+                        Err(MediaError::Microphone)
+                    } else {
+                        Ok(BoundaryDevice {
+                            shared: owner.lock().unwrap().clone(),
+                            observed,
+                            failed: false,
+                        })
+                    }
+                })
+            },
+        );
+        *owner.lock().unwrap() = Arc::downgrade(&shared);
+        BoundaryFixture {
+            shared,
+            observed,
+            entered,
+            released,
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_restart_releases_runtime_lock_before_original_device_cancel_join_and_drop() {
+        let fixture = boundary_runtime(true);
+        let shared = &fixture.shared;
+        shared.demand.reserve().unwrap();
+        shared.state.lock().unwrap().device = Some(Arc::new(BoundaryDevice {
+            shared: Arc::downgrade(shared),
+            observed: fixture.observed.clone(),
+            failed: true,
+        }));
+        fixture.released.add_permits(1);
+        let ready = shared.start(true);
+        shared.seal_cleanup().unwrap();
+        assert!(shared.ready(ready).await.is_err());
+        tokio::time::timeout(Duration::from_secs(2), shared.wait_for_cleanup())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fixture.observed.cancels.load(Ordering::Acquire), 1);
+        assert_eq!(fixture.observed.joins.load(Ordering::Acquire), 1);
+        assert_eq!(fixture.observed.drops.load(Ordering::Acquire), 1);
+        assert!(!fixture.observed.blocked.load(Ordering::Acquire));
+        assert!(!shared.state.is_poisoned());
+    }
+
+    #[tokio::test]
+    async fn pending_revocation_wakes_after_runtime_unlock_and_preserves_original_acquisition() {
+        use std::future::Future;
+        for mode in ["reset", "maintain"] {
+            let fixture = boundary_runtime(false);
+            let shared = &fixture.shared;
+            let voice = shared.demand.reserve().unwrap();
+            let mut ready = shared.start(true).unwrap().0;
+            fixture.entered.acquire().await.unwrap().forget();
+            let pending = shared.state.lock().unwrap().pending.clone().unwrap();
+            let waker = std::task::Waker::from(Arc::new(BoundaryWake {
+                shared: Arc::downgrade(shared),
+                observed: fixture.observed.clone(),
+                reset: AtomicBool::new(false),
+            }));
+            let mut context = std::task::Context::from_waker(&waker);
+            let mut cancelled = Box::pin(pending.stop.cancelled());
+            let mut changed = Box::pin(ready.changed());
+            assert!(cancelled.as_mut().poll(&mut context).is_pending());
+            assert!(changed.as_mut().poll(&mut context).is_pending());
+            if mode == "reset" {
+                shared.reset();
+            } else {
+                shared.demand.revoke(voice);
+                shared.maintain(Instant::now());
+            }
+            drop(changed);
+            drop(cancelled);
+            let revoked = pending.revoked.load(Ordering::Acquire);
+            assert!(pending.stop.is_cancelled());
+            assert!(matches!(*ready.borrow(), Some(Err(()))));
+            assert!(Arc::ptr_eq(
+                shared.state.lock().unwrap().pending.as_ref().unwrap(),
+                &pending
+            ));
+            assert_eq!(shared.cleanup.pending.load(Ordering::Acquire), 1);
+            let current = shared.demand.reserve().unwrap();
+            assert!(shared.demand.activate(current));
+            let monitor = shared.monitor(true);
+            let snapshot = shared.mic_test.snapshot(Instant::now());
+            assert!(shared.start(true).is_err());
+            shared.seal_cleanup().unwrap();
+            fixture.released.add_permits(1);
+            tokio::time::timeout(Duration::from_secs(2), shared.wait_for_cleanup())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(matches!(*ready.borrow(), Some(Err(()))));
+            assert!(shared.state.lock().unwrap().pending.is_none());
+            assert!(shared.state.lock().unwrap().device.is_none());
+            assert_eq!(fixture.observed.cancels.load(Ordering::Acquire), 1);
+            assert_eq!(fixture.observed.joins.load(Ordering::Acquire), 1);
+            assert_eq!(fixture.observed.drops.load(Ordering::Acquire), 1);
+            assert!(fixture.observed.wakes.load(Ordering::Acquire) >= 2);
+            assert!(monitor.is_current());
+            assert_eq!(shared.demand.active(), current);
+            assert_eq!(shared.mic_test.snapshot(Instant::now()), snapshot);
+            assert!(
+                revoked,
+                "Original acquisition was not quarantined in {mode}"
+            );
+            assert!(
+                !fixture.observed.blocked.load(Ordering::Acquire),
+                "Runtime lock remained held during a {mode} wake"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn factory_readiness_wakes_after_unlock_and_reentrant_reset_cannot_accept_late_device() {
+        use std::future::Future;
+        for fail in [true, false] {
+            let fixture = boundary_runtime(fail);
+            let shared = &fixture.shared;
+            let monitor = shared.monitor(true);
+            let mut ready = shared.start(true).unwrap().0;
+            fixture.entered.acquire().await.unwrap().forget();
+            let pending = shared.state.lock().unwrap().pending.clone().unwrap();
+            let waker = std::task::Waker::from(Arc::new(BoundaryWake {
+                shared: Arc::downgrade(shared),
+                observed: fixture.observed.clone(),
+                reset: AtomicBool::new(!fail),
+            }));
+            let mut context = std::task::Context::from_waker(&waker);
+            let mut changed = Box::pin(ready.changed());
+            assert!(changed.as_mut().poll(&mut context).is_pending());
+            fixture.released.add_permits(1);
+            tokio::time::timeout(Duration::from_secs(2), shared.wait_for_cleanup())
+                .await
+                .unwrap()
+                .unwrap();
+            drop(changed);
+            assert!(fixture.observed.wakes.load(Ordering::Acquire) >= 1);
+            assert!(!fixture.observed.blocked.load(Ordering::Acquire));
+            assert_eq!(
+                fixture.observed.resets.load(Ordering::Acquire),
+                usize::from(!fail)
+            );
+            assert!(matches!(*ready.borrow(), Some(Err(()))));
+            assert!(shared.state.lock().unwrap().pending.is_none());
+            assert!(shared.state.lock().unwrap().device.is_none());
+            assert_eq!(monitor.is_current(), fail);
+            assert_eq!(pending.revoked.load(Ordering::Acquire), !fail);
+            assert_eq!(
+                fixture.observed.joins.load(Ordering::Acquire),
+                usize::from(!fail)
+            );
+            assert_eq!(
+                fixture.observed.drops.load(Ordering::Acquire),
+                usize::from(!fail)
+            );
+            assert!(!shared.state.is_poisoned());
+        }
+    }
+
+    struct ReplacementMonitorWake {
+        shared: std::sync::Weak<SharedAudio<BoundaryDevice>>,
+        replacement: Mutex<Option<(MonitorLease<BoundaryDevice>, crate::mic_test::CaptureToken)>>,
+        armed: AtomicBool,
+        now: Instant,
+    }
+
+    impl std::task::Wake for ReplacementMonitorWake {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            if self.armed.swap(false, Ordering::AcqRel) {
+                let shared = self.shared.upgrade().unwrap();
+                let monitor = shared.monitor(true);
+                let token = shared.mic_test.begin(self.now).unwrap();
+                *self.replacement.lock().unwrap() = Some((monitor, token));
+            }
+        }
+    }
+
+    async fn factory_failure_preserves_replacement_monitor(cancelled_wake: bool) {
+        use std::future::Future;
+        let fixture = boundary_runtime(true);
+        let shared = &fixture.shared;
+        let now = Instant::now();
+        let original = shared.monitor(true);
+        let original_token = shared.mic_test.begin(now).unwrap();
+        let mut ready = shared.start(true).unwrap().0;
+        fixture.entered.acquire().await.unwrap().forget();
+        let pending = shared.state.lock().unwrap().pending.clone().unwrap();
+        let wake = Arc::new(ReplacementMonitorWake {
+            shared: Arc::downgrade(shared),
+            replacement: Mutex::new(None),
+            armed: AtomicBool::new(true),
+            now,
+        });
+        let waker = std::task::Waker::from(wake.clone());
+        let mut context = std::task::Context::from_waker(&waker);
+        let mut changed = Box::pin(ready.changed());
+        let mut cancelled = Box::pin(pending.stop.cancelled());
+        if cancelled_wake {
+            assert!(cancelled.as_mut().poll(&mut context).is_pending());
+        } else {
+            assert!(changed.as_mut().poll(&mut context).is_pending());
+        }
+        fixture.released.add_permits(1);
+        tokio::time::timeout(Duration::from_secs(2), shared.wait_for_cleanup())
+            .await
+            .unwrap()
+            .unwrap();
+        drop(changed);
+        drop(cancelled);
+        let (replacement, token) = wake.replacement.lock().unwrap().take().unwrap();
+        assert!(!original.is_current());
+        assert!(replacement.is_current());
+        assert_ne!(original_token, token);
+        assert!(matches!(*ready.borrow(), Some(Err(()))));
+        assert!(pending.stop.is_cancelled());
+        let state = shared.state.lock().unwrap();
+        assert!(state.pending.is_none());
+        assert!(state.device.is_none());
+        assert!(state.failed);
+        drop(state);
+        assert!(shared.start(false).is_err());
+        assert_eq!(
+            shared.mic_test.capture_token(),
+            Some(token),
+            "Original factory failure invalidated replacement capture token"
+        );
+        let snapshot = shared.mic_test.snapshot(now);
+        assert_eq!(snapshot.stage, crate::mic_test::MicTestStage::Arming);
+        assert_eq!(snapshot.failure, None);
+        assert_eq!(snapshot.issue, None);
+    }
+
+    #[tokio::test]
+    async fn factory_failure_readiness_wake_cannot_fail_replacement_monitor_token() {
+        factory_failure_preserves_replacement_monitor(false).await;
+    }
+
+    #[tokio::test]
+    async fn factory_failure_cancellation_wake_cannot_fail_replacement_monitor_token() {
+        factory_failure_preserves_replacement_monitor(true).await;
+    }
+
     struct TaskDropProbe {
         entered: std::sync::mpsc::Sender<()>,
         release: std::sync::mpsc::Receiver<()>,
@@ -1299,6 +1881,84 @@ mod tests {
             self.release.recv_timeout(Duration::from_secs(3)).unwrap();
             self.finished.store(true, Ordering::Release);
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_value_retirement_stays_registered_through_seal_abort_and_held_owner_drop() {
+        for mode in ["normal", "panic", "requested-abort", "unexpected-abort"] {
+            let cleanup = Arc::new(AudioCleanup::default());
+            let prepared = cleanup.prepare_task().unwrap();
+            let retirement = cleanup.prepare_task().unwrap();
+            let stop = CancellationToken::new();
+            let (entered, waiting) = std::sync::mpsc::channel();
+            let (release, held) = std::sync::mpsc::channel();
+            let finished = Arc::new(AtomicBool::new(false));
+            let value = retirement.hold(TaskDropProbe {
+                entered,
+                release: held,
+                finished: finished.clone(),
+            });
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let task = prepared.spawn(stop.clone(), async move {
+                let _value = value;
+                started.send(()).unwrap();
+                match mode {
+                    "normal" => {}
+                    "panic" => panic!("Expected task with native retirement panic"),
+                    _ => std::future::pending::<()>().await,
+                }
+            });
+            ready.await.unwrap();
+            cleanup.seal().unwrap();
+            if mode == "requested-abort" {
+                stop.cancel();
+            }
+            if mode.ends_with("abort") {
+                task.abort();
+            }
+            tokio::task::spawn_blocking(move || {
+                waiting.recv_timeout(std::time::Duration::from_secs(2))
+            })
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(30), cleanup.wait())
+                    .await
+                    .is_err()
+            );
+            assert!(!finished.load(Ordering::Acquire));
+            release.send(()).unwrap();
+            let result = tokio::time::timeout(std::time::Duration::from_secs(2), cleanup.wait())
+                .await
+                .unwrap();
+            assert_eq!(
+                result.is_err(),
+                matches!(mode, "panic" | "unexpected-abort")
+            );
+            assert!(finished.load(Ordering::Acquire));
+            assert_eq!(cleanup.wait().await.is_err(), result.is_err());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn registered_native_value_drop_panic_is_sticky_even_after_original_task_succeeds() {
+        let cleanup = Arc::new(AudioCleanup::default());
+        let prepared = cleanup.prepare_task().unwrap();
+        let value = cleanup.prepare_task().unwrap().hold(TaskPanicDrop(true));
+        let task = prepared.spawn(CancellationToken::new(), async move {
+            let _value = value;
+        });
+        cleanup.seal().unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), cleanup.wait())
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert!(task.is_finished());
+        assert_eq!(cleanup.pending.load(Ordering::Acquire), 0);
+        assert!(cleanup.wait().await.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

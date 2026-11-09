@@ -325,6 +325,17 @@ impl VoiceSession {
         let (width, height, fps) = capture_format(quality)?;
         #[cfg(windows)]
         let audio_source = source.clone();
+        #[cfg(windows)]
+        let capture = ScreenCapture::start_with_audio_runtime(
+            self.audio_runtime.as_ref(),
+            source,
+            width,
+            height,
+            fps,
+            !allow_control,
+        )
+        .await?;
+        #[cfg(not(windows))]
         let capture = tokio::task::spawn_blocking(move || {
             ScreenCapture::start(source, width, height, fps, !allow_control)
         })
@@ -565,12 +576,21 @@ impl VoiceSession {
         if !self.peers.contains(peer) {
             return Err(MediaError::UnauthorizedPeer);
         }
-        if stream
+        let p2p = self
+            .engine
+            .peer_lifetime(peer)
+            .is_some_and(|original| original.is_same(&lifetime) && lifetime.is_alive());
+        let sfu = stream
             && self
-                .engine
-                .peer_lifetime(peer)
-                .is_some_and(|p2p| p2p.is_same(&lifetime))
-        {
+                .streams
+                .selected
+                .get(peer)
+                .and_then(|epoch| *epoch)
+                .is_some_and(|epoch| self.engine.sfu_epoch_matches(peer, false, epoch, &lifetime));
+        if !p2p && !sfu {
+            return Err(MediaError::UnauthorizedPeer);
+        }
+        if stream && p2p {
             self.streams
                 .p2p_audio
                 .insert(peer.into(), (track.clone(), lifetime.clone()));

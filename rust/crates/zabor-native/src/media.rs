@@ -31,6 +31,26 @@ use tokio_util::sync::CancellationToken;
 
 static NEXT_OFFER_EPOCH: AtomicU64 = AtomicU64::new(1);
 
+pub(crate) struct MediaWorkerState {
+    failed: Arc<AtomicBool>,
+    finished: Arc<AtomicBool>,
+}
+
+impl MediaWorkerState {
+    pub(crate) fn new(failed: Arc<AtomicBool>, finished: Arc<AtomicBool>) -> Self {
+        Self { failed, finished }
+    }
+}
+
+impl Drop for MediaWorkerState {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.failed.store(true, Ordering::Release);
+        }
+        self.finished.store(true, Ordering::Release);
+    }
+}
+
 pub mod adaptive;
 mod sfu;
 use adaptive::{AdaptiveVideo, VideoProfile, ViewerState};
@@ -1036,6 +1056,26 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
+
+    #[test]
+    fn native_worker_health_retires_on_return_and_panic_without_waiter_or_capture_drop() {
+        for panics in [false, true] {
+            let failed = Arc::new(AtomicBool::new(false));
+            let finished = Arc::new(AtomicBool::new(false));
+            let worker_failed = failed.clone();
+            let worker_finished = finished.clone();
+            let result = std::thread::spawn(move || {
+                let _state = MediaWorkerState::new(worker_failed, worker_finished);
+                if panics {
+                    panic!("Expected native media owner panic");
+                }
+            })
+            .join();
+            assert_eq!(result.is_err(), panics);
+            assert!(finished.load(Ordering::Acquire));
+            assert_eq!(failed.load(Ordering::Acquire), panics);
+        }
+    }
 
     #[test]
     fn video_send_profile_rejects_unknown_quality_without_implicit_defaults() {

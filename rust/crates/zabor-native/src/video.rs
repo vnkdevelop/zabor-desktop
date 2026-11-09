@@ -109,6 +109,14 @@ pub struct VideoDelivery {
     pub lease: VideoFrameLease,
 }
 
+struct VideoLeaseRetirement(Arc<AtomicBool>);
+
+impl Drop for VideoLeaseRetirement {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 struct VideoSubscription {
     task: tokio::task::AbortHandle,
     lease: VideoFrameLease,
@@ -189,6 +197,9 @@ impl VideoReceiver {
         let Ok(prepared) = self.cleanup.prepare_task() else {
             return;
         };
+        let Ok(retirement) = self.cleanup.prepare_task() else {
+            return;
+        };
         self.stop();
         let lease = VideoFrameLease {
             lifetime: self.lifetime.clone(),
@@ -196,10 +207,22 @@ impl VideoReceiver {
         };
         let live = lease.clone();
         let sink = self.sink.clone();
-        let mut stream = NativeVideoStream::new(self.track.clone());
+        let mut stream = retirement.hold(NativeVideoStream::new(self.track.clone()));
         let stop = CancellationToken::new();
+        let cancel = stop.clone();
+        let retired = VideoLeaseRetirement(live.active.clone());
         let task = prepared.spawn(stop.clone(), async move {
-            while let Some(frame) = stream.next().await {
+            let _retired = retired;
+            loop {
+                let frame = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => break,
+                    _ = live.lifetime.cancelled() => break,
+                    frame = stream.next() => frame,
+                };
+                let Some(frame) = frame else {
+                    break;
+                };
                 if !live.is_alive() {
                     break;
                 }
@@ -212,7 +235,6 @@ impl VideoReceiver {
                     }
                 }
             }
-            live.active.store(false, Ordering::Release);
         });
         self.subscription = Some(VideoSubscription { task, lease, stop });
     }
@@ -386,6 +408,58 @@ mod tests {
         );
         let track = factory.create_video_track("video-cleanup", source.clone());
         (factory, source, track)
+    }
+
+    #[tokio::test]
+    async fn native_video_worker_retires_original_frame_lease_without_receiver_drop_on_every_exit()
+    {
+        for mode in ["peer-retired-idle", "callback-panic", "unexpected-abort"] {
+            let shared = shared();
+            let (mut engine, lifetime, _events) = peer();
+            let (_factory, source, track) = native_video();
+            let (sender, mut frames) = mpsc::channel(1);
+            let mut receiver = VideoReceiver::with_audio_runtime(
+                track,
+                lifetime.clone(),
+                Arc::new(move |frame| {
+                    sender.try_send(frame).unwrap();
+                    if mode == "callback-panic" {
+                        panic!("Expected original native video callback panic");
+                    }
+                }),
+                shared.as_ref(),
+            );
+            receiver.start();
+            let lease = receiver.subscription.as_ref().unwrap().lease.clone();
+            let task = receiver.subscription.as_ref().unwrap().task.clone();
+            source.capture_frame(&VideoFrame::new(
+                VideoRotation::VideoRotation0,
+                I420Buffer::new_black(160, 96),
+            ));
+            let delivery = timeout(Duration::from_secs(2), frames.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if mode == "peer-retired-idle" {
+                engine.disconnect_peer("remote");
+            } else if mode == "unexpected-abort" {
+                task.abort();
+            }
+            let result = timeout(Duration::from_secs(2), shared.wait_for_cleanup())
+                .await
+                .unwrap();
+            assert_eq!(result.is_err(), mode != "peer-retired-idle");
+            assert!(task.is_finished());
+            assert!(!lease.is_alive());
+            assert!(!delivery.lease.is_alive());
+            assert!(!receiver.is_playing());
+            assert!(receiver.subscription.is_some());
+            assert!(delivery.lease.lifetime.is_same(&lifetime));
+            assert_eq!(lifetime.is_alive(), mode != "peer-retired-idle");
+            receiver.stop();
+            assert_eq!(shared.wait_for_cleanup().await.is_err(), result.is_err());
+            engine.close();
+        }
     }
 
     struct HeldDrop {

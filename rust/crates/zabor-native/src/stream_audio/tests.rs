@@ -1,5 +1,38 @@
 use super::*;
 
+#[tokio::test]
+async fn acquired_stream_audio_worker_panic_retires_health_and_reports_sticky_original_join_failure(
+) {
+    let cleanup = Arc::new(AudioCleanup::default());
+    let (release, held) = std::sync::mpsc::channel();
+    let capture = StreamAudioCapture::start_with(
+        cleanup.clone(),
+        CancellationToken::new(),
+        move |_, source, ready| {
+            ready.send(source.clone()).unwrap();
+            held.recv_timeout(std::time::Duration::from_secs(3))
+                .unwrap();
+            panic!("Expected acquired stream audio worker panic");
+        },
+    )
+    .await
+    .unwrap();
+    assert!(capture.is_live());
+    release.send(()).unwrap();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), cleanup.wait())
+            .await
+            .unwrap()
+            .is_err()
+    );
+    assert!(!capture.is_live());
+    assert!(capture.failed());
+    assert!(capture.finished.load(Ordering::Acquire));
+    assert!(!capture.stop.is_cancelled());
+    drop(capture);
+    assert!(cleanup.wait().await.is_err());
+}
+
 #[test]
 fn stereo_queue_preserves_channels_sanitizes_bounds_and_discards_partial_discontinuous_audio() {
     let mut queue = PcmQueue(VecDeque::new());

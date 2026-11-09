@@ -1,5 +1,5 @@
 use crate::audio_runtime::{AudioCleanup, AudioCleanupError, SharedAudio, SharedAudioDevice};
-use crate::media::MediaError;
+use crate::media::{MediaError, MediaWorkerState};
 use crate::picker::{PickerImage, PickerQuery};
 use crate::screen::bgra_frame;
 use libwebrtc::video_frame::{VideoFrame, VideoRotation};
@@ -194,6 +194,7 @@ impl CameraCapture {
         let worker_finished = finished.clone();
         let (ready, received) = oneshot::channel();
         prepared.spawn_blocking_result(move || {
+            let _state = MediaWorkerState::new(worker_failed.clone(), worker_finished);
             if worker_stop.is_cancelled() {
                 return Ok(());
             }
@@ -260,7 +261,9 @@ impl CameraCapture {
             }
             drop(ready);
             let result = owner.finish();
-            worker_finished.store(true, Ordering::Release);
+            if result.is_err() {
+                worker_failed.store(true, Ordering::Release);
+            }
             result
         });
         let source = tokio::select! {
@@ -525,14 +528,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn acquired_camera_cleanup_failure_retires_health_before_capture_wrapper_is_dropped() {
+        let cleanup = Arc::new(AudioCleanup::default());
+        let capture = CameraCapture::synthetic(cleanup.clone(), 5, 0)
+            .await
+            .unwrap();
+        assert!(capture.is_live());
+        capture.stop.cancel();
+        assert!(timeout(Duration::from_secs(5), cleanup.wait())
+            .await
+            .unwrap()
+            .is_err());
+        assert!(capture.failed());
+        assert!(capture.finished.load(Ordering::Acquire));
+        assert!(!capture.is_live());
+        drop(capture);
+        assert!(cleanup.wait().await.is_err());
+    }
+
+    #[tokio::test]
     async fn owner_unwind_keeps_native_completion_until_join_and_reports_incomplete_drain() {
         timeout(Duration::from_secs(10), async {
             let cleanup = Arc::new(AudioCleanup::default());
+            let failed = Arc::new(AtomicBool::new(false));
+            let finished = Arc::new(AtomicBool::new(false));
+            let worker_failed = failed.clone();
+            let worker_finished = finished.clone();
             let (entered, started) = oneshot::channel();
             cleanup
                 .prepare_task()
                 .unwrap()
                 .spawn_blocking_result(move || {
+                    let _state = MediaWorkerState::new(worker_failed, worker_finished);
                     let mut owner = NativeOwner::new(Camera::synthetic_video(2, 150).unwrap());
                     let frame = loop {
                         if let Some(frame) = owner.camera.as_ref().unwrap().take_frame() {
@@ -563,8 +590,16 @@ mod tests {
                 });
             started.await.unwrap();
             let started = Instant::now();
+            cleanup.seal().unwrap();
+            assert!(timeout(Duration::from_millis(60), cleanup.wait())
+                .await
+                .is_err());
+            assert!(!finished.load(Ordering::Acquire));
             assert!(cleanup.wait().await.is_err());
             assert!(started.elapsed() >= Duration::from_millis(130));
+            assert!(finished.load(Ordering::Acquire));
+            assert!(failed.load(Ordering::Acquire));
+            assert!(cleanup.wait().await.is_err());
         })
         .await
         .unwrap();

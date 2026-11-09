@@ -1,5 +1,5 @@
 use crate::audio_runtime::{AudioCleanup, AudioCleanupError};
-use crate::media::MediaError;
+use crate::media::{MediaError, MediaWorkerState};
 use crate::screen::{ScreenSource, SourceKind};
 use libwebrtc::audio_frame::AudioFrame;
 use libwebrtc::audio_source::{native::NativeAudioSource, AudioSourceOptions};
@@ -154,6 +154,7 @@ impl StreamAudioCapture {
         let worker_stop = stop.clone();
         let (ready, received) = oneshot::channel();
         prepared.spawn_blocking_result(move || {
+            let _state = MediaWorkerState::new(worker_failed.clone(), worker_finished);
             if worker_stop.is_cancelled() {
                 return Ok(());
             }
@@ -169,7 +170,6 @@ impl StreamAudioCapture {
             );
             let result = acquire(&worker_stop, &source, ready);
             drop(source);
-            worker_finished.store(true, Ordering::Release);
             if result.is_err() {
                 worker_failed.store(true, Ordering::Release);
             }

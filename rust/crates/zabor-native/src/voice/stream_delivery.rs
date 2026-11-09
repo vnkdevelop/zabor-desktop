@@ -378,6 +378,105 @@ mod tests {
         hub.close();
         fixture.server.await.unwrap();
     }
+
+    #[tokio::test]
+    async fn remote_stream_stop_retires_only_stream_audio_and_backups_not_original_voice_peer() {
+        use crate::audio_mix::AudioMixer;
+        use crate::microphone::audio_source;
+        let fixture = fixture([]).await;
+        let (hub, _events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let mut session = session();
+        let lifetime = peer(&mut session);
+        let factory = PeerConnectionFactory::default();
+        let voice = factory.create_audio_track("original-voice", audio_source());
+        let audio = factory.create_audio_track("original-stream", audio_source());
+        session.playback = Some(AudioPlayback::with_cleanup(
+            Arc::new(AudioMixer::new(session.controls.clone())),
+            session.audio_runtime.cleanup_tracker(),
+        ));
+        session
+            .receive_audio("peer", voice, lifetime.clone(), false)
+            .unwrap();
+        session
+            .receive_audio("peer", audio, lifetime.clone(), true)
+            .unwrap();
+        let (_, video) = frames();
+        session.prepare_p2p_video("peer", video, lifetime.clone());
+        assert_eq!(session.playback.as_ref().unwrap().subscription_count(), 2);
+        session
+            .handle(&hub, "UserStoppedStreaming", &[json!("peer")])
+            .await
+            .unwrap();
+        assert_eq!(session.playback.as_ref().unwrap().subscription_count(), 1);
+        assert!(session.streams.p2p_audio.is_empty() && session.streams.p2p_video.is_empty());
+        assert!(session.streams.sfu_audio.is_empty() && session.streams.probes.is_empty());
+        assert!(session.streams.probe_deadlines.is_empty() && session.streams.selected.is_empty());
+        assert!(lifetime.is_alive() && session.has_peer("peer"));
+        let runtime = session.audio_runtime.clone();
+        drop(session);
+        runtime.seal_cleanup().unwrap();
+        runtime.wait_for_cleanup().await.unwrap();
+        hub.close();
+        assert!(fixture.server.await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn receive_audio_and_video_reject_unrelated_live_peer_and_unselected_sfu_originals() {
+        use crate::audio_mix::AudioMixer;
+        use crate::microphone::audio_source;
+        let mut session = session();
+        let original = peer(&mut session);
+        let (mut unrelated, _) = MediaEngine::new_data_only("other".into());
+        unrelated.authorize_peers(["peer".into()]);
+        unrelated
+            .create_data_channel(
+                "peer",
+                "unrelated",
+                libwebrtc::data_channel::DataChannelInit::default(),
+            )
+            .unwrap();
+        let wrong = unrelated.peer_lifetime("peer").unwrap();
+        let factory = PeerConnectionFactory::default();
+        let audio = factory.create_audio_track("synthetic-audio", audio_source());
+        let (_, video) = frames();
+        session.playback = Some(AudioPlayback::with_cleanup(
+            Arc::new(AudioMixer::new(session.controls.clone())),
+            session.audio_runtime.cleanup_tracker(),
+        ));
+        assert_eq!(
+            session.receive_audio("peer", audio.clone(), wrong.clone(), false),
+            Err(MediaError::UnauthorizedPeer)
+        );
+        assert_eq!(
+            session.receive_audio("peer", audio.clone(), wrong.clone(), true),
+            Err(MediaError::UnauthorizedPeer)
+        );
+        session.prepare_p2p_video("peer", video, wrong.clone());
+        assert!(wrong.is_alive() && session.streams.p2p_video.is_empty());
+        assert!(session.streams.p2p_audio.is_empty());
+        session.engine.begin_sfu_subscriber("peer", 42).unwrap();
+        let sfu = session.engine.sfu_lifetime("peer", false).unwrap();
+        assert_eq!(
+            session.receive_audio("peer", audio.clone(), sfu.clone(), true),
+            Err(MediaError::UnauthorizedPeer)
+        );
+        session.streams.selected.insert("peer".into(), Some(42));
+        session
+            .receive_audio("peer", audio.clone(), sfu.clone(), true)
+            .unwrap();
+        let voice = factory.create_audio_track("synthetic-voice", audio_source());
+        session
+            .receive_audio("peer", voice, original.clone(), false)
+            .unwrap();
+        assert_eq!(session.playback.as_ref().unwrap().subscription_count(), 2);
+        assert!(original.is_alive() && sfu.is_alive());
+        let runtime = session.audio_runtime.clone();
+        drop(session);
+        runtime.seal_cleanup().unwrap();
+        runtime.wait_for_cleanup().await.unwrap();
+    }
 }
 
 impl Default for StreamRoutes {
@@ -758,7 +857,13 @@ impl VoiceSession {
     }
 
     pub fn prepare_p2p_video(&mut self, peer: &str, track: RtcVideoTrack, lifetime: PeerLifetime) {
-        if !self.peers.contains(peer) || !lifetime.is_alive() {
+        if !self.peers.contains(peer)
+            || !lifetime.is_alive()
+            || !self
+                .engine
+                .peer_lifetime(peer)
+                .is_some_and(|original| original.is_same(&lifetime))
+        {
             return;
         }
         self.streams.streaming.insert(peer.into());
@@ -997,8 +1102,15 @@ impl VoiceSession {
                     self.streams.streaming.remove(peer);
                     self.streams.snapshots.remove(peer);
                     self.streams.probes.remove(peer);
+                    self.streams.probe_deadlines.remove(peer);
                     self.streams.selected.remove(peer);
                     self.streams.reported.remove(peer);
+                    self.streams.p2p_video.remove(peer);
+                    self.streams.p2p_audio.remove(peer);
+                    self.streams.sfu_audio.remove(peer);
+                    if let Some(playback) = self.playback.as_mut() {
+                        playback.remove_stream(peer);
+                    }
                     self.engine.close_sfu_subscriber(peer);
                 }
             }

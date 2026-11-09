@@ -1,4 +1,6 @@
-use crate::audio_runtime::{SharedAudio, SharedAudioDevice};
+use crate::audio_runtime::{
+    AudioCleanup, AudioCleanupError, AudioCleanupTask, SharedAudio, SharedAudioDevice,
+};
 use crate::media::MediaError;
 use crate::picker::{PickerImage, PickerQuery};
 use libwebrtc::desktop_capturer::{
@@ -67,7 +69,40 @@ pub struct ScreenCapture {
     stop: Arc<AtomicBool>,
     failed: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    retirement: Option<ScreenRetirement>,
     pub(crate) geometry: Arc<zabor_input::CaptureLease>,
+}
+
+struct ScreenRetirement {
+    task: AudioCleanupTask,
+    runtime: tokio::runtime::Handle,
+}
+
+struct CaptureCancellation {
+    stop: Arc<AtomicBool>,
+    armed: bool,
+}
+
+impl Drop for CaptureCancellation {
+    fn drop(&mut self) {
+        if self.armed {
+            self.stop.store(true, Ordering::Release);
+        }
+    }
+}
+
+struct ScreenWorkerState {
+    failed: Arc<AtomicBool>,
+    geometry: Arc<zabor_input::CaptureLease>,
+}
+
+impl Drop for ScreenWorkerState {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.failed.store(true, Ordering::Release);
+        }
+        self.geometry.revoke();
+    }
 }
 
 impl ScreenCapture {
@@ -186,11 +221,84 @@ impl ScreenCapture {
         fps: u32,
         cursor: bool,
     ) -> Result<Self, MediaError> {
+        Self::start_stoppable(
+            selected,
+            width,
+            height,
+            fps,
+            cursor,
+            Arc::new(AtomicBool::new(false)),
+            None,
+        )
+    }
+
+    pub async fn start_with_audio_runtime<D: SharedAudioDevice>(
+        runtime: &SharedAudio<D>,
+        selected: ScreenSource,
+        width: u32,
+        height: u32,
+        fps: u32,
+        cursor: bool,
+    ) -> Result<Self, MediaError> {
+        Self::start_with(runtime.cleanup_tracker(), move |stop, retirement| {
+            Self::start_stoppable(selected, width, height, fps, cursor, stop, Some(retirement))
+        })
+        .await
+    }
+
+    async fn start_with(
+        cleanup: Arc<AudioCleanup>,
+        begin: impl FnOnce(Arc<AtomicBool>, ScreenRetirement) -> Result<Self, MediaError>
+            + Send
+            + 'static,
+    ) -> Result<Self, MediaError> {
+        let prepared = cleanup.prepare_task().map_err(|_| MediaError::Backend)?;
+        let retirement = ScreenRetirement {
+            task: cleanup.prepare_task().map_err(|_| MediaError::Backend)?,
+            runtime: tokio::runtime::Handle::current(),
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut cancellation = CaptureCancellation {
+            stop: stop.clone(),
+            armed: true,
+        };
+        let worker_stop = stop.clone();
+        let (ready, received) = tokio::sync::oneshot::channel();
+        prepared.spawn_blocking_result(move || {
+            if worker_stop.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            if let Ok(capture) = begin(worker_stop.clone(), retirement) {
+                if !worker_stop.load(Ordering::Acquire) {
+                    let _ = ready.send(capture);
+                }
+            }
+            Ok(())
+        });
+        let capture = tokio::time::timeout(Duration::from_secs(5), received)
+            .await
+            .map_err(|_| MediaError::Backend)?
+            .map_err(|_| MediaError::Backend)?;
+        if stop.load(Ordering::Acquire) || !capture.is_live() {
+            return Err(MediaError::Backend);
+        }
+        cancellation.armed = false;
+        Ok(capture)
+    }
+
+    fn start_stoppable(
+        selected: ScreenSource,
+        width: u32,
+        height: u32,
+        fps: u32,
+        cursor: bool,
+        stop: Arc<AtomicBool>,
+        retirement: Option<ScreenRetirement>,
+    ) -> Result<Self, MediaError> {
         if width == 0 || height == 0 || width > 3840 || height > 2160 || !(1..=60).contains(&fps) {
             return Err(MediaError::Backend);
         }
         let source = NativeVideoSource::new(VideoResolution { width, height }, true);
-        let stop = Arc::new(AtomicBool::new(false));
         let failed = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
         let worker_failed = failed.clone();
@@ -203,6 +311,13 @@ impl ScreenCapture {
         let thread = std::thread::Builder::new()
             .name("zabor-screen".into())
             .spawn(move || {
+                let _state = ScreenWorkerState {
+                    failed: worker_failed.clone(),
+                    geometry: frame_geometry.clone(),
+                };
+                if worker_stop.load(Ordering::Acquire) {
+                    return;
+                }
                 let source_type = match selected.kind {
                     SourceKind::Screen => DesktopCaptureSourceType::Screen,
                     SourceKind::Window => DesktopCaptureSourceType::Window,
@@ -223,47 +338,55 @@ impl ScreenCapture {
                 };
                 let mut ready = Some(ready);
                 let callback_stop = worker_stop.clone();
-                capturer.start_capture(Some(selected), move |result| match result {
-                    Ok(frame) => {
-                        match bgra_frame(
-                            frame.data(),
-                            frame.stride(),
-                            frame.width(),
-                            frame.height(),
-                            width,
-                            height,
-                        ) {
-                            Ok(buffer) => {
-                                frame_geometry.update(zabor_input::Rect {
-                                    left: frame.left(),
-                                    top: frame.top(),
-                                    width: frame.width(),
-                                    height: frame.height(),
-                                });
-                                frames.capture_frame(&VideoFrame::new(
-                                    VideoRotation::VideoRotation0,
-                                    buffer,
-                                ));
-                                if let Some(ready) = ready.take() {
-                                    let _ = ready.send(true);
+                capturer.start_capture(Some(selected), move |result| {
+                    if callback_stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    match result {
+                        Ok(frame) => {
+                            match bgra_frame(
+                                frame.data(),
+                                frame.stride(),
+                                frame.width(),
+                                frame.height(),
+                                width,
+                                height,
+                            ) {
+                                Ok(buffer) => {
+                                    if callback_stop.load(Ordering::Acquire) {
+                                        return;
+                                    }
+                                    frame_geometry.update(zabor_input::Rect {
+                                        left: frame.left(),
+                                        top: frame.top(),
+                                        width: frame.width(),
+                                        height: frame.height(),
+                                    });
+                                    frames.capture_frame(&VideoFrame::new(
+                                        VideoRotation::VideoRotation0,
+                                        buffer,
+                                    ));
+                                    if let Some(ready) = ready.take() {
+                                        let _ = ready.send(true);
+                                    }
+                                }
+                                Err(_) => {
+                                    frame_geometry.revoke();
+                                    worker_failed.store(true, Ordering::Release);
+                                    callback_stop.store(true, Ordering::Release);
                                 }
                             }
-                            Err(_) => {
-                                frame_geometry.revoke();
-                                worker_failed.store(true, Ordering::Release);
-                                callback_stop.store(true, Ordering::Release);
+                        }
+                        Err(CaptureError::Permanent) => {
+                            frame_geometry.revoke();
+                            worker_failed.store(true, Ordering::Release);
+                            callback_stop.store(true, Ordering::Release);
+                            if let Some(ready) = ready.take() {
+                                let _ = ready.send(false);
                             }
                         }
+                        Err(CaptureError::Temporary) => {}
                     }
-                    Err(CaptureError::Permanent) => {
-                        frame_geometry.revoke();
-                        worker_failed.store(true, Ordering::Release);
-                        callback_stop.store(true, Ordering::Release);
-                        if let Some(ready) = ready.take() {
-                            let _ = ready.send(false);
-                        }
-                    }
-                    Err(CaptureError::Temporary) => {}
                 });
                 let period = Duration::from_secs_f64(1.0 / f64::from(fps));
                 while !worker_stop.load(Ordering::Acquire) {
@@ -278,6 +401,7 @@ impl ScreenCapture {
             stop,
             failed,
             thread: Some(thread),
+            retirement,
             geometry,
         };
         match status.recv_timeout(Duration::from_secs(5)) {
@@ -322,6 +446,7 @@ impl ScreenCapture {
                 stop: stop.clone(),
                 failed: failed.clone(),
                 thread: Some(thread),
+                retirement: None,
                 geometry: zabor_input::CaptureLease::new(None),
             },
             stop,
@@ -336,7 +461,21 @@ impl Drop for ScreenCapture {
         self.stop.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
             thread.thread().unpark();
-            let _ = thread.join();
+            if let Some(retirement) = self.retirement.take() {
+                let source = self.source.clone();
+                let failed = self.failed.clone();
+                let _runtime = retirement.runtime.enter();
+                retirement.task.spawn_blocking_result(move || {
+                    let result = thread.join().map_err(|_| AudioCleanupError::Incomplete);
+                    if result.is_err() {
+                        failed.store(true, Ordering::Release);
+                    }
+                    drop(source);
+                    result
+                });
+            } else if thread.join().is_err() {
+                self.failed.store(true, Ordering::Release);
+            }
         }
     }
 }
@@ -458,5 +597,149 @@ mod tests {
             .all(|value| (75..=90).contains(value)));
         assert!(bgra_frame(&pixels[..20], 80, 16, 8, 8, 8).is_err());
         assert!(bgra_frame(&pixels, 32, 16, 8, 8, 8).is_err());
+    }
+
+    fn registered_fixture(
+        stop: Arc<AtomicBool>,
+        retirement: ScreenRetirement,
+        release: mpsc::Receiver<()>,
+        panic_on_exit: bool,
+    ) -> ScreenCapture {
+        let source = NativeVideoSource::new(
+            VideoResolution {
+                width: 160,
+                height: 96,
+            },
+            true,
+        );
+        let failed = Arc::new(AtomicBool::new(false));
+        let geometry = zabor_input::CaptureLease::new(None);
+        let worker_stop = stop.clone();
+        let worker_failed = failed.clone();
+        let worker_geometry = geometry.clone();
+        let thread = std::thread::spawn(move || {
+            let _state = ScreenWorkerState {
+                failed: worker_failed,
+                geometry: worker_geometry,
+            };
+            while !worker_stop.load(Ordering::Acquire) {
+                std::thread::park_timeout(Duration::from_millis(5));
+            }
+            release.recv_timeout(Duration::from_secs(3)).unwrap();
+            assert!(!panic_on_exit, "synthetic original screen owner panic");
+        });
+        ScreenCapture {
+            source,
+            stop,
+            failed,
+            thread: Some(thread),
+            retirement: Some(retirement),
+            geometry,
+        }
+    }
+
+    #[tokio::test]
+    async fn registered_screen_drop_returns_before_original_join_and_sealed_drain_keeps_that_join()
+    {
+        let cleanup = Arc::new(AudioCleanup::default());
+        let (release, released) = mpsc::channel();
+        let capture = ScreenCapture::start_with(cleanup.clone(), move |stop, retirement| {
+            Ok(registered_fixture(stop, retirement, released, false))
+        })
+        .await
+        .unwrap();
+        let stop = capture.stop.clone();
+        let geometry = capture.geometry.clone();
+        geometry.update(zabor_input::Rect {
+            left: 0,
+            top: 0,
+            width: 160,
+            height: 96,
+        });
+        assert!(geometry.snapshot().is_some());
+        cleanup.seal().unwrap();
+        let started = Instant::now();
+        drop(capture);
+        assert!(started.elapsed() < Duration::from_millis(100));
+        assert!(stop.load(Ordering::Acquire));
+        assert!(geometry.snapshot().is_none());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(40), cleanup.wait())
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), cleanup.wait())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn aborted_screen_acquisition_retains_original_late_owner_and_descendant_retirement() {
+        let cleanup = Arc::new(AudioCleanup::default());
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (return_owner, returned) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let task_cleanup = cleanup.clone();
+        let start = tokio::spawn(async move {
+            ScreenCapture::start_with(task_cleanup, move |stop, retirement| {
+                entered.send(stop.clone()).unwrap();
+                returned.recv_timeout(Duration::from_secs(3)).unwrap();
+                Ok(registered_fixture(stop, retirement, released, false))
+            })
+            .await
+        });
+        let stop = started.await.unwrap();
+        start.abort();
+        assert!(matches!(start.await, Err(error) if error.is_cancelled()));
+        assert!(stop.load(Ordering::Acquire));
+        cleanup.seal().unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(40), cleanup.wait())
+                .await
+                .is_err()
+        );
+        return_owner.send(()).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(40), cleanup.wait())
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), cleanup.wait())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn sealed_screen_start_never_calls_factory_and_original_worker_panic_is_sticky_incomplete(
+    ) {
+        let cleanup = Arc::new(AudioCleanup::default());
+        cleanup.seal().unwrap();
+        assert!(ScreenCapture::start_with(cleanup.clone(), |_, _| {
+            panic!("sealed screen factory must not run")
+        })
+        .await
+        .is_err());
+        cleanup.wait().await.unwrap();
+        let cleanup = Arc::new(AudioCleanup::default());
+        let (release, released) = mpsc::channel();
+        let capture = ScreenCapture::start_with(cleanup.clone(), move |stop, retirement| {
+            Ok(registered_fixture(stop, retirement, released, true))
+        })
+        .await
+        .unwrap();
+        let failed = capture.failed.clone();
+        drop(capture);
+        release.send(()).unwrap();
+        cleanup.seal().unwrap();
+        assert!(tokio::time::timeout(Duration::from_secs(3), cleanup.wait())
+            .await
+            .unwrap()
+            .is_err());
+        assert!(failed.load(Ordering::Acquire));
+        assert!(cleanup.wait().await.is_err());
     }
 }

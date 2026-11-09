@@ -348,6 +348,9 @@ impl MediaEngine {
         self.sfu.ready.clear();
         self.sfu.fallback.clear();
         self.sfu.close_at = None;
+        for peer in self.peers.keys().cloned().collect::<Vec<_>>() {
+            let _ = self.set_screen_sender_active(&peer, true);
+        }
     }
 
     pub(crate) fn retain_sfu_viewers(&mut self) {
@@ -996,6 +999,37 @@ mod tests {
             .parameters();
         assert!(params.encodings[0].scale_resolution_down_by.is_none());
         assert!(params.encodings[0].max_bitrate.is_none());
+    }
+
+    #[tokio::test]
+    async fn replacement_share_reactivates_original_p2p_senders_after_sfu_without_publishing_microphone(
+    ) {
+        let (mut engine, _) = engine(true);
+        let microphone = engine.microphone.clone().unwrap();
+        let p2p = engine.peer_lifetime("peer").unwrap();
+        engine.begin_sfu_publisher(42).unwrap();
+        engine.set_delivery_mode(DeliveryMode::Sfu, 42).unwrap();
+        engine.viewer_sfu_ready("peer", 42, false).unwrap();
+        assert!(
+            !engine.peers["peer"]
+                .stream_sender
+                .as_ref()
+                .unwrap()
+                .parameters()
+                .encodings[0]
+                .active
+        );
+        let old_publisher = engine.sfu_lifetime("owner", true).unwrap();
+        engine.set_video_with_quality(source(), "low").unwrap();
+        assert!(!old_publisher.is_alive());
+        let peer = &engine.peers["peer"];
+        assert!(peer.video_sender.as_ref().unwrap().parameters().encodings[0].active);
+        assert!(peer.stream_sender.as_ref().unwrap().parameters().encodings[0].active);
+        assert!(microphone.enabled() && p2p.is_alive());
+        assert!(engine.peer_lifetime("peer").unwrap().is_same(&p2p));
+        engine.begin_sfu_publisher(43).unwrap();
+        let offer = engine.sfu_offer("owner", true).await.unwrap();
+        assert!(!offer.contains("zabor-microphone") && !offer.contains("zabor-voice"));
     }
 
     #[tokio::test]
