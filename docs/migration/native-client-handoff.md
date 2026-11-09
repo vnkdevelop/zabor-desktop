@@ -23,6 +23,22 @@ Active FileJobs publication/drains, app/media/RC hooks and reference/launcher fi
 full-client/trust/legal/physical gates remain unaccepted. No release, profile install,
 legacy deletion, push/main merge or shutdown.
 
+Coordination checkpoint `5cc85bb28981ed111d1a27348f6c548539dcf044` is saved clean.
+Later reference follow-up review resolved its original two P2s but found a new
+failed-freeze check/unlink replacement race. Same reference owner must bind deletion
+to the original object or preserve the failed tree; no primary reference integration
+or unsafe pathname cleanup. This docs-only gate addendum precedes real compact and
+does not change checked source `172c4a8` or its original passing proof.
+
+Latest App/UI delivery is checked stage3 `b209c23` plus handoff `76d7f34`, dependent
+on preserved stage2 wiring. Its original forty-four-pass/Clippy-failed group and
+fourteen-test repaired follow-up yield forty-four distinct stage proofs, confirmed
+by twenty-three final hashes. Original jobs/graph completed, no current app job.
+Contextual source/shell patches are retained in `sol-stage3-v2/`; no primary/RC
+hooks were changed. Actual post-Join Invite and production HiddenStore metadata
+crash durability/full native acceptance remain open. Delivery schedules no new
+app job; primary review/contextual integration is still separate.
+
 ## Earlier post-compact chat-IO work — preserved history
 
 Primary `046325d` was confirmed clean after real compact. Original

@@ -12,14 +12,22 @@ zero and ten zero-node/HTML5000/semantic/raw-producer caveats. Original primary
 commands/runners/fixtures completed/removed; cached pins retained, no primary check
 pending. Historical eighteen-pass/count-mismatch and P2 red receipts are separate.
 
-Current child gates: app green `sh_1bf1ee6c1001DBBY9hn0Kpd3aP`; media green
-`sh_1befe072e001R7QYGYXMNg7eZ8`; FileJobs callback
-`sh_1bf07d27d001AZZiL9iEw2oopW`, all pending, not passing evidence. Same RC owner
+Current child gates: media green `sh_1befe072e001R7QYGYXMNg7eZ8`; FileJobs callback
+`sh_1bf07d27d001AZZiL9iEw2oopW`, pending, not passing evidence. App stage3
+`b209c23`/`76d7f34` is delivered with all original jobs/graph completed: forty-four
+distinct stage passes across original/repaired receipts and twenty-three final
+hashes, not fifty-eight unique tests. Stage2-dependent contextual integration is
+separate; no new app job scheduled, no accepted successful post-Join Invite or
+HiddenStore crash durability. Same RC owner
 implements five RC-only hook areas in new `native-rc-completion`, preserving original
 candidate/receipts. Launcher follow-up retains five resolved issues but has three
 new caller-transport review findings; same owner corrects. Reference `b674b9b`
-follow-up delivered fifty-three affected passes and is under original read-only
-review. Neither source/hook delivery is integrated or whole-native accepted.
+follow-up delivered fifty-three affected passes; original read-only review resolved
+both predecessor P2s but found a new failed-freeze identity-check/path-unlink race.
+Same owner must use object-bound/exclusive cleanup or preserve failed trees where
+safe deletion is not provable. Neither source/hook delivery is integrated or
+whole-native accepted. Clean coordination `5cc85bb` is saved; latest review gate is
+preserved in a docs-only addendum before real compact.
 
 Next primary action is coordination save/clean-boundary/real compact, then checked
 FileJobs publication/drains and contextual child integration. No repeat of unchanged

@@ -36,10 +36,23 @@ perform real manual compact; do not repeat the unchanged thirty-one-test group.
 
 ### Current independent owners and pending gates
 
-- App: same `native-app-completion` owner; original review predecessors completed,
-  corrected green `sh_1bf1ee6c1001DBBY9hn0Kpd3aP` is pending with twenty-three
-  paths frozen. No competing RC hunks or primary common hooks. Production HiddenStore
-  remains fail-closed; member actions beyond list/adapter full readiness unaccepted.
+- App: same `native-app-completion` owner delivered checked stage3 source `b209c23`
+  and handoff `76d7f34`, retaining stage2 `ccdc698/5c7c8e2/9b61f48` and predecessors.
+  Original `sh_1bf1ee6c1001DBBY9hn0Kpd3aP` passed forty-four tests but failed
+  all-target Clippy on one new test's immutable while; assertions were preserved
+  by if+loop. Follow-up `sh_1bf26eee5001QuPO80SirrU76y` completed fourteen affected
+  passes and all ten fmt/diff/Clippy/normal-tree/build checks. Independent stage
+  audit confirms twenty-three final hashes and forty-four distinct passes across
+  receipts, not fifty-eight distinct tests. Own graph `sh_1bf26efad001e3Qxn6sZBsaFOA`
+  completed; no current app job pending, tracked tree clean/inherited target retained.
+  AppUi/AvatarUi transition and three review fixes plus bounded actual worker Kick/
+  RemoveFriend/member-generated AddFriend proofs are delivered. Post-Join Invite
+  now uses installed VoiceSession.channel but successful actual Invite remains
+  unproven. Primary integration requires dependent stage2 plus contextual stage3
+  hunks from saved patches; no whole shell/root-lock replacement or competing RC/
+  data hooks. Stage3 root manifest/lock/app.slint/root.slint unchanged; production
+  HiddenStore crash-durability gate remains fail-closed. Full physical/accessibility/
+  raster/motion/resource/release gates false. No new app job is scheduled by delivery.
 - Media: original correction green `sh_1befe072e001R7QYGYXMNg7eZ8` remains pending;
   preserve its original worktree/joins/target, not timeout/abort readiness.
 - File publication: `native-file-publication` owner
@@ -62,8 +75,20 @@ perform real manual compact; do not repeat the unchanged thirty-one-test group.
   `2f4c19a` fixes both P2s; fifty-three affected passes (36 JS/17 Rust), thirty-two
   source hashes, nine unchanged original proof/pin files, nine read-only SDK artifacts
   and all original job/temp cleanup are delivered. Original reviewer
-  `ses_e40f6ce5effe3t3FaxkhAXnCS1` now checks that scoped correction. No primary
-  integration or transitive-package/Tailwind/capture/physical acceptance yet.
+  `ses_e40f6ce5effe3t3FaxkhAXnCS1` resolved both predecessor P2s but found a new P2:
+  checked file identity/hash followed by pathname unlink can delete a concurrent
+  replacement user file. Same owner is correcting all failed-freeze cleanup paths
+  with object-bound/exclusive deletion or preservation of the failed tree where
+  safe deletion is unavailable; no path-check/delete fallback or broad cleanup.
+  Synthetic test fixtures remain owner-cleaned only after original racer exits.
+  Reference delivery is still blocked; no primary integration or transitive-package/
+  Tailwind/capture/physical acceptance yet.
+
+Coordination `5cc85bb28981ed111d1a27348f6c548539dcf044` saved the checked source
+boundary and owners; a docs-only addendum preserves this later cleanup-review gate
+before real compact. Source `172c4a8`, all 184 protected hashes and four saved source
+Git blobs remain unchanged. Final code-graph synchronization after that checkpoint
+completed with no topology change; semantic docs remain unrefreshed.
 
 ## Earlier post-compact work and receipts — superseded by the boundary above
 
