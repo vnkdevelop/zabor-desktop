@@ -1,5 +1,30 @@
 # Native remote-control desktop primitives
 
+## Verified recovery handoff — 2026-11-09
+
+Checked follow-up is saved as `3e9cb2fe02d849be0c71f9b123dd20f32bb56ac9`,
+parent `6d7b4cf11c3d6c00024282d98ccd876f6b1dd278`. Recovery independently matched
+all six committed paths/blobs and all 17 current source/pin hashes against the
+original checked manifest and save receipt, with a clean RC worktree. Manifest
+SHA-256: `2e870aff78d8a5fbb4ab177211fec5644801db3963334e4599277baa43fe82e1`.
+
+The original completed job `sh_1bcfe3947001Yu38Ee1wnubJFH` was recovered once
+from its saved output and owner history after its live output endpoint returned
+404; all nine original command groups exited 0. The passing log names establish
+41 affected tests, six new regressions and 60 combined unique proofs with the
+retained 54-test baseline, not 95 distinct tests or a new full-suite run. Historical
+V2/V3 intermediate failures remain documented below; only their named successful
+unchanged checks are retained. Recovery started zero builds or regression jobs.
+
+Independent evidence is `migration-artifacts/native-rc/recovery-2026-11-09/verification.json`
+and `original-history-summary.json` in that directory. Original receipts remain in
+`review-followup-2026-11-09/checked-v1/` and `adapter-2026-11-08/checked-v2/`,
+`checked-v3/`, `checked-v6/` under `migration-artifacts/native-rc/`; the original
+owned target/fixtures are absent. These ignored local receipts are not part of
+the Git delivery. This recovery changes only this handoff; no remaining bounded
+adapter gap was selected. Primary integration and physical acceptance are still
+open, not established by the checked adapter or this recovery.
+
 ## Review follow-up from 6d7b4cf — 2026-11-09
 
 Readonly review `ses_e43154694ffezOCirYR8xEUzHl` found two P1 and three P2 defects
@@ -154,6 +179,27 @@ Adapter contracts:
 
 ### Exact primary shell hooks still required
 
+Primary-owned integration paths, inspected read-only in `rust-p0-backend-bench`:
+
+- `rust/crates/zabor-native/src/shell.rs`: original `Command`/`UiEvent` request
+  handoff and queue admission/release, `on_toggle_control`, RemoteControl events,
+  `FrameUpdate`/`DisplayedFrame`, the original VideoReceiver delivery callback,
+  admitted `on_process_video` rows, focus/layout/activity and UI teardown records.
+- `rust/crates/zabor-native/ui/app.slint`: export `control-viewport` and
+  `control-confinement`, bind the already delivered RemoteViewer callbacks and
+  original request's `confined` state; preserve existing release/modal behavior.
+- `rust/crates/zabor-native/ui/root.slint`: export `RemoteControlPillWindow`.
+- `rust/crates/zabor-native/src/voice/remote_control.rs`: original worker request/
+  ACK identity, admitted input/PING result handoff, request-qualified release, and
+  original host CaptureLease/token/atomic authorization fence. Keep its existing
+  RemoteInput as the sole host input owner; revoke the fence before host retirement.
+- `rust/crates/zabor-native/src/video.rs`: original VideoSubscription/VideoDelivery
+  provenance for a source retained once per subscription. Coordinate the source
+  clone with shell FrameUpdate, including same-peer stop/start replacement; retain
+  the existing registered decoder cleanup and immutable original stamp/lease.
+
+These are required primary-owner changes, not files edited by this RC recovery.
+
 1. On the existing `on_toggle_control`, retain one request record for the cloned
    original target, original command `IntentTicket`, its original Voice token,
    `video_generation` and the original `native_window_handle`. Create
@@ -164,7 +210,8 @@ Adapter contracts:
    `Handle::enter()` while registering the actor; do not create another runtime,
    input owner, capture or cleanup tracker. Replacement retires the old record.
 2. In `UiEvent::RemoteControl(state, targets)`, before consuming state strings,
-   call `update_control(&state, original_matching_target, focused, modal != 0)`.
+   call `update_control(&state, original_matching_target, focused, modal != 0,
+   original_request.as_ref())` with the canonical request carried by that event.
    Compare lifetime/channel, not peer strings. Do not acknowledge from the derived
    `control-ready` image boolean or create another request on each maintenance
    event. Until ACK/P2P readiness, confinement remains unavailable.
@@ -176,7 +223,10 @@ Adapter contracts:
    a layout-only callback must never call `decoded_frame`.
 4. In the existing `on_process_video` admitted-row path, call `decoded_frame` only
    for that actual `FrameUpdate`: `DisplayedFrame::from_update(&frame).stamp`,
-   `frame.ticket`, `frame.generation`, `frame.source_epoch`. Preserve the original
+   `frame.ticket`, `frame.generation`, `frame.source_epoch`, `&source`. This source
+   is the original P2pFrameSource clone carried by that delivery, created once with
+   `P2pFrameSource::from_delivery(original_stamp, source_epoch)` in the original
+   subscription callback, not reconstructed in this UI path. Preserve the original
    decoder stamp/lease. A cached `control_frames` read may validate input but must
    not stamp or manufacture another decoded delivery. Fallback/RemoveVideo and
    stale request/frame/Voice tickets retire the original adapter immediately.
