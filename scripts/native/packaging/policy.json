@@ -7,6 +7,7 @@
   "architecture": "x64",
   "target": "x86_64-pc-windows-msvc",
   "executable": "zabor-native.exe",
+  "updateHelper": "zabor-native-update-helper.exe",
   "installationRoute": "explicit-native-installation",
   "webRtcRevision": "a545de4",
   "webRtcLibrarySha256": "3e5959b5320579814706848a0641224db22f03a374493e90cbd235948977f930",
@@ -17,6 +18,10 @@
   },
   "onnxRuntimeVersion": "1.31.1",
   "onnxRuntimeApi": 31,
+  "modelFiles": {
+    "DeepFilterNet3_onnx.tar.gz": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+    "silero_vad.onnx": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
+  },
   "onnxFiles": {
     "native/onnxruntime.dll": "cb2fa518b18356617f6f9f460c012501da2819ec7e5c1d80bd8f5de20492db0c",
     "native/onnxruntime.lib": "8022d994b1abb84d4b8b25e37937dfa921ef1e2a2ebba66f5a9af1f8433fa05c",

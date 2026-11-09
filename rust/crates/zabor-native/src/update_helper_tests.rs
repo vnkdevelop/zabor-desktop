@@ -171,6 +171,18 @@ impl Fixture {
     ) -> (SignedBundle, PathBuf, Vec<u8>) {
         let payload =
             format!("MZ LOCAL NATIVE UPDATE FIXTURE {version}; NEVER EXECUTED").into_bytes();
+        self.package_with_payload(version, sequence, schema, extra, payload, 150)
+    }
+
+    pub(crate) fn package_with_payload(
+        &self,
+        version: &str,
+        sequence: u64,
+        schema: u32,
+        extra: Option<(&str, &[u8])>,
+        payload: Vec<u8>,
+        now: u64,
+    ) -> (SignedBundle, PathBuf, Vec<u8>) {
         let text = b"LOCAL LICENSE FIXTURE ONLY".to_vec();
         let inventory =
             serde_json::to_vec(&serde_json::json!({"inventoryVersion":1,"complete":true,
@@ -228,8 +240,8 @@ impl Fixture {
             architecture: "x64".into(),
             commit: commit.into(),
             sequence,
-            issued_at: 100,
-            expires_at: 300,
+            issued_at: now.saturating_sub(50),
+            expires_at: now + 150,
             data_schema: schema,
             minimum_data_schema: 1,
             maximum_data_schema: schema,
@@ -891,5 +903,107 @@ fn abrupt_helper_process_exit_recovers_only_acknowledged_commits() {
             .unwrap()
             .ends_with("bootstrap/zabor-native.exe");
         assert_eq!(old, point != "Committed");
+    }
+}
+
+#[test]
+fn pending_host_pin_accepts_mixed_case_executable_and_rejects_case_collision() {
+    for (executable_name, collision) in [
+        ("ZABOR-NATIVE.EXE", true),
+        ("ZABOR-NATIVE.EXE", false),
+        ("ZaBoR-NaTiVe.ExE", false),
+    ] {
+        let fixture = Fixture::new();
+        let root = fixture.root();
+        let baseline = root.current_executable().unwrap();
+        let (mut bundle, archive, bytes) = fixture.package("3.8.0-rust", 2, 1, None);
+        let mut source = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut metadata: serde_json::Value =
+            serde_json::from_reader(source.by_name("native-package.json").unwrap()).unwrap();
+        let files = metadata["files"].as_array_mut().unwrap();
+        let executable = files
+            .iter_mut()
+            .find(|item| item["path"] == "zabor-native.exe")
+            .unwrap();
+        let original_entry = executable.clone();
+        executable["path"] = executable_name.into();
+        if collision {
+            files.push(original_entry);
+        }
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let mut payload = Vec::new();
+        for index in 0..source.len() {
+            let mut entry = source.by_index(index).unwrap();
+            let name = entry.name().unwrap().into_owned();
+            let mut data = Vec::new();
+            entry.read_to_end(&mut data).unwrap();
+            let renamed = if name == "zabor-native.exe" {
+                payload = data.clone();
+                executable_name
+            } else {
+                name.as_str()
+            };
+            if name == "native-package.json" {
+                data = serde_json::to_vec(&metadata).unwrap();
+            }
+            writer
+                .start_file(renamed, SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(&data).unwrap();
+            if collision && name == "zabor-native.exe" {
+                writer
+                    .start_file(&name, SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(&data).unwrap();
+            }
+        }
+        let changed = writer.finish().unwrap().into_inner();
+        std::fs::write(&archive, &changed).unwrap();
+        let mut manifest: NativeUpdateManifest = serde_json::from_slice(&bundle.manifest).unwrap();
+        manifest.package_size = changed.len() as u64;
+        manifest.package_sha256 = digest(&changed);
+        bundle.manifest = serde_json::to_vec(&manifest).unwrap();
+        bundle.signature = sign(
+            &fixture.manifest_key,
+            MANIFEST_SIGNATURE_DOMAIN,
+            &bundle.manifest,
+        );
+        let candidate = root.validate(bundle, 150).unwrap();
+        let original = root.begin(2).unwrap();
+        let context = || StageContext {
+            operation: 2,
+            cancellation: &original,
+            deadline: Instant::now() + Duration::from_secs(30),
+            now: 150,
+            crash: CrashPoint::None,
+        };
+        let staged = root.prepare(context(), candidate, &archive);
+        if collision {
+            assert_eq!(staged.unwrap_err(), "unsafe-native-zip-entry");
+            assert_eq!(root.phase().unwrap(), DurablePhase::Idle);
+            assert_eq!(root.highest_sequence().unwrap(), 1);
+            assert_eq!(root.current_executable().unwrap(), baseline);
+            continue;
+        }
+        staged.unwrap();
+        root.activate(
+            2,
+            &original,
+            context().deadline,
+            150,
+            &SandboxDrain,
+            CrashPoint::None,
+        )
+        .unwrap();
+        assert_eq!(root.phase().unwrap(), DurablePhase::AwaitingHealth);
+        let held = root
+            .pending_host_executable(context())
+            .expect("validated mixed-case executable must retain its held pin");
+        assert_eq!(std::fs::read(&held.path).unwrap(), payload);
+        assert!(std::fs::write(held.path.with_file_name(executable_name), b"CHANGED").is_err());
+        drop(held);
+        root.recover(CrashPoint::None).unwrap();
+        assert_eq!(root.phase().unwrap(), DurablePhase::RolledBack);
+        assert_eq!(root.current_executable().unwrap(), baseline);
     }
 }

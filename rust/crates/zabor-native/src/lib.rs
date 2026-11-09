@@ -64,6 +64,8 @@ pub mod update;
 #[cfg(windows)]
 pub mod update_helper;
 #[cfg(windows)]
+pub mod update_host;
+#[cfg(windows)]
 pub mod update_io;
 #[cfg(feature = "native-media")]
 pub mod video;

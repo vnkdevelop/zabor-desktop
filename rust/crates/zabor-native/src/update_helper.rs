@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -93,6 +93,92 @@ pub fn open_read(path: &Path) -> Result<File> {
     Ok(file)
 }
 
+pub(crate) struct HeldExecutable {
+    pub path: PathBuf,
+    image: File,
+    _namespace: Vec<File>,
+    proofs: Vec<File>,
+}
+
+impl HeldExecutable {
+    fn open(path: &Path) -> Result<Self> {
+        let parent = path.parent().ok_or("host-image-parent-missing")?;
+        let mut namespace = Vec::new();
+        let mut current = PathBuf::new();
+        for component in parent.components() {
+            if matches!(component, Component::ParentDir | Component::CurDir) {
+                return Err("unsafe-path-component".into());
+            }
+            current.push(component);
+            if matches!(component, Component::Prefix(_)) {
+                continue;
+            }
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                options.custom_flags(0x0220_0000).share_mode(3);
+            }
+            let directory = options
+                .open(&current)
+                .map_err(|_| "host-namespace-lease-failed")?;
+            let metadata = directory
+                .metadata()
+                .map_err(|_| "host-namespace-stat-failed")?;
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if metadata.file_attributes() & 0x400 != 0 {
+                    return Err("host-namespace-reparse-rejected".into());
+                }
+            }
+            if !metadata.is_dir() {
+                return Err("host-namespace-not-directory".into());
+            }
+            namespace.push(directory);
+        }
+        Ok(Self {
+            path: path.to_owned(),
+            image: open_read(path)?,
+            _namespace: namespace,
+            proofs: Vec::new(),
+        })
+    }
+
+    fn verify(&mut self, size: u64, expected: &str, exact: bool) -> Result<()> {
+        self.image
+            .seek(SeekFrom::Start(0))
+            .map_err(|_| "held-image-seek-failed")?;
+        let (length, hash) = hash_reader(&mut self.image, size)?;
+        if hash != expected || (exact && length != size) {
+            return Err("held-executable-pin-mismatch".into());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static HOST_VERIFICATION_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_host_verification_hook(hook: impl FnOnce() + 'static) {
+    HOST_VERIFICATION_HOOK.with(|slot| {
+        assert!(slot.borrow().is_none());
+        *slot.borrow_mut() = Some(Box::new(hook));
+    });
+}
+
+#[cfg(test)]
+fn host_verification_hook() {
+    let hook = HOST_VERIFICATION_HOOK.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
 fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let mut file = open_read(path)?;
     if file.metadata().map_err(|_| "file-stat-failed")?.len() > limit as u64 {
@@ -128,6 +214,15 @@ impl Drop for OwnedProcess {
 }
 
 impl NativePlatform {
+    pub(crate) fn host_executable(&self, sandbox: bool) -> Result<HeldExecutable> {
+        if !sandbox && !self.signer_verified {
+            return Err("certified-native-host-required".into());
+        }
+        let mut held = HeldExecutable::open(&self.executable)?;
+        held.verify(16 * 1024 * 1024, &self.sha256, false)?;
+        Ok(held)
+    }
+
     pub fn pinned(executable: &Path, sha256: &str) -> Result<Self> {
         if sha256.len() != 64 || sha256 == "0".repeat(64) {
             return Err("native-helper-pin-missing".into());
@@ -327,6 +422,13 @@ pub struct HealthChallenge {
     pub nonce: Zeroizing<Vec<u8>>,
 }
 
+pub struct HostRootIdentity {
+    pub root_sha256: String,
+    pub current_manifest_sha256: String,
+    pub sandbox: bool,
+    pub health_deadline: Option<u64>,
+}
+
 pub struct StageContext<'a> {
     pub operation: u64,
     pub cancellation: &'a CancellationToken,
@@ -341,6 +443,169 @@ impl UpdateRoot {
             return Err("signed-native-helper-required".into());
         }
         Self::load(path, pins, platform, String::new(), true)
+    }
+
+    pub fn initialize_accepted_baseline(
+        path: &Path,
+        pins: TrustPins,
+        platform: NativePlatform,
+        bundle: SignedBundle,
+        archive: &Path,
+        now: u64,
+        deadline: Instant,
+    ) -> Result<Arc<Self>> {
+        Self::initialize_baseline_before(
+            path,
+            pins,
+            platform,
+            bundle,
+            archive,
+            StageContext {
+                operation: 1,
+                cancellation: &CancellationToken::new(),
+                now,
+                deadline,
+                crash: CrashPoint::None,
+            },
+        )
+    }
+
+    pub(crate) fn initialize_baseline_before(
+        path: &Path,
+        pins: TrustPins,
+        platform: NativePlatform,
+        bundle: SignedBundle,
+        archive: &Path,
+        context: StageContext<'_>,
+    ) -> Result<Arc<Self>> {
+        let StageContext {
+            now,
+            cancellation,
+            deadline,
+            operation,
+            ..
+        } = context;
+        if operation == 0
+            || !platform.signer_verified
+            || cancellation.is_cancelled()
+            || Instant::now() >= deadline
+        {
+            return Err("certified-baseline-helper-and-deadline-required".into());
+        }
+        let release = VerifiedRelease::verify(
+            &bundle.manifest,
+            &bundle.signature,
+            &pins.manifest_key,
+            now,
+            0,
+        )
+        .map_err(str::to_owned)?;
+        Self::acceptance_for(&pins, "", &bundle, &release)?;
+        let path = plain_canonical(path)?;
+        platform.run("root-access", &[path.to_string_lossy().into_owned()])?;
+        if std::fs::read_dir(&path)
+            .map_err(|_| "baseline-root-read-failed")?
+            .next()
+            .is_some()
+        {
+            return Err("baseline-root-not-empty".into());
+        }
+        let receipt = VersionReceipt {
+            key: format!("baseline-{}", release.manifest_sha256()),
+            manifest_sha256: release.manifest_sha256().into(),
+            bundle,
+        };
+        let journal = Journal {
+            format: 1,
+            profile: NATIVE_BETA_PROFILE.into(),
+            scope: String::new(),
+            last_operation: operation,
+            highest_sequence: release.manifest().sequence,
+            phase: DurablePhase::Idle,
+            current: receipt.clone(),
+            pending: None,
+        };
+        let mut identity = vec![0; 32];
+        getrandom::fill(&mut identity).map_err(|_| "baseline-identity-random-failed")?;
+        let lease = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(path.join("update.lock"))
+            .map_err(|_| "baseline-root-must-be-uninitialized")?;
+        lease
+            .try_lock_exclusive()
+            .map_err(|_| "baseline-root-owned")?;
+        let root = Arc::new(Self {
+            path,
+            identity,
+            scope: String::new(),
+            pins,
+            platform,
+            _lease: lease,
+            journal: Mutex::new(journal.clone()),
+            active: AtomicU64::new(operation),
+            current_cancellation: Mutex::new(CancellationToken::new()),
+            cancelled_operation: AtomicU64::new(0),
+            blocked: AtomicBool::new(false),
+        });
+        root.acceptance(&receipt.bundle, &release)?;
+        root.platform
+            .run("root-access", &[root.path.to_string_lossy().into_owned()])?;
+        let existing = std::fs::read_dir(&root.path).map_err(|_| "baseline-root-read-failed")?;
+        for item in existing {
+            if item.map_err(|_| "baseline-root-read-failed")?.file_name() != "update.lock" {
+                return Err("baseline-root-not-empty".into());
+            }
+        }
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(root.path.join("identity"))
+            .map_err(|_| "baseline-identity-write-failed")?;
+        file.write_all(&root.identity)
+            .map_err(|_| "baseline-identity-write-failed")?;
+        file.sync_all()
+            .map_err(|_| "baseline-identity-flush-failed")?;
+        std::fs::create_dir(root.path.join("versions")).map_err(|_| "baseline-versions-failed")?;
+        let stage = tempfile::Builder::new()
+            .prefix("baseline-stage-")
+            .tempdir_in(&root.path)
+            .map_err(|_| "baseline-stage-failed")?;
+        root.extract(
+            &release,
+            archive,
+            stage.path(),
+            operation,
+            cancellation,
+            deadline,
+        )?;
+        root.check(operation, cancellation, deadline)?;
+        std::fs::rename(stage.path(), root.path.join("versions").join(&receipt.key))
+            .map_err(|_| "baseline-version-rename-failed")?;
+        root.selector(&receipt)?;
+        root.check(operation, cancellation, deadline)?;
+        root.persist(&journal)?;
+        root.recover(CrashPoint::None)?;
+        root.active.store(0, Ordering::Release);
+        Ok(root)
+    }
+
+    pub fn host_identity(&self) -> Result<HostRootIdentity> {
+        let state = self.journal.lock().map_err(|_| "journal-poisoned")?;
+        Ok(HostRootIdentity {
+            root_sha256: digest(&Self::entropy(&self.path, &self.identity)),
+            current_manifest_sha256: state.current.manifest_sha256.clone(),
+            sandbox: !self.scope.is_empty(),
+            health_deadline: state
+                .pending
+                .as_ref()
+                .map(|pending| pending.health_deadline),
+        })
+    }
+
+    pub(crate) fn host_platform(&self) -> &NativePlatform {
+        &self.platform
     }
 
     fn load(
@@ -506,17 +771,25 @@ impl UpdateRoot {
     }
 
     fn acceptance(&self, bundle: &SignedBundle, release: &VerifiedRelease) -> Result<()> {
+        Self::acceptance_for(&self.pins, &self.scope, bundle, release)
+    }
+
+    fn acceptance_for(
+        pins: &TrustPins,
+        scope: &str,
+        bundle: &SignedBundle,
+        release: &VerifiedRelease,
+    ) -> Result<()> {
         if bundle.acceptance.is_empty()
             || bundle.acceptance.len() > 32768
             || digest(&bundle.acceptance) != release.manifest().acceptance_sha256
-            || self.pins.publisher_certificate_sha256.len() != 64
-            || self.pins.publisher_certificate_sha256 == "0".repeat(64)
-            || self.pins.publisher_certificate_sha256
-                != release.manifest().publisher_certificate_sha256
+            || pins.publisher_certificate_sha256.len() != 64
+            || pins.publisher_certificate_sha256 == "0".repeat(64)
+            || pins.publisher_certificate_sha256 != release.manifest().publisher_certificate_sha256
         {
             return Err("acceptance-or-publisher-pin-missing".into());
         }
-        let key = VerifyingKey::from_sec1_bytes(&self.pins.acceptance_key)
+        let key = VerifyingKey::from_sec1_bytes(&pins.acceptance_key)
             .map_err(|_| "acceptance-key-missing")?;
         let signature = Signature::from_slice(&bundle.acceptance_signature)
             .map_err(|_| "acceptance-signature-invalid")?;
@@ -536,7 +809,7 @@ impl UpdateRoot {
             || receipt.commit != manifest.commit
             || receipt.inventory_sha256 != manifest.inventory_sha256
             || receipt.data_schema != manifest.data_schema
-            || receipt.publisher_certificate_sha256 != self.pins.publisher_certificate_sha256
+            || receipt.publisher_certificate_sha256 != pins.publisher_certificate_sha256
         {
             return Err("acceptance-release-mismatch".into());
         }
@@ -545,12 +818,12 @@ impl UpdateRoot {
             && receipt.two_device_acceptance
             && receipt.data_compatibility_acceptance
             && receipt.licenses_accepted;
-        if self.scope.is_empty() {
+        if scope.is_empty() {
             if receipt.kind != "native-release" || !receipt.scope_id.is_empty() || !complete {
                 return Err("complete-native-acceptance-required".into());
             }
         } else if receipt.kind != "local-sandbox"
-            || receipt.scope_id != self.scope
+            || receipt.scope_id != scope
             || complete
             || receipt.complete_native_acceptance
             || receipt.windows_10_11_acceptance
@@ -757,7 +1030,38 @@ impl UpdateRoot {
         drain: &dyn DrainVerifier,
         crash: CrashPoint,
     ) -> Result<HealthChallenge> {
+        let started = Instant::now();
+        self.activate_guarded(
+            StageContext {
+                operation,
+                cancellation: cancel,
+                deadline,
+                now,
+                crash,
+            },
+            drain,
+            || {
+                now.checked_add(started.elapsed().as_secs())
+                    .ok_or_else(|| "activation-clock-overflow".into())
+            },
+        )
+    }
+
+    pub(crate) fn activate_guarded(
+        &self,
+        context: StageContext<'_>,
+        drain: &dyn DrainVerifier,
+        gate: impl Fn() -> Result<u64>,
+    ) -> Result<HealthChallenge> {
+        let StageContext {
+            operation,
+            cancellation: cancel,
+            deadline,
+            now,
+            crash,
+        } = context;
         self.check(operation, cancel, deadline)?;
+        gate()?;
         let mut state = self.journal.lock().map_err(|_| "journal-poisoned")?;
         if state.last_operation != operation || state.phase != DurablePhase::Prepared {
             return Err("not-original-prepared-operation".into());
@@ -776,13 +1080,22 @@ impl UpdateRoot {
             !self.scope.is_empty(),
         )?;
         self.verify_tree(&pending.target, state.highest_sequence)?;
-        self.check(operation, cancel, deadline)?;
+        #[cfg(test)]
+        host_verification_hook();
         let mut next = state.clone();
         next.phase = DurablePhase::Switching;
+        self.check(operation, cancel, deadline)?;
+        let checked_now = gate()?;
+        if !target.fresh_at(checked_now) || checked_now >= pending.health_deadline {
+            return Err("activation-expired".into());
+        }
         self.persist(&next)?;
         *state = next;
         hit(crash, CrashPoint::Switching)?;
         self.check(operation, cancel, deadline)?;
+        if gate()? >= pending.health_deadline {
+            return Err("activation-expired".into());
+        }
         self.selector(&pending.target)?;
         hit(crash, CrashPoint::SelectorSwitched)?;
         let mut next = state.clone();
@@ -804,11 +1117,58 @@ impl UpdateRoot {
         now: u64,
         crash: CrashPoint,
     ) -> Result<()> {
-        self.check(
-            acknowledgment.operation,
+        self.healthy_before(
+            acknowledgment,
             cancel,
+            now,
             Instant::now() + Duration::from_secs(30),
-        )?;
+            crash,
+        )
+    }
+
+    pub fn healthy_before(
+        &self,
+        acknowledgment: &HealthChallenge,
+        cancel: &CancellationToken,
+        now: u64,
+        deadline: Instant,
+        crash: CrashPoint,
+    ) -> Result<()> {
+        let started = Instant::now();
+        self.healthy_guarded(
+            acknowledgment,
+            StageContext {
+                operation: acknowledgment.operation,
+                cancellation: cancel,
+                deadline,
+                now,
+                crash,
+            },
+            || {
+                now.checked_add(started.elapsed().as_secs())
+                    .ok_or_else(|| "health-clock-overflow".into())
+            },
+        )
+    }
+
+    pub(crate) fn healthy_guarded(
+        &self,
+        acknowledgment: &HealthChallenge,
+        context: StageContext<'_>,
+        gate: impl Fn() -> Result<u64>,
+    ) -> Result<()> {
+        let StageContext {
+            operation,
+            cancellation: cancel,
+            now,
+            deadline,
+            crash,
+        } = context;
+        if operation != acknowledgment.operation {
+            return Err("health-operation-mismatch".into());
+        }
+        self.check(acknowledgment.operation, cancel, deadline)?;
+        gate()?;
         let mut state = self.journal.lock().map_err(|_| "journal-poisoned")?;
         let pending = state
             .pending
@@ -824,10 +1184,16 @@ impl UpdateRoot {
         }
         self.verify_selector(&pending.target)?;
         self.verify_tree(&pending.target, state.highest_sequence)?;
+        #[cfg(test)]
+        host_verification_hook();
         let mut next = state.clone();
         next.current = pending.target;
         next.pending = None;
         next.phase = DurablePhase::Committed;
+        self.check(acknowledgment.operation, cancel, deadline)?;
+        if gate()? >= pending.health_deadline {
+            return Err("health-acknowledgment-rejected".into());
+        }
         self.persist(&next)?;
         *state = next;
         hit(crash, CrashPoint::Committed)
@@ -911,7 +1277,49 @@ impl UpdateRoot {
             .join("zabor-native.exe"))
     }
 
+    pub(crate) fn pending_host_executable(
+        &self,
+        context: StageContext<'_>,
+    ) -> Result<HeldExecutable> {
+        self.check(context.operation, context.cancellation, context.deadline)?;
+        let state = self.journal.lock().map_err(|_| "journal-poisoned")?;
+        if state.phase != DurablePhase::AwaitingHealth || state.last_operation != context.operation
+        {
+            return Err("no-original-pending-launch".into());
+        }
+        let pending = state
+            .pending
+            .as_ref()
+            .ok_or("pending-installation-missing")?;
+        if context.now >= pending.health_deadline {
+            return Err("pending-launch-expired".into());
+        }
+        let tree = self.path.join("versions").join(&pending.target.key);
+        let mut held = HeldExecutable::open(&tree.join("zabor-native.exe"))?;
+        held.proofs.push(open_read(&tree.join("package.zip"))?);
+        held.proofs
+            .push(open_read(&tree.join("native-package.json"))?);
+        self.verify_selector(&pending.target)?;
+        let package = self.verify_tree_package(&pending.target, state.highest_sequence)?;
+        let image = package
+            .files
+            .iter()
+            .find(|item| item.path.eq_ignore_ascii_case("zabor-native.exe"))
+            .ok_or("pending-executable-pin-missing")?;
+        held.verify(image.size, &image.sha256, true)?;
+        self.check(context.operation, context.cancellation, context.deadline)?;
+        Ok(held)
+    }
+
     fn verify_tree(&self, receipt: &VersionReceipt, sequence: u64) -> Result<()> {
+        self.verify_tree_package(receipt, sequence).map(|_| ())
+    }
+
+    fn verify_tree_package(
+        &self,
+        receipt: &VersionReceipt,
+        sequence: u64,
+    ) -> Result<PackageManifest> {
         let release = self.retained(receipt, sequence)?;
         let tree = self.path.join("versions").join(&receipt.key);
         no_reparse(&tree)?;
@@ -956,8 +1364,17 @@ impl UpdateRoot {
                     self.pins.publisher_certificate_sha256.clone(),
                 ],
             )?;
+            self.platform.run(
+                "verify-pe",
+                &[
+                    tree.join("zabor-native-update-helper.exe")
+                        .to_string_lossy()
+                        .into_owned(),
+                    self.pins.publisher_certificate_sha256.clone(),
+                ],
+            )?;
         }
-        Ok(())
+        Ok(package)
     }
 
     fn hash_archive(&self, release: &VerifiedRelease, path: &Path) -> Result<()> {
@@ -1088,6 +1505,16 @@ impl UpdateRoot {
                     self.pins.publisher_certificate_sha256.clone(),
                 ],
             )?;
+            self.platform.run(
+                "verify-pe",
+                &[
+                    stage
+                        .join("zabor-native-update-helper.exe")
+                        .to_string_lossy()
+                        .into_owned(),
+                    self.pins.publisher_certificate_sha256.clone(),
+                ],
+            )?;
         }
         std::fs::copy(archive, stage.join("package.zip"))
             .map_err(|_| "archive-retention-failed")?;
@@ -1164,12 +1591,14 @@ impl UpdateRoot {
         let mut names = BTreeSet::new();
         for item in &package.files {
             let name = item.path.to_ascii_lowercase();
-            let binary = name == "zabor-native.exe"
-                || package.neural_dsp
-                    && matches!(
-                        name.as_str(),
-                        "onnxruntime.dll" | "onnxruntime_providers_shared.dll"
-                    );
+            let binary = matches!(
+                name.as_str(),
+                "zabor-native.exe" | "zabor-native-update-helper.exe"
+            ) || package.neural_dsp
+                && matches!(
+                    name.as_str(),
+                    "onnxruntime.dll" | "onnxruntime_providers_shared.dll"
+                );
             if !safe_path(&item.path)
                 || !names.insert(name.clone())
                 || item.size > MAX_PACKAGE_BYTES
@@ -1193,6 +1622,7 @@ impl UpdateRoot {
             }
         }
         if !names.contains("zabor-native.exe")
+            || self.scope.is_empty() && !names.contains("zabor-native-update-helper.exe")
             || !names.contains("licenses/inventory.json")
             || package.neural_dsp
                 && (!names.contains("onnxruntime.dll")
@@ -1229,6 +1659,10 @@ struct PackageFile {
 
 fn hash_file(path: &Path, limit: u64) -> Result<(u64, String)> {
     let mut file = open_read(path)?;
+    hash_reader(&mut file, limit)
+}
+
+fn hash_reader(file: &mut File, limit: u64) -> Result<(u64, String)> {
     let mut hash = Sha256::new();
     let mut length = 0_u64;
     let mut buffer = [0; 65536];

@@ -1,4 +1,7 @@
 import argparse
+from contextlib import contextmanager
+import ctypes
+from ctypes import wintypes
 import hashlib
 import json
 import os
@@ -7,6 +10,7 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import tomllib
 import zipfile
@@ -20,6 +24,14 @@ MAX_PACKAGE = 1024 * 1024 * 1024
 def digest(path):
     with open(path, "rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def model_digest(name):
+    expected = POLICY["modelFiles"][name]
+    actual = digest(ROOT / "rust/crates/zabor-native/assets/models" / name)
+    if actual != expected:
+        raise ValueError("Pinned native model hash mismatch: " + name)
+    return actual
 
 
 def load_json(raw):
@@ -132,9 +144,12 @@ def inspect_pe(data):
     return sorted(imports)
 
 
-def check_composition(entries, neural):
+def check_composition(entries, neural, require_helper=False):
     names = {name.lower() for name in entries}
     expected = {"zabor-native.exe"}
+    helper = POLICY["updateHelper"]
+    if require_helper or helper in names:
+        expected.add(helper)
     if neural:
         expected.update(["onnxruntime.dll", "onnxruntime_providers_shared.dll"])
     if any(name not in expected and name != "build-provenance.json" and not name.startswith("licenses/")
@@ -284,13 +299,13 @@ def collect_licenses(destination, data, cache, neural, supplements_path=None):
                                     for name in ["LICENSE", "ThirdPartyNotices.txt"]]})
         deep_filter = next(item for item in inventory if item["name"] == "deep_filter")
         inventory.append({"name": "deepfilternet3-model", "version": "d375b2d8309e0935d165700c91da9de862a99c31",
-                          "source": "existing repository model; THIRD-PARTY-NOTICES.md upstream provenance",
-                          "assetSha256": digest(ROOT / "src/renderer/public/deepfilternet3/models/DeepFilterNet3_onnx.tar.gz"),
-                          "licenseExpression": "MIT OR Apache-2.0", "texts": deep_filter["texts"]})
+                           "source": "existing repository model; THIRD-PARTY-NOTICES.md upstream provenance",
+                           "assetSha256": model_digest("DeepFilterNet3_onnx.tar.gz"),
+                           "licenseExpression": "MIT OR Apache-2.0", "texts": deep_filter["texts"]})
         silero_extra = supplements.get(("silero-vad-model", "existing-local-model"), [])
         inventory.append({"name": "silero-vad-model", "version": "existing-local-model",
-                          "source": "https://github.com/snakers4/silero-vad; existing repository model",
-                          "assetSha256": digest(ROOT / "src/renderer/public/silero_vad.onnx"),
+                           "source": "https://github.com/snakers4/silero-vad; existing repository model",
+                           "assetSha256": model_digest("silero_vad.onnx"),
                           "licenseExpression": "MIT", "supplementProvenance": [url for _, url in silero_extra],
                           "texts": [copy_text(path, "silero-vad-model/" + str(index) + "-" + path.name)
                                     for index, (path, _) in enumerate(silero_extra)]})
@@ -331,6 +346,8 @@ def check_cache(cache, neural):
         if digest(cache / "libclang-win-x64-18.1.1" / name) != expected:
             raise ValueError("Pinned libclang cache hash mismatch")
     if neural:
+        for name in POLICY["modelFiles"]:
+            model_digest(name)
         for name, expected in POLICY["onnxFiles"].items():
             if digest(cache / "onnxruntime-win-x64-1.31.1" / name) != expected:
                 raise ValueError("Pinned ONNX Runtime cache hash mismatch")
@@ -345,7 +362,7 @@ def make_archive(stage, output, neural, fixture=False):
     if (stage / "native-package.json").exists():
         raise ValueError("Stage already contains a package manifest")
     entries = {name.lower(): path.read_bytes() for name, path in files_in(stage)}
-    imports = check_composition(entries, neural)
+    imports = check_composition(entries, neural, require_helper=not fixture)
     if sum(len(value) for value in entries.values()) > MAX_PACKAGE:
         raise ValueError("Package exceeds local size limit")
     commit = run(["git", "rev-parse", "HEAD"]).strip()
@@ -408,7 +425,7 @@ def verify_archive(path):
             if type(item["size"]) is not int or len(data) != item["size"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
                 raise ValueError("Package file hash/length mismatch")
             entries[item["path"].lower()] = data
-        imports = check_composition(entries, manifest["neuralDsp"])
+        imports = check_composition(entries, manifest["neuralDsp"], require_helper=not manifest["localFixture"])
         inventory = load_json(entries["licenses/inventory.json"])
         if (inventory.get("inventoryVersion") != 1 or inventory.get("target") != POLICY["target"]
                 or inventory.get("complete") is not True or not inventory.get("packages")):
@@ -466,6 +483,83 @@ def compile_binary(args):
             "installationAllowed": False}
 
 
+def copy_certified_update_helper(source, stage, certificate_sha256):
+    if (not re.fullmatch(r"[0-9a-f]{64}", certificate_sha256 or "")
+            or certificate_sha256 == "0" * 64):
+        raise ValueError("Explicit trusted update helper certificate pin required")
+    source = source.resolve(strict=True)
+    if source.is_symlink() or source.is_junction() or not source.is_file():
+        raise ValueError("Update helper must be a regular native image")
+    target = stage / POLICY["updateHelper"]
+    if target.exists():
+        raise ValueError("Refusing to overwrite staged update helper")
+    shutil.copyfile(source, target)
+    with held_update_helper(target) as data:
+        imports = inspect_pe(data)
+        if any(name not in POLICY["systemDlls"] and not name.startswith(("api-ms-win-", "ext-ms-win-"))
+               for name in imports):
+            raise ValueError("Update helper requires a static CRT and system-only imports")
+        expected = hashlib.sha256(data).hexdigest()
+        receipt = load_json(run([sys.executable, "-B", Path(__file__).with_name("authenticode.py"),
+                                target, "--certificate-sha256", certificate_sha256]))
+        if receipt.get("authenticode") != "trusted" or receipt.get("certificateSha256") != certificate_sha256:
+            raise ValueError("Certified update helper receipt mismatch")
+        if digest(target) != expected:
+            raise ValueError("Certified update helper bytes changed")
+        return {"path": POLICY["updateHelper"], "sha256": expected, "certificateSha256": certificate_sha256}
+
+
+@contextmanager
+def held_update_helper(path):
+    import msvcrt
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                  wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.GetFileInformationByHandleEx.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handles = []
+
+    def acquire(name, directory):
+        handle = kernel.CreateFileW(str(name), 0x80 if directory else 0x80000000,
+                                    3 if directory else 1, None, 3,
+                                    0x02200000 if directory else 0x00200000, None)
+        if handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        handles.append(handle)
+        attributes = (wintypes.DWORD * 2)()
+        if not kernel.GetFileInformationByHandleEx(handle, 9, attributes, ctypes.sizeof(attributes)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if attributes[0] & 0x400 or bool(attributes[0] & 0x10) != directory:
+            raise ValueError("Update helper namespace must be regular and non-reparse")
+        return handle
+
+    try:
+        path = path.absolute()
+        for parent in reversed(path.parents):
+            acquire(parent, True)
+        handle = acquire(path, False)
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        handles.pop()
+        with os.fdopen(descriptor, "rb") as stream:
+            yield stream.read()
+    finally:
+        for handle in reversed(handles):
+            kernel.CloseHandle(handle)
+
+
+def archive_with_certified_update_helper(stage, output, neural, helper):
+    if helper.get("path") != POLICY["updateHelper"]:
+        raise ValueError("Certified update helper path mismatch")
+    with held_update_helper(stage / POLICY["updateHelper"]) as data:
+        if hashlib.sha256(data).hexdigest() != helper.get("sha256"):
+            raise ValueError("Certified update helper bytes changed before composition")
+        return make_archive(stage, output, neural)
+
+
 def build(args):
     if args.output.exists() or args.output.suffix.lower() != ".zip":
         raise ValueError("Output must be a new local .zip package")
@@ -482,16 +576,17 @@ def build(args):
             raise ValueError("Missing upstream licence texts: " + ", ".join(inventory["missingUpstreamTexts"]))
         result = compile_binary(args)
         shutil.copyfile(result["binary"], stage / "zabor-native.exe")
+        helper = copy_certified_update_helper(args.update_helper, stage, args.publisher_certificate_sha256)
         if neural:
             for name in ["onnxruntime.dll", "onnxruntime_providers_shared.dll"]:
                 shutil.copyfile(cache / "onnxruntime-win-x64-1.31.1/native" / name, stage / name)
         write_json(stage / "build-provenance.json", {"cargoLockSha256": digest(ROOT / "rust/Cargo.lock"),
                    "policySha256": digest(Path(__file__).with_name("policy.json")),
                    "profile": "release" if args.release else "debug", "target": POLICY["target"],
-                   "staticCrt": True, "neuralDsp": neural, "licenseComponents": count,
+                    "staticCrt": True, "neuralDsp": neural, "licenseComponents": count, "updateHelper": helper,
                    "sourceStatus": run(["git", "status", "--porcelain", "--untracked-files=no"]),
                    "nativeClientReady": False, "acceptanceApproval": None})
-        return make_archive(stage, args.output.resolve(), neural)
+        return archive_with_certified_update_helper(stage, args.output.resolve(), neural, helper)
 
 
 def main():
@@ -505,6 +600,8 @@ def main():
     command.add_argument("--neural-disabled", action="store_true")
     command.add_argument("--clippy", action="store_true")
     command.add_argument("--license-supplements", type=Path)
+    command.add_argument("--update-helper", type=Path, required=True)
+    command.add_argument("--publisher-certificate-sha256", required=True)
     command = commands.add_parser("build-binary")
     command.add_argument("--cache-root", type=Path, required=True)
     command.add_argument("--target-dir", type=Path, required=True)

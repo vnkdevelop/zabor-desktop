@@ -84,6 +84,106 @@ class PackageTests(unittest.TestCase):
             PACKAGE.make_archive(self.stage, path, False, True)
         self.assertEqual(PACKAGE.digest(path), before)
 
+    def test_native_helper_is_exactly_allowlisted_and_hashed(self):
+        helper = self.stage / PACKAGE.POLICY["updateHelper"]
+        helper.write_bytes(fixture_pe("kernel32.dll"))
+        path = self.archive()
+        result = PACKAGE.verify_archive(path)
+        self.assertEqual(result["peImports"][helper.name], ["kernel32.dll"])
+        self.rewrite(path, lambda entries: entries.update({helper.name: b"tampered"}))
+        with self.assertRaisesRegex(ValueError, "hash/length"):
+            PACKAGE.verify_archive(path)
+
+    def test_non_fixture_requires_original_native_helper(self):
+        with self.assertRaisesRegex(ValueError, "missing native binaries"):
+            PACKAGE.make_archive(self.stage, self.root / "not-live.zip", False, False)
+
+    def test_unsigned_helper_or_missing_pin_cannot_enter_certified_route(self):
+        source = self.root / "unsigned-helper.exe"
+        source.write_bytes(fixture_pe("kernel32.dll"))
+        with self.assertRaisesRegex(ValueError, "trusted update helper certificate"):
+            PACKAGE.copy_certified_update_helper(source, self.stage, "")
+        with self.assertRaises(RuntimeError):
+            PACKAGE.copy_certified_update_helper(source, self.stage, "1" * 64)
+
+    def test_managed_or_dynamic_crt_helper_is_rejected(self):
+        source = self.root / "invalid-helper.exe"
+        for data, reason in [(fixture_pe(managed=True), "CLR"),
+                             (fixture_pe("vcruntime140.dll"), "static CRT")]:
+            source.write_bytes(data)
+            (self.stage / PACKAGE.POLICY["updateHelper"]).unlink(missing_ok=True)
+            with self.assertRaisesRegex(ValueError, reason):
+                PACKAGE.copy_certified_update_helper(source, self.stage, "1" * 64)
+
+    def test_followup_source_flip_cannot_certify_staged_non_system_imports(self):
+        source = self.root / "flipped-helper.exe"
+        source.write_bytes(fixture_pe("kernel32.dll"))
+        copy = PACKAGE.shutil.copyfile
+
+        def flip_before_copy(original, target):
+            original.write_bytes(fixture_pe("foreign-helper.dll"))
+            return copy(original, target)
+
+        with patch.object(PACKAGE.shutil, "copyfile", side_effect=flip_before_copy), patch.object(PACKAGE, "run") as verify:
+            with self.assertRaisesRegex(ValueError, "static CRT and system-only"):
+                PACKAGE.copy_certified_update_helper(source, self.stage, "1" * 64)
+            verify.assert_not_called()
+
+    def test_followup_staged_bytes_and_namespace_are_held_during_certificate_check(self):
+        source = self.root / "held-helper.exe"
+        source.write_bytes(fixture_pe("kernel32.dll"))
+        target = self.stage / PACKAGE.POLICY["updateHelper"]
+
+        def verify(parts):
+            self.assertEqual(parts[3], target)
+            with self.assertRaises(OSError):
+                target.write_bytes(fixture_pe("foreign-helper.dll"))
+            with self.assertRaises(OSError):
+                target.rename(self.stage / "replacement.exe")
+            with self.assertRaises(OSError):
+                self.stage.rename(self.root / "replacement-stage")
+            return json.dumps({"authenticode": "trusted", "certificateSha256": "1" * 64})
+
+        with patch.object(PACKAGE, "run", side_effect=verify):
+            receipt = PACKAGE.copy_certified_update_helper(source, self.stage, "1" * 64)
+        self.assertEqual(receipt["sha256"], PACKAGE.digest(target))
+        result = PACKAGE.verify_archive(self.archive())
+        self.assertFalse(result["installationAllowed"])
+        self.assertEqual(result["peImports"][target.name], ["kernel32.dll"])
+
+    def test_followup_changed_certified_helper_cannot_enter_composition(self):
+        source = self.root / "composition-helper.exe"
+        source.write_bytes(fixture_pe("kernel32.dll"))
+        with patch.object(PACKAGE, "run", return_value=json.dumps({"authenticode": "trusted", "certificateSha256": "1" * 64})):
+            receipt = PACKAGE.copy_certified_update_helper(source, self.stage, "1" * 64)
+        (self.stage / PACKAGE.POLICY["updateHelper"]).write_bytes(fixture_pe("foreign-helper.dll"))
+        with patch.object(PACKAGE, "make_archive") as compose:
+            with self.assertRaisesRegex(ValueError, "bytes changed before composition"):
+                PACKAGE.archive_with_certified_update_helper(self.stage, self.root / "not-live.zip", False, receipt)
+            compose.assert_not_called()
+
+    def test_followup_composition_keeps_certified_helper_bytes_held(self):
+        source = self.root / "composition-held-helper.exe"
+        source.write_bytes(fixture_pe("kernel32.dll"))
+        target = self.stage / PACKAGE.POLICY["updateHelper"]
+        with patch.object(PACKAGE, "run", return_value=json.dumps({"authenticode": "trusted", "certificateSha256": "1" * 64})):
+            receipt = PACKAGE.copy_certified_update_helper(source, self.stage, "1" * 64)
+        archive = PACKAGE.make_archive
+
+        def compose(stage, output, neural):
+            with self.assertRaises(OSError):
+                target.write_bytes(fixture_pe("foreign-helper.dll"))
+            return archive(stage, output, neural, fixture=True)
+
+        path = self.root / "held-composition.zip"
+        with patch.object(PACKAGE, "make_archive", side_effect=compose):
+            result = PACKAGE.archive_with_certified_update_helper(self.stage, path, False, receipt)
+        self.assertFalse(result["installationAllowed"])
+        with zipfile.ZipFile(path) as payload:
+            metadata = json.loads(payload.read("native-package.json"))
+        entry = next(item for item in metadata["files"] if item["path"] == target.name)
+        self.assertEqual(entry["sha256"], receipt["sha256"])
+
     def test_tampered_binary_rejected(self):
         path = self.archive()
         self.rewrite(path, lambda entries: entries.update({"zabor-native.exe": b"tampered"}))
@@ -223,6 +323,58 @@ class PackageTests(unittest.TestCase):
         inventory = json.loads((output / "inventory.json").read_text())
         self.assertNotIn("missing-upstream-notice", [item["name"] for item in inventory["packages"]])
         self.assertTrue(inventory["complete"])
+
+    def test_model_policy_matches_native_owned_resource_bytes(self):
+        resources = json.loads((PACKAGE.ROOT / "rust/crates/zabor-native/assets/resources.json").read_text())
+        models = {Path(item["path"]).name: item["sha256"] for item in resources["resources"]
+                  if item["path"].startswith("models/")}
+        self.assertEqual(PACKAGE.POLICY["modelFiles"], models)
+        for name, expected in models.items():
+            self.assertEqual(PACKAGE.model_digest(name), expected)
+
+    def test_native_model_hash_rejects_corruption_missing_bytes_and_renderer_fallback(self):
+        name = "silero_vad.onnx"
+        native = self.root / "rust/crates/zabor-native/assets/models" / name
+        native.parent.mkdir(parents=True)
+        original = PACKAGE.ROOT / "rust/crates/zabor-native/assets/models" / name
+        native.write_bytes(original.read_bytes())
+        reference = self.root / "src/renderer/public" / name
+        reference.parent.mkdir(parents=True)
+        reference.write_bytes(native.read_bytes())
+        with patch.object(PACKAGE, "ROOT", self.root):
+            self.assertEqual(PACKAGE.model_digest(name), PACKAGE.POLICY["modelFiles"][name])
+            native.write_bytes(b"CORRUPT LOCAL MODEL FIXTURE")
+            with self.assertRaisesRegex(ValueError, "Pinned native model hash mismatch"):
+                PACKAGE.model_digest(name)
+            native.unlink()
+            with self.assertRaises(FileNotFoundError):
+                PACKAGE.model_digest(name)
+
+    def test_neural_license_inventory_uses_pinned_native_models_without_granting_approval(self):
+        cache, sysroot, data = self.license_fixture()
+        folder = self.root / "deep_filter"
+        folder.mkdir()
+        (folder / "Cargo.toml").write_text("LOCAL MANIFEST FIXTURE ONLY", encoding="utf-8")
+        (folder / "LICENSE").write_text("LOCAL LICENSE FIXTURE ONLY", encoding="utf-8")
+        data["packages"].append({"id": "deep_filter", "name": "deep_filter", "version": "0.1.0",
+                                 "source": None, "license": "MIT", "manifest_path": str(folder / "Cargo.toml")})
+        data["resolve"]["nodes"][0]["deps"].append({"pkg": "deep_filter", "dep_kinds": [{"kind": None}]})
+        data["resolve"]["nodes"].append({"id": "deep_filter", "deps": []})
+        for name in ["LICENSE", "ThirdPartyNotices.txt"]:
+            path = cache / "onnxruntime-win-x64-1.31.1/licenses" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("LOCAL ONNX LICENSE FIXTURE ONLY", encoding="utf-8")
+        output = self.root / "inventory"
+        with patch.object(PACKAGE, "run", side_effect=[str(sysroot), "LOCAL TOOLCHAIN FIXTURE"]):
+            PACKAGE.collect_licenses(output, data, cache, True)
+        inventory = json.loads((output / "inventory.json").read_text())
+        entries = {item["name"]: item for item in inventory["packages"]}
+        self.assertEqual(entries["deepfilternet3-model"]["assetSha256"],
+                         PACKAGE.POLICY["modelFiles"]["DeepFilterNet3_onnx.tar.gz"])
+        self.assertEqual(entries["silero-vad-model"]["assetSha256"], PACKAGE.POLICY["modelFiles"]["silero_vad.onnx"])
+        self.assertFalse(inventory["complete"])
+        self.assertFalse(inventory["legalApproval"])
+        self.assertFalse(inventory["nativeClientReady"])
 
 
 if __name__ == "__main__":
