@@ -2,6 +2,194 @@
 
 Редакция / updated: 2026-11-09.
 
+## Checked chat-IO checkpoint — current boundary
+
+Source saved as **`172c4a8b47e1b0e52e8f7716da18381f857506e5`**, parent `046325d`:
+exactly `src/shell.rs`, `src/shell/session_io.rs`, new `src/shell/chat_io.rs` under
+`rust/crates/zabor-native/`, and `docs/migration/native-chat-io.md`. Original
+corrected `sh_1bf1d715d001JinznKIyYHwN0n` completed: **thirty-one passing affected
+tests**, fmt/diff, strict fixture all-target/normal lib-and-bin Clippy, normal
+native-media closure/build and Graphify. Original P2 review is resolved; no
+remaining actionable findings in the scoped correction. Exported graph integrity
+has zero missing/dangling/self-loop/duplicate/collapsed edges; raw producer loss
+and semantic documentation refresh remain unmeasured.
+
+All **184** source/pin hashes and exact saved Git blobs survived source save.
+Normal binary SHA-256 is
+`0f2978c31012cb486e97cba297b1ba943463f7b03b384de454a0f03dd4ab6646`.
+Graph: **7,948 nodes / 20,440 edges / 312 communities**, ten zero-node warnings,
+HTML5000 skipping retained. Actual original command/log hashes, P2 red failures,
+eighteen-pass predecessor reconciliation, source/binary/graph boundary and four-path
+save proof remain in `migration-artifacts/native-data/chat-io-integration-2026-11-09/`.
+Thirty-one final tests are not augmented by eighteen predecessor passes or three
+red failures as distinct final coverage. All original primary runners/fixtures are
+removed after their commands; pinned caches retained. No primary check is pending.
+
+This closes original revocation/return/storage-admission observation, not active
+FileJobs teardown/publication or whole-client readiness. Next primary source stage
+binds the checked original-worker FileJobs publication/drains and integrates checked
+child contextual changes, never a whole shell/root lock replacement. Actual import,
+main startup/update drain/health/baseline, full app/RC/media and trust/legal/physical/
+two-device/long-session acceptance remain false. No release/installation/legacy
+deletion/push/merge/shutdown. Save coordination, verify clean source boundary, then
+perform real manual compact; do not repeat the unchanged thirty-one-test group.
+
+### Current independent owners and pending gates
+
+- App: same `native-app-completion` owner; original review predecessors completed,
+  corrected green `sh_1bf1ee6c1001DBBY9hn0Kpd3aP` is pending with twenty-three
+  paths frozen. No competing RC hunks or primary common hooks. Production HiddenStore
+  remains fail-closed; member actions beyond list/adapter full readiness unaccepted.
+- Media: original correction green `sh_1befe072e001R7QYGYXMNg7eZ8` remains pending;
+  preserve its original worktree/joins/target, not timeout/abort readiness.
+- File publication: `native-file-publication` owner
+  `ses_e40fd6357ffe3EN42Zj0YoFejm`; original
+  `sh_1bf07d27d001AZZiL9iEw2oopW` remains pending, frozen/uncommitted. Graph checks
+  completed; no checked callback/drain delivery yet.
+- RC: recovered `4e7dd64/6d7b4cf/3e9cb2f/080821f` source/receipts preserved in clean
+  `native-rc-integration`; same owner implements the five delegated RC-only shell/
+  app/root/voice/video hook areas in `native-rc-completion` from `046325d`. Keep sole
+  existing SharedAudio/RemoteInput ownership; no physical acceptance or checked new
+  hook delivery yet. App/data/import/update areas remain excluded.
+- Launcher: `173232b` follow-up received; re-review resolved five original issues
+  and the old `%*` sink but found three replacement-transport findings (CMD vs CRT
+  quotes, caller delayed-expansion mode, ordinary /S /C outer quotes). Same owner
+  corrects those; no primary integration. Child cannot undo its caller's already
+  queued CMD commands: safe argv-as-data admission must be explicit, no parent kill
+  or false raw-CRT shell-safety claim. Original timeout remains failed/incomplete;
+  completed new graph/proofs are preserved, not rewritten original exit evidence.
+- References: checked follow-up `b674b9b1e11fe5113318574f5f5536f9f28a190b` on
+  `2f4c19a` fixes both P2s; fifty-three affected passes (36 JS/17 Rust), thirty-two
+  source hashes, nine unchanged original proof/pin files, nine read-only SDK artifacts
+  and all original job/temp cleanup are delivered. Original reviewer
+  `ses_e40f6ce5effe3t3FaxkhAXnCS1` now checks that scoped correction. No primary
+  integration or transitive-package/Tailwind/capture/physical acceptance yet.
+
+## Earlier post-compact work and receipts — superseded by the boundary above
+
+Confirmed clean HEAD `046325d73acb85ba28e02d7f7bd284b609a7ef44` after the real
+compact. The unchanged update-host 33-test group was not repeated. Primary now
+owns exactly three uncommitted data-hook paths: `src/shell.rs`,
+`src/shell/session_io.rs` and new `src/shell/chat_io.rs` under
+`rust/crates/zabor-native/`. Original blocking chat/transport revocation work is
+registered before acquisition; SQLite/native close runs outside acceptance locks.
+Cancelled waiters/drains retain the original joins; return publication uses the
+original worker ticket and releases rejected owners outside acceptance locks.
+SessionIo observes these original jobs and rechecks profile jobs after that wait.
+No app-owned UI/store/renderer/main_session or Cargo/package/pin bytes were changed.
+
+Original primary `sh_1bf0dd171001V5pcD4t3DlotCB` completed with runner exit 1. Its
+frozen hashes, original logs and independent partial-result reconciliation are in
+`migration-artifacts/native-data/chat-io-integration-2026-11-09/checked-v1/`.
+Actual **eighteen passes**: eight chat-IO and ten SessionIo. Runner expected eleven
+SessionIo and stopped after that successful command; its collected test-name total
+eight is reconciled against all eighteen named log passes without editing history.
+Fmt/diff/fixture all-target Clippy passed. SessionWork/four actual-worker tests,
+normal Clippy/closure/build and Graphify were not executed. Frozen predecessor
+sources/hashes and original runner/temp removal are verified; pinned caches remain.
+Read-only review `ses_e40f1df40ffe07Z23lrSGbxJ1Y` found a blocking P2: pending old
+revocation can mutate same-file replacement-download metadata after Logout cancels
+the waiter. Guarded returned-engine publication does not protect that retained
+SQLite write. After the finished original check, establish the focused predecessor
+regression and observe cleanup before replacement-store/engine admission. Preserve
+original joins/intent and Leave responsiveness; no metadata-CAS bypass. The stage
+is not accepted; do not integrate child code or commit until checked corrections.
+
+Focused original red `sh_1bf1838f6001tL6UVQ0myKe1jw` completed: all three admission
+regressions failed as expected with exit 101, frozen-source hashes unchanged and
+owned temporary cleanup observed. Red source/receipt directory:
+`chat-io-integration-2026-11-09/red-admission-v1/`. The minimal correction is now
+applied: before the worker store callback, await the original retained cleanup.
+Original corrected group `sh_1bf1d715d001JinznKIyYHwN0n` is pending in `checked-v2/`
+with three source paths frozen. Expected thirty-one tests (eleven chat-IO, ten
+SessionIo, six SessionWork, four actual worker), fmt/diff, fixture/normal Clippy,
+normal closure/build/Graphify are not passed results. Read-only correction review
+`ses_e40f1df40ffe07Z23lrSGbxJ1Y` completed: P2 resolved, no remaining actionable
+findings; static only, not passing-test/full-client evidence. Preserve old partial/red receipts; do not poll,
+duplicate, change frozen source or integrate child code before the original outcome.
+
+Fresh deliveries/owners are kept separate from whole-client acceptance:
+
+- RC original receipts are reconciled, not rerun. Source follow-up `3e9cb2f`,
+  baseline `6d7b4cf`, final docs `080821f`; all seventeen original source/pin hashes
+  match. Original `sh_1bcfe3947001Yu38Ee1wnubJFH` and
+  `sh_1bee925ab0010KNtnw1q498Gob` completed. Sixty combined unique proofs, not
+  ninety-five fresh tests. Primary source/canonical request/frame adapter integration
+  is not yet applied; physical HWND/IME/UIPI/two-device/long-session gates remain.
+  The same RC owner `ses_e411cba39ffeFDb49Am5LpkzL4` now implements the five missing
+  RC hook areas in fresh `native-rc-completion`, based on `046325d`, preserving the
+  clean original `native-rc-integration` and its receipts. Import prerequisites:
+  exact `4e7dd64 -> 6d7b4cf -> 3e9cb2f -> 080821f` chain from common `fd8783f`.
+  Delegated sole scope is RC request/frame/focus/activity/teardown shell hunks,
+  app.slint RemoteViewer callbacks, root pill export, original voice remote-control
+  request/host-fence handoff and video subscription provenance, plus RC-only helpers/
+  tests/handoff. No app-owned member/avatar/store/UI or primary data/import/update
+  hooks; no second input/capture/runtime/cleanup owner. Original candidate primitive
+  receipts are inherited, not repeated full-suite evidence. Primary integration waits
+  for checked contextual delivery; current primary green source remains frozen.
+- Media consumed the original red result: five predecessor regressions failed as
+  expected. Retirement checkpoint `bfd425c` exists; the correction is frozen and
+  uncommitted pending original green `sh_1befe072e001R7QYGYXMNg7eZ8`. Old red
+  `sh_1beeca99d001fZrez83Ab7ZMsG` is no longer pending. Do not duplicate green work.
+- App checked stage delivered `ccdc698`/`5c7c8e2`/`9b61f48`, retaining
+  `cf3dec9`/`ebd7064`/`19c1dcc`/`3968c29`. Original
+  `sh_1bef64751001QEA3610X9qcZIW` passed twenty-five affected tests with twenty
+  frozen hashes; original Graphify `sh_1befba2ed001FqIAEcBSSjldOU` completed.
+  Read-only review `ses_e40f6cb6affeVVOL2El9jYp1fS` completed with P1 stale-bootstrap
+  last-seen re-exposure after server redaction, P2 missing outgoing-request profile
+  status and P2 initial achievements-modal focus. Corrections are queued with the
+  same owner after its original AppUi/AvatarUi checks; do not edit frozen WIP or
+  repeat those jobs. Primary delivery integration is blocked. Integrate only
+  app-owned contextual shell/Slint/lock hunks, preserving primary common hooks and
+  helper packages. Member actual-worker coverage remains list-only; Invite/Kick/
+  RemoveFriend/member-origin ProfileAddFriend/AvatarUi-first-AppUi adapter and
+  production HiddenStore Windows crash-durability remain incomplete/fail-closed.
+  That same app owner has now admitted two bounded original AppUi/AvatarUi binding
+  checks for the next stage; its later working source is frozen, not accepted.
+  Original IDs were not included in that notice. The member-stage review is pinned
+  to committed `9b61f48`/predecessors through Git, not those moving working bytes.
+  The original AppUi/AvatarUi checks have since completed and reproduced both
+  transition defects, recorded in `sol-adapters-v1/`. Four review regression
+  predecessors now run under original `sh_1bf1733d8001g9QCyMr9Jzh7zB`; twenty-three
+  source paths are frozen, corrections not yet applied, worker WIP not certified.
+- Immutable references delivered `2f4c19a`, twenty-seven JS plus twelve narrow Rust
+  tests, twenty-three scoped paths and completed original jobs. Read-only review
+  `ses_e40f6ce5effe3t3FaxkhAXnCS1` completed with two P2 findings: drive-rooted
+  freeze destination admission before writes, and repeated per-translation
+  Node/Git/Python admission (recorded Rust test times fifty to 114 seconds).
+  Original owner is implementing the surgical follow-up; primary integration is
+  blocked until checked corrections. Each test must load one explicitly admitted
+  catalog snapshot, not use a global trust cache that ignores a changed root.
+  Frozen references still do not close immutable transitive-package/capture gates.
+- Launcher `02f31b3` is **not accepted**: static review
+  `ses_e40febbe6ffeeaXyfkJeSpulfB` found six defects, including P1 CMD argument
+  injection, running-tool overwrite, empty inherited Rust flag override, omitted
+  synthetic test features, PR head/base routing and CMD argument-length handling.
+  Original owner `ses_e410fd532ffen6wShAUWclGv49` retains the frozen source.
+  Its foreground Graphify timed out at sixty seconds without a PID/job receipt;
+  success/freshness and descendant exit are unconfirmed. One bounded read-only
+  original-resource recovery audit is permitted, not polling/retry/kill. Correction
+  admission waits for the actual original resource boundary; no primary integration.
+  Follow-up `173232b394589a2aad64ec98776ddcc2cec15934` is now delivered on `02f31b3`:
+  seventeen predecessor failures across all six findings, thirty-one affected green
+  cases, twenty-eight recorded original process exits, eighteen hash records and
+  completed new post-change graph with seventeen frozen files/exit 0. The single
+  authorized original-resource audit found the old graph inactive; old timeout
+  remains failed/incomplete with no invented exit. Clean own tree, no pending jobs,
+  owned temporary outputs removed. Read-only security follow-up by the original
+  reviewer is pending. Explicit cmd.exe /c transport only; interactive/CALL/batch
+  chains fail closed. No real Cargo/client/packaging/physical/trust acceptance.
+- New isolated `native-file-publication` owner `ses_e40fd6357ffe3EN42Zj0YoFejm`
+  owns only FileJobs' original-worker acceptance callback API/tests and handoff,
+  based on `046325d`. Original affected check `sh_1bf07d27d001AZZiL9iEw2oopW`
+  is pending; source uncommitted/frozen. Graphify/diagnostics completed. Preserve
+  its owned `native-file-publication-checks-61yvd754` approved-temp workspace until
+  original command completion. Primary constructor/active FileJobs drains remain
+  unapplied; callbacks must retain the original intent, never a fresh completion ticket.
+
+No primary source save for the new chat-IO stage, child integration, release,
+profile installation, legacy deletion or shutdown is authorized by these admissions.
+
 ## Проверенный update этап / checked update stage
 
 Recovery checkpoint `c8a622f727a60a269752013d1e222b9864c50d49` is saved. The checked

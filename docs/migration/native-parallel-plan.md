@@ -2,7 +2,87 @@
 
 Updated: 2026-11-09. Coordination plan, not complete-native acceptance.
 
-## Restored continuation — current ownership
+## Current checked primary and independent owners
+
+Source **`172c4a8b47e1b0e52e8f7716da18381f857506e5`** checked/saved on `046325d`:
+four scoped paths, original thirty-one passing affected tests/fmt/diff/strict
+fixture-normal Clippy/normal closure-build/Graphify, P2 review resolved. All 184
+hashes and source Git blobs preserved; graph 7,948/20,440/312 with exported integrity
+zero and ten zero-node/HTML5000/semantic/raw-producer caveats. Original primary
+commands/runners/fixtures completed/removed; cached pins retained, no primary check
+pending. Historical eighteen-pass/count-mismatch and P2 red receipts are separate.
+
+Current child gates: app green `sh_1bf1ee6c1001DBBY9hn0Kpd3aP`; media green
+`sh_1befe072e001R7QYGYXMNg7eZ8`; FileJobs callback
+`sh_1bf07d27d001AZZiL9iEw2oopW`, all pending, not passing evidence. Same RC owner
+implements five RC-only hook areas in new `native-rc-completion`, preserving original
+candidate/receipts. Launcher follow-up retains five resolved issues but has three
+new caller-transport review findings; same owner corrects. Reference `b674b9b`
+follow-up delivered fifty-three affected passes and is under original read-only
+review. Neither source/hook delivery is integrated or whole-native accepted.
+
+Next primary action is coordination save/clean-boundary/real compact, then checked
+FileJobs publication/drains and contextual child integration. No repeat of unchanged
+thirty-one-test group or whole shell/root lock replacement; original worktrees and
+runtime/joins remain owned. Exact sources/proofs/pending owners and constraints:
+[native-resume-2026-11-09.md](native-resume-2026-11-09.md).
+
+## Earlier post-compact primary data hooks and deliveries — preserved history
+
+Clean `046325d` was confirmed after real compact. Original primary
+`sh_1bf0dd171001V5pcD4t3DlotCB` completed: eighteen actual tests/fmt/diff/fixture
+Clippy passed, then the runner stopped on its wrong SessionIo expectation (eleven
+versus ten); no normal build/graph or remaining ten tests ran. Source/temp/runner
+boundary and exact log counts are independently reconciled. Review
+`ses_e40f1df40ffe07Z23lrSGbxJ1Y` found a blocking P2 replacement-store admission
+race. Original red `sh_1bf1838f6001tL6UVQ0myKe1jw` completed with three expected
+failures and confirmed cleanup. The minimal retained-cleanup-before-store barrier
+is applied; original corrected thirty-one-test group
+`sh_1bf1d715d001JinznKIyYHwN0n` and correction review are pending with three source
+paths frozen. No source integration or commit while those original commands run.
+Exact pending scope and receipts: [native-chat-io.md](native-chat-io.md) and
+[native-resume-2026-11-09.md](native-resume-2026-11-09.md).
+
+RC checked source `3e9cb2f`/handoff `080821f` is recovered with original completed
+receipts and seventeen unchanged hashes, not a fresh test run. App delivered
+`ccdc698`/`5c7c8e2`/`9b61f48` with twenty-five affected passes and completed
+original graph. Read-only
+app review is pinned to the delivered Git boundary, never moving WIP, and found
+P1 redacted last-seen re-exposure plus P2 outgoing-request/focus defects; queued
+with the same owner after original AppUi/AvatarUi results.
+AppUi/AvatarUi checks have completed and reproduced the transition defects;
+four original review regressions `sh_1bf1733d8001g9QCyMr9Jzh7zB` now freeze
+twenty-three app-owned paths, not corrected/certified yet. Media original
+red completed; its frozen green `sh_1befe072e001R7QYGYXMNg7eZ8` remains pending.
+New FileJobs callback owner `ses_e40fd6357ffe3EN42Zj0YoFejm` in
+`native-file-publication` has original `sh_1bf07d27d001AZZiL9iEw2oopW` pending;
+Graphify/diagnostics completed, source not committed/accepted.
+
+Read-only chat-IO correction review completed with original P2 resolved/no remaining
+findings; current thirty-one-test green remains pending. Original RC owner now owns
+actual missing RC hook integration in fresh `native-rc-completion` from `046325d`,
+preserving original candidate/receipts. Exact checked import chain is
+`4e7dd64/6d7b4cf/3e9cb2f/080821f`; five RC-specific shell/app/root/voice/video hook
+areas are delegated, never app-owned member/avatar/store or main data/update/import
+hunks. Original SharedAudio/RemoteInput remain sole cleanup/input owners. No primary
+source integration before original green and checked child delivery.
+
+Launcher `02f31b3` has six actionable review defects, including P1 CMD injection;
+same owner must first establish the original timed-out foreground graph resource
+boundary, then checked corrections. One bounded recovery audit is not a polling
+loop; no kill/retry or graph-success claim. Immutable references `2f4c19a` have two
+P2 review findings (drive-root destination/per-translation admission); same owner
+implements the bounded follow-up. Neither delivery is integrated yet. Native
+functionality, original drains/startup/import, transitive captures and physical/
+trust/legal/full-acceptance gates remain incomplete; no legacy deletion/release.
+
+Launcher checked follow-up `173232b` is now delivered with seventeen predecessor
+failures/thirty-one affected green cases/twenty-eight original process exits and
+completed new graph after the bounded old-resource audit. Old timeout remains
+failed/incomplete, not rewritten as success. Original read-only security reviewer
+is checking that six-path correction; primary acceptance/integration is still pending.
+
+## Earlier restored continuation boundary — superseded by the section above
 
 Recovery checkpoint `c8a622f` and exact active scopes are in
 [native-resume-2026-11-09.md](native-resume-2026-11-09.md). Primary update-host

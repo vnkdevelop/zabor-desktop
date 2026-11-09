@@ -2,6 +2,52 @@
 
 Редакция: 2026-11-09. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
+## Checked chat-IO stage — 2026-11-09
+
+Checked source **`172c4a8b47e1b0e52e8f7716da18381f857506e5`**, parent `046325d`,
+saves three scoped shell/SessionIo/ChatIo sources plus the stage handoff. Original
+`sh_1bf1d715d001JinznKIyYHwN0n` passed thirty-one affected tests, fmt/diff, fixture/
+normal strict Clippy, normal native-media closure/build and Graphify. P2 admission
+review resolved; zero remaining findings. All 184 source/pin hashes/exact saved
+Git blobs matched, owned primary runners/fixtures removed after original commands,
+pinned caches retained. Binary `0f2978c3...b6646`; graph 7,948/20,440/312, exported
+integrity zero, ten zero-node/HTML5000/doc-semantic/raw-producer limits explicit.
+
+Original partial eighteen passes/count mismatch and three expected P2 red failures
+remain separate history, not additional distinct final coverage. No primary check
+pending. Exact receipts/save, child owners/current pending jobs and next primary
+FileJobs/import/startup/contextual integration are in
+[native-resume-2026-11-09.md](native-resume-2026-11-09.md). Save clean coordination
+and perform real compact before next source stage; do not rerun unchanged checks.
+Active FileJobs publication/drains, app/media/RC hooks and reference/launcher fixes,
+full-client/trust/legal/physical gates remain unaccepted. No release, profile install,
+legacy deletion, push/main merge or shutdown.
+
+## Earlier post-compact chat-IO work — preserved history
+
+Primary `046325d` was confirmed clean after real compact. Original
+`sh_1bf0dd171001V5pcD4t3DlotCB` completed with eighteen passing tests/fmt/diff/
+fixture Clippy but a wrong expected SessionIo count stopped the runner; remaining
+tests/normal build/graph were not run. Historical receipt/logs and cleanup are
+reconciled. Read-only review `ses_e40f1df40ffe07Z23lrSGbxJ1Y` found a blocking
+replacement-store admission race. Original red `sh_1bf1838f6001tL6UVQ0myKe1jw`
+finished with three expected failures and cleanup; the minimal observed-cleanup
+store barrier is applied. Three source paths are now frozen under corrected group
+`sh_1bf1d715d001JinznKIyYHwN0n`; correction review resolved P2/no remaining findings,
+but thirty-one expected tests are not passed. Exact
+scope/receipts/original-resource contract: [native-chat-io.md](native-chat-io.md).
+
+RC receipts/source are reconciled; app's checked member stage has separate
+read-only review and later AppUi/AvatarUi jobs; media green and FileJobs callback
+checks remain pending. Launcher and immutable-reference deliveries have review
+findings and are not integrated. Current exact commits/owners/jobs/receipts and
+next moves are in [native-resume-2026-11-09.md](native-resume-2026-11-09.md).
+RC's same owner now implements the delegated five actual RC hook areas in isolated
+`native-rc-completion`; original receipts/worktree remain preserved. Launcher
+follow-up `173232b` is delivered and under read-only security review, with old
+timed-out graph honestly failed/incomplete and a completed new graph after changes.
+No child/source admission establishes whole-native readiness or legacy/release authority.
+
 ## Checked update integration — 2026-11-09
 
 Checked source **`d331535bfd229491fbaa4fa94d6dd7baabac11a2`** integrates candidate

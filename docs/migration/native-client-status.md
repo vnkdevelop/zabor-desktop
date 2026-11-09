@@ -2,6 +2,31 @@
 
 Редакция / updated: 2026-11-09.
 
+## Latest checked original chat cleanup and admission
+
+Primary **`172c4a8b47e1b0e52e8f7716da18381f857506e5`** saves three scoped shell/
+SessionIo/ChatIo sources and the stage handoff on `046325d`. Original
+`sh_1bf1d715d001JinznKIyYHwN0n` passed thirty-one affected tests, fmt/diff, strict
+fixture all-target/normal lib-and-bin Clippy, normal native-media closure/build and
+Graphify. Review's replacement-store P2 is resolved with no remaining findings.
+Original retained cleanup completes before store readmission; waiter cancellation
+does not detach original joins. SQLite/native close and rejected owners stay outside
+acceptance locks. All 184 source/pin hashes/saved source blobs preserved; primary
+temp/runners removed after original commands, caches retained. No primary check pending.
+
+Graph 7,948 nodes / 20,440 edges / 312 communities; exported integrity zero, ten
+zero-node/HTML5000/doc-semantic/raw-producer caveats retained. Binary
+`0f2978c31012cb486e97cba297b1ba943463f7b03b384de454a0f03dd4ab6646`.
+Predecessor eighteen passes/count mismatch and three expected reds are not additional
+final coverage. Scope/save receipts: [native-chat-io.md](native-chat-io.md).
+
+Whole-native readiness remains false. Active FileJobs app teardown/publication,
+import account/key/consent/recovery, main startup/update drain/health/baseline,
+app/media/RC integration and launcher/reference/trust/legal/physical/two-device/
+long-session/full-client gates remain. Exact child jobs and checked follow-ups:
+[native-resume-2026-11-09.md](native-resume-2026-11-09.md). No release, profile install,
+legacy deletion, push/main merge or shutdown.
+
 ## Latest checked update integration
 
 Primary source **`d331535bfd229491fbaa4fa94d6dd7baabac11a2`** integrates the checked
