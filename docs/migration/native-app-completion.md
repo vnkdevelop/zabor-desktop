@@ -27,6 +27,15 @@ member/UI WIP is certified by this commit. Crash durability remains FALSE.
 Stage-1 handoff is saved before a real current-session API compaction request;
 continue pending frozen stage-2 checks in the next context, do not replace owner.
 
+Checked stage-2 commit `ccdc698` contains the member actions/controller/headless
+tests, narrow shell/main-session/app/Slint wiring and associated RU/EN privacy,
+data-flow/legal notes. All nine changed native source/UI files exactly match the
+PASSED `sol-members-v5` hashes; the other eleven checked paths remain unchanged.
+Tracked working state is clean after this commit; inherited untracked `target/`
+outputs remain preserved. No push, merge, primary/update-host write, physical
+clipboard/input/capture or full visual/audio/neural matrix was performed. Preserve
+this receipt and the completed original jobs below through the next API compact.
+
 Actual inherited `members-v2/verification.json` is PASSED with 20 unchanged hashes:
 45 unique affected tests, native-media library/all-target Clippy `-D warnings`,
 normal library/native feature trees and builds passed. This supersedes the old
@@ -91,6 +100,13 @@ RU/EN privacy/data-flow/legal notes now describe memory-only member/profile cach
 existing RPC metadata, no permission grants/content route, and blocked production
 hidden-achievement durability. These notes do not claim complete native acceptance.
 Parent continues update-host; none of its files/worktrees is modified here.
+Parent's 2026-11-09 boundary reservation: primary is at clean `046325d` after
+accepted update-host/compact. Common shell data hooks for friend-authority
+revocation, original file publication construction and FileJobs drains at logout,
+auth reset/app close (plus any retained off-lock chat-IO helper/tests) are solely
+primary-owned. This worktree must not add competing hooks there. App/UI/store/
+profile/renderer seam/main_session remain here; integrate only contextual shell
+hunks, never replace the primary shell.rs file or the whole root lock.
 Windows metadata crash durability, full native/physical/accessibility/raster/motion
 and release gates remain FALSE. Checked stage delivery/commit and real API compact
 must retain this handoff and exact original job results in the next context.
@@ -107,6 +123,14 @@ member transitions (including before the 250 ms refresh) and first AppUi owner
 initialization; current member fixtures bind MemberUi without AvatarUi. Preserve
 AvatarUi ownership and use an app-owned adapter/test seam rather than overwriting
 that module. These integration gates remain explicit even if bounded tests pass.
+Read-only continuation tracing confirms original Join returns UiEvent::Voice while
+the installed VoiceSession keeps its channel; it does not update worker current_user
+at that success site. Invite must use a current, voice-ticket-bound original resource
+instead of trusting a manually populated login user or the UI active-channel field.
+Adapter hypotheses still require reproducing tests: AvatarUi.refresh may reapply a
+prior profile after batched member transitions, and the first AppUi.context may
+clear a member snapshot before owner initialization. Do not certify or change those
+paths based only on tracing; add original binding/refresh fixtures in the next stage.
 
 ## Historical sole-owner handoff — 2026-11-08
 
