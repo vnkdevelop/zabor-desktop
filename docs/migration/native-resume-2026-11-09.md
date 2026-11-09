@@ -2,6 +2,56 @@
 
 Редакция / updated: 2026-11-09.
 
+## Current post-compact App integration admission
+
+Restored primary `2b9c6180eaee3f810bf08de6042e6d6cf5fae204` was confirmed clean.
+The unchanged thirty-one-test chat-IO and thirty-three-test update groups were not
+rerun. App prerequisite chain from common `fd8783f` through `76d7f34` was reconciled
+read-only: all twenty-three final checked working-source SHA-256 values and their
+filtered Git blobs match the committed delivery; exact cumulative scope is twenty-six
+paths. Stage3 still has forty-four distinct delivered tests, not fifty-eight.
+
+Admission artifacts:
+`migration-artifacts/native-ui/app-primary-integration-2026-11-09/admission-v1/`.
+The cumulative non-shell/non-lock contextual patch passes `git apply --check` against
+this primary. The shell patch fails on the first module hunk because primary retains
+`mod chat_io`; it is not applied or replaced wholesale. All five primary chat-IO
+shell hunks and both original ChatIo/SessionIo sources must survive. The Slint lock
+patch passes read-only admission: exactly one `i-slint-backend-testing` 1.18.1 entry
+and additive links in three existing Slint packages. No checksum/version change or
+dependency deletion. Root workspace manifest and primary-only helper package entries
+remain excluded from replacement; normal builds must still exclude the dev renderer.
+
+Original reviewer `ses_e40f6cb6affeVVOL2El9jYp1fS` completed the read-only
+`5c7c8e2 -> b209c23` review. Redacted-presence, first-created achievement focus and
+AppUi/AvatarUi owner transitions are resolved; no other stage3-introduced findings
+within its assigned member-worker/display scope. One outgoing-status P2 remains:
+a fresh lookup can confirm the owner's existing outgoing request while the original
+action is pending, then a late literal-false action response clears pending state
+and unconditionally displays Add Friend. The confirmed profile still rejects that
+action, so the display/action state diverges. Existing tests cover the two events
+separately, not this combined ordering.
+
+The same App owner `ses_e411cbb1fffeAMLQAdk0IRfvV4` received only that concrete
+member-status follow-up, with a combined predecessor regression, minimal correction
+and affected checks required before delivery. This is not a new broad app/Invite/
+audio-support task. Source acceptance and primary contextual integration remain
+blocked. Parent independently owns prerequisite/primary-hook/lock integration;
+no candidate source has been applied and no fresh primary test is claimed. Preserve
+the twenty-three-hash admission as historical evidence, then admit the checked
+follow-up separately. Do not count forty-four predecessor passes as new final
+coverage or weaken production HiddenStore/post-Join Invite gates.
+
+RC owner reported frozen implementation in `native-rc-completion` and original
+affected check **`sh_1bf350415001tJpwcpf7LpeTsH`**, pending automatic outcome.
+Its fifteen imported primitive blobs match the four checked prerequisite commits;
+root manifest/lock/config/pins unchanged. Five delegated hook areas plus two RC-only
+helper/test paths and handoff exist, but hook source is uncommitted/not delivered.
+Final Graphify has not started. Preserve original resources; do not poll, duplicate,
+integrate unverified RC code or treat timeout/abort as original completion.
+Media/FileJobs original checks and launcher/reference correction owners remain as
+recorded below; none was polled or duplicated by this continuation.
+
 ## Checked chat-IO checkpoint — current boundary
 
 Source saved as **`172c4a8b47e1b0e52e8f7716da18381f857506e5`**, parent `046325d`:

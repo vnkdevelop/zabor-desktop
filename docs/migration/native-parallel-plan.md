@@ -2,6 +2,23 @@
 
 Updated: 2026-11-09. Coordination plan, not complete-native acceptance.
 
+## Current App admission/review follow-up after compact
+
+Primary `2b9c618` restored clean; App candidate chain/26 paths/23 raw source hashes
+and committed blobs reconciled read-only. Contextual non-shell/non-lock and Slint
+dev-lock slices pass `--check`; shell requires preserving the primary ChatIo module
+and its five checked hooks. Root workspace/helper packages are never replaced.
+No source applied, no fresh primary tests or unchanged matrices repeated.
+
+Original reviewer resolved stage3 redaction/initial focus/owner transitions; one P2
+remains in confirmed-outgoing lookup followed by original pending false completion.
+Same App owner received only that bounded status correction/regression, not a new
+App/Invite/audio-support task. Primary integration remains blocked until checked
+follow-up/re-review. RC hooks' original `sh_1bf350415001tJpwcpf7LpeTsH` is pending,
+source frozen and final graph/save not yet delivered. Keep all other original jobs
+and owner workspaces untouched. Admission/proofs/current exact constraints:
+[native-resume-2026-11-09.md](native-resume-2026-11-09.md).
+
 ## Current checked primary and independent owners
 
 Source **`172c4a8b47e1b0e52e8f7716da18381f857506e5`** checked/saved on `046325d`:

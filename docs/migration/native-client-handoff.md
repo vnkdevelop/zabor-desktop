@@ -2,6 +2,28 @@
 
 Редакция: 2026-11-09. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
+## Post-compact App admission and remaining review gate
+
+Primary `2b9c618` was restored clean. Read-only App admission reconciled the exact
+`fd8783f -> 76d7f34` chain, twenty-six candidate paths, twenty-three checked raw
+hashes and Git blobs. Non-shell/non-lock contextual changes and the additive Slint
+lock slice pass `git apply --check`; shell's first hunk conflicts with the retained
+primary ChatIo module and requires surgical merging, not whole-file replacement.
+Root manifest, helper packages, primary ChatIo/SessionIo and RC boundaries remain
+protected. No source patch was applied and no unchanged test matrix rerun.
+
+Stage3 static review resolved redaction/focus/owner-transition issues but found
+one remaining P2: fresh lookup confirms an outgoing request during a pending action,
+then the original false completion resets displayed status to Add Friend. Same App
+owner received only this minimal combined-ordering regression/fix follow-up; primary
+integration waits for checked source and re-review. No broad App/Invite task is
+scheduled. Exact admission artifacts/current owners:
+[native-resume-2026-11-09.md](native-resume-2026-11-09.md).
+
+RC original hook check `sh_1bf350415001tJpwcpf7LpeTsH` is pending in its own frozen
+worktree. Final RC Graphify/source save not started/delivered. Media/FileJobs original
+checks and launcher/reference fixes remain independent; none was polled/duplicated.
+
 ## Checked chat-IO stage — 2026-11-09
 
 Checked source **`172c4a8b47e1b0e52e8f7716da18381f857506e5`**, parent `046325d`,
