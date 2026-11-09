@@ -338,6 +338,259 @@ fn selected_member_outgoing_request_is_displayed_for_current_owner() {
     .unwrap();
 }
 
+fn pending_member_friend_fixture() -> (Fixture, ProfileRequest, ProfileRequest, User) {
+    let (ui, state, app, data, mut receiver, intents, timer) = fixture();
+    ui.set_user_id("fixture-owner".into());
+    data.borrow_mut().user.id = "fixture-owner".into();
+    ui.invoke_open_channel_members("channel".into());
+    let Command::MemberAction(request) = receiver.try_recv().unwrap().command else {
+        panic!("pending friend original member list missing")
+    };
+    let peer = User {
+        id: "fixture-peer".into(),
+        ..member()
+    };
+    state.borrow_mut().handle(
+        &ui,
+        &app,
+        &data.borrow(),
+        Event {
+            request,
+            result: Ok(Response::Members(vec![peer.clone()])),
+        },
+        &intents,
+    );
+    ui.invoke_open_member_profile("fixture-peer".into());
+    let queued = receiver.try_recv().unwrap();
+    let Command::LookupProfile(lookup) = queued.command else {
+        panic!("pending friend original fresh lookup missing")
+    };
+    assert_eq!(queued.ticket, lookup.ticket);
+    assert_eq!(ui.get_profile_request_status(), 0);
+    ui.invoke_member_profile_action("friend".into());
+    let queued = receiver.try_recv().unwrap();
+    let Command::ProfileAddFriend(query) = queued.command else {
+        panic!("pending friend original MemberUi request missing")
+    };
+    assert_eq!(queued.ticket, query.ticket);
+    assert!(query.alive() && lookup.alive());
+    assert_eq!(ui.get_profile_request_status(), 1);
+    assert!(state.borrow().friend_request.as_ref().unwrap().same(&query));
+    (
+        (ui, state, app, data, receiver, intents, timer),
+        lookup,
+        query,
+        peer,
+    )
+}
+
+#[test]
+fn pending_member_friend_completion_reconciles_fresh_outgoing_after_original_worker_result() {
+    for confirmed in [true, false] {
+        for mode in ["false", "null", "true"] {
+            std::thread::spawn(move || {
+                let ((ui, state, app, data, mut receiver, intents, _timer), lookup, query, peer) =
+                    pending_member_friend_fixture();
+                let fresh = User {
+                    display_name: "Fresh Pending Peer".into(),
+                    friend_requests_received: vec![if confirmed {
+                        data.borrow().user.id.clone()
+                    } else {
+                        "unrelated-owner".into()
+                    }],
+                    ..peer
+                };
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let result = runtime.block_on(
+                    super::super::main_session_tests::member_origin_friend_original_worker(
+                        query.clone(),
+                        intents.clone(),
+                        mode,
+                        || {
+                            assert!(state.borrow().lookup.as_ref().unwrap().same(&lookup));
+                            state.borrow_mut().profile_lookup(
+                                &ui,
+                                &app,
+                                &lookup,
+                                Ok(Some(fresh.clone())),
+                                &intents,
+                            );
+                            assert_eq!(state.borrow().profile, Some(fresh.clone()));
+                            assert_eq!(app.borrow().member_profile, Some(fresh.clone()));
+                            assert!(state
+                                .borrow()
+                                .profiles
+                                .is_current(ui.get_user_id().as_str(), &intents));
+                            assert_eq!(ui.get_profile_request_status(), 1);
+                            assert!(state.borrow().friend_request.as_ref().unwrap().same(&query));
+                            assert!(query.alive());
+                            ui.invoke_member_profile_action("friend".into());
+                            assert!(receiver.try_recv().is_err());
+                        },
+                    ),
+                );
+                assert_eq!(result, Some(mode == "true"));
+                state
+                    .borrow_mut()
+                    .friend_result(&ui, &query, result.unwrap(), &intents);
+                assert!(state.borrow().friend_request.is_none());
+                assert!(state.borrow().lookup.is_none());
+                assert_eq!(state.borrow().profile, Some(fresh));
+                assert_eq!(
+                    ui.get_profile_request_status(),
+                    if confirmed || mode == "true" { 2 } else { 0 }
+                );
+                ui.invoke_member_profile_action("friend".into());
+                if !confirmed && mode != "true" {
+                    let Command::ProfileAddFriend(retry) = receiver.try_recv().unwrap().command
+                    else {
+                        panic!("unconfirmed false completion did not restore AddFriend")
+                    };
+                    assert!(!retry.same(&query));
+                    assert_eq!(retry.ticket, query.ticket);
+                    assert_eq!(ui.get_profile_request_status(), 1);
+                    ui.invoke_close_member_profile();
+                    assert!(!retry.alive());
+                } else {
+                    assert!(receiver.try_recv().is_err());
+                    ui.invoke_close_member_profile();
+                    if confirmed {
+                        ui.invoke_open_member_profile("fixture-peer".into());
+                        assert!(receiver.try_recv().is_err());
+                        assert_eq!(ui.get_profile_request_status(), 2);
+                        state
+                            .borrow_mut()
+                            .friend_result(&ui, &query, false, &intents);
+                        assert_eq!(ui.get_profile_request_status(), 2);
+                        ui.invoke_close_member_profile();
+                    }
+                }
+                assert!(data.borrow().friends.is_empty() && data.borrow().channel_users.is_empty());
+            })
+            .join()
+            .unwrap();
+        }
+    }
+}
+
+#[test]
+fn pending_member_friend_completion_rejects_closed_modal_logout_and_replacement_results() {
+    use zabor_native::critical_intents::CriticalAction;
+    for mode in [
+        "closed",
+        "reopened",
+        "modal",
+        "logout",
+        "unauthenticated",
+        "owner",
+        "profile",
+        "source",
+        "login",
+        "identity",
+        "cancelled",
+    ] {
+        for sent in [false, true] {
+            std::thread::spawn(move || {
+                let ((ui, state, app, data, mut receiver, intents, _timer), lookup, query, peer) =
+                    pending_member_friend_fixture();
+                let fresh = User {
+                    friend_requests_received: vec![data.borrow().user.id.clone()],
+                    ..peer
+                };
+                state.borrow_mut().profile_lookup(
+                    &ui,
+                    &app,
+                    &lookup,
+                    Ok(Some(fresh.clone())),
+                    &intents,
+                );
+                assert_eq!(state.borrow().profile, Some(fresh));
+                assert_eq!(ui.get_profile_request_status(), 1);
+                let mut completion = query.clone();
+                let mut replacement = None;
+                match mode {
+                    "closed" => ui.invoke_close_member_profile(),
+                    "reopened" => {
+                        ui.invoke_close_member_profile();
+                        ui.invoke_open_member_profile("fixture-peer".into());
+                        assert!(receiver.try_recv().is_err());
+                        assert_eq!(ui.get_profile_request_status(), 2);
+                    }
+                    "modal" => ui.set_modal(10),
+                    "logout" => intents.request(CriticalAction::Logout),
+                    "unauthenticated" => ui.set_authenticated(false),
+                    "owner" => {
+                        ui.set_user_id("replacement".into());
+                        data.borrow_mut().user.id = "replacement".into();
+                        state
+                            .borrow_mut()
+                            .context(&ui, &data.borrow(), &intents, Instant::now());
+                        assert!(!query.alive());
+                        load(&ui, &state, &app, &data, &mut receiver, &intents);
+                        ui.invoke_open_member_profile("member".into());
+                        let Command::LookupProfile(current) = receiver.try_recv().unwrap().command
+                        else {
+                            panic!("replacement owner fresh lookup missing")
+                        };
+                        assert_eq!(current.owner, "replacement");
+                        assert_eq!(ui.get_profile_request_status(), 0);
+                        ui.invoke_member_profile_action("friend".into());
+                        let Command::ProfileAddFriend(current) =
+                            receiver.try_recv().unwrap().command
+                        else {
+                            panic!("replacement owner friend request missing")
+                        };
+                        assert_eq!(current.owner, "replacement");
+                        assert!(!current.same(&query));
+                        replacement = Some(current);
+                    }
+                    "profile" => ui.set_profile_id("other".into()),
+                    "source" => ui.set_profile_source("friends".into()),
+                    "login" => ui.set_profile_login("Other".into()),
+                    "identity" => {
+                        completion =
+                            ProfileRequest::new(&query.owner, &query.id, &query.username, &intents)
+                                .unwrap();
+                        assert_eq!(completion.ticket, query.ticket);
+                        assert!(!completion.same(&query));
+                    }
+                    "cancelled" => query.stop.cancel(),
+                    _ => unreachable!(),
+                }
+                state
+                    .borrow_mut()
+                    .friend_result(&ui, &completion, sent, &intents);
+                assert_eq!(
+                    ui.get_profile_request_status(),
+                    if mode == "reopened" { 2 } else { 1 }
+                );
+                if let Some(current) = replacement {
+                    assert!(state
+                        .borrow()
+                        .friend_request
+                        .as_ref()
+                        .unwrap()
+                        .same(&current));
+                    ui.invoke_close_member_profile();
+                    assert!(!current.alive());
+                } else if !matches!(mode, "closed" | "reopened") {
+                    assert!(state.borrow().friend_request.as_ref().unwrap().same(&query));
+                    ui.invoke_close_member_profile();
+                    assert!(!query.alive());
+                }
+                assert!(data.borrow().friends.is_empty() && data.borrow().channel_users.is_empty());
+                assert!(receiver.try_recv().is_err());
+            })
+            .join()
+            .unwrap();
+        }
+    }
+}
+
 #[test]
 fn fresh_and_cached_member_outgoing_status_preserves_original_pending_and_replacement_owner() {
     std::thread::spawn(|| {

@@ -432,7 +432,13 @@ impl MemberUi {
                 .is_some_and(|pending| pending.same(request))
         {
             self.friend_request = None;
-            ui.set_profile_request_status(if sent { 2 } else { 0 });
+            ui.set_profile_request_status(if sent {
+                2
+            } else {
+                self.profile
+                    .as_ref()
+                    .map_or(0, |user| self.profile_request_status(user))
+            });
         }
     }
 
