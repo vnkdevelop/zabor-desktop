@@ -12,6 +12,7 @@ use zabor_native::critical_intents::{CriticalIntents, IntentScope, IntentTicket}
 use zabor_native::profile::{PreparedSession, Profile, ProfileError, SavedSession};
 
 pub(super) struct SessionIo {
+    pub(super) chat_io: Arc<super::chat_io::ChatIo>,
     profile: Option<Arc<Profile>>,
     intents: Arc<CriticalIntents>,
     stop: CancellationToken,
@@ -41,6 +42,7 @@ impl SessionIo {
         stop: CancellationToken,
     ) -> Arc<Self> {
         Arc::new(Self {
+            chat_io: Arc::new(super::chat_io::ChatIo::default()),
             profile,
             intents,
             stop,
@@ -169,7 +171,18 @@ impl SessionIo {
                 .unwrap_or_else(|error| error.into_inner())
                 .clone();
             if jobs.is_empty() {
-                break;
+                if self.chat_io.finish().await.is_err() {
+                    self.failed.store(true, Ordering::Release);
+                }
+                if self
+                    .jobs
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .is_empty()
+                {
+                    break;
+                }
+                continue;
             }
             for job in &jobs {
                 let mut join = job.join.lock().await;

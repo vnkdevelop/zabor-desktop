@@ -52,6 +52,7 @@ use zeroize::Zeroizing;
 
 mod avatar_interactions;
 mod avatar_ui;
+mod chat_io;
 #[cfg(test)]
 mod critical_tests;
 mod leave_work;
@@ -2460,6 +2461,7 @@ async fn worker(
         intents,
         session_io,
     } = media;
+    let chat_io = session_io.chat_io.clone();
     let audio_controls = audio_preferences.controls.clone();
     let signing = match Attestation::from_environment(zabor_native::release::TARGET_BETA_VERSION) {
         Ok(signing) => signing,
@@ -2593,7 +2595,14 @@ async fn worker(
         }
         if session_work.is_current() && chat.is_none() && !chat_failed {
             if let (Some(user), Some(profile)) = (current_user.as_ref(), profile.as_ref()) {
-                match initialize_chat(profile, &user.id, &friends) {
+                let initialized = run_session!(
+                    session_work,
+                    chat_io.before_store(|| initialize_chat(profile, &user.id, &friends))
+                );
+                let Some(initialized) = initialized else {
+                    continue;
+                };
+                match initialized {
                     Ok(engine) => {
                         chat = Some(engine);
                         file_jobs = Some(FileJobs::with_stop(
@@ -2740,15 +2749,16 @@ async fn worker(
                                 }
                             }
                         }
-                        if matches!(event.target.as_str(), "FriendAdded" | "FriendRequestAccepted") {
-                            if let Some(user) = event.arguments.first().and_then(|value| serde_json::from_value::<zabor_native::auth::User>(value.clone()).ok()) { if !user.id.is_empty() && current_user.as_ref().is_none_or(|owner| owner.id != user.id) && !friends.contains(&user.id) { friends.push(user.id); } }
-                        }
-                        if matches!(event.target.as_str(), "FriendRemoved" | "UserDeleted") {
-                            if let Some(id) = event.arguments.first().and_then(serde_json::Value::as_str) { friends.retain(|friend| friend != id); if selected_chat.as_deref() == Some(id) { selected_chat = None; } }
-                        }
                         if matches!(event.target.as_str(), "FriendAdded" | "FriendRequestAccepted" | "FriendRemoved" | "UserDeleted") {
-                            if let Some(chat) = chat.as_mut() { chat.set_friends(friends.iter().cloned()); }
-                            if let Some(transport) = chat_transport.as_mut() { transport.set_friends(&friends); }
+                            let previous = session_work.commit(|| {
+                                let previous = friends.clone();
+                                if matches!(event.target.as_str(), "FriendAdded" | "FriendRequestAccepted") {
+                                    if let Some(user) = event.arguments.first().and_then(|value| serde_json::from_value::<zabor_native::auth::User>(value.clone()).ok()) { if !user.id.is_empty() && current_user.as_ref().is_none_or(|owner| owner.id != user.id) && !friends.contains(&user.id) { friends.push(user.id); } }
+                                } else if let Some(id) = event.arguments.first().and_then(serde_json::Value::as_str) { friends.retain(|friend| friend != id); if selected_chat.as_deref() == Some(id) { selected_chat = None; } }
+                                previous
+                            });
+                            let Some(previous) = previous else { continue; };
+                            if run_session!(session_work, chat_io::reconcile(&session_work, &chat_io, &mut chat, &mut chat_transport, &mut file_jobs, &previous, &friends)).is_none() { continue; }
                         }
                         if let (Some(transport), Some(hub), Some(peer), Some(payload)) = (chat_transport.as_mut(), hub.as_ref(), event.arguments.first().and_then(serde_json::Value::as_str), event.arguments.get(1).and_then(serde_json::Value::as_str)) {
                             if payload.starts_with("zabor-chat:") && run_session!(session_work, transport.handle_signal(hub, &event.target, peer, payload)).is_none() { continue; }
@@ -3583,32 +3593,45 @@ async fn worker(
                     let Some(Some(restored)) = restored else {
                         continue;
                     };
-                    if auth_work
-                        .commit(|| {
-                            sent_audio_state = None;
-                            sent_speaking = false;
-                            speaking_release = None;
-                            session_ready = true;
-                            retry_attempt = 0;
-                            retry_at = None;
-                            current_user = Some(data.user.clone());
-                            chat_ice = data
-                                .ice_config
-                                .as_ref()
-                                .and_then(|value| {
-                                    serde_json::from_value(value["iceServers"].clone()).ok()
-                                })
-                                .unwrap_or_default();
-                            friends = data
-                                .friends
+                    let previous = auth_work.commit(|| {
+                        sent_audio_state = None;
+                        sent_speaking = false;
+                        speaking_release = None;
+                        session_ready = true;
+                        retry_attempt = 0;
+                        retry_at = None;
+                        current_user = Some(data.user.clone());
+                        chat_ice = data
+                            .ice_config
+                            .as_ref()
+                            .and_then(|value| {
+                                serde_json::from_value(value["iceServers"].clone()).ok()
+                            })
+                            .unwrap_or_default();
+                        std::mem::replace(
+                            &mut friends,
+                            data.friends
                                 .iter()
                                 .map(|friend| friend.id.clone())
-                                .collect();
-                            if let Some(chat) = chat.as_mut() {
-                                chat.set_friends(friends.iter().cloned());
-                            }
-                        })
-                        .is_none()
+                                .collect(),
+                        )
+                    });
+                    let Some(previous) = previous else {
+                        continue;
+                    };
+                    if run_session!(
+                        auth_work,
+                        chat_io::reconcile(
+                            &auth_work,
+                            &chat_io,
+                            &mut chat,
+                            &mut chat_transport,
+                            &mut file_jobs,
+                            &previous,
+                            &friends
+                        )
+                    )
+                    .is_none()
                     {
                         continue;
                     }
