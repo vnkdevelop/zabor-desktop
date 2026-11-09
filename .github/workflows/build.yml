@@ -13,6 +13,12 @@ on:
     types:
       - published
   workflow_dispatch:
+    inputs:
+      channel:
+        description: Legacy reference checks require explicit selection; native uses rust-migration.yml
+        type: choice
+        options: [native, legacy-reference]
+        default: native
 
 permissions:
   contents: read
@@ -20,7 +26,8 @@ permissions:
 
 jobs:
   verify:
-    name: Verify Code, Audio & Compilation
+    if: "!contains(github.ref, '-rust') && !contains(github.event.release.tag_name, '-rust') && !startsWith(github.ref, 'refs/heads/rust/') && !startsWith(github.ref, 'refs/heads/beta/rust-') && !startsWith(github.head_ref, 'rust/') && !startsWith(github.head_ref, 'beta/rust-') && !startsWith(github.base_ref, 'rust/') && !startsWith(github.base_ref, 'beta/rust-') && (github.event_name != 'workflow_dispatch' || inputs.channel == 'legacy-reference')"
+    name: Legacy Reference Code, Audio & Compilation
     runs-on: windows-latest
 
     steps:
@@ -43,6 +50,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Explicit legacy reference addon and model preparation
+        run: cmd.exe /d /c npm run reference:postinstall
 
       - name: Verify DeepFilterNet Wasm & Models
         run: node scripts/fetch-deepfilter-assets.cjs
@@ -54,7 +64,7 @@ jobs:
         run: npm test
 
       - name: Build application
-        run: npm run build
+        run: npm run reference:build
         env:
           # CI собирает канал `dev` и подписывает отдельным dev-секретом: релизный
           # секрет в CI не попадает вовсе. Для pull request из форка GitHub секреты
@@ -65,7 +75,7 @@ jobs:
   release:
     name: Package Windows Installer Artifacts
     needs: verify
-    if: ((github.event_name == 'release' && github.event.action == 'published') || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && github.event.release.prerelease != true && !contains(github.ref, '-beta') && !startsWith(github.ref, 'refs/heads/beta/')
+    if: ((github.event_name == 'release' && github.event.action == 'published') || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.channel == 'legacy-reference')) && github.event.release.prerelease != true && !contains(github.ref, '-beta') && !contains(github.event.release.tag_name, '-beta') && !contains(github.ref, '-rust') && !contains(github.event.release.tag_name, '-rust') && !startsWith(github.ref, 'refs/heads/beta/') && !startsWith(github.ref, 'refs/heads/rust/')
     runs-on: windows-latest
 
     steps:
@@ -88,6 +98,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Explicit legacy reference addon and model preparation
+        run: cmd.exe /d /c npm run reference:postinstall
 
       - name: Verify DeepFilterNet Wasm & Models
         run: node scripts/fetch-deepfilter-assets.cjs

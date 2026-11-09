@@ -1,11 +1,20 @@
-name: Rust migration beta checks
+name: Native Rust developer checks
 
 on:
   push:
     branches: [beta/rust-migration, rust/native-client]
+    tags: ['v*-rust*']
   pull_request:
-    branches: [beta/rust-migration, rust/native-client]
+    branches: [main, beta/rust-migration, rust/native-client]
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      lane:
+        description: Native developer checks or explicit legacy reference checks (not acceptance)
+        type: choice
+        options: [native, reference]
+        default: native
 
 permissions:
   contents: read
@@ -15,7 +24,59 @@ defaults:
     shell: cmd
 
 jobs:
-  verify:
+  native:
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/rust/native-client' || github.ref == 'refs/heads/beta/rust-migration' || (startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '-rust')))) || (github.event_name == 'pull_request' && (startsWith(github.head_ref, 'rust/') || startsWith(github.head_ref, 'beta/rust-') || startsWith(github.base_ref, 'rust/') || startsWith(github.base_ref, 'beta/rust-'))) || (github.event_name == 'release' && github.event.action == 'published' && startsWith(github.event.release.tag_name, 'v') && contains(github.event.release.tag_name, '-rust')) || (github.event_name == 'workflow_dispatch' && inputs.lane == 'native')
+    name: Windows MSVC native-only developer build (not a certified package)
+    runs-on: windows-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/rust/target/native-developer
+      ZABOR_CLIENT_CHANNEL: native-dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Restore vetted immutable WebRTC SDK (no download fallback)
+        uses: actions/cache/restore@v4
+        with:
+          path: rust/target/webrtc-win-x64-a545de4
+          key: native-webrtc-win-x64-a545de4-3e5959b5320579814706848a0641224db22f03a374493e90cbd235948977f930
+          fail-on-cache-miss: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Explicit pinned developer cache provisioning (no npm install)
+        run: cmd.exe /d /c native.bat prepare
+      - name: Read-only SHA256 cache admission
+        run: cmd.exe /d /c native.bat cache-check
+      - name: Scoped launcher and workflow regressions (mocks only)
+        run: cmd.exe /d /c node --test scripts/native/developer-launcher.test.cjs scripts/native/developer-transport.test.cjs
+      - name: Fetch locked workspace dependencies for the native target before offline checks
+        run: cmd.exe /d /c cargo fetch --manifest-path rust/Cargo.toml --locked --target x86_64-pc-windows-msvc
+      - name: Format explicit zabor-native package
+        run: cmd.exe /d /c native.bat fmt
+      - name: Clippy explicit zabor-native package and all targets
+        run: cmd.exe /d /c native.bat clippy
+      - name: Native library and binary unit tests with synthetic camera/audio fixtures (reference tests stay separate)
+        run: cmd.exe /d /c native.bat test
+      - name: Build explicit native Windows MSVC executable
+        run: cmd.exe /d /c native.bat build --release
+      - name: Require the native artifact
+        run: cmd.exe /d /c "if not exist rust\target\native-developer\x86_64-pc-windows-msvc\release\zabor-native.exe exit /b 1"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zabor-native-windows-msvc-developer
+          path: |
+            rust/target/native-developer/x86_64-pc-windows-msvc/release/zabor-native.exe
+            rust/target/native-developer/x86_64-pc-windows-msvc/release/*.dll
+          if-no-files-found: error
+  reference:
+    if: github.event_name == 'workflow_dispatch' && inputs.lane == 'reference'
+    name: Explicit legacy Electron/WASM reference checks (not native acceptance)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,9 +84,10 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - run: cmd.exe /d /c npm ci --ignore-scripts
+      - run: cmd.exe /d /c npm run reference:postinstall
       - run: npm test
       - run: npm run test:migration
       - run: npm run test:rust
       - run: npm run typecheck
-      - run: npm run build
+      - run: cmd.exe /d /c npm run reference:build
