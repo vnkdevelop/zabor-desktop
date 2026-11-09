@@ -36,6 +36,52 @@ outputs remain preserved. No push, merge, primary/update-host write, physical
 clipboard/input/capture or full visual/audio/neural matrix was performed. Preserve
 this receipt and the completed original jobs below through the next API compact.
 
+Checked stage-3 source commit `b209c23` contains ten native source/UI paths plus
+the three associated RU/EN privacy/data-flow/legal notes. It retains the original
+stage-2 work and closes the two reproduced AppUi/AvatarUi adapter defects and the
+three review corrections: accepted-profile presence redaction, selected/fresh/
+cached outgoing status without replacing active original requests, and first
+achievement Return/Escape focus. The initial tests were red on their predecessors;
+their assertions passed unchanged in the original stage-3 run. The AvatarUi owner,
+bindings and jobs are preserved; only a read-only selected-snapshot accessor and
+its existing ProfileLookup owner/session guard are added.
+
+Actual original-worker Kick/RemoveFriend scenarios now verify exact existing wire
+args, literal-true/false/null, repeated observed Leave, Logout/view/window rejection,
+owner/permission rejection, original request identity/ticket and observed worker/
+SessionIo/AchievementIo/audio cleanup. The member-origin AddFriend test uses the
+actual MemberUi-generated request through the original worker, including original
+close callback, stale UI friend state and the same literal-true/Leave/cancellation
+constraints. This bounded proof is separate from the three review display fixes;
+it does not certify every member action, authorization lifecycle or full native UI.
+
+Invite now reads installed VoiceSession.channel through the original request's
+VoiceWork.commit_resource admission, never login-user/UI channel fields. A real
+worker test rejects a stale login channel without the voice resource. Successful
+post-Join Invite is still NOT proved: do not manually seed a voice channel, start
+physical audio or claim the negative fixture closes that integration gate.
+
+Evidence: original `sol-stage3-v1/` has 44 unique passing affected tests and an
+explicit FAILED all-target Clippy result. Original `sol-stage3-v2/verification.json`
+is PASSED after the sole immutable-test-loop correction: 14 affected worker/UI
+tests rerun, all ten checks passed including both Clippy modes, normal library/native
+feature trees and builds. `checked-stage-audit.json` independently confirms all 23
+final frozen hashes, 22 retained v1 paths, 44 distinct passing tests across receipts,
+and no pending original jobs. Library achievement/store evidence remains inherited
+and unchanged, rather than silently rerunning a full matrix. Root manifest/lock,
+app.slint/root.slint and production HiddenStore-before-journal-open gate are unchanged.
+Source delivery must apply only contextual shell hunks and the one achievement
+FocusScope init hunk, preserving primary and RC ownership below. No primary/RC/
+update-host writes, push, merge, physical clipboard/input/capture or source resets.
+Windows metadata crash durability, successful actual post-Join Invite and full
+native/physical/accessibility/raster/motion/resource/release acceptance remain FALSE.
+Exact source patch and shell-only delta from `5c7c8e2` are retained in
+`sol-stage3-v2/checked-source.patch` and `sol-stage3-v2/app-shell-hunks.patch`.
+The delta depends on the checked stage-2 member wiring; it is not a whole-shell or
+root-lock replacement. Commit this checked handoff before real parent delivery
+(`resume: false`) and current-session API compact; admission receipts belong in
+`sol-stage3-v2/stage-delivery.json`. Do not restart completed jobs in the next context.
+
 Actual inherited `members-v2/verification.json` is PASSED with 20 unchanged hashes:
 45 unique affected tests, native-media library/all-target Clippy `-D warnings`,
 normal library/native feature trees and builds passed. This supersedes the old
@@ -131,6 +177,96 @@ Adapter hypotheses still require reproducing tests: AvatarUi.refresh may reapply
 prior profile after batched member transitions, and the first AppUi.context may
 clear a member snapshot before owner initialization. Do not certify or change those
 paths based only on tracing; add original binding/refresh fixtures in the next stage.
+
+Stage-2 delivery was durably admitted after `5c7c8e2`, not merely proposed:
+parent input `msg_1bf07a58d001O6ikCybt2Emt20` used `delivery: steer`, `resume: false`;
+current-session API compact `msg_1bf07a741001zQgb7mmjwnDr0X` used `delivery: steer`.
+Receipts are retained in `sol-members-v5/stage-delivery.json`. Two earlier attempts
+admitted nothing (CLI flag parsing, HTTP 400 invalid JSON); the successful helper
+verified Windows JSON argv round-trip and self-deleted without config/install work.
+
+Stage-3 original reproduction `sh_1bf0cc907001tqEJt9rTFKnSKs` COMPLETED against
+22 frozen paths: the previous 20 plus unchanged AvatarUi and VoiceWork. Only two
+new synthetic original-binding tests run, for first AppUi owner context and batched
+AvatarUi friend/self-profile to member navigation. Evidence `sol-adapters-v1/`;
+no polling/restart or frozen-source edits. Both tests compiled and reproduced the
+defects: first AppUi context discarded the snapshot; AvatarUi refresh reapplied the
+prior friend profile. Fmt/diff-check passed; all 22 frozen hashes matched; temporary
+runner/fixtures self-cleaned. These failures are not acceptance. Unchecked narrow
+follow-up synchronizes the original AvatarUi callback while modal 11 is active and
+initializes AppUi owner context before installing the member snapshot.
+
+The same stage includes UNCHECKED actual original-worker Kick/RemoveFriend cases,
+member-origin ProfileAddFriend callback-to-worker cases, and rejection of Invite
+from stale login channel without an installed voice resource. The Invite channel
+source is now an UNCHECKED snapshot of original VoiceSession.channel admitted by
+VoiceWork.commit_resource with the request ticket; no UI/login channel success is
+fabricated. Actual successful post-Join Invite remains an explicit integration gate.
+Primary common data hooks remain untouched; only two contextual worker shell hunks.
+
+Read-only review `ses_e40f6cb6affeVVOL2El9jYp1fS` adds three corrections to this same
+follow-up: ordinary-profile redacted presence must use the accepted AvatarUi
+snapshot; selected/fresh/cached member outgoing status must match the current owner
+without replacing an active original friend request; initial achievement FocusScope
+must acquire focus on creation. Four deterministic predecessor regression tests run
+in original `sh_1bf1733d8001g9QCyMr9Jzh7zB`, evidence `sol-review-red-v1/`, against
+23 frozen paths (previous 22 plus ProfileLookup). Do not edit/poll/restart/duplicate
+before automatic completion and original runner/fixture exit. That original job
+COMPLETED: Rust/Slint compiled, fmt/diff-check passed, all four new tests failed at
+their unchanged predecessor assertions (old timestamp, selected/fresh status 0
+instead of 2, first Return left modal 10 open). All 23 hashes matched; original
+temporary runner/fixtures self-cleaned. No job was polled/repeated/killed/detached.
+
+Corrections are now UNCHECKED: AppUi's original timer reads AvatarUi's selected
+profile through a read-only owner/session/cache guard, including missing timestamps;
+member snapshots no longer fall back to old roster presence. AvatarUi only gains
+that accessor, without replacing its ownership, bindings, cache or worker jobs.
+Member status derives from selected/fresh/cached current-owner profiles and keeps
+an active original friend request pending. Achievement FocusScope.init acquires
+the close-button focus using the pinned pattern; styles/motion/strings are unchanged.
+Associated RU/EN privacy/data-flow/legal notes preserve their existing content and
+add the redaction and source constraints; no native catalog/locale/asset edits.
+
+Original grouped verification `sh_1bf1ee6c1001DBBY9hn0Kpd3aP` COMPLETED against
+23 frozen paths, evidence `sol-stage3-v1/`: all affected app/member/contract/cache/
+profile/original-worker/voice-resource/achievement/clock tests, native-media library
+and all-target Clippy, normal feature trees/builds. Same explicit cmd.exe/offline/
+locked/-j2/owned-target/static-CRT/read-only-short-SDK/ONNX1.31.1 constraints.
+All 44 unique affected tests passed (app 6, member 10, contracts 2, actual member
+worker/wire 4, profile cache 6, profile Session 3, voice resource 1, achievement IO 5,
+actual achievement worker 4, clock 3). Independent `sol-stage3-v1/test-audit.json`
+records their exact names. Both original adapter assertions and all four review
+predecessor assertions passed unchanged. Native-media library Clippy passed; only
+all-target Clippy failed on the new test's immutable `while mode != "window"`.
+Later trees/builds did not run, so the original receipt remains FAILED, not certified
+as all-green. All 23 frozen hashes matched; runner/fixtures self-cleaned on exit.
+
+Only that test loop was changed to `if { loop { ... } }`, preserving assertions.
+Original bounded follow-up `sh_1bf26eee5001QuPO80SirrU76y` COMPLETED/PASSED against
+23 frozen paths (`sol-stage3-v2/`), rerunning affected actual member-worker and member
+callback-to-worker tests plus both Clippy modes and remaining normal trees/builds.
+It validates 22 unchanged paths against v1 and retains the original passing test
+evidence for unchanged behavior; it does not relabel v1's failed Clippy as success.
+All 14 rerun tests and all ten checks passed; all 23 source hashes remain current.
+Its temporary runner and fixture directory self-cleaned on original exit.
+Own Graphify original `sh_1bf26efad001e3Qxn6sZBsaFOA` COMPLETED independently on
+the same frozen code (`update . --no-cluster`); log `sol-stage3-graph-v1.log`.
+Result: 14657 nodes/34450 edges, same 9 zero-node warnings, code-only without
+semantic/docs/clustering refresh. Graph.json was updated; no Graphify job is pending.
+No original verification or Graphify job remains pending. Neither was polled,
+restarted, duplicated, killed or detached; source freeze is released after their
+automatic outcomes and original resource exit. Retained receipts/logs are evidence.
+
+Latest coordination reserves an independent `native-rc-completion` worktree from
+`046325d` for the original RC owner. Only that owner adds canonical RC Command/
+UiEvent/ToggleControl/request-qualified ACK/activity/release/frame-handoff/focus/
+teardown shell hunks; existing RemoteViewer viewport/confinement callback wiring;
+root RemoteControlPillWindow export; canonical remote_control request/host capture/
+fence; original per-subscription P2pFrameSource; unchanged checked RC primitives.
+This app owner neither inspects that worktree nor adds competing RC hooks. AppUi/
+avatar/member/achievements/modal/legal/store/main_session hunks remain here. Primary
+owns chatIO/FileJobs/import/update. Only contextual shell/Slint/lock integration,
+never whole-file replacement. Full durability/native/physical acceptance remains FALSE.
 
 ## Historical sole-owner handoff — 2026-11-08
 
