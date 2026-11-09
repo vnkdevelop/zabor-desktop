@@ -26,22 +26,76 @@ FileIo scaffold is excluded from that commit. No reference job remains pending.
 
 Launcher cumulative `02f31b3 -> 173232b -> 7d47a8 -> 0ac8bb2` has an exact eleven-path
 contextual patch which passes primary `git apply --check`. The bounded-response
-read review reports no findings. Launcher code has not yet been applied or tested
-in primary. Prepared admission: `migration-artifacts/native-launch/primary-integration-2026-11-09/`.
+read review reports no findings. Its primary integration is now checked and saved
+as `3963585045c75ea0b04b029cdeab6d5bfc148cfa`, exactly eleven scoped paths,
+with 61 fresh launcher/workflow/transport/bounded-reader tests and ten exact
+candidate implementation/test/workflow blobs. The primary handoff has an additive
+integration receipt. Its original Graphify update completed with exit 0; no
+launcher jobs remain. Authoritative receipt:
+`migration-artifacts/native-launch/primary-integration-2026-11-09/checks-v1/checked-checkpoint-v2.json`.
 
-A new primary `src/shell/file_io.rs` scaffold retains original FileJobs cleanup
-joins through cancelled waiters. It is not yet connected to the shell or tested;
-do not treat it as checked active-file teardown or include it in a checked source
-commit. The callback candidate and primary constructor/drain integration remain
-separate steps.
+The original FileIo primary check `sh_1bf7d932b001JMoa4fu56JY00C` completed with
+exit 0, strict binary/test Clippy, a real binary unit-test build and 19 selected
+FileIo/SessionIo/actual Logout/failed-authentication tests. Its owned temporary
+workspace and runner are removed; exact original evidence remains in
+`migration-artifacts/native-files/primary-fileio-2026-11-09/checks-v1/`.
+The checked component `f8ab4709`/handoff `5152a0bb` is now imported exactly into
+primary; normalized FileJobs SHA256 is
+`157edceacafeb192136ae8d36b6e0bfb87657be02374bd5e2c3afa28d3d683c5`.
+No new component matrix was run by the importer; 14 original checks remain inherited.
 
-The provider stopped the new UI, RC and import executors with pre-consume quota
-errors; there is no checked delivery from those attempts. No quota failure is
+The subsequent uncommitted extension retains original FileJobs, ChatEngine and
+chat transport together through worker Drop/abort, Logout, failed authentication
+and cancelled/stale ChatIo reconciliation. SessionIo shares ChatIo's exact FileIo.
+The bound constructor captures the strong original intents, issued ticket and
+global stop before publication admission. New actual blocking-save/SQLite-lease
+cases passed. Combined original check `sh_1bfc72321001bBB2K6Jp6xVA4v`
+failed compilation at the module-relative `now_ms` path before any tests. Its
+failed receipt remains intact; only one excess `super` was corrected. Corrected
+original `sh_1bfcad1c8001TKAdVjtKgQDCPR` completed with exit 0: 34 fresh tests,
+normal/fixture binary/test strict Clippy, actual binary test build, affected fmt
+and twelve-source/pin freeze. Together with 14 inherited component tests, the
+distinct union is 48; the first-wiring 19 tests are not added again. Owned original
+temporary workspace/runner were removed. Original post-change Graphify completed
+as `sh_1bfcf31ee001OWAIOP3zoRHHuH`, 8,022 nodes / 20,730 edges.
+The seven-path source checkpoint is saved as
+`34c0f3a6602355843ae61c5125b9f99e786c6f90`. No FileIo check/graph job is pending.
+Exact saved-source evidence: `migration-artifacts/native-files/primary-fileio-2026-11-09/save-v1/`.
+Handoff:
+`docs/migration/native-fileio-integration.md`.
+
+The provider stopped earlier UI, RC, import and license executors with pre-consume quota
+errors; there is no checked delivery from those attempts. After the successful
+new launcher/FileJobs deliveries, those same four independent owners received
+one resumed assignment each in their isolated worktrees. No current successful
+delivery is inferred from their launch. No quota failure is
 completion evidence. Previously saved worktrees, source and original receipts
 remain preserved. Other task outcomes must be consumed from their automatic
 notifications, not polled, duplicated or inferred from session admission.
-Save the two current coordination documents separately, then request actual
-compaction before applying and checking the prepared eleven-path launcher slice.
+Media source `05e1659b`/handoff `0eb77d5` is delivered and checked in its original
+worktree: 12 distinct affected tests, both Clippy modes, normal build, source/pin
+freeze and completed graph. Executor `ses_e409ebb4bffd4z4xTWS74TOr8L` now owns
+the exact 13-Rust-path/scoped-handoff primary integration after the checked
+`34c0f3a` boundary. Do not edit those paths or repeat its original commands while
+it works. Delivery artifacts are under the media worktree's
+`migration-artifacts/native-audio/media-scenarios-2026-11-09/delivery/`.
+
+The current UI owner reports isolated `native-app-completion` HEAD `a2e70f6`,
+including checked outgoing-request P2 source `16731e5`. Its original failed
+predecessor and green affected result were reconciled, not rerun. A source-only
+opt-in `audio-test-source` exercises real NativeAudio/DeviceStream threads for
+original Join/Invite in that isolated candidate. Its first runner
+`sh_1bf6d9a5c0012FxuFoA777mirK` timed out during compilation and is not a test
+pass. The replacement original `sh_1bfd0b1f0001QPujzkoUsIdKQg` has timeout 0 and
+is active; do not poll/duplicate. Same durability child
+`ses_e409a6548ffey6eXh0KElJpPrI` resumes only in `native-hidden-durability`.
+No candidate UI/durability delta is yet accepted in primary.
+
+Next: preserve this checked FileIo boundary and current coordination checkpoint,
+perform actual compaction, then consume media/UI/RC/import/dependency deliveries
+and integrate checked contextual deltas. Startup/health/live AppDrainEvidence and
+full parity/resource/package/physical approvals remain open. These component
+checkpoints are not the user's requested full-native completion.
 
 ## Current post-compact App integration admission
 

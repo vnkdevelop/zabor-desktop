@@ -26,9 +26,49 @@ profile. The .NET backend and Go SFU remain unchanged.
   проверок, runtime-only tree и Graphify завершены; 34 scoped paths.
   Reference integration is saved in `e392f75`, with 62 distinct affected tests,
   completed runtime-only tree and Graphify checks in 34 scoped paths.
-- Новый `src/shell/file_io.rs` пока не подключён и не проверен; он исключён из
-  проверенного reference-коммита. The new FileIo scaffold is not yet wired or
-  tested and is excluded from the checked reference commit.
+- Первый FileIo wiring проверен отдельно; более полная ownership extension пока
+  остаётся WIP. FileIo не входил в reference checkpoint. The first FileIo wiring
+  is checked separately; the extended resource owner remains WIP and was excluded
+  from the reference checkpoint.
+
+## Продолжение после compact / post-compact continuation
+
+- `sh_1bf77f5920019BMWd2tn41oK24` завершился с exit 0. Code Graphify обновлён;
+  топология не изменилась, десять zero-node inputs и отдельный doc-semantic refresh
+  остаются ограничениями extraction, а не ошибками native tests.
+- Launcher integration передана `ses_e40855b87ffefFI6sJKMZqGnFg` в primary:
+  завершённый scoped checkpoint `3963585`, ровно одиннадцать admitted paths,
+  61 fresh tests passed; source equivalence, syntax и Graphify completed.
+- Первый FileIo wiring добавляет original FileJobs owner, cancelled-waiter-safe
+  retirement и SessionIo drain. Original check `sh_1bf7d932b001JMoa4fu56JY00C`
+  завершился exit 0: strict Clippy, binary test build и 19 selected tests passed.
+- FileJobs component доставлен: checked source `f8ab4709`, handoff `5152a0bb`,
+  14 original affected tests и strict Clippy без повторного запуска. Exact delta
+  импортирован в primary с exact normalized Git blob equality и 20 unchanged pins.
+- Полный primary FileIo ownership extension удерживает ChatEngine/transport/cache
+  с original FileJobs, включая cancelled ChatIo reconciliation, и использует bound
+  original-intents/ticket/global-stop constructor. Combined original check
+  `sh_1bfc72321001bBB2K6Jp6xVA4v` failed before tests at a module-relative function
+  path; one excess `super` corrected, failed receipt preserved. Corrected original
+  `sh_1bfcad1c8001TKAdVjtKgQDCPR` completed: 34 fresh tests + 14 inherited component
+  tests = 48 distinct union, normal/fixture strict Clippy и binary test build.
+  Source checkpoint `34c0f3a`: семь scoped paths, source/pin freeze и original
+  post-change Graphify completed; owned temporaries removed. FileIo jobs pending: none.
+- UI/Invite, RC, import/recovery и dependency/legal executors получили по одному
+  resumed assignment в своих isolated worktrees после успешных launcher/FileJobs
+  deliveries. Дальнейшие quota failures не повторяются автоматически и не означают
+  завершения; текущие результаты ожидаются только через original notifications.
+- Media delivery `05e1659b`/`0eb77d5` checked with 12 distinct affected tests; same
+  executor now integrates exactly 13 Rust media paths plus scoped handoff in
+  primary after `34c0f3a`. Parent не редактирует этот scope параллельно.
+- UI candidate `a2e70f6` retains checked friend P2 `16731e5`. Actual Join/Invite
+  original `sh_1bfd0b1f0001QPujzkoUsIdKQg` active with timeout 0; original prior
+  compilation timeout is not a test pass. Durability child works only in its
+  isolated worktree. No current UI/durability source is yet admitted in primary.
+
+These are explicit in-progress boundaries, not whole-native acceptance. Preserve
+all original successful and failed receipts. Do not alter checked source while an
+original compilation/source-freeze job is still active.
 
 ## Порядок завершения / completion order
 
