@@ -2,6 +2,16 @@
 
 Редакция: 2026-11-09. Это постоянный handoff для compact, не отчёт о готовности релиза.
 
+## Продолжение исходной сессии / restored original session
+
+Точная граница `2f9d7e6`, сохранённые этапы, свежие app/media/RC владельцы и
+полный порядок следующей интеграции зафиксированы в
+[native-resume-2026-11-09.md](native-resume-2026-11-09.md).
+Original-session boundary `2f9d7e6`, preserved milestones, fresh app/media/RC
+ownership and next integration sequence are recorded there. The previous manual
+compact and app/media continuations failed at the provider; their WIP is preserved,
+not accepted. Whole-native readiness remains false.
+
 ## Latest data source4ee243e
 
 Checked4ee243e7eebb42c44519c80dc747429587f4fa46 integratesbc84383+be6476f+3receipt docs
