@@ -52,7 +52,7 @@ impl AchievementIo {
             next: AtomicU64::new(0),
             jobs: Mutex::new(BTreeMap::new()),
             failed: AtomicBool::new(false),
-            metadata_ordered: false,
+            metadata_ordered: cfg!(windows),
         })
     }
 
@@ -64,6 +64,17 @@ impl AchievementIo {
     ) -> Arc<Self> {
         let mut io = Self::new(profile, intents, stop);
         Arc::get_mut(&mut io).unwrap().metadata_ordered = true;
+        io
+    }
+
+    #[cfg(test)]
+    pub(super) fn unsupported_metadata_fixture(
+        profile: Option<Arc<Profile>>,
+        intents: Arc<CriticalIntents>,
+        stop: CancellationToken,
+    ) -> Arc<Self> {
+        let mut io = Self::new(profile, intents, stop);
+        Arc::get_mut(&mut io).unwrap().metadata_ordered = false;
         io
     }
 

@@ -711,7 +711,7 @@ async fn achievements_actual_worker_services_leave_and_drains_held_storage_ack_b
             let fixture = fixture_with_response("GetMyAchievements", json!(user()), Some(json!(payload("fresh-hidden")))).await;
             let session_io = SessionIo::new(Some(profile.clone()), intents.clone(), stop.clone());
             let achievement_io = if mode == "metadata-blocked" {
-                super::achievement_io::AchievementIo::new(Some(profile.clone()), intents.clone(), stop.clone())
+                super::achievement_io::AchievementIo::unsupported_metadata_fixture(Some(profile.clone()), intents.clone(), stop.clone())
             } else {
                 super::achievement_io::AchievementIo::unverified_transaction_fixture(Some(profile.clone()), intents.clone(), stop.clone())
             };
@@ -834,6 +834,140 @@ async fn achievements_actual_worker_services_leave_and_drains_held_storage_ack_b
             let methods = fixture.server.await.unwrap();
             assert_eq!(methods.iter().filter(|method| method.as_str() == "GetMyAchievements").count(), 1);
             assert!(!methods.iter().any(|method| method == "ViewProfile"));
+        }
+    }).await.unwrap();
+}
+
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hidden_durability_normal_constructor_actual_worker_keeps_original_owner_and_cleanup() {
+    use sha2::{Digest, Sha256};
+    use zabor_native::achievements::{AchievementTarget, AchievementsView};
+    timeout(Duration::from_secs(45), async {
+        for existing in [false, true] {
+            for mode in ["accept", "leave", "logout", "view", "owner", "cancel", "busy"] {
+                let root = tempfile::tempdir().unwrap();
+                let profile = Arc::new(Profile::open(root.path()).unwrap());
+                let directory = root.path().join("achievements");
+                std::fs::create_dir(&directory).unwrap();
+                let path = directory.join(format!("{:x}.json", Sha256::digest(b"fixture-owner")));
+                let previous = existing.then(|| b"{\r\n}\r\n".to_vec());
+                if let Some(previous) = &previous {
+                    std::fs::write(&path, previous).unwrap();
+                }
+                let payload = json!({"unlockedHiddenDefs":[{"id":"fresh-hidden","icon":"x","maxValue":1,"statKey":"fresh-hidden","titleRu":"r","descriptionRu":"r","titleEn":"e","descriptionEn":"e"}]}).to_string();
+                let fixture = fixture_with_response("GetMyAchievements", json!(user()), Some(json!(payload))).await;
+                let intents = Arc::new(CriticalIntents::default());
+                let stop = CancellationToken::new();
+                let session_io = SessionIo::new(Some(profile.clone()), intents.clone(), stop.clone());
+                let achievement_io = super::achievement_io::AchievementIo::new(Some(profile.clone()), intents.clone(), stop.clone());
+                let audio_runtime = audio(&stop);
+                let (sender, commands) = mpsc::channel(8);
+                let queue = CommandQueue { sender, intents: intents.clone() };
+                queue.try_send(Command::Authenticate { credentials: credentials(), registration: None }).unwrap_or_else(|_| panic!("durability authentication queue failed"));
+                let (updates, mut published) = mpsc::unbounded_channel();
+                let task = tokio::spawn(worker(
+                    fixture.endpoint.clone(), commands, Arc::new(move |event| { let _ = updates.send(event); }), stop.clone(), Some(profile.clone()),
+                    WorkerMedia {
+                        video_sink: Arc::new(|_| panic!("durability fixture must not produce video")),
+                        video_generation: Arc::new(AtomicU64::new(1)),
+                        audio_preferences: AudioPreferences::new(&json!({})),
+                        audio_runtime: audio_runtime.clone(),
+                        intents: intents.clone(),
+                        session_io: session_io.clone(),
+                        achievement_io: achievement_io.clone(),
+                    },
+                ));
+                loop {
+                    if matches!(published.recv().await.unwrap().for_current(&intents), Some(UiEvent::SignedIn(_))) { break; }
+                }
+                let mut view = AchievementsView::default();
+                let query = view.begin(&intents, intents.ticket(), "fixture-owner", AchievementTarget::Own).unwrap();
+                queue.sender.try_send(super::QueuedCommand { command: Command::Achievements(query.clone()), ticket: query.ticket() }).unwrap_or_else(|_| panic!("durability original-ticket queue failed"));
+                fixture.held.notified().await;
+                fixture.release.notify_one();
+                let proposal = loop {
+                    match published.recv().await.unwrap().for_current(&intents) {
+                        Some(UiEvent::App(super::app_ui::Event::AchievementProposal { result, plan, acknowledge })) => break Some((result, plan, acknowledge)),
+                        Some(UiEvent::App(super::app_ui::Event::Achievements(result))) if result.storage_failed => break None,
+                        _ => {}
+                    }
+                };
+                let Some((result, plan, acknowledge)) = proposal else {
+                    stop.cancel();
+                    task.await.unwrap();
+                    assert!(achievement_io.finish().await.is_err());
+                    session_io.finish().await.unwrap();
+                    audio_runtime.seal_cleanup().unwrap();
+                    audio_runtime.wait_for_cleanup().await.unwrap();
+                    let methods = fixture.server.await.unwrap();
+                    assert_eq!(methods.iter().filter(|method| method.as_str() == "GetMyAchievements").count(), 1);
+                    assert_eq!(std::fs::read(&path).ok(), previous);
+                    panic!("normal production constructor still refuses the supported durability path after original resource exits");
+                };
+                assert_eq!(result.query, query);
+                assert!(!result.storage_failed);
+                assert!(path.with_extension("journal").exists());
+                let reader = rusqlite::Connection::open_with_flags(path.with_extension("sqlite3"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+                if mode == "busy" { reader.execute_batch("BEGIN").unwrap(); }
+                let (stored, pending): (Option<Vec<u8>>, i64) = reader.query_row("SELECT payload, pending FROM hidden_state WHERE id=1", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+                assert_eq!(stored, previous);
+                assert_eq!(pending, 1);
+                let held_reader = if mode == "busy" { Some(reader) } else { drop(reader); None };
+                if mode == "leave" {
+                    queue.try_send(Command::Leave).unwrap_or_else(|_| panic!("durability Leave queue failed"));
+                    loop {
+                        if matches!(timeout(Duration::from_secs(2), published.recv()).await.unwrap().unwrap().for_current(&intents), Some(UiEvent::VoiceEnded)) { break; }
+                    }
+                }
+                if mode == "logout" {
+                    queue.try_send(Command::Logout).unwrap_or_else(|_| panic!("durability Logout queue failed"));
+                    loop {
+                        if matches!(published.recv().await.unwrap().for_current(&intents), Some(UiEvent::SignedOut)) { break; }
+                    }
+                    drop(acknowledge);
+                } else if mode == "cancel" {
+                    stop.cancel();
+                    drop(acknowledge);
+                } else {
+                    if mode == "view" { view.close(); }
+                    if mode == "owner" { view.begin(&intents, intents.ticket(), "replacement", AchievementTarget::Own).unwrap(); }
+                    let accepted = if view.accept(&intents, &result.query, result.result) { plan.commit_if_current(&intents, &view) } else { None };
+                    let _ = acknowledge.send(accepted);
+                    loop {
+                        match published.recv().await.unwrap().for_current(&intents) {
+                            Some(UiEvent::App(super::app_ui::Event::AchievementsStored { query: completed, result })) => {
+                                assert_ne!(mode, "busy");
+                                assert_eq!(completed, query);
+                                assert_eq!(result.unwrap().is_some(), matches!(mode, "accept" | "leave"));
+                                break;
+                            }
+                            Some(UiEvent::Toast("validation.sessionSaveError")) if mode == "busy" => break,
+                            _ => {}
+                        }
+                    }
+                }
+                drop(held_reader);
+                stop.cancel();
+                task.await.unwrap();
+                assert_eq!(achievement_io.finish().await.is_err(), mode == "busy");
+                session_io.finish().await.unwrap();
+                audio_runtime.seal_cleanup().unwrap();
+                audio_runtime.wait_for_cleanup().await.unwrap();
+                let methods = fixture.server.await.unwrap();
+                assert_eq!(methods.iter().filter(|method| method.as_str() == "GetMyAchievements").count(), 1);
+                assert!(!methods.iter().any(|method| method == "ViewProfile"));
+                let stored = zabor_native::achievement_store::load(&profile, "fixture-owner").unwrap();
+                let probe_intents = CriticalIntents::default();
+                let mut probe_view = AchievementsView::default();
+                let probe = probe_view.begin(&probe_intents, probe_intents.ticket(), "fixture-owner", AchievementTarget::Own).unwrap();
+                let own = stored.prepare_response(&probe, &Default::default()).unwrap().unwrap();
+                assert_eq!(own.prepared_json().contains("fresh-hidden"), matches!(mode, "accept" | "leave"));
+                if !matches!(mode, "accept" | "leave") { assert_eq!(std::fs::read(&path).ok(), previous); }
+                assert!(!path.with_extension("journal").exists());
+                assert!(!std::fs::read_dir(&directory).unwrap().any(|entry| entry.unwrap().path().extension().is_some_and(|extension| extension == "tmp")));
+                println!("hidden durability actual worker existing={existing} mode={mode} original_query=true original_ticket=true worker_join=true achievement_join=true session_join=true audio_cleanup=true loopback_join=true physical=false");
+            }
         }
     }).await.unwrap();
 }

@@ -438,7 +438,11 @@ async fn production_constructor_without_metadata_ordering_preserves_history_and_
             .unwrap();
         let previous = std::fs::read(&path).unwrap();
         let (_, reply) = fixture(&intents);
-        let io = AchievementIo::new(Some(profile.clone()), intents.clone(), stop);
+        let io = AchievementIo::unsupported_metadata_fixture(
+            Some(profile.clone()),
+            intents.clone(),
+            stop,
+        );
         let (updates, mut events) = mpsc::unbounded_channel();
         let job = io.start(
             reply,

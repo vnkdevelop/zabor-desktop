@@ -2,9 +2,15 @@ use crate::achievements::{HiddenCatalog, HiddenPersistence, MAX_PAYLOAD_BYTES};
 use crate::profile::{Profile, ProfileError};
 use fs2::FileExt;
 use sha2::{Digest, Sha256};
+use std::cell::Cell;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+
+#[path = "achievement_authority.rs"]
+mod authority;
+
+use authority::{Authority, State};
 
 fn checked(path: &Path) -> Result<(), ProfileError> {
     match fs::symlink_metadata(path) {
@@ -40,7 +46,18 @@ pub fn load(profile: &Profile, owner: &str) -> Result<HiddenCatalog, ProfileErro
     HiddenStore::open(profile, owner)?.load()
 }
 
+#[cfg(test)]
+type Checkpoint = Box<dyn Fn(&str) + Send>;
+
 pub struct HiddenStore {
+    authority: Authority,
+    compatibility: CompatibilityStore,
+    failed: Cell<bool>,
+    #[cfg(test)]
+    checkpoint: Option<Checkpoint>,
+}
+
+struct CompatibilityStore {
     _lock: File,
     destination: PathBuf,
     journal: PathBuf,
@@ -94,8 +111,142 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ProfileError> {
         .map_err(|_| ProfileError::Storage)
 }
 
+fn validate_bytes(owner: &str, bytes: Option<&[u8]>) -> Result<HiddenCatalog, ProfileError> {
+    match bytes {
+        Some(bytes) => HiddenCatalog::from_durable(
+            owner,
+            std::str::from_utf8(bytes).map_err(|_| ProfileError::Storage)?,
+        )
+        .map_err(|_| ProfileError::Storage),
+        None => HiddenCatalog::empty(owner).map_err(|_| ProfileError::Storage),
+    }
+}
+
 impl HiddenStore {
     pub fn open(profile: &Profile, owner: &str) -> Result<Self, ProfileError> {
+        let compatibility = CompatibilityStore::lock(profile, owner)?;
+        let database = compatibility.destination.with_extension("sqlite3");
+        let bootstrap = match fs::symlink_metadata(&database) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Some(compatibility.legacy_state()?)
+            }
+            Ok(_) => None,
+            Err(_) => return Err(ProfileError::Storage),
+        };
+        let authority = Authority::open(&database, owner, || match bootstrap {
+            Some(state) => Ok(state),
+            None => compatibility.legacy_state(),
+        })?;
+        let state = authority.state()?;
+        let store = Self {
+            authority,
+            compatibility,
+            failed: Cell::new(false),
+            #[cfg(test)]
+            checkpoint: None,
+        };
+        checked(&store.compatibility.journal)?;
+        let journal = match fs::symlink_metadata(&store.compatibility.journal) {
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(_) => return Err(ProfileError::Storage),
+        };
+        let mirror = read_limited(&store.compatibility.destination, MAX_PAYLOAD_BYTES);
+        if state.pending || journal || !matches!(mirror, Ok(ref bytes) if *bytes == state.payload) {
+            store.compatibility.restore(state.payload.as_deref())?;
+            if state.pending {
+                store.authority.finish(state.payload.as_deref())?;
+            }
+        }
+        Ok(store)
+    }
+
+    pub fn load(&self) -> Result<HiddenCatalog, ProfileError> {
+        if self.failed.get() {
+            return Err(ProfileError::Storage);
+        }
+        let state = self.authority.state()?;
+        if state.pending {
+            return Err(ProfileError::Storage);
+        }
+        validate_bytes(&self.compatibility.owner, state.payload.as_deref())
+    }
+
+    pub fn prepare(&self, plan: &HiddenPersistence) -> Result<PreparedHidden, ProfileError> {
+        self.load()?;
+        self.compatibility.prepare(plan)
+    }
+
+    pub fn replace_if<T>(
+        &self,
+        prepared: PreparedHidden,
+        current: impl FnOnce() -> bool,
+        accept: impl FnOnce() -> Option<T>,
+    ) -> Result<Option<T>, ProfileError> {
+        let completed = (|| {
+            if self.failed.get() || prepared.destination != self.compatibility.destination {
+                return Err(ProfileError::Storage);
+            }
+            let state = self.authority.state()?;
+            if state.pending
+                || read_limited(&self.compatibility.destination, MAX_PAYLOAD_BYTES)?
+                    != state.payload
+            {
+                return Err(ProfileError::Storage);
+            }
+            let candidate = read_limited(&prepared.temporary, MAX_PAYLOAD_BYTES)?
+                .ok_or(ProfileError::Storage)?;
+            validate_bytes(&self.compatibility.owner, Some(&candidate))?;
+            if !current() {
+                return Ok(None);
+            }
+            self.authority.begin()?;
+            #[cfg(test)]
+            self.observe("rollback-record");
+            let accepted = self.compatibility.replace_if(prepared, || true, accept)?;
+            #[cfg(test)]
+            self.observe("compatibility-finalized");
+            if accepted.is_some() {
+                if self.authority.finish(Some(&candidate)).is_err() {
+                    let restored = self.authority.restore(state.payload.as_deref());
+                    let mirror = self.compatibility.restore(state.payload.as_deref());
+                    if restored.is_ok() && mirror.is_ok() {
+                        let _ = self.authority.finish(state.payload.as_deref());
+                    }
+                    return Err(ProfileError::Storage);
+                }
+                #[cfg(test)]
+                self.observe("authority-finalized");
+            } else {
+                self.authority.finish(state.payload.as_deref())?;
+                #[cfg(test)]
+                self.observe("rollback-finalized");
+            }
+            Ok(accepted)
+        })();
+        if completed.is_err() {
+            self.failed.set(true);
+        }
+        completed
+    }
+
+    #[cfg(test)]
+    fn observe(&self, stage: &str) {
+        if let Some(checkpoint) = &self.checkpoint {
+            checkpoint(stage);
+        }
+    }
+}
+
+impl CompatibilityStore {
+    #[cfg(test)]
+    fn open(profile: &Profile, owner: &str) -> Result<Self, ProfileError> {
+        let store = Self::lock(profile, owner)?;
+        store.recover()?;
+        Ok(store)
+    }
+
+    fn lock(profile: &Profile, owner: &str) -> Result<Self, ProfileError> {
         let destination = destination(profile, owner)?;
         let lock = destination.with_extension("lock");
         checked(&lock)?;
@@ -113,10 +264,30 @@ impl HiddenStore {
             owner: owner.into(),
             _lock: lock,
         };
-        store.recover()?;
         Ok(store)
     }
 
+    fn legacy_state(&self) -> Result<State, ProfileError> {
+        let journal = read_limited(&self.journal, MAX_PAYLOAD_BYTES + 5)?;
+        let pending = journal.is_some();
+        let payload = match journal {
+            Some(journal) => {
+                if journal.len() < 5 || &journal[..4] != b"ZNH1" {
+                    return Err(ProfileError::Storage);
+                }
+                match journal[4] {
+                    0 if journal.len() == 5 => None,
+                    1 => Some(journal[5..].to_vec()),
+                    _ => return Err(ProfileError::Storage),
+                }
+            }
+            None => read_limited(&self.destination, MAX_PAYLOAD_BYTES)?,
+        };
+        validate_bytes(&self.owner, payload.as_deref())?;
+        Ok(State { payload, pending })
+    }
+
+    #[cfg(test)]
     pub fn load(&self) -> Result<HiddenCatalog, ProfileError> {
         if read_limited(&self.journal, MAX_PAYLOAD_BYTES + 5)?.is_some() {
             return Err(ProfileError::Storage);
@@ -149,6 +320,7 @@ impl HiddenStore {
         remove(&self.journal)
     }
 
+    #[cfg(test)]
     fn recover(&self) -> Result<(), ProfileError> {
         let Some(journal) = read_limited(&self.journal, MAX_PAYLOAD_BYTES + 5)? else {
             return Ok(());
@@ -482,6 +654,9 @@ mod tests {
     #[test]
     fn interrupted_publication_recovers_exact_previous_bytes_or_absence_and_corrupt_journals_fail_closed(
     ) {
+        let load = |profile: &Profile, owner: &str| -> Result<HiddenCatalog, ProfileError> {
+            CompatibilityStore::open(profile, owner)?.load()
+        };
         let root = tempfile::tempdir().unwrap();
         let profile = Profile::open(root.path()).unwrap();
         let path = destination(&profile, "owner").unwrap();
@@ -554,3 +729,7 @@ mod tests {
                 .is_some_and(|extension| extension == "tmp")));
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "achievement_store_durability_tests.rs"]
+mod durability_tests;
