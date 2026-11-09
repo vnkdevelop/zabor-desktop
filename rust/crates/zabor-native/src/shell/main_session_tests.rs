@@ -68,6 +68,7 @@ fn answer(method: &str) -> Value {
             json!("{\"unlockedIds\":[\"first_friend\"],\"totalHiddenCount\":0}")
         }
         "GetIceServers" => json!({"iceServers":[]}),
+        "JoinChannel" => json!({"users":[user()]}),
         "GetRegistrationCaptcha" => json!({"id":"fixture-captcha","imageBase64":"fixture-image"}),
         "UpdateProfile" => Value::Null,
         "GetUserByUsername" => {
@@ -105,6 +106,16 @@ async fn fixture_with_friends(
     login_result: Value,
     held_result: Option<Value>,
     initial_friends: Vec<User>,
+) -> Fixture {
+    fixture_with_audio_response(hold, login_result, held_result, initial_friends, false).await
+}
+
+async fn fixture_with_audio_response(
+    hold: &'static str,
+    login_result: Value,
+    held_result: Option<Value>,
+    initial_friends: Vec<User>,
+    post_join: bool,
 ) -> Fixture {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/zabor_v3", listener.local_addr().unwrap());
@@ -165,9 +176,15 @@ async fn fixture_with_friends(
                             assert!(request.get("invocationId").is_none());
                             assert_eq!(request["arguments"], json!([]));
                             hint_sender.send(method.into()).await.unwrap();
-                        } else if method == "UpdateUserState" {
-                            assert!(request.get("invocationId").is_none());
-                            assert_eq!(request["arguments"], json!([{"userId":"fixture-owner","isMuted":true,"isDeafened":false}]));
+                         } else if method == "UpdateUserState" {
+                             assert!(request.get("invocationId").is_none());
+                             if post_join {
+                                 assert!(methods.iter().any(|method| method == "JoinChannel"));
+                                 assert_eq!(request["arguments"], json!([{"userId":"fixture-owner","isMuted":false,"isDeafened":false}]));
+                                 hint_sender.send("UpdateUserState".into()).await.unwrap();
+                             } else {
+                                 assert_eq!(request["arguments"], json!([{"userId":"fixture-owner","isMuted":true,"isDeafened":false}]));
+                             }
                         } else {
                             if method == "LoginAndResume" { assert_eq!(request["arguments"].as_array().unwrap().len(), 3); assert_eq!(request["arguments"][2], RESUME_SESSION); }
                             if method == "Login" { assert_eq!(request["arguments"].as_array().unwrap().len(), 2); }
@@ -177,7 +194,8 @@ async fn fixture_with_friends(
                               if method == "GetMyAchievements" { assert_eq!(request["arguments"], json!([])); }
                                if method == "GetUserAchievements" { assert_eq!(request["arguments"], json!(["fixture-peer"])); }
                                if method == "GetChannelMembersList" { assert_eq!(request["arguments"], json!(["fixture-channel"])); }
-                               if method == "CallToChannel" { assert_eq!(request["arguments"], json!(["fixture-peer", "fixture-channel", "Fixture"])); }
+                                if method == "CallToChannel" { assert_eq!(request["arguments"], json!(["fixture-peer", "fixture-channel", "Fixture"])); }
+                                if method == "JoinChannel" { assert_eq!(request["arguments"], json!([{"channelId":"fixture-channel"}])); }
                                if method == "KickFromChannel" { assert_eq!(request["arguments"], json!(["fixture-channel", "fixture-peer"])); }
                                if method == "RemoveFriend" { assert_eq!(request["arguments"], json!(["fixture-peer"])); }
                             if matches!(method, "AcceptFriendRequest" | "DeclineFriendRequest" | "DeclineChannelInvite") { assert_eq!(request["arguments"], json!(["fixture-id"])); }
@@ -186,7 +204,7 @@ async fn fixture_with_friends(
                                 waiting = Some(request);
                                 server_held.notify_one();
                              } else {
-                                 let result = if method == "GetFriends" { json!(initial_friends) } else { answer(method) };
+                                  let result = if matches!(method, "Login" | "LoginAndResume" | "Register") { login_result.clone() } else if method == "GetFriends" { json!(initial_friends) } else { answer(method) };
                                  socket.send(Message::text(encode(&json!({"type":3,"invocationId":request["invocationId"],"result":result})).unwrap())).await.unwrap();
                             }
                         }
@@ -1185,15 +1203,34 @@ struct MemberWorkerFixture {
     session_io: Arc<SessionIo>,
     achievement_io: Arc<super::achievement_io::AchievementIo>,
     audio: Arc<SharedAudio<NativeAudio>>,
+    #[cfg(feature = "audio-test-source")]
+    signed_in_user: User,
 }
 
 impl MemberWorkerFixture {
     async fn start(endpoint: &str, intents: Arc<CriticalIntents>) -> Self {
         let stop = CancellationToken::new();
+        let audio = audio(&stop);
+        Self::start_with_audio(
+            endpoint,
+            intents,
+            stop,
+            audio,
+            AudioPreferences::new(&json!({})),
+        )
+        .await
+    }
+
+    async fn start_with_audio(
+        endpoint: &str,
+        intents: Arc<CriticalIntents>,
+        stop: CancellationToken,
+        audio: Arc<SharedAudio<NativeAudio>>,
+        audio_preferences: Arc<AudioPreferences>,
+    ) -> Self {
         let session_io = SessionIo::new(None, intents.clone(), stop.clone());
         let achievement_io =
             super::achievement_io::AchievementIo::new(None, intents.clone(), stop.clone());
-        let audio = audio(&stop);
         let (sender, commands) = mpsc::channel(8);
         let queue = CommandQueue {
             sender,
@@ -1219,21 +1256,21 @@ impl MemberWorkerFixture {
                     panic!("member action fixture must not produce physical video")
                 }),
                 video_generation: Arc::new(AtomicU64::new(1)),
-                audio_preferences: AudioPreferences::new(&json!({})),
+                audio_preferences,
                 audio_runtime: audio.clone(),
                 intents: intents.clone(),
                 session_io: session_io.clone(),
                 achievement_io: achievement_io.clone(),
             },
         ));
-        loop {
+        let _signed_in_user = loop {
             if let Some(UiEvent::SignedIn(data)) =
                 events.recv().await.unwrap().for_current(&intents)
             {
                 assert_eq!(data.user.id, "fixture-owner");
-                break;
+                break data.user.clone();
             }
-        }
+        };
         Self {
             queue,
             events,
@@ -1242,6 +1279,8 @@ impl MemberWorkerFixture {
             session_io,
             achievement_io,
             audio,
+            #[cfg(feature = "audio-test-source")]
+            signed_in_user: _signed_in_user,
         }
     }
 
@@ -1250,6 +1289,8 @@ impl MemberWorkerFixture {
         self.task.await.unwrap();
         self.session_io.finish().await.unwrap();
         self.achievement_io.finish().await.unwrap();
+        self.audio.reset();
+        self.audio.seal_cleanup().unwrap();
         self.audio.wait_for_cleanup().await.unwrap();
         while let Ok(event) = self.events.try_recv() {
             let event = event.for_current(&self.queue.intents);
@@ -1260,6 +1301,13 @@ impl MemberWorkerFixture {
         }
     }
 }
+
+#[cfg(feature = "audio-test-source")]
+#[path = "post_join_invite_tests.rs"]
+mod post_join_invite;
+
+#[cfg(feature = "audio-test-source")]
+pub(super) use post_join_invite::member_origin_invite_original_worker;
 
 pub(super) async fn member_origin_friend_original_worker(
     query: super::profile_lookup::Request,

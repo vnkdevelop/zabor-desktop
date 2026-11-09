@@ -638,7 +638,7 @@ impl DeviceStream {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "audio-test-source"))]
     pub(crate) fn test_worker(
         stop: CancellationToken,
         run: impl FnOnce(

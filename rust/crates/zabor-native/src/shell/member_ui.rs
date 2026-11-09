@@ -84,6 +84,15 @@ impl MemberUi {
         if let Some(request) = self.friend_request.take() {
             request.stop.cancel();
         }
+        if let Some(pending) = self
+            .action
+            .take_if(|pending| matches!(pending.request.operation, Operation::Invite { .. }))
+        {
+            pending.request.stop.cancel();
+            if let Operation::Invite { channel, target } = pending.request.operation {
+                self.sent.remove(&(channel.id, target.id));
+            }
+        }
     }
 
     fn profile_context(&self, ui: &NativeApp) -> bool {
@@ -747,6 +756,7 @@ pub(super) fn bind(
             let mut state = returning.borrow_mut();
             state.cancel_profile_requests(&controls, Instant::now());
             ui.set_modal(if state.channel.is_some() { 11 } else { 0 });
+            state.render(&ui);
             ui.set_profile_restore_reset(ui.get_profile_restore_reset().wrapping_add(1));
         }
     });

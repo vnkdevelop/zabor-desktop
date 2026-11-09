@@ -5,6 +5,10 @@ use slint::PhysicalSize;
 use tokio::sync::mpsc;
 use zabor_native::strings::Strings;
 
+#[cfg(feature = "audio-test-source")]
+#[path = "member_invite_ui_tests.rs"]
+mod member_invite_ui;
+
 struct Headless;
 
 impl Platform for Headless {
