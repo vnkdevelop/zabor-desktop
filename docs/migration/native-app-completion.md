@@ -82,6 +82,53 @@ root-lock replacement. Commit this checked handoff before real parent delivery
 (`resume: false`) and current-session API compact; admission receipts belong in
 `sol-stage3-v2/stage-delivery.json`. Do not restart completed jobs in the next context.
 
+Stage-3 delivery and compaction were actually admitted after handoff `76d7f34`:
+parent inbox `msg_1bf3090290012W45v6V5kJBsbq` (`delivery: steer`, `resume: false`),
+current-session compact `msg_1bf3090c3001c2OmhoMUPLcMEw` (`delivery: steer`). Exact
+receipts remain in `sol-stage3-v2/stage-delivery.json`; neither admission is a new
+verification job, integration acceptance or authorization to replace primary files.
+
+### Post-compact bounded Invite design — read-only
+
+Continuation from `b209c23` / `76d7f34` queried the current own graph before targeted
+reads. No completed check was rerun, no original job is pending, and no runtime,
+manifest, lock, UI, audio or RC source was changed for this design.
+
+The actual worker Join installs the original VoiceSession through
+`VoiceWork.install_voice`, then runs its original `VoiceSession.join` under the
+installed resource ticket (`shell.rs`, Join branch). In `voice.rs`, `join` calls
+`start_audio` before `JoinChannel`; on Windows this requires a real
+`SharedAudio<NativeAudio>` lease, source attachment and playback. Only the successful
+server membership response sets VoiceSession.channel. Skipping audio/Join or
+assigning channel directly would not prove the required actual post-Join behavior.
+
+The existing main_session worker fixture injects a SharedAudio factory which panics
+if a device is requested. NativeAudio has private capture/render DeviceStreams;
+the inert construction in `native_audio.rs` is inside its private library test.
+`DeviceStream.test_worker` is also library-only `cfg(test)`. Those helpers are not
+available to the binary's actual-worker tests through its normal library dependency.
+Therefore a passing, nonphysical original Join needs an explicitly approved
+cross-crate inert-audio test-support boundary first. Do not introduce a production
+audio bypass, dev feature/manifest change, copied worker, manually seeded resource,
+or physical device access to evade this prerequisite. Audio-owner coordination is
+required before expanding this App/UI slice into that support work.
+
+Once that boundary exists, the bounded proof must retain the original worker and
+Join: loopback Login leaves current_channel_id absent or deliberately stale;
+JoinChannel asserts its existing object argument and returns owner-only membership
+so no remote peer offer is needed; only observed current UiEvent::Voice admits the
+next request. Invite uses the original installed ticket/identity and asserts exact
+CallToChannel arguments, literal true/false/null, wrong-channel/offline-target/owner
+rejection, held-response Leave/Logout/view/window rejection, and rejection of the
+old request after a real rejoin without reticketing it. Observe all worker, SessionIo,
+AchievementIo, audio lease/device-thread and loopback-server joins before receipt.
+Keep the current stale-login/no-resource negative test unchanged. Even future
+passing inert-resource coverage would not certify physical audio or full native UI.
+
+This is a test design and a concrete support prerequisite, not new test evidence.
+Successful actual post-Join Invite, Windows crash durability and all full acceptance
+gates remain FALSE. The checked stage-3 source and its original receipts are retained.
+
 Actual inherited `members-v2/verification.json` is PASSED with 20 unchanged hashes:
 45 unique affected tests, native-media library/all-target Clippy `-D warnings`,
 normal library/native feature trees and builds passed. This supersedes the old
