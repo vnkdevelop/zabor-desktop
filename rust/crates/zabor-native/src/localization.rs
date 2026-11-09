@@ -29,18 +29,14 @@ impl Catalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reference;
 
     #[test]
     fn catalogs_match_react_keys_and_values() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let snapshot = reference::Snapshot::admit("catalogs");
         for language in ["ru", "en"] {
-            let reference = std::fs::read_to_string(
-                root.join(format!("src/renderer/src/locales/{language}.json")),
-            )
-            .unwrap();
-            let reference: serde_json::Value = serde_json::from_str(&reference).unwrap();
             let catalog = Catalog::load(language).unwrap();
-            let reference = reference["updater"].as_object().unwrap();
+            let reference = snapshot.catalog(language)["updater"].as_object().unwrap();
             assert_eq!(catalog.0.len(), reference.len());
             for (key, value) in reference {
                 assert_eq!(catalog.get(key), value.as_str().unwrap());

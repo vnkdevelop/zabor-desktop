@@ -1,0 +1,153 @@
+{
+  "baseCommit": "b674b9b1e11fe5113318574f5f5536f9f28a190b",
+  "scope": "Persistent reference preserve-only deletion policy; scoped JS race/freeze checks; unchanged Rust proof inherited",
+  "passed": false,
+  "jsTests": 0,
+  "inheritedRustTests": 17,
+  "originalOutcomes": [
+    {
+      "command": [
+        "git",
+        "show",
+        "b674b9b1e11fe5113318574f5f5536f9f28a190b:scripts/native/reference-contract.cjs"
+      ],
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "elapsedSeconds": 0.0617,
+      "stdout": "const { execFileSync } = require('node:child_process');\nconst { createHash, randomUUID } = require('node:crypto');\nconst fs = require('node:fs');\nconst path = require('node:path');\nconst { gunzipSync } = require('node:zlib');\n\nconst repository = path.resolve(__dirname, '../..');\nconst inventoryPath = 'tests/native-reference/manifest.json';\nconst hash = bytes => createHash('sha256').update(bytes).digest('hex');\nconst fail = message => { throw new Error(`Native reference admission: ${message}`); };\nconst logicalPath = value => {\n  if (typeof value !== 'string' || !value || value.includes('\\\\') || value.split('/').some(part => !/^[A-Za-z0-9_@+-][A-Za-z0-9_.@+-]*$/.test(part) || /[. ]$/.test(part) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\\.|$)/i.test(part))) fail(`invalid relative path: ${value}`);\n  return value;\n};\nconst absoluteLocal = value => typeof value === 'string' && (process.platform === 'win32' ? /^[A-Z]:[\\\\/]/.test(value) : path.isAbsolute(value)) && !/[\"%\\r\\n]/.test(value) && !value.replace(/\\\\/g, '/').includes('//') && !value.split(/[\\\\/]/).some(part => part === '.' || part === '..' || /[. ]$/.test(part));\nconst canonical = value => {\n  if (!absoluteLocal(value)) fail('root must be an absolute, non-aliased local path');\n  const normalized = path.normalize(value);\n  const parsed = path.parse(normalized);\n  let current = parsed.root;\n  const volume = fs.lstatSync(current);\n  if (!volume.isDirectory() || volume.isSymbolicLink() || fs.realpathSync.native(current) !== current) fail(`redirected/reparse volume: ${current}`);\n  const ancestors = [current];\n  for (const part of normalized.slice(parsed.root.length).split(path.sep).filter(Boolean)) {\n    if (!fs.readdirSync(current).includes(part)) fail(`missing or case-aliased path: ${current}${part}`);\n    current = path.join(current, part);\n    ancestors.push(current);\n    const stat = fs.lstatSync(current);\n    if (stat.isSymbolicLink() || fs.realpathSync.native(current) !== current) fail(`redirected/reparse path: ${current}`);\n  }\n  if (process.platform === 'win32') {\n    const helper = path.join(repository, 'scripts/native/reference-paths.py');\n    execFileSync('cmd.exe', ['/d', '/v:off', '/s', '/c', `\"\"python\" \"-B\" \"${helper}\"\"`], { input: JSON.stringify(ancestors), windowsVerbatimArguments: true });\n  }\n  return normalized;\n};\nconst checkedPath = (root, file) => {\n  logicalPath(file);\n  const result = canonical(path.join(root, file));\n  const stat = fs.lstatSync(result);\n  if (!stat.isFile() || stat.nlink !== 1) fail(`not an unaliased regular file: ${file}`);\n  return result;\n};\nconst git = args => {\n  const parts = ['git', ...args];\n  if (parts.some(value => /[\"%\\r\\n]/.test(value))) fail('invalid Git argument');\n  return execFileSync('cmd.exe', ['/d', '/v:off', '/s', '/c', `\"${parts.map(value => `\"${value}\"`).join(' ')}\"`], { cwd: repository, windowsVerbatimArguments: true, maxBuffer: 32 * 1024 * 1024 });\n};\nconst checkedBytes = (bytes, row) => {\n  if (bytes.length !== row.size || hash(bytes) !== row.sha256) fail(`size/hash mismatch: ${row.path}`);\n  return bytes;\n};\nconst validateManifest = manifest => {\n  if (manifest.version !== 1 || !/^[a-f0-9]{40}$/.test(manifest.sourceCommit) || !Array.isArray(manifest.files) || !manifest.files.length) fail('invalid manifest header');\n  const paths = new Set();\n  for (const row of manifest.files) {\n    logicalPath(row.path);\n    if (paths.has(row.path.toLowerCase()) || !Number.isSafeInteger(row.size) || row.size < 1 || !/^[a-f0-9]{64}$/.test(row.sha256) || !/^[a-f0-9]{64}$/.test(row.gitSha256) || !/^[a-f0-9]{40}$/.test(row.gitBlob) || !['exact', 'crlf'].includes(row.checkout)) fail(`invalid manifest entry: ${row.path}`);\n    paths.add(row.path.toLowerCase());\n    if (row.seed) logicalPath(row.seed);\n  }\n  if (!manifest.groups || Object.values(manifest.groups).some(files => !Array.isArray(files) || files.some(file => !paths.has(file.toLowerCase()) || !manifest.files.some(row => row.path === file)))) fail('invalid group closure');\n  if (!manifest.bundle || !/^[a-f0-9]{64}$/.test(manifest.bundle.sha256)) fail('invalid frozen bundle');\n  logicalPath(manifest.bundle.path);\n  if (!manifest.packages || typeof manifest.captureGate !== 'string' || !manifest.captureGate || Object.values(manifest.packages).some(pin => typeof pin.version !== 'string' || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(pin.integrity) || pin.admitted !== false)) fail('unreviewed package/capture admission');\n  if (manifest.packageLock?.path !== 'package-lock.json' || !/^[a-f0-9]{40}$/.test(manifest.packageLock.gitBlob) || !/^[a-f0-9]{64}$/.test(manifest.packageLock.gitSha256)) fail('invalid package-lock provenance');\n  return manifest;\n};\nconst checkProvenance = (row, commit, readGit = git) => {\n  const listing = readGit(['ls-tree', commit, '--', row.path]).toString('utf8').trim();\n  if (listing !== `100644 blob ${row.gitBlob}\\t${row.path}`) fail(`Git path/blob mismatch: ${row.path}`);\n  const bytes = readGit(['cat-file', 'blob', row.gitBlob]);\n  if (hash(bytes) !== row.gitSha256) fail(`Git hash mismatch: ${row.path}`);\n  return bytes;\n};\nconst openReference = (options = {}) => {\n  const manifest = validateManifest(JSON.parse(fs.readFileSync(checkedPath(repository, inventoryPath), 'utf8')));\n  const lock = JSON.parse(checkProvenance(manifest.packageLock, manifest.sourceCommit));\n  for (const [name, pin] of Object.entries(manifest.packages)) {\n    const original = lock.packages[`node_modules/${name}`];\n    if (!original || original.version !== pin.version || original.integrity !== pin.integrity) fail(`package lock provenance mismatch: ${name}`);\n  }\n  const root = canonical(options.root === undefined ? (process.env.ZABOR_NATIVE_REFERENCE_ROOT || repository) : options.root);\n  const rows = new Map(manifest.files.map(row => [row.path, row]));\n  const validate = (file, bytes) => {\n    const row = rows.get(logicalPath(file));\n    if (!row) fail(`path outside retained closure: ${file}`);\n    checkedBytes(bytes, row);\n    const normalized = row.checkout === 'crlf' ? Buffer.from(bytes.toString('utf8').replace(/\\r\\n/g, '\\n')) : bytes;\n    if (!normalized.equals(checkProvenance(row, manifest.sourceCommit))) fail(`working/Git provenance mismatch: ${file}`);\n    return bytes;\n  };\n  const filePath = file => {\n    if (!rows.has(logicalPath(file))) fail(`path outside retained closure: ${file}`);\n    const result = checkedPath(root, file);\n    validate(file, fs.readFileSync(result));\n    return result;\n  };\n  const read = file => validate(file, fs.readFileSync(filePath(file)));\n  const group = name => {\n    if (!Object.hasOwn(manifest.groups, name)) fail(`unknown group: ${name}`);\n    return Object.fromEntries(manifest.groups[name].map(file => [file, hash(read(file))]));\n  };\n  const requirePackage = name => {\n    const pin = manifest.packages[name];\n    if (!pin) fail(`unlisted package: ${name}`);\n    fail(`package closure not frozen: ${name}@${pin.version}; lock integrity ${pin.integrity}; no checkout/node_modules fallback`);\n  };\n  const packagePath = (name, file) => { logicalPath(file); return requirePackage(name); };\n  const capture = () => { fail(manifest.captureGate); };\n  const snapshot = name => {\n    if (!Object.hasOwn(manifest.groups, name)) fail(`unknown group: ${name}`);\n    return { root, files: Object.fromEntries(manifest.groups[name].map(file => [file, read(file).toString('utf8')])) };\n  };\n  return { root, manifest, path: filePath, read, text: file => read(file).toString('utf8'), group, snapshot, requirePackage, packagePath, capture, validate };\n};\nconst freezeReference = destination => {\n  if (!absoluteLocal(destination)) fail('invalid freeze destination');\n  const target = path.normalize(destination);\n  logicalPath(path.basename(target));\n  const parent = canonical(path.dirname(target));\n  if (fs.lstatSync(target, { throwIfNoEntry: false })) fail('existing freeze destination preserved');\n  const reference = openReference({ root: repository });\n  const bundleBytes = fs.readFileSync(checkedPath(repository, reference.manifest.bundle.path));\n  if (hash(bundleBytes) !== reference.manifest.bundle.sha256) fail('frozen bundle hash mismatch');\n  const bundle = JSON.parse(gunzipSync(bundleBytes).toString('utf8'));\n  const bundled = reference.manifest.files.filter(row => !row.seed).map(row => row.path);\n  if (Object.keys(bundle).length !== bundled.length || Object.keys(bundle).some(file => !bundled.includes(file))) fail('frozen bundle closure mismatch');\n  const files = reference.manifest.files.map(row => {\n    const bytes = row.seed ? fs.readFileSync(checkedPath(repository, row.seed)) : Buffer.from(bundle[row.path], 'base64');\n    return [row.path, reference.validate(row.path, bytes)];\n  });\n  const marker = path.join(parent, `.native-reference-owner-${randomUUID()}`);\n  const markerHandle = fs.openSync(marker, 'wx');\n  const markerIdentity = fs.fstatSync(markerHandle);\n  fs.closeSync(markerHandle);\n  const directories = new Map();\n  const written = [];\n  const same = (left, right) => left && right && left.dev === right.dev && left.ino === right.ino;\n  const ownedMarker = () => {\n    const stat = fs.lstatSync(marker, { throwIfNoEntry: false });\n    if (!same(stat, markerIdentity) || !stat.isFile() || stat.nlink !== 1 || fs.realpathSync.native(marker) !== marker) fail('freeze ownership marker changed; existing files preserved');\n  };\n  try {\n    fs.mkdirSync(target);\n    directories.set(target, fs.lstatSync(target));\n    for (const [file, bytes] of files) {\n      let directory = target;\n      for (const part of file.split('/').slice(0, -1)) {\n        directory = path.join(directory, part);\n        if (!directories.has(directory)) {\n          fs.mkdirSync(directory);\n          directories.set(directory, fs.lstatSync(directory));\n        }\n      }\n      const output = path.join(target, file);\n      const handle = fs.openSync(output, 'wx');\n      written.push({ path: output, identity: fs.fstatSync(handle), bytes });\n      try { fs.writeFileSync(handle, bytes); } finally { fs.closeSync(handle); }\n    }\n    const frozen = openReference({ root: target });\n    for (const [file] of files) frozen.read(file);\n    return { root: target, files: files.length, manifestSha256: hash(fs.readFileSync(checkedPath(repository, inventoryPath))), packagesAdmitted: false, visualAcceptance: false };\n  } catch (error) {\n    try {\n      ownedMarker();\n      if (directories.has(target)) {\n        canonical(target);\n        if (!same(fs.lstatSync(target), directories.get(target))) fail('freeze root ownership changed; existing files preserved');\n        for (const file of written.reverse()) {\n          const stat = fs.lstatSync(checkedPath(target, path.relative(target, file.path).replace(/\\\\/g, '/')));\n          const bytes = fs.readFileSync(file.path);\n          if (!same(stat, file.identity) || bytes.length > file.bytes.length || !bytes.equals(file.bytes.subarray(0, bytes.length))) fail('freeze file ownership/content changed; existing files preserved');\n          fs.unlinkSync(file.path);\n        }\n        for (const [directory, identity] of [...directories].reverse()) {\n          canonical(directory);\n          if (!same(fs.lstatSync(directory), identity)) fail('freeze directory ownership changed; existing files preserved');\n          fs.rmdirSync(directory);\n        }\n      }\n    } catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Freeze failed; unsafe or nonempty cleanup paths preserved'); }\n    throw error;\n  } finally {\n    ownedMarker();\n    fs.unlinkSync(marker);\n  }\n};\n\nmodule.exports = { openReference, freezeReference, validateManifest, logicalPath, checkProvenance };\nif (require.main === module) {\n  const [operation, value, ...extra] = process.argv.slice(2);\n  try {\n    if (extra.length) fail('unexpected arguments');\n    if (operation === '--read' && value) process.stdout.write(openReference().read(value));\n    else if (operation === '--snapshot' && value) process.stdout.write(JSON.stringify(openReference().snapshot(value)));\n    else if (operation === '--check' && value) process.stdout.write(JSON.stringify(openReference().group(value)));\n    else if (operation === '--freeze' && value) process.stdout.write(JSON.stringify(freezeReference(value)));\n    else fail('usage: reference-contract.cjs --read PATH | --snapshot GROUP | --check GROUP | --freeze ABSOLUTE_DIRECTORY');\n  } catch (error) {\n    console.error(error.message);\n    process.exitCode = 1;\n  }\n}\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "--test",
+        "--test-name-pattern=boundary",
+        "tests/native-reference/cleanup-races.test.cjs"
+      ],
+      "exitCode": 1,
+      "expectedExitCode": 1,
+      "elapsedSeconds": 2.8815,
+      "stdout": "\u0432\u045a\u2013 data replacement at final check/delete boundary remains preserved (628.7426ms)\n\u0432\u045a\u2013 directory replacement at final check/delete boundary remains preserved (582.216ms)\n\u0432\u045a\u2013 root replacement at final check/delete boundary remains preserved (619.4563ms)\n\u0432\u045a\u2013 marker replacement at final check/delete boundary remains preserved (579.2666ms)\n\u0432\u045a\u2013 successful freeze marker replacement at the deletion boundary keeps admitted own bytes (310.8116ms)\n\u0432\u201e\u2116 tests 5\n\u0432\u201e\u2116 suites 0\n\u0432\u201e\u2116 pass 0\n\u0432\u201e\u2116 fail 5\n\u0432\u201e\u2116 cancelled 0\n\u0432\u201e\u2116 skipped 0\n\u0432\u201e\u2116 todo 0\n\u0432\u201e\u2116 duration_ms 2795.889\n\n\u0432\u045a\u2013 failing tests:\n\ntest at tests\\native-reference\\cleanup-races.test.cjs:93:3\n\u0432\u045a\u2013 data replacement at final check/delete boundary remains preserved (628.7426ms)\n  AssertionError [ERR_ASSERTION]: Replacement deleted at after-final-ownership-check-at-deletion-entry\n  \n  false !== true\n  \n      at TestContext.<anonymous> (C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\cleanup-races.test.cjs:95:12)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1306:25)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n\ntest at tests\\native-reference\\cleanup-races.test.cjs:93:3\n\u0432\u045a\u2013 directory replacement at final check/delete boundary remains preserved (582.216ms)\n  AssertionError [ERR_ASSERTION]: Replacement deleted at after-final-ownership-check-at-deletion-entry\n  \n  false !== true\n  \n      at TestContext.<anonymous> (C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\cleanup-races.test.cjs:95:12)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1306:25)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n\ntest at tests\\native-reference\\cleanup-races.test.cjs:93:3\n\u0432\u045a\u2013 root replacement at final check/delete boundary remains preserved (619.4563ms)\n  AssertionError [ERR_ASSERTION]: Replacement deleted at after-final-ownership-check-at-deletion-entry\n  \n  false !== true\n  \n      at TestContext.<anonymous> (C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\cleanup-races.test.cjs:95:12)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1306:25)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n\ntest at tests\\native-reference\\cleanup-races.test.cjs:93:3\n\u0432\u045a\u2013 marker replacement at final check/delete boundary remains preserved (579.2666ms)\n  AssertionError [ERR_ASSERTION]: Replacement deleted at after-final-ownership-check-at-deletion-entry\n  \n  false !== true\n  \n      at TestContext.<anonymous> (C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\cleanup-races.test.cjs:95:12)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1306:25)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n\ntest at tests\\native-reference\\cleanup-races.test.cjs:104:1\n\u0432\u045a\u2013 successful freeze marker replacement at the deletion boundary keeps admitted own bytes (310.8116ms)\n  AssertionError [ERR_ASSERTION]: Replacement marker was deleted by success-finally cleanup\n  \n  false !== true\n  \n      at TestContext.<anonymous> (C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\cleanup-races.test.cjs:106:10)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1306:25)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: false,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "--test",
+        "tests/native-reference/followup-freeze.test.cjs",
+        "tests/native-reference/cleanup-races.test.cjs"
+      ],
+      "exitCode": 1,
+      "expectedExitCode": 0,
+      "elapsedSeconds": 7.7432,
+      "stdout": "\u0432\u045a\u201d data replacement at final check/delete boundary remains preserved (188.1926ms)\n\u0432\u045a\u201d directory replacement at final check/delete boundary remains preserved (201.2017ms)\n\u0432\u045a\u201d root replacement at final check/delete boundary remains preserved (183.0807ms)\n\u0432\u045a\u201d marker replacement at final check/delete boundary remains preserved (204.8501ms)\n\u0432\u045a\u201d successful freeze marker replacement at the deletion boundary keeps admitted own bytes (271.2108ms)\n\u0432\u045a\u201d failed unchanged owned file remains preserved with truthful failure state (177.4316ms)\n\u0432\u045a\u2013 failed root junction and its synthetic user bytes remain untouched (174.1017ms)\n\u0432\u045a\u201d CLI failure identifies the persistent destination as preserved and unvalidated (2788.6961ms)\n\u0432\u045a\u201d freezer contains no automatic pathname deletion fallback for any object class (0.5906ms)\n\u0432\u045a\u201d drive-rooted destination is rejected before any mkdir/write (predecessor regression) (1.7201ms)\n\u0432\u045a\u201d drive-relative, UNC, device, volume, case and path aliases fail before mutation (8.4288ms)\n\u0432\u045a\u201d aliased volume realpath fails before any mutation (1.7071ms)\n\u0432\u045a\u201d reparse parent fails without creating a destination or ownership marker (3.5415ms)\n\u0432\u045a\u201d existing destination and user marker remain byte-identical (99.1966ms)\n\u0432\u045a\u201d failed partial write reports and preserves the failed reference tree (2385.006ms)\n\u0432\u045a\u201d failed directory creation preserves its owned prefix without any deletion (2738.6536ms)\n\u0432\u045a\u201d unexpected user file inside a failed destination is preserved (2305.4087ms)\n\u0432\u201e\u2116 tests 17\n\u0432\u201e\u2116 suites 0\n\u0432\u201e\u2116 pass 16\n\u0432\u201e\u2116 fail 1\n\u0432\u201e\u2116 cancelled 0\n\u0432\u201e\u2116 skipped 0\n\u0432\u201e\u2116 todo 0\n\u0432\u201e\u2116 duration_ms 7636.3718\n\n\u0432\u045a\u2013 failing tests:\n\ntest at tests\\native-reference\\cleanup-races.test.cjs:122:1\n\u0432\u045a\u2013 failed root junction and its synthetic user bytes remain untouched (174.1017ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  false !== true\n  \n      at TestContext.<anonymous> (C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\cleanup-races.test.cjs:125:10)\n      at Test.runInAsyncScope (node:async_hooks:227:14)\n      at Test.run (node:internal/test_runner/test:1306:25)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: false,\n    expected: true,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+      "stderr": ""
+    }
+  ],
+  "sdk": {
+    "serde": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+      "sha256": "3351f8911787b08b2d2618540f592fdfe8b8bbd80aa598007cddfce1081d7046",
+      "fingerprint": 13778454799618568188
+    },
+    "serde_json": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+      "sha256": "5cb32cc1596f9d682a8f5a4f0358547ab50eab348400da6ceea608c0a3d3254e",
+      "fingerprint": 13836475259000838342
+    },
+    "thiserror": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+      "sha256": "2e2704890c72d744f6e53d7cb47a908b90eb179fd348e5476a682ba773f86ead",
+      "fingerprint": 1121792929245877005
+    },
+    "futures_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+      "sha256": "8ebb99f44c662b53427adb22c8009a6618569bea1cdb00f64685d1f022b60d51",
+      "fingerprint": 13879001378624573752
+    },
+    "tokio": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+      "sha256": "99242fe1aff80af1c1e886fa07d5263fb9004b0d41d1f511edade810496ad39a",
+      "fingerprint": 18142639122434583119
+    },
+    "tokio_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+      "sha256": "61969158f101b2baad1999b50af489da1a9861f39da6c61172adf1e84860d5b8",
+      "fingerprint": 16555775765130003229
+    },
+    "tokio_tungstenite": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+      "sha256": "b87a8cc363ab3890daabf926e6bc4ce30e4d97cdb8354842548c32868f395f08",
+      "fingerprint": 3741319618123961936
+    },
+    "url": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+      "sha256": "05fd91d9d53a4a3e6fa00a8dce52ae76d0eb3006b5eb0fd8126e9ac1204576cc",
+      "fingerprint": 17321916557742098263
+    },
+    "reqwest": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib",
+      "sha256": "ea8ee077c47ce4631ab38ebf862f88711f62f853eda7a66a97a01aa0fbe0443f",
+      "fingerprint": 14121496218506268594
+    }
+  },
+  "temporaryCleanup": {
+    "completed": true,
+    "afterOriginalProcessesExited": true
+  },
+  "sources": {
+    "scripts/native/reference-contract.cjs": "f663ef7119b02243885f3c7db7a40eef59637edad85ffabbf078f5f660592832",
+    "tests/native-reference/followup-freeze.test.cjs": "535495b205451adb31607ed6122e96239fd7d4821f940bc277165c23f68eed52",
+    "tests/native-reference/cleanup-races.test.cjs": "2ac1de80f51ae9bfd4e716ebf9f9e5668f617e1738d6f98562d6e635bc05c5c6"
+  },
+  "inheritedSources": {
+    ".cargo/config.toml": "8feb1d003d7cca188186af5cc2523152f2e2ac3abaa95409315f7eb015f358b9",
+    "package-lock.json": "8eaa580fe89dede5ba22b3064496ca32f8346583705e04e3a061d0ccd5547c37",
+    "rust/Cargo.lock": "48db95ccb660a6d1e48a4056ee8dbf0855f640e33ec78de42e6075a289c9c31c",
+    "rust/Cargo.toml": "9da9a5dc7733144d5d424af0157c8508b7b2d9914a1ab471a4151f3e8ba22f2f",
+    "rust/crates/zabor-native/Cargo.toml": "c1331cebe377ff1e42428334469c4503776c2b9230d5e2df137bccf2235e3957",
+    "rust/crates/zabor-native/assets/catalogs/en.json": "a353e37199ad8e79aa2ea44d3afdacedaca13af4e28382db9f8ea0a23793958a",
+    "rust/crates/zabor-native/assets/catalogs/ru.json": "066fd2522dc46cdf7987df79a653521e8d34516b09dffb037356303353194fcc",
+    "rust/crates/zabor-native/assets/models/DeepFilterNet3_onnx.tar.gz": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+    "rust/crates/zabor-native/assets/models/silero_vad.onnx": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+    "rust/crates/zabor-native/assets/resources.json": "ede7a7d4d1d10d8430b58eac6cfe30c4323dd2a9a164b15dbb089f14ab9fc4b8",
+    "rust/crates/zabor-native/src/achievements.rs": "a93f46c746ae8f64707543b793c18acbb63ac4212facbef34c8f9a9634d8b9ec",
+    "rust/crates/zabor-native/src/achievements/tests.rs": "5150d4219904a07b7d1056cbb591199d003c7f18b9c4150b20116abb8aefb5fb",
+    "rust/crates/zabor-native/src/critical_intents.rs": "75221e725ef8fda3c0d2e1115d19b5c8a8b5f29136bbb0a928a8dbaf9f781248",
+    "rust/crates/zabor-native/src/hub.rs": "c06230d5c1ca21e7a173bde9cbf0d0059c638269d00d0a21154bc1b4ed637fde",
+    "rust/crates/zabor-native/src/localization.rs": "9d39c4c8e26c18ff3e940c9b2309aa28aa75a932c1926b05c45e4dd68d430ec5",
+    "rust/crates/zabor-native/src/presence.rs": "434861756f0717418c76b33b8e24c417ce65a4eba11832454b5349d4d14becf8",
+    "rust/crates/zabor-native/src/presence/tests.rs": "6d0eaa29818d211e341e267321f22720f19bc2d1bbe925a4047ae5714860bb8b",
+    "rust/crates/zabor-native/src/protocol.rs": "f3d06033b97e7d362a526448771460b11c041965eb400aaa767237e4b18bcfd3",
+    "rust/crates/zabor-native/tests/neural-reference.mjs": "c7849b3cf5b240ef3ef42dab857bfefa3eff12044447425245a12a2da9cf3976",
+    "rust/crates/zabor-native/tests/reference/contract.rs": "658557fa9bd5d12f5f9a43d63a7c77408e4b8a45955a445951b4e6026a3d20e2",
+    "rust/crates/zabor-native/tests/silero-reference.cjs": "5fe7aaaca059a969b7ea34d8483c14db7fa3ebb362fc71775e23d2f4e2579a6b",
+    "rust/crates/zabor-native/tests/vad-reference.cjs": "e868a85f4fdeca5fdeb5916810323029784420f5fba9053021b538a88b5aa91f",
+    "rust/crates/zabor-native/tests/voice-reference.cjs": "f7c6e62cac174a8919343986f0cd33b9f9f5cd860235931e1648ef4143b6e764",
+    "scripts/native/capture-react.cjs": "59ad7af206c728ea0cdf2fe840b09365a5a4ef38b347b523dd3d69bad039a059",
+    "scripts/native/reference-paths.py": "2fea1679b2544a27531dcc8831f9b11612811fa064677035fd1208d942d04ec8",
+    "scripts/native/verify.cjs": "51851c24c5140a1056e796755729758425f3bd04bae3db610b88feace461aeb7",
+    "tests/native-reference/contract.test.cjs": "faaab08b3b9e49e7c390f0676a23fb2807f2a1d6f8101deb866ec8ac66156021",
+    "tests/native-reference/manifest.json": "229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a",
+    "tests/native-reference/snapshot-regressions.rs": "d041fd1719d8d6cf1b38e4afce80491d351442afd40fa49024594fb0e9dbaa88",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa"
+  },
+  "originalProofs": {
+    "tests/native-reference/rust-verification-v1.json": "22f5488d562c6f4c026345d982515502b3dce5d1fa2444a15c86fca32dd464fe",
+    "tests/native-reference/rust-verification-v2.json": "1bb443fd49d8e6ef4b020dea0f46d2e11f7c049d301075aef32813888b0ab390",
+    "tests/native-reference/rust-verification-v3.json": "e9f7b83242924323bdfc314eda5e0ea1a59e9955efd74e61b8c5b40fdfebb712",
+    "tests/native-reference/rust-verification-v4.json": "0a088953d37dfab0a8cd37e2dd350f2a838e18ba263b029aa942b8c3645b7ad4",
+    "tests/native-reference/followup-freeze-verification.json": "7f226ffd501efb4fbd05cb4eca926c524194d164e8baad5142adc477b38069f3",
+    "tests/native-reference/followup-verification-v1.json": "fe7ca7cf828c9e453dcfa60b5af9637ada632c69de823b21622a705339aecb97",
+    "tests/native-reference/followup-verification-v2.json": "23841669aac2c18b2e72ed3ac81ddde6c5bae0e83ca6bbb406fcbf795a145299",
+    "tests/native-reference/followup-graph-integrity.json": "cb9c90a5164cf68176aa709f8131a42689df2ffa302d4268e5d293c2293bdc29",
+    "tests/native-reference/js-verification.json": "ec3708638f9957708c54b6ed134b49ad175f9c4f273facfb2a0eab49d89def0b",
+    "tests/native-reference/source-integrity.json": "dabcb90199e92039045711b07c460cafa7b96dd6b143bd9b7b5de1d0e26bcb72",
+    "tests/native-reference/graph-integrity.json": "b240b988416e37a86588fa3de46901126ccb1560adc0c9d6cfbee2fd90a8ec1e",
+    "tests/native-reference/manifest.json": "229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa"
+  },
+  "unchangedAdmissionBodySha256": "9e4a8827ef082b2c00d8fcf35d85164bd9dbcb195608d84bc6e3da179fdd5b5e",
+  "predecessorRaceFailures": 5,
+  "error": "Original subprocess exit code 1, expected 0"
+}

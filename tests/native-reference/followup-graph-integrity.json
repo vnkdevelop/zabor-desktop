@@ -1,0 +1,18 @@
+{
+  "originalJob": "sh_1bf1fabf6001qS7J1ZQGBgmUC6",
+  "command": "cmd.exe /c graphify update .",
+  "exitCode": 0,
+  "updatesRun": 1,
+  "nodes": 14900,
+  "edges": 32733,
+  "communities": 575,
+  "duplicateNodeIds": 0,
+  "missingEndpointEdges": 0,
+  "danglingEndpointEdges": 0,
+  "selfLoops": 0,
+  "duplicateUndirectedExportPairs": 0,
+  "zeroNodeSourceWarnings": 22,
+  "semanticRefresh": false,
+  "htmlSkippedAbove5000": true,
+  "caveat": "Export-only checks cannot reconstruct already collapsed extraction edges or prove semantic documentation/client completeness; original graph proof/history stays unchanged"
+}

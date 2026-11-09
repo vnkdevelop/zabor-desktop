@@ -48,6 +48,9 @@ pub mod picker;
 pub mod presence;
 pub mod profile;
 pub mod protocol;
+#[cfg(test)]
+#[path = "../tests/reference/contract.rs"]
+mod reference;
 pub mod release;
 #[cfg(all(windows, feature = "native-media"))]
 mod remote_input;

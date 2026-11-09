@@ -1,0 +1,31 @@
+{
+  "baseCommit": "2f4c19ab7221c1a70eac93aef9ccd14f22b6b371",
+  "predecessor": {
+    "command": "cmd.exe /c set ZABOR_REFERENCE_PREDECESSOR=1&& node --test --test-name-pattern=predecessor tests/native-reference/followup-freeze.test.cjs",
+    "exitCode": 1,
+    "tests": 1,
+    "passed": 0,
+    "failed": 1,
+    "mockedMkdirs": 16,
+    "mockedWrites": 15,
+    "realDriveRootWrites": 0,
+    "elapsedMs": 3492.9558
+  },
+  "green": {
+    "originalJob": "sh_1bf1625f3001e8Ssf4WrREfG18",
+    "command": "cmd.exe /c node --test tests/native-reference/followup-freeze.test.cjs",
+    "exitCode": 0,
+    "tests": 8,
+    "passed": 8,
+    "failed": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "elapsedMs": 25260.1084
+  },
+  "sources": {
+    "scripts/native/reference-contract.cjs": "fcff2dd918fdc176ff0ba9ae574da89bbf763df5222a461e67c7485e52b97844",
+    "scripts/native/reference-paths.py": "2fea1679b2544a27531dcc8831f9b11612811fa064677035fd1208d942d04ec8",
+    "tests/native-reference/followup-freeze.test.cjs": "59ff037c0f4ed5eeb810a025a72e6b92b0289b9c0fa135bf57a580ae487faa42"
+  },
+  "cleanup": "Marker-owned fixture cleanup completed; freezer cleanup uses recorded file/directory identities and nonrecursive unlink/rmdir only"
+}

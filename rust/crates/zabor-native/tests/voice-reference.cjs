@@ -1,11 +1,11 @@
 const { readFileSync } = require('node:fs');
-const { resolve } = require('node:path');
 const vm = require('node:vm');
-const ts = require('typescript');
+const reference = require('../../../../scripts/native/reference-contract.cjs').openReference();
+reference.group('voice');
+const ts = reference.requirePackage('typescript');
 
-const root = resolve(__dirname, '../../../..');
 const payload = JSON.parse(readFileSync(0, 'utf8'));
-const compile = file => ts.transpileModule(readFileSync(resolve(root, file), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const compile = file => ts.transpileModule(reference.text(file), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const exported = {};
 vm.runInNewContext(compile('src/renderer/src/services/voice-shaping.ts'), { exports: exported, sampleRate: 48000 });
 const input = Float32Array.from(payload.samples);

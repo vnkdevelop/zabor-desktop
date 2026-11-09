@@ -1,5 +1,6 @@
 use super::*;
 use crate::critical_intents::CriticalAction;
+use crate::reference;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -7,15 +8,10 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::Message;
 
-fn translate(language: &str, key: &str) -> String {
-    let source = if language == "en" {
-        include_str!("../../../../../src/renderer/src/locales/en.json")
-    } else {
-        include_str!("../../../../../src/renderer/src/locales/ru.json")
-    };
-    let mut value: Value = serde_json::from_str(source).unwrap();
+fn translate(snapshot: &reference::Snapshot, language: &str, key: &str) -> String {
+    let mut value = snapshot.catalog(if language == "en" { "en" } else { "ru" });
     for segment in key.split('.') {
-        value = value[segment].clone();
+        value = &value[segment];
     }
     value.as_str().unwrap_or(key).into()
 }
@@ -147,7 +143,8 @@ fn duplicate_ids_deduplicate_in_original_order_but_conflicting_keys_fail() {
 
 #[test]
 fn standard_definitions_match_original_ids_stats_categories_max_and_units() {
-    let source = include_str!("../../../../../src/renderer/src/achievements.ts");
+    let snapshot = reference::Snapshot::admit("achievements");
+    let source = snapshot.text("src/renderer/src/achievements.ts");
     let definitions = &source[source.find("export const ACHIEVEMENTS:").unwrap()
         ..source
             .find("export interface HiddenAchievementPayload")
@@ -173,7 +170,7 @@ fn standard_definitions_match_original_ids_stats_categories_max_and_units() {
         for language in ["ru", "en"] {
             for field in ["title", "description"] {
                 let key = format!("achievements.{}.{field}", standard.id);
-                assert_ne!(translate(language, &key), key);
+                assert_ne!(translate(&snapshot, language, &key), key);
             }
         }
     }
@@ -203,13 +200,16 @@ fn exact_progress_rounds_minutes_to_hours_not_fractional_bar() {
 
 #[test]
 fn own_peer_rows_localization_sort_and_unknown_hidden_differ() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     let intents = CriticalIntents::default();
     let (mut view, query) = own_view(&intents);
     assert!(view.data().is_none());
-    assert!(view.rows("en", |key| translate("en", key), None).is_empty());
+    assert!(view
+        .rows("en", |key| translate(&snapshot, "en", key), None)
+        .is_empty());
     assert!(view.accept(&intents, &query, Ok(data())));
     for language in ["ru", "en"] {
-        let rows = view.rows(language, |key| translate(language, key), None);
+        let rows = view.rows(language, |key| translate(&snapshot, language, key), None);
         assert_eq!(rows.len(), 25);
         assert_eq!(rows[0].id, "local-hidden");
         assert_eq!(rows[0].category, Category::Hidden);
@@ -236,7 +236,7 @@ fn own_peer_rows_localization_sort_and_unknown_hidden_differ() {
         )
         .unwrap();
     assert!(view.accept(&intents, &peer, Ok(data())));
-    let rows = view.rows("en", |key| translate("en", key), None);
+    let rows = view.rows("en", |key| translate(&snapshot, "en", key), None);
     assert_eq!(rows.len(), 16);
     assert!(!rows.iter().any(|row| row.unknown));
     assert!(HiddenCatalog::empty("local-owner")
@@ -304,6 +304,7 @@ fn pending_duplicate_selection_close_duplicate_reply_logout_and_leave_guards() {
 
 #[test]
 fn error_acceptance_is_explicit_empty_not_achievement_grant() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     let intents = CriticalIntents::default();
     let (mut view, query) = own_view(&intents);
     assert!(view.accept(&intents, &query, Err(AchievementError::Missing)));
@@ -315,13 +316,14 @@ fn error_acceptance_is_explicit_empty_not_achievement_grant() {
         .unwrap()
         .is_none());
     assert!(!view
-        .rows("en", |key| translate("en", key), None)
+        .rows("en", |key| translate(&snapshot, "en", key), None)
         .iter()
         .any(|row| row.unlocked));
 }
 
 #[test]
 fn own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     let intents = CriticalIntents::default();
     let (mut view, query) = own_view(&intents);
     view.accept(&intents, &query, Ok(data()));
@@ -354,13 +356,22 @@ fn own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation() {
         .unwrap();
     view.accept(&intents, &refreshed, Ok(missing.clone()));
     assert_eq!(
-        view.rows("en", |key| translate("en", key), Some(&committed))[0].id,
+        view.rows(
+            "en",
+            |key| translate(&snapshot, "en", key),
+            Some(&committed)
+        )[0]
+        .id,
         "local-hidden"
     );
     let wrong_owner = HiddenCatalog::from_durable("other-owner", &json).unwrap();
     assert_eq!(
-        view.rows("en", |key| translate("en", key), Some(&wrong_owner))
-            .len(),
+        view.rows(
+            "en",
+            |key| translate(&snapshot, "en", key),
+            Some(&wrong_owner)
+        )
+        .len(),
         25
     );
     assert!(wrong_owner.prepare(&view).unwrap().is_none());
@@ -378,8 +389,12 @@ fn own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation() {
         .is_none());
     view.accept(&intents, &peer, Ok(missing));
     assert_eq!(
-        view.rows("en", |key| translate("en", key), Some(&committed))
-            .len(),
+        view.rows(
+            "en",
+            |key| translate(&snapshot, "en", key),
+            Some(&committed)
+        )
+        .len(),
         15
     );
     let own = view

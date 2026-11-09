@@ -1,0 +1,98 @@
+{
+  "sourceCommit": "c8a622f727a60a269752013d1e222b9864c50d49",
+  "retainedPrimaryFiles": [
+    {
+      "path": "src/renderer/src/locales/ru.json",
+      "sha256": "066fd2522dc46cdf7987df79a653521e8d34516b09dffb037356303353194fcc",
+      "gitBlob": "8028fcf5985247fc6065c0a1fc0c3e6c59274e2a",
+      "size": 30087
+    },
+    {
+      "path": "src/renderer/src/locales/en.json",
+      "sha256": "a353e37199ad8e79aa2ea44d3afdacedaca13af4e28382db9f8ea0a23793958a",
+      "gitBlob": "9bb216da76c296138ec1ddd20c8797f804d588f8",
+      "size": 21345
+    },
+    {
+      "path": "src/renderer/src/achievements.ts",
+      "sha256": "342b44c3ac604da4b68cf47598c5b99a45a1b0bb9b2eebb336729329e4d568f8",
+      "gitBlob": "542be00d62cf8868454b9d0f5277c6ba41d5a007",
+      "size": 7701
+    },
+    {
+      "path": "src/renderer/src/services/voice-shaping.ts",
+      "sha256": "7674e9832732473df1c091cd2805d60bc87071c7130a4a04e26315feb4dac25d",
+      "gitBlob": "c25b3c325670cfe8ca8cc218f6c65906f141cfe5",
+      "size": 19367
+    },
+    {
+      "path": "src/renderer/src/services/manual-gate-processor.ts",
+      "sha256": "1f3e5eaae3379ce4aeb77dcb6d26d86b995319eeaf4d55b21ed9318983ebdd7e",
+      "gitBlob": "8bea0cf52c7a48f01188a7be8db9ab751f1ea7a7",
+      "size": 8142
+    },
+    {
+      "path": "src/renderer/src/services/mic-pipeline-core.ts",
+      "sha256": "1c52074728381f157d3b5b4a9b157cb292b8ed128f8839b89ba5504dce713961",
+      "gitBlob": "2392a563913055420ff6fca920cd35568924c6cf",
+      "size": 77944
+    },
+    {
+      "path": "src/renderer/src/services/webrtc-vad.ts",
+      "sha256": "2294ea3ba32feeff62f06269886ee339759f12b831ed88797fb437e0881879d1",
+      "gitBlob": "fef525f0b9f341f8ccd8fff0aed315d53de04e03",
+      "size": 9557
+    },
+    {
+      "path": "src/renderer/src/services/fvad-binary.ts",
+      "sha256": "e1357a796c31d245ff99ccd2ab9b260fc8738623142491e9f495d5b7fe929277",
+      "gitBlob": "861b841d9800545d32c7a900058dcbcb93065ee2",
+      "size": 27464
+    },
+    {
+      "path": "src/renderer/src/services/silero-vad.worker.ts",
+      "sha256": "665c74ac45180eeadcdfff637d182b50c9a3a6bebd5efe06709d81b156ef9686",
+      "gitBlob": "fd02fac9a91b4bdc76be328aff3d290fbdc2093b",
+      "size": 5809
+    },
+    {
+      "path": "src/renderer/public/silero_vad.onnx",
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "gitBlob": "80c5592ef1f4c9ede3e357bbd02eb863358a6a9d",
+      "size": 2327524
+    },
+    {
+      "path": "src/renderer/public/deepfilternet3/pkg/df_bg.wasm",
+      "sha256": "0027c731a1093589b78f73a997a6b10c387862f451542041b5b673eea10e4812",
+      "gitBlob": "b1e6f4e620820528b7cb059d478b1b3f66cf76ad",
+      "size": 9068001
+    },
+    {
+      "path": "src/renderer/public/deepfilternet3/models/DeepFilterNet3_onnx.tar.gz",
+      "sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+      "gitBlob": "1c4f4ffe1015fbb4541433cf291234ca32338871",
+      "size": 7983136
+    },
+    {
+      "path": "src/renderer/src/components/UpdaterWindow.tsx",
+      "sha256": "33b572befd3d884856ef1faed5288c33e6c40f54541eef7215919e62f9eca556",
+      "gitBlob": "9207b18c3cdcceef005d1276cdd4afdecd640d34",
+      "size": 12119
+    },
+    {
+      "path": "src/renderer/src/index.css",
+      "sha256": "8cfb1c6904cc09346fff43a93a144177d7ca80cd9f194eff88b8984256405402",
+      "gitBlob": "fd7a471f36172eda07800f9afe1a047ebca23918",
+      "size": 12690
+    },
+    {
+      "path": "tailwind.config.js",
+      "sha256": "90dc8d1b1be60b5af5557b61eedab5a7041950e440c306ff25ce0422d9adaa06",
+      "gitBlob": "fe2de66811898674b1ea53dbcf819c69825ee434",
+      "size": 1216
+    }
+  ],
+  "existingSourcesModified": false,
+  "packagesAdmitted": false,
+  "wholeNativeAcceptance": false
+}

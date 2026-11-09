@@ -1,0 +1,284 @@
+{
+  "baseCommit": "2f4c19ab7221c1a70eac93aef9ccd14f22b6b371",
+  "scope": "Two reference-only regressions and exact affected Rust test modules; no whole-native/media/Electron matrix",
+  "passed": false,
+  "greenTests": 28,
+  "originalOutcomes": [
+    {
+      "command": [
+        "node",
+        "--test",
+        "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\contract.test.cjs"
+      ],
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "elapsedSeconds": 56.2056,
+      "stdout": "\u0432\u045a\u201d all fifteen frozen sources retain exact bytes and historical Git provenance (14294.984ms)\n\u0432\u045a\u201d current CRLF catalogs retain native hashes rather than old or normalized catalogs (4791.5234ms)\n\u0432\u045a\u201d freeze preserves an existing destination without overwrite (297.3482ms)\n\u0432\u045a\u201d independent root contains only the explicit retained fifteen-file closure (9.8008ms)\n\u0432\u045a\u201d missing file fails closed (16.4827ms)\n\u0432\u045a\u201d same-size corruption fails closed (313.8956ms)\n\u0432\u045a\u201d LF substitution fails closed (330.2972ms)\n\u0432\u045a\u201d outside-closure existing files are not admitted (2.5518ms)\n\u0432\u045a\u201d relative path traversal, drive, separators, ADS and Windows aliases fail (1.3218ms)\n\u0432\u045a\u201d nonabsolute, traversal and UNC roots fail before reads (2944.6362ms)\n\u0432\u045a\u201d case-aliased files fail (0.7821ms)\n\u0432\u045a\u201d hard-linked files fail even with correct hashes (308.4159ms)\n\u0432\u045a\u201d redirected parent junction fails rather than using another root (21.1855ms)\n\u0432\u045a\u201d redirected root junction fails (701.6333ms)\n\u0432\u045a\u201d environment selects only the explicit frozen root (2700.1189ms)\n\u0432\u045a\u201d each explicit catalog snapshot re-admits current root and bytes without a global trust cache (4450.752ms)\n\u0432\u045a\u201d invalid digests, sizes, duplicate paths and unknown group entries fail (4.9056ms)\n\u0432\u045a\u201d self-asserted package admission cannot bypass the reviewed gate (1.8879ms)\n\u0432\u045a\u201d original full-renderer Tailwind/capture closure is an explicit pre-Electron gate (0.4088ms)\n\u0432\u045a\u201d Git provenance rejects wrong paths, blobs, modes and content (1.0991ms)\n\u0432\u045a\u201d package versions and integrity pins come from the exact historical Git lock blob (295.3579ms)\n\u0432\u045a\u201d frozen bundle has a hash-checked bounded inventory, not arbitrary source copies (182.006ms)\n\u0432\u045a\u201d scripts/native/verify.cjs admits references before loading packages or subprocesses (10.2837ms)\n\u0432\u045a\u201d scripts/native/capture-react.cjs admits references before loading packages or subprocesses (18.046ms)\n\u0432\u045a\u201d rust/crates/zabor-native/tests/voice-reference.cjs admits references before loading packages or subprocesses (4.6015ms)\n\u0432\u045a\u201d rust/crates/zabor-native/tests/vad-reference.cjs admits references before loading packages or subprocesses (6.3174ms)\n\u0432\u045a\u201d rust/crates/zabor-native/tests/silero-reference.cjs admits references before loading packages or subprocesses (3.8801ms)\n\u0432\u045a\u201d ESM neural imports only the contract and standard Node modules before admission (1.2491ms)\n\u0432\u201e\u2116 tests 28\n\u0432\u201e\u2116 suites 0\n\u0432\u201e\u2116 pass 28\n\u0432\u201e\u2116 fail 0\n\u0432\u201e\u2116 cancelled 0\n\u0432\u201e\u2116 skipped 0\n\u0432\u201e\u2116 todo 0\n\u0432\u201e\u2116 duration_ms 55944.5234\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "node",
+        "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\scripts\\native\\reference-contract.cjs",
+        "--freeze",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\frozen"
+      ],
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "elapsedSeconds": 22.5202,
+      "stdout": "{\"root\":\"C:\\\\Users\\\\porad\\\\AppData\\\\Local\\\\Temp\\\\opencode\\\\native-reference-followup-check-uf2qrl63\\\\frozen\",\"files\":15,\"manifestSha256\":\"229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a\",\"packagesAdmitted\":false,\"visualAcceptance\":false}",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--version"
+      ],
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "elapsedSeconds": 0.156,
+      "stdout": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "show",
+        "2f4c19ab7221c1a70eac93aef9ccd14f22b6b371:rust/crates/zabor-native/src/achievements/tests.rs"
+      ],
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "elapsedSeconds": 0.1474,
+      "stdout": "use super::*;\nuse crate::critical_intents::CriticalAction;\nuse futures_util::{SinkExt, StreamExt};\nuse serde_json::json;\nuse tokio::io::{AsyncReadExt, AsyncWriteExt};\nuse tokio::net::TcpListener;\nuse tokio::sync::oneshot;\nuse tokio_tungstenite::tungstenite::Message;\n\n#[path = \"../../tests/reference/contract.rs\"]\nmod reference;\n\nfn translate(language: &str, key: &str) -> String {\n    let source = if language == \"en\" {\n        reference::text(\"src/renderer/src/locales/en.json\")\n    } else {\n        reference::text(\"src/renderer/src/locales/ru.json\")\n    };\n    let mut value: Value = serde_json::from_str(&source).unwrap();\n    for segment in key.split('.') {\n        value = value[segment].clone();\n    }\n    value.as_str().unwrap_or(key).into()\n}\n\nfn hidden() -> Value {\n    json!({\"id\":\"local-hidden\",\"icon\":\"\u0432\u00ad\u0452\",\"maxValue\":120,\"statKey\":\"localCount\",\"unit\":\"min\",\"category\":\"social\",\"titleRu\":\"\u0420\u00bb\u0420\u0455\u0420\u0454\u0420\u00b0\u0420\u00bb\u0421\u040a\u0420\u0405\u0420\u0455\u0420\u00b5\",\"descriptionRu\":\"\u0420\u00bb\u0420\u0455\u0420\u0454\u0420\u00b0\u0420\u00bb\u0421\u040a\u0420\u0405\u0421\u2039\u0420\u2116 \u0421\u201a\u0420\u00b5\u0421\u0403\u0421\u201a\",\"titleEn\":\"local\",\"descriptionEn\":\"local test\"})\n}\n\nfn data() -> AchievementData {\n    parse_result(&json!(json!({\"stats\":{\"totalVoiceMinutes\":119,\"totalCalls\":1},\"unlockedIds\":[\"first_friend\",\"local-hidden\"],\"visitedChannelIds\":[\"local-channel\"],\"totalHiddenCount\":10,\"unlockedHiddenDefs\":[hidden()]}).to_string())).unwrap()\n}\n\nfn own_view(intents: &CriticalIntents) -> (AchievementsView, AchievementQuery) {\n    let mut view = AchievementsView::default();\n    let query = view\n        .begin(\n            intents,\n            intents.ticket(),\n            \"local-owner\",\n            AchievementTarget::Own,\n        )\n        .unwrap();\n    (view, query)\n}\n\n#[test]\nfn envelope_defaults_and_null_fields_are_reference_defaults() {\n    assert_eq!(\n        parse_result(&json!(\"{}\")).unwrap(),\n        AchievementData::default()\n    );\n    assert_eq!(parse_result(&json!(\"{\\\"stats\\\":null,\\\"unlockedIds\\\":null,\\\"visitedChannelIds\\\":null,\\\"totalHiddenCount\\\":null,\\\"unlockedHiddenDefs\\\":null}\")).unwrap(), AchievementData::default());\n    let zero = parse_result(&json!(\"{\\\"TotalHiddenCount\\\":0}\")).unwrap();\n    assert_eq!(zero.total_hidden_count, 0);\n}\n\n#[test]\nfn pascal_and_camel_envelopes_and_hidden_fields_match() {\n    let camel = data();\n    let mut pascal = json!({\"Stats\":camel.stats,\"UnlockedIds\":camel.unlocked_ids,\"VisitedChannelIds\":camel.visited_channel_ids,\"TotalHiddenCount\":10,\"UnlockedHiddenDefs\":[hidden()]});\n    let definition = pascal[\"UnlockedHiddenDefs\"][0].as_object_mut().unwrap();\n    let old = std::mem::take(definition);\n    for (key, value) in old {\n        let name = format!(\"{}{}\", key[..1].to_uppercase(), &key[1..]);\n        definition.insert(name, value);\n    }\n    assert_eq!(parse_result(&json!(pascal.to_string())).unwrap(), camel);\n}\n\n#[test]\nfn null_object_array_malformed_and_wrong_fields_do_not_fake_success() {\n    for result in [Value::Null, json!(\"\"), json!({}), json!(false)] {\n        assert!(parse_result(&result).is_err());\n    }\n    for source in [\n        \"null\",\n        \"[]\",\n        \"[{}]\",\n        \"1\",\n        \"{\",\n        \"{}{}\",\n        \"{\\\"stats\\\":[]}\",\n        \"{\\\"stats\\\":{\\\"n\\\":-1}}\",\n        \"{\\\"stats\\\":{\\\"n\\\":1e999}}\",\n        \"{\\\"unlockedIds\\\":[1]}\",\n        \"{\\\"totalHiddenCount\\\":-1}\",\n        \"{\\\"totalHiddenCount\\\":1.5}\",\n        \"{\\\"unlockedHiddenDefs\\\":[{}]}\",\n    ] {\n        assert!(parse_result(&json!(source)).is_err(), \"{source}\");\n    }\n}\n\n#[test]\nfn bytes_counts_text_numbers_and_nesting_are_bounded() {\n    assert_eq!(\n        parse_result(&json!(\" \".repeat(MAX_PAYLOAD_BYTES + 1))),\n        Err(AchievementError::Limit)\n    );\n    for envelope in [\n        json!({\"unlockedIds\":vec![\"id\"; MAX_IDS + 1]}),\n        json!({\"visitedChannelIds\":vec![\"id\"; MAX_IDS + 1]}),\n        json!({\"totalHiddenCount\":MAX_HIDDEN + 1}),\n        json!({\"unlockedHiddenDefs\":vec![hidden(); MAX_HIDDEN + 1]}),\n        json!({\"stats\":(0..129).map(|index| (format!(\"n{index}\"), 0)).collect::<BTreeMap<_, _>>()}),\n        json!({\"unlockedIds\":[\"x\".repeat(257)]}),\n    ] {\n        assert_eq!(\n            parse_result(&json!(envelope.to_string())),\n            Err(AchievementError::Limit)\n        );\n    }\n    let mut definition = hidden();\n    definition[\"titleEn\"] = json!(\"x\".repeat(4097));\n    assert_eq!(\n        parse_result(&json!(\n            json!({\"unlockedHiddenDefs\":[definition]}).to_string()\n        )),\n        Err(AchievementError::Limit)\n    );\n    let nested = format!(\"{{\\\"ignored\\\":{}0{}}}\", \"[\".repeat(130), \"]\".repeat(130));\n    assert!(parse_result(&json!(nested)).is_err());\n    assert!(parse_result(&json!(\"{\\\"stats\\\":{\\\"n\\\":9007199254740992}}\")).is_err());\n}\n\n#[test]\nfn duplicate_ids_deduplicate_in_original_order_but_conflicting_keys_fail() {\n    let parsed = parse_result(&json!(json!({\"unlockedIds\":[\"b\",\"a\",\"b\"],\"visitedChannelIds\":[\"c\",\"c\"],\"unlockedHiddenDefs\":[hidden(),hidden()]}).to_string())).unwrap();\n    assert_eq!(parsed.unlocked_ids, [\"b\", \"a\"]);\n    assert_eq!(parsed.visited_channel_ids, [\"c\"]);\n    assert_eq!(parsed.unlocked_hidden_defs.len(), 1);\n    for source in [\n        \"{\\\"stats\\\":{},\\\"Stats\\\":{}}\",\n        \"{\\\"stats\\\":{\\\"n\\\":1,\\\"n\\\":2}}\",\n        \"{\\\"unlockedIds\\\":[],\\\"unlockedIds\\\":[]}\",\n    ] {\n        assert_eq!(parse_result(&json!(source)), Err(AchievementError::Invalid));\n    }\n    let mut conflict = hidden();\n    conflict[\"titleEn\"] = json!(\"different\");\n    assert!(parse_result(&json!(\n        json!({\"unlockedHiddenDefs\":[hidden(),conflict]}).to_string()\n    ))\n    .is_err());\n    let mut collision = hidden();\n    collision[\"id\"] = json!(\"first_friend\");\n    assert!(parse_result(&json!(json!({\"unlockedHiddenDefs\":[collision]}).to_string())).is_err());\n}\n\n#[test]\nfn standard_definitions_match_original_ids_stats_categories_max_and_units() {\n    let source = reference::text(\"src/renderer/src/achievements.ts\");\n    let definitions = &source[source.find(\"export const ACHIEVEMENTS:\").unwrap()\n        ..source\n            .find(\"export interface HiddenAchievementPayload\")\n            .unwrap()];\n    let blocks: Vec<_> = definitions.split(\"id: '\").skip(1).collect();\n    assert_eq!(blocks.len(), STANDARD.len());\n    for (block, standard) in blocks.iter().zip(&STANDARD) {\n        assert!(block.starts_with(&format!(\"{}'\", standard.id)));\n        assert!(block.contains(&format!(\"icon: '{}'\", standard.icon)));\n        assert!(block.contains(&format!(\"maxValue: {},\", standard.max_value)));\n        assert!(block.contains(&format!(\"statKey: '{}'\", standard.stat_key)));\n        let category = match standard.category {\n            Category::Voice => \"voice\",\n            Category::Calls => \"calls\",\n            Category::Social => \"social\",\n            Category::Hidden => \"hidden\",\n        };\n        assert!(block.contains(&format!(\"category: '{category}'\")));\n        assert_eq!(\n            block.contains(\"unit: 'min'\"),\n            standard.unit == Some(Unit::Minutes)\n        );\n        for language in [\"ru\", \"en\"] {\n            for field in [\"title\", \"description\"] {\n                let key = format!(\"achievements.{}.{field}\", standard.id);\n                assert_ne!(translate(language, &key), key);\n            }\n        }\n    }\n}\n\n#[test]\nfn exact_progress_rounds_minutes_to_hours_not_fractional_bar() {\n    for (value, maximum, expected, text) in [\n        (59.0, 600.0, 0.0, \"0 / 10 h\"),\n        (60.0, 600.0, 0.1, \"1 / 10 h\"),\n        (119.0, 600.0, 0.1, \"1 / 10 h\"),\n        (900.0, 600.0, 1.0, \"10 / 10 h\"),\n        (1.0, 30.0, 0.0, \"0 / 0 h\"),\n    ] {\n        assert_eq!(\n            progress(value, maximum, Some(Unit::Minutes), \" h\"),\n            (expected, text.into())\n        );\n    }\n    assert_eq!(progress(1.5, 3.0, None, \" \u0421\u2021\"), (0.5, \"1.5 / 3\".into()));\n    assert_eq!(\n        progress(119.0, 600.0, Some(Unit::Minutes), \" \u0421\u2021\"),\n        (0.1, \"1 / 10 \u0421\u2021\".into())\n    );\n    assert_eq!(progress(0.0, 0.0, None, \" h\"), (0.0, \"0 / 0\".into()));\n}\n\n#[test]\nfn own_peer_rows_localization_sort_and_unknown_hidden_differ() {\n    let intents = CriticalIntents::default();\n    let (mut view, query) = own_view(&intents);\n    assert!(view.data().is_none());\n    assert!(view.rows(\"en\", |key| translate(\"en\", key), None).is_empty());\n    assert!(view.accept(&intents, &query, Ok(data())));\n    for language in [\"ru\", \"en\"] {\n        let rows = view.rows(language, |key| translate(language, key), None);\n        assert_eq!(rows.len(), 25);\n        assert_eq!(rows[0].id, \"local-hidden\");\n        assert_eq!(rows[0].category, Category::Hidden);\n        assert!(rows[0].unlocked);\n        assert_eq!(\n            rows[0].title,\n            if language == \"en\" {\n                \"local\"\n            } else {\n                \"\u0420\u00bb\u0420\u0455\u0420\u0454\u0420\u00b0\u0420\u00bb\u0421\u040a\u0420\u0405\u0420\u0455\u0420\u00b5\"\n            }\n        );\n        assert_eq!(rows[1].id, \"first_friend\");\n        assert_eq!(rows[1].progress, 1.0);\n        assert_eq!(rows[2].id, \"first_call\");\n        assert_eq!(rows.iter().filter(|row| row.unknown).count(), 9);\n    }\n    let peer = view\n        .begin(\n            &intents,\n            intents.ticket(),\n            \"local-owner\",\n            AchievementTarget::Peer(\"local-peer\".into()),\n        )\n        .unwrap();\n    assert!(view.accept(&intents, &peer, Ok(data())));\n    let rows = view.rows(\"en\", |key| translate(\"en\", key), None);\n    assert_eq!(rows.len(), 16);\n    assert!(!rows.iter().any(|row| row.unknown));\n    assert!(HiddenCatalog::empty(\"local-owner\")\n        .unwrap()\n        .prepare(&view)\n        .unwrap()\n        .is_none());\n}\n\n#[test]\nfn pending_duplicate_selection_close_duplicate_reply_logout_and_leave_guards() {\n    let intents = CriticalIntents::default();\n    let (mut view, old) = own_view(&intents);\n    assert_eq!(\n        view.begin(\n            &intents,\n            intents.ticket(),\n            \"local-owner\",\n            AchievementTarget::Own\n        ),\n        Err(AchievementError::Busy)\n    );\n    let new = view\n        .begin(\n            &intents,\n            intents.ticket(),\n            \"local-owner\",\n            AchievementTarget::Peer(\"local-peer\".into()),\n        )\n        .unwrap();\n    assert!(!view.accept(&intents, &old, Ok(data())));\n    intents.request(CriticalAction::Leave);\n    assert!(view.accept(&intents, &new, Ok(data())));\n    assert!(!view.accept(&intents, &new, Ok(data())));\n    let closed = view\n        .begin(\n            &intents,\n            intents.ticket(),\n            \"local-owner\",\n            AchievementTarget::Own,\n        )\n        .unwrap();\n    view.close();\n    assert!(!view.accept(&intents, &closed, Ok(data())));\n    let stale = view\n        .begin(\n            &intents,\n            intents.ticket(),\n            \"local-owner\",\n            AchievementTarget::Own,\n        )\n        .unwrap();\n    intents.request(CriticalAction::Logout);\n    assert!(!view.accept(&intents, &stale, Ok(data())));\n    assert_eq!(\n        view.begin(\n            &intents,\n            stale.ticket(),\n            \"local-owner\",\n            AchievementTarget::Own\n        ),\n        Err(AchievementError::Cancelled)\n    );\n}\n\n#[test]\nfn error_acceptance_is_explicit_empty_not_achievement_grant() {\n    let intents = CriticalIntents::default();\n    let (mut view, query) = own_view(&intents);\n    assert!(view.accept(&intents, &query, Err(AchievementError::Missing)));\n    assert_eq!(view.data(), Some(&AchievementData::default()));\n    assert_eq!(view.error(), Some(&AchievementError::Missing));\n    assert!(HiddenCatalog::empty(\"local-owner\")\n        .unwrap()\n        .prepare(&view)\n        .unwrap()\n        .is_none());\n    assert!(!view\n        .rows(\"en\", |key| translate(\"en\", key), None)\n        .iter()\n        .any(|row| row.unlocked));\n}\n\n#[test]\nfn own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation() {\n    let intents = CriticalIntents::default();\n    let (mut view, query) = own_view(&intents);\n    view.accept(&intents, &query, Ok(data()));\n    let catalog = HiddenCatalog::empty(\"local-owner\").unwrap();\n    let plan = catalog.prepare(&view).unwrap().unwrap();\n    let json = plan.prepared_json().to_owned();\n    assert_eq!(plan.owner(), \"local-owner\");\n    assert!(plan\n        .commit_if_current(&intents, &view, |_| Err::<(), _>(\"local failure\"))\n        .unwrap()\n        .is_err());\n    let plan = catalog.prepare(&view).unwrap().unwrap();\n    let committed = plan\n        .commit_if_current(&intents, &view, |_| Ok::<(), ()>(()))\n        .unwrap()\n        .unwrap();\n    assert_eq!(\n        HiddenCatalog::from_durable(\"local-owner\", &json).unwrap(),\n        committed\n    );\n    let mut missing = data();\n    missing.unlocked_hidden_defs.clear();\n    let refreshed = view\n        .begin(\n            &intents,\n            intents.ticket(),\n            \"local-owner\",\n            AchievementTarget::Own,\n        )\n        .unwrap();\n    view.accept(&intents, &refreshed, Ok(missing.clone()));\n    assert_eq!(\n        view.rows(\"en\", |key| translate(\"en\", key), Some(&committed))[0].id,\n        \"local-hidden\"\n    );\n    let wrong_owner = HiddenCatalog::from_durable(\"other-owner\", &json).unwrap();\n    assert_eq!(\n        view.rows(\"en\", |key| translate(\"en\", key), Some(&wrong_owner))\n            .len(),\n        25\n    );\n    assert!(wrong_owner.prepare(&view).unwrap().is_none());\n    let plan = committed.prepare(&view).unwrap().unwrap();\n    let peer = view\n        .begin(\n            &intents,\n            intents.ticket(),\n            \"local-owner\",\n            AchievementTarget::Peer(\"local-peer\".into()),\n        )\n        .unwrap();\n    assert!(plan\n        .commit_if_current::<()>(&intents, &view, |_| panic!(\"stale write\"))\n        .is_none());\n    view.accept(&intents, &peer, Ok(missing));\n    assert_eq!(\n        view.rows(\"en\", |key| translate(\"en\", key), Some(&committed))\n            .len(),\n        15\n    );\n    let own = view\n        .begin(\n            &intents,\n            intents.ticket(),\n            \"local-owner\",\n            AchievementTarget::Own,\n        )\n        .unwrap();\n    view.accept(&intents, &own, Ok(data()));\n    let plan = committed.prepare(&view).unwrap().unwrap();\n    intents.request(CriticalAction::Logout);\n    assert!(plan\n        .commit_if_current::<()>(&intents, &view, |_| panic!(\"logout write\"))\n        .is_none());\n}\n\n#[test]\nfn durable_map_malformed_duplicate_key_and_mismatched_id_fail() {\n    for source in [\"null\", \"[]\", \"{\", \"{\\\"wrong\\\":{}}\"] {\n        assert!(HiddenCatalog::from_durable(\"local-owner\", source).is_err());\n    }\n    let definition = hidden().to_string();\n    let duplicate = format!(\"{{\\\"local-hidden\\\":{definition},\\\"local-hidden\\\":{definition}}}\");\n    assert!(HiddenCatalog::from_durable(\"local-owner\", &duplicate).is_err());\n    let wrong = json!({\"wrong\":hidden()}).to_string();\n    assert!(HiddenCatalog::from_durable(\"local-owner\", &wrong).is_err());\n}\n\nasync fn server(\n    result: Result<Value, ()>,\n    held: bool,\n) -> (\n    String,\n    oneshot::Receiver<Value>,\n    oneshot::Sender<()>,\n    tokio::task::JoinHandle<()>,\n) {\n    let listener = TcpListener::bind(\"127.0.0.1:0\").await.unwrap();\n    let endpoint = format!(\"http://{}/local\", listener.local_addr().unwrap());\n    let (request_tx, request_rx) = oneshot::channel();\n    let (release_tx, release_rx) = oneshot::channel();\n    let task = tokio::spawn(async move {\n        let (mut http, _) = listener.accept().await.unwrap();\n        let mut header = Vec::new();\n        while !header.ends_with(b\"\\r\\n\\r\\n\") {\n            header.push(http.read_u8().await.unwrap());\n            assert!(header.len() < 8192);\n        }\n        let body = json!({\"connectionToken\":\"local-fixture\",\"availableTransports\":[{\"transport\":\"WebSockets\",\"transferFormats\":[\"Text\"]}]}).to_string();\n        http.write_all(format!(\"HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{body}\", body.len()).as_bytes()).await.unwrap();\n        drop(http);\n        let (tcp, _) = listener.accept().await.unwrap();\n        let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();\n        assert_eq!(\n            socket.next().await.unwrap().unwrap().into_text().unwrap(),\n            \"{\\\"protocol\\\":\\\"json\\\",\\\"version\\\":1}\\u{1e}\"\n        );\n        socket.send(Message::text(\"{}\\u{1e}\")).await.unwrap();\n        let mut decoder = crate::protocol::Decoder::default();\n        let request = loop {\n            let message = socket.next().await.unwrap().unwrap();\n            if let Message::Text(text) = message {\n                if let Some(request) = decoder\n                    .push(text.as_bytes())\n                    .unwrap()\n                    .into_iter()\n                    .find(|request| request[\"type\"] == 1)\n                {\n                    break request;\n                }\n            }\n        };\n        let _ = request_tx.send(request.clone());\n        if held {\n            let _ = release_rx.await;\n        }\n        let response = match result {\n            Ok(result) => json!({\"type\":3,\"invocationId\":request[\"invocationId\"],\"result\":result}),\n            Err(()) => {\n                json!({\"type\":3,\"invocationId\":request[\"invocationId\"],\"error\":\"local refusal\"})\n            }\n        };\n        let _ = socket\n            .send(Message::text(crate::protocol::encode(&response).unwrap()))\n            .await;\n        while let Some(Ok(message)) = socket.next().await {\n            if matches!(message, Message::Close(_)) {\n                break;\n            }\n            if let Message::Text(text) = message {\n                for extra in decoder.push(text.as_bytes()).unwrap() {\n                    assert_ne!(extra[\"type\"], 1, \"unexpected RPC: {extra}\");\n                }\n            }\n        }\n    });\n    (endpoint, request_rx, release_tx, task)\n}\n\n#[tokio::test]\nasync fn actual_hub_own_peer_exact_arguments_no_view_or_grant_rpc() {\n    for target in [\n        AchievementTarget::Own,\n        AchievementTarget::Peer(\"local-peer\".into()),\n    ] {\n        tokio::time::timeout(Duration::from_secs(5), async {\n            let (endpoint, request, _, server) = server(Ok(json!(\"{}\")), false).await;\n            let (hub, _events) = HubConnection::connect(&endpoint, None).await.unwrap();\n            let intents = CriticalIntents::default();\n            let mut view = AchievementsView::default();\n            let query = view\n                .begin(&intents, intents.ticket(), \"local-owner\", target.clone())\n                .unwrap();\n            let result = load(&hub, &intents, &CancellationToken::new(), &query)\n                .await\n                .unwrap();\n            assert_eq!(result, AchievementData::default());\n            let request = request.await.unwrap();\n            match target {\n                AchievementTarget::Own => {\n                    assert_eq!(request[\"target\"], \"GetMyAchievements\");\n                    assert_eq!(request[\"arguments\"], json!([]));\n                }\n                AchievementTarget::Peer(_) => {\n                    assert_eq!(request[\"target\"], \"GetUserAchievements\");\n                    assert_eq!(request[\"arguments\"], json!([\"local-peer\"]));\n                }\n            }\n            hub.close();\n            server.await.unwrap();\n        })\n        .await\n        .unwrap();\n    }\n}\n\n#[tokio::test]\nasync fn actual_hub_error_null_malformed_and_oversize() {\n    for (result, expected) in [\n        (\n            Err(()),\n            AchievementError::Hub(HubError::Server(\"local refusal\".into())),\n        ),\n        (Ok(Value::Null), AchievementError::Missing),\n        (Ok(json!(\"{\")), AchievementError::Invalid),\n        (\n            Ok(json!(\"x\".repeat(MAX_PAYLOAD_BYTES + 1))),\n            AchievementError::Limit,\n        ),\n    ] {\n        tokio::time::timeout(Duration::from_secs(5), async {\n            let (endpoint, _, _, server) = server(result, false).await;\n            let (hub, _events) = HubConnection::connect(&endpoint, None).await.unwrap();\n            let intents = CriticalIntents::default();\n            let (_, query) = own_view(&intents);\n            assert_eq!(\n                load(&hub, &intents, &CancellationToken::new(), &query).await,\n                Err(expected)\n            );\n            hub.close();\n            server.await.unwrap();\n        })\n        .await\n        .unwrap();\n    }\n}\n\n#[tokio::test]\nasync fn held_response_survives_leave_but_rejects_new_selected_view() {\n    tokio::time::timeout(Duration::from_secs(5), async {\n        let (endpoint, request, release, server) = server(Ok(json!(\"{}\")), true).await;\n        let (hub, _events) = HubConnection::connect(&endpoint, None).await.unwrap();\n        let intents = CriticalIntents::default();\n        let (mut view, query) = own_view(&intents);\n        let stop = CancellationToken::new();\n        let load = load(&hub, &intents, &stop, &query);\n        tokio::pin!(load);\n        tokio::select! { biased; _ = request => {}, _ = &mut load => panic!(\"not held\") }\n        intents.request(CriticalAction::Leave);\n        let newer = view\n            .begin(\n                &intents,\n                intents.ticket(),\n                \"local-owner\",\n                AchievementTarget::Peer(\"local-peer\".into()),\n            )\n            .unwrap();\n        release.send(()).unwrap();\n        let result = load.await.unwrap();\n        assert!(!view.accept(&intents, &query, Ok(result)));\n        assert_eq!(view.query(), Some(&newer));\n        hub.close();\n        server.await.unwrap();\n    })\n    .await\n    .unwrap();\n}\n\n#[tokio::test]\nasync fn held_response_logout_shutdown_timeout_and_predispatch_cancel() {\n    for mode in [0, 1, 2] {\n        tokio::time::timeout(Duration::from_secs(5), async {\n            let (endpoint, request, release, server) = server(Ok(json!(\"{}\")), true).await;\n            let (hub, _events) = HubConnection::connect(&endpoint, None).await.unwrap();\n            let intents = CriticalIntents::default();\n            let (_, query) = own_view(&intents);\n            let stop = CancellationToken::new();\n            let load = load_timed(&hub, &intents, &stop, &query, Duration::from_millis(100));\n            tokio::pin!(load);\n            tokio::select! { biased; _ = request => {}, _ = &mut load => panic!(\"not held\") }\n            if mode == 0 {\n                intents.request(CriticalAction::Logout);\n            }\n            if mode == 1 {\n                stop.cancel();\n            }\n            let expected = if mode == 2 {\n                AchievementError::Hub(HubError::Timeout)\n            } else {\n                AchievementError::Cancelled\n            };\n            assert_eq!(load.await, Err(expected));\n            release.send(()).unwrap();\n            let cancelled = CancellationToken::new();\n            cancelled.cancel();\n            assert_eq!(\n                load_timed(&hub, &intents, &cancelled, &query, Duration::ZERO).await,\n                Err(AchievementError::Cancelled)\n            );\n            hub.close();\n            server.await.unwrap();\n        })\n        .await\n        .unwrap();\n    }\n}\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--test",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\predecessor.rs",
+        "-o",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\target\\predecessor.exe",
+        "--edition=2024",
+        "-L",
+        "dependency=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps",
+        "-C",
+        "target-feature=+crt-static",
+        "--extern",
+        "serde=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+        "--extern",
+        "serde_json=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+        "--extern",
+        "thiserror=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+        "--extern",
+        "futures_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+        "--extern",
+        "tokio=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+        "--extern",
+        "tokio_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+        "--extern",
+        "tokio_tungstenite=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+        "--extern",
+        "url=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+        "--extern",
+        "reqwest=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib"
+      ],
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "elapsedSeconds": 1.2462,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\target\\predecessor.exe",
+        "--test-threads=1"
+      ],
+      "exitCode": 101,
+      "expectedExitCode": 101,
+      "elapsedSeconds": 0.3945,
+      "stdout": "\nrunning 1 test\ntest predecessor_lookup_admission_budget ... FAILED\n\nfailures:\n\n---- predecessor_lookup_admission_budget stdout ----\n\nthread 'predecessor_lookup_admission_budget' (3240) panicked at C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\predecessor.rs:17:122:\nassertion `left == right` failed: mocked predecessor subprocess admissions per test\n  left: 400\n right: 1\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    predecessor_lookup_admission_budget\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--crate-type=rlib",
+        "--crate-name=reference_support",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\support.rs",
+        "-o",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\target\\libreference_support.rlib",
+        "--edition=2024",
+        "-L",
+        "dependency=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps",
+        "-C",
+        "target-feature=+crt-static",
+        "--extern",
+        "serde=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+        "--extern",
+        "serde_json=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+        "--extern",
+        "thiserror=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+        "--extern",
+        "futures_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+        "--extern",
+        "tokio=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+        "--extern",
+        "tokio_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+        "--extern",
+        "tokio_tungstenite=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+        "--extern",
+        "url=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+        "--extern",
+        "reqwest=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib"
+      ],
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "elapsedSeconds": 2.2099,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--test",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\affected.rs",
+        "-o",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\target\\affected.exe",
+        "-A",
+        "dead_code",
+        "--extern",
+        "reference_support=C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-check-uf2qrl63\\target\\libreference_support.rlib",
+        "--edition=2024",
+        "-L",
+        "dependency=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps",
+        "-C",
+        "target-feature=+crt-static",
+        "--extern",
+        "serde=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+        "--extern",
+        "serde_json=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+        "--extern",
+        "thiserror=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+        "--extern",
+        "futures_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+        "--extern",
+        "tokio=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+        "--extern",
+        "tokio_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+        "--extern",
+        "tokio_tungstenite=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+        "--extern",
+        "url=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+        "--extern",
+        "reqwest=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib"
+      ],
+      "exitCode": 1,
+      "expectedExitCode": 0,
+      "elapsedSeconds": 2.4678,
+      "stdout": "",
+      "stderr": "error: implementation of `FnOnce` is not general enough\n  --> C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\snapshot-regressions.rs:34:17\n   |\n34 |     let first = Snapshot::admit_with(\"catalogs\", admit);\n   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implementation of `FnOnce` is not general enough\n   |\n   = note: closure with signature `fn(&'2 str, &str) -> std::string::String` must implement `FnOnce<(&'1 str, &str)>`, for any lifetime `'1`...\n   = note: ...but it actually implements `FnOnce<(&'2 str, &str)>`, for some specific lifetime `'2`\nhelp: consider adding explicit type annotations to the closure's arguments\n   |\n27 |     let admit = |_: &str, _: &str| {\n   |                   ++++++   ++++++\n\nerror: implementation of `FnOnce` is not general enough\n  --> C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\snapshot-regressions.rs:34:17\n   |\n34 |     let first = Snapshot::admit_with(\"catalogs\", admit);\n   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implementation of `FnOnce` is not general enough\n   |\n   = note: closure with signature `fn(&str, &'2 str) -> std::string::String` must implement `FnOnce<(&str, &'1 str)>`, for any lifetime `'1`...\n   = note: ...but it actually implements `FnOnce<(&str, &'2 str)>`, for some specific lifetime `'2`\nhelp: consider adding explicit type annotations to the closure's arguments\n   |\n27 |     let admit = |_: &str, _: &str| {\n   |                   ++++++   ++++++\n\nerror: implementation of `FnOnce` is not general enough\n  --> C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\snapshot-regressions.rs:36:18\n   |\n36 |     let second = Snapshot::admit_with(\"catalogs\", admit);\n   |                  ^^^^^^^^^^^^^^^^^^^^ implementation of `FnOnce` is not general enough\n   |\n   = note: closure with signature `fn(&'2 str, &str) -> std::string::String` must implement `FnOnce<(&'1 str, &str)>`, for any lifetime `'1`...\n   = note: ...but it actually implements `FnOnce<(&'2 str, &str)>`, for some specific lifetime `'2`\nhelp: consider adding explicit type annotations to the closure's arguments\n   |\n27 |     let admit = |_: &str, _: &str| {\n   |                   ++++++   ++++++\n\nerror: implementation of `FnOnce` is not general enough\n  --> C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\snapshot-regressions.rs:36:18\n   |\n36 |     let second = Snapshot::admit_with(\"catalogs\", admit);\n   |                  ^^^^^^^^^^^^^^^^^^^^ implementation of `FnOnce` is not general enough\n   |\n   = note: closure with signature `fn(&str, &'2 str) -> std::string::String` must implement `FnOnce<(&str, &'1 str)>`, for any lifetime `'1`...\n   = note: ...but it actually implements `FnOnce<(&str, &'2 str)>`, for some specific lifetime `'2`\nhelp: consider adding explicit type annotations to the closure's arguments\n   |\n27 |     let admit = |_: &str, _: &str| {\n   |                   ++++++   ++++++\n\nerror: implementation of `FnOnce` is not general enough\n  --> C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\snapshot-regressions.rs:36:18\n   |\n36 |     let second = Snapshot::admit_with(\"catalogs\", admit);\n   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implementation of `FnOnce` is not general enough\n   |\n   = note: closure with signature `fn(&'2 str, &str) -> std::string::String` must implement `FnOnce<(&'1 str, &str)>`, for any lifetime `'1`...\n   = note: ...but it actually implements `FnOnce<(&'2 str, &str)>`, for some specific lifetime `'2`\nhelp: consider adding explicit type annotations to the closure's arguments\n   |\n27 |     let admit = |_: &str, _: &str| {\n   |                   ++++++   ++++++\n\nerror: implementation of `FnOnce` is not general enough\n  --> C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\tests\\native-reference\\snapshot-regressions.rs:36:18\n   |\n36 |     let second = Snapshot::admit_with(\"catalogs\", admit);\n   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implementation of `FnOnce` is not general enough\n   |\n   = note: closure with signature `fn(&str, &'2 str) -> std::string::String` must implement `FnOnce<(&str, &'1 str)>`, for any lifetime `'1`...\n   = note: ...but it actually implements `FnOnce<(&str, &'2 str)>`, for some specific lifetime `'2`\nhelp: consider adding explicit type annotations to the closure's arguments\n   |\n27 |     let admit = |_: &str, _: &str| {\n   |                   ++++++   ++++++\n\nerror: aborting due to 6 previous errors\n\n"
+    }
+  ],
+  "sdk": {
+    "serde": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+      "sha256": "3351f8911787b08b2d2618540f592fdfe8b8bbd80aa598007cddfce1081d7046",
+      "fingerprint": 13778454799618568188
+    },
+    "serde_json": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+      "sha256": "5cb32cc1596f9d682a8f5a4f0358547ab50eab348400da6ceea608c0a3d3254e",
+      "fingerprint": 13836475259000838342
+    },
+    "thiserror": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+      "sha256": "2e2704890c72d744f6e53d7cb47a908b90eb179fd348e5476a682ba773f86ead",
+      "fingerprint": 1121792929245877005
+    },
+    "futures_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+      "sha256": "8ebb99f44c662b53427adb22c8009a6618569bea1cdb00f64685d1f022b60d51",
+      "fingerprint": 13879001378624573752
+    },
+    "tokio": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+      "sha256": "99242fe1aff80af1c1e886fa07d5263fb9004b0d41d1f511edade810496ad39a",
+      "fingerprint": 18142639122434583119
+    },
+    "tokio_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+      "sha256": "61969158f101b2baad1999b50af489da1a9861f39da6c61172adf1e84860d5b8",
+      "fingerprint": 16555775765130003229
+    },
+    "tokio_tungstenite": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+      "sha256": "b87a8cc363ab3890daabf926e6bc4ce30e4d97cdb8354842548c32868f395f08",
+      "fingerprint": 3741319618123961936
+    },
+    "url": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+      "sha256": "05fd91d9d53a4a3e6fa00a8dce52ae76d0eb3006b5eb0fd8126e9ac1204576cc",
+      "fingerprint": 17321916557742098263
+    },
+    "reqwest": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib",
+      "sha256": "ea8ee077c47ce4631ab38ebf862f88711f62f853eda7a66a97a01aa0fbe0443f",
+      "fingerprint": 14121496218506268594
+    }
+  },
+  "sources": {
+    ".cargo/config.toml": "8feb1d003d7cca188186af5cc2523152f2e2ac3abaa95409315f7eb015f358b9",
+    "package-lock.json": "8eaa580fe89dede5ba22b3064496ca32f8346583705e04e3a061d0ccd5547c37",
+    "rust/Cargo.lock": "48db95ccb660a6d1e48a4056ee8dbf0855f640e33ec78de42e6075a289c9c31c",
+    "rust/Cargo.toml": "9da9a5dc7733144d5d424af0157c8508b7b2d9914a1ab471a4151f3e8ba22f2f",
+    "rust/crates/zabor-native/Cargo.toml": "c1331cebe377ff1e42428334469c4503776c2b9230d5e2df137bccf2235e3957",
+    "rust/crates/zabor-native/assets/catalogs/en.json": "a353e37199ad8e79aa2ea44d3afdacedaca13af4e28382db9f8ea0a23793958a",
+    "rust/crates/zabor-native/assets/catalogs/ru.json": "066fd2522dc46cdf7987df79a653521e8d34516b09dffb037356303353194fcc",
+    "rust/crates/zabor-native/assets/models/DeepFilterNet3_onnx.tar.gz": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+    "rust/crates/zabor-native/assets/models/silero_vad.onnx": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+    "rust/crates/zabor-native/assets/resources.json": "ede7a7d4d1d10d8430b58eac6cfe30c4323dd2a9a164b15dbb089f14ab9fc4b8",
+    "rust/crates/zabor-native/src/achievements.rs": "a93f46c746ae8f64707543b793c18acbb63ac4212facbef34c8f9a9634d8b9ec",
+    "rust/crates/zabor-native/src/achievements/tests.rs": "5150d4219904a07b7d1056cbb591199d003c7f18b9c4150b20116abb8aefb5fb",
+    "rust/crates/zabor-native/src/critical_intents.rs": "75221e725ef8fda3c0d2e1115d19b5c8a8b5f29136bbb0a928a8dbaf9f781248",
+    "rust/crates/zabor-native/src/hub.rs": "c06230d5c1ca21e7a173bde9cbf0d0059c638269d00d0a21154bc1b4ed637fde",
+    "rust/crates/zabor-native/src/localization.rs": "9d39c4c8e26c18ff3e940c9b2309aa28aa75a932c1926b05c45e4dd68d430ec5",
+    "rust/crates/zabor-native/src/presence.rs": "434861756f0717418c76b33b8e24c417ce65a4eba11832454b5349d4d14becf8",
+    "rust/crates/zabor-native/src/presence/tests.rs": "6d0eaa29818d211e341e267321f22720f19bc2d1bbe925a4047ae5714860bb8b",
+    "rust/crates/zabor-native/src/protocol.rs": "f3d06033b97e7d362a526448771460b11c041965eb400aaa767237e4b18bcfd3",
+    "rust/crates/zabor-native/tests/neural-reference.mjs": "c7849b3cf5b240ef3ef42dab857bfefa3eff12044447425245a12a2da9cf3976",
+    "rust/crates/zabor-native/tests/reference/contract.rs": "658557fa9bd5d12f5f9a43d63a7c77408e4b8a45955a445951b4e6026a3d20e2",
+    "rust/crates/zabor-native/tests/silero-reference.cjs": "5fe7aaaca059a969b7ea34d8483c14db7fa3ebb362fc71775e23d2f4e2579a6b",
+    "rust/crates/zabor-native/tests/vad-reference.cjs": "e868a85f4fdeca5fdeb5916810323029784420f5fba9053021b538a88b5aa91f",
+    "rust/crates/zabor-native/tests/voice-reference.cjs": "f7c6e62cac174a8919343986f0cd33b9f9f5cd860235931e1648ef4143b6e764",
+    "scripts/native/capture-react.cjs": "59ad7af206c728ea0cdf2fe840b09365a5a4ef38b347b523dd3d69bad039a059",
+    "scripts/native/reference-contract.cjs": "fcff2dd918fdc176ff0ba9ae574da89bbf763df5222a461e67c7485e52b97844",
+    "scripts/native/reference-paths.py": "2fea1679b2544a27531dcc8831f9b11612811fa064677035fd1208d942d04ec8",
+    "scripts/native/verify.cjs": "51851c24c5140a1056e796755729758425f3bd04bae3db610b88feace461aeb7",
+    "tests/native-reference/contract.test.cjs": "faaab08b3b9e49e7c390f0676a23fb2807f2a1d6f8101deb866ec8ac66156021",
+    "tests/native-reference/followup-freeze.test.cjs": "59ff037c0f4ed5eeb810a025a72e6b92b0289b9c0fa135bf57a580ae487faa42",
+    "tests/native-reference/manifest.json": "229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a",
+    "tests/native-reference/snapshot-regressions.rs": "550b472a20c886706bc70f7f74a89be3c3a0e21d3f71378521700fcc5992fd39",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa"
+  },
+  "originalProofs": {
+    "tests/native-reference/rust-verification-v1.json": "22f5488d562c6f4c026345d982515502b3dce5d1fa2444a15c86fca32dd464fe",
+    "tests/native-reference/rust-verification-v2.json": "1bb443fd49d8e6ef4b020dea0f46d2e11f7c049d301075aef32813888b0ab390",
+    "tests/native-reference/rust-verification-v3.json": "e9f7b83242924323bdfc314eda5e0ea1a59e9955efd74e61b8c5b40fdfebb712",
+    "tests/native-reference/rust-verification-v4.json": "0a088953d37dfab0a8cd37e2dd350f2a838e18ba263b029aa942b8c3645b7ad4",
+    "tests/native-reference/js-verification.json": "ec3708638f9957708c54b6ed134b49ad175f9c4f273facfb2a0eab49d89def0b",
+    "tests/native-reference/source-integrity.json": "dabcb90199e92039045711b07c460cafa7b96dd6b143bd9b7b5de1d0e26bcb72",
+    "tests/native-reference/graph-integrity.json": "b240b988416e37a86588fa3de46901126ccb1560adc0c9d6cfbee2fd90a8ec1e",
+    "tests/native-reference/manifest.json": "229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa"
+  },
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "predecessorAdmissionRegression": {
+    "lookups": 400,
+    "actualMockedAdmissionBoundaryCalls": 400,
+    "budget": 1,
+    "originalExitCode": 101,
+    "realNodePerLookupMatrixRun": false
+  },
+  "error": "Original subprocess exit code 1, expected 0"
+}

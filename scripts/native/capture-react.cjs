@@ -1,7 +1,10 @@
-const { app, BrowserWindow, ipcMain, nativeImage } = require('electron');
-const { buildSync } = require('esbuild');
-const postcss = require('postcss');
-const tailwind = require('tailwindcss');
+const reference = require('./reference-contract.cjs').openReference();
+reference.group('capture');
+reference.capture();
+const { app, BrowserWindow, ipcMain, nativeImage } = reference.requirePackage('electron');
+const { buildSync } = reference.requirePackage('esbuild');
+const postcss = reference.requirePackage('postcss');
+const tailwind = reference.requirePackage('tailwindcss');
 const { createHash } = require('node:crypto');
 const { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { join, resolve } = require('node:path');
@@ -14,7 +17,7 @@ if (!process.versions.electron) {
   const env = { ...process.env, ZABOR_NATIVE_CAPTURE_TEMP: temporary };
   delete env.ELECTRON_RUN_AS_NODE;
   try {
-    const arguments = [process.execPath, require.resolve('electron/cli.js'), __filename, ...process.argv.slice(2)];
+    const arguments = [process.execPath, reference.packagePath('electron', 'cli.js'), __filename, ...process.argv.slice(2)];
     if (arguments.some(value => /["%\r\n]/.test(value))) throw new Error('Unsupported character in capture arguments');
     execFileSync('cmd.exe', ['/d', '/s', '/c', `"${arguments.map(value => `"${value}"`).join(' ')}"`], { stdio: 'inherit', env, timeout: 70000, windowsVerbatimArguments: true });
   } finally {
@@ -52,10 +55,10 @@ const watchdog = setTimeout(() => { console.error('Reference capture timed out')
 
 app.whenReady().then(async () => {
   const sourceFiles = ['src/renderer/src/components/UpdaterWindow.tsx', 'src/renderer/src/index.css', 'tailwind.config.js', 'src/renderer/src/locales/ru.json', 'src/renderer/src/locales/en.json'];
-  const sources = Object.fromEntries(sourceFiles.map(file => [file, createHash('sha256').update(readFileSync(file, 'utf8').replace(/\r\n/g, '\n')).digest('hex')]));
+  const sources = Object.fromEntries(sourceFiles.map(file => [file, createHash('sha256').update(reference.text(file).replace(/\r\n/g, '\n')).digest('hex')]));
   const entry = `import React from 'react'; import { createRoot } from 'react-dom/client'; import i18n from 'i18next'; import { I18nextProvider } from 'react-i18next'; import UpdaterWindow from './src/renderer/src/components/UpdaterWindow'; import ru from './src/renderer/src/locales/ru.json'; import en from './src/renderer/src/locales/en.json'; i18n.init({lng:new URLSearchParams(location.hash.slice(1)).get('locale'),fallbackLng:'ru',resources:{ru:{translation:ru},en:{translation:en}},interpolation:{escapeValue:false}}).then(()=>createRoot(document.getElementById('root')).render(<I18nextProvider i18n={i18n}><UpdaterWindow/></I18nextProvider>));`;
-  const bundle = buildSync({ stdin: { contents: entry, resolveDir: process.cwd(), loader: 'tsx' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', write: false }).outputFiles[0].text;
-  const css = await postcss([tailwind(require(resolve('tailwind.config.js')))]).process(readFileSync('src/renderer/src/index.css', 'utf8'), { from: resolve('src/renderer/src/index.css') });
+  const bundle = buildSync({ stdin: { contents: entry, resolveDir: reference.root, loader: 'tsx' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', write: false }).outputFiles[0].text;
+  const css = await postcss([tailwind(require(reference.path('tailwind.config.js')))]).process(reference.text('src/renderer/src/index.css'), { from: reference.path('src/renderer/src/index.css') });
   writeFileSync(join(temporary, 'reference.js'), bundle);
   writeFileSync(join(temporary, 'reference.css'), css.css);
   writeFileSync(join(temporary, 'index.html'), '<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'self\' data:; script-src \'self\'; style-src \'self\' \'unsafe-inline\'; connect-src \'none\'"><link rel="stylesheet" href="reference.css"></head><body><div id="root"></div><script src="reference.js"></script></body></html>');
@@ -72,7 +75,7 @@ app.whenReady().then(async () => {
     if (!window.webContents.debugger.isAttached()) window.webContents.debugger.attach('1.3');
     await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reducedMotion ? 'reduce' : 'no-preference' }] });
     await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 420, height: 240, deviceScaleFactor: scale, mobile: false });
-    const dictionary = JSON.parse(readFileSync(`src/renderer/src/locales/${locale}.json`, 'utf8')).updater;
+    const dictionary = JSON.parse(reference.text(`src/renderer/src/locales/${locale}.json`)).updater;
     const expectedHeading = dictionary[state === 'error' ? 'errorTitle' : state];
     await window.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const expected=${JSON.stringify(expectedHeading)};const ready=()=>[...document.querySelectorAll('span')].some(element=>element.textContent===expected);if(ready()){resolve();return;}const observer=new MutationObserver(()=>{if(ready()){clearTimeout(timeout);observer.disconnect();resolve();}});const timeout=setTimeout(()=>{observer.disconnect();reject(Error('Reference state was not rendered'));},5000);observer.observe(document.documentElement,{subtree:true,childList:true,characterData:true});})`);
     await window.webContents.executeJavaScript(`(async()=>{await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const animations=document.getAnimations();for(const animation of animations)animation.pause();await Promise.all(animations.map(animation=>animation.ready));for(const animation of animations)animation.currentTime=${atMs};})()`);

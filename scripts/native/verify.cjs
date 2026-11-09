@@ -5,6 +5,9 @@ const { homedir } = require('node:os');
 const { join, resolve, relative } = require('node:path');
 
 const root = resolve(__dirname, '../..');
+const retained = require('./reference-contract.cjs').openReference();
+const referenceSources = Object.assign({}, ...Object.keys(retained.manifest.groups).map(group => retained.group(group)));
+retained.requirePackage('typescript');
 process.chdir(root);
 if (process.platform !== 'win32') throw new Error('The native parity harness currently requires Windows');
 const args = process.argv.slice(2);
@@ -22,9 +25,9 @@ const filesIn = directory => readdirSync(directory, { withFileTypes: true }).fla
   const path = join(directory, entry.name);
   return entry.isDirectory() ? filesIn(path) : [path];
 });
-const sourceFiles = [...filesIn('rust/crates/zabor-native'), ...filesIn('rust/vendor/tract-core-0.21.4'), ...filesIn('scripts/native'), '.cargo/config.toml', 'rust/Cargo.toml', 'rust/Cargo.lock', 'src/renderer/src/components/UpdaterWindow.tsx', 'src/renderer/src/services/mic-pipeline-core.ts', 'src/renderer/src/services/manual-gate-processor.ts', 'src/renderer/src/services/voice-shaping.ts', 'src/renderer/src/services/webrtc-vad.ts', 'src/renderer/src/services/fvad-binary.ts', 'src/renderer/public/silero_vad.onnx', 'src/renderer/public/deepfilternet3/models/DeepFilterNet3_onnx.tar.gz', 'src/renderer/public/deepfilternet3/pkg/df_bg.wasm', 'src/renderer/src/index.css', 'tailwind.config.js', 'src/renderer/src/locales/ru.json', 'src/renderer/src/locales/en.json'];
+const sourceFiles = [...filesIn('rust/crates/zabor-native'), ...filesIn('rust/vendor/tract-core-0.21.4'), ...filesIn('scripts/native'), '.cargo/config.toml', 'rust/Cargo.toml', 'rust/Cargo.lock'];
 sourceFiles.push(...filesIn('rust/vendor/webrtc-vad-0.4.0'));
-sourceFiles.push(...filesIn('rust/vendor/rnnoise2-sys-0.1.2'), 'src/renderer/src/services/silero-vad.worker.ts');
+sourceFiles.push(...filesIn('rust/vendor/rnnoise2-sys-0.1.2'));
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const sources = Object.fromEntries(sourceFiles.map(path => [path.replace(/\\/g, '/'), digest(path)]));
 run(process.execPath, ['scripts/native/prepare-onnx.cjs'], 300000);
@@ -55,7 +58,8 @@ for (const scale of ['1', '1.25', '1.5', '2']) for (const locale of ['ru', 'en']
 }
 run('python', ['scripts/native/compare-ui.py', '--reference', reference, '--native', native, '--output', join(output, 'comparison')]);
 for (const [path, hash] of Object.entries(sources)) if (digest(path) !== hash) throw new Error(`Source changed during verification: ${path}`);
+for (const [path, hash] of Object.entries(referenceSources)) if (createHash('sha256').update(retained.read(path)).digest('hex') !== hash) throw new Error(`Reference changed during verification: ${path}`);
 const images = Object.fromEntries([...filesIn(reference), ...filesIn(native)].map(path => [relative(output, path).replace(/\\/g, '/'), digest(path)]));
-const summary = { automatedChecks: 'passed', visualAcceptance: 'requires review of comparison images; not a full-client parity claim', nativeClientReady: false, pairs: cases.length * 6, interactionRuns: 8, cases, sources, binarySha256: digest(binary), artifacts: images };
+const summary = { automatedChecks: 'passed', visualAcceptance: 'requires review of comparison images; not a full-client parity claim', nativeClientReady: false, pairs: cases.length * 6, interactionRuns: 8, cases, sources, referenceSources, referenceRoot: retained.root, referenceCommit: retained.manifest.sourceCommit, binarySha256: digest(binary), artifacts: images };
 writeFileSync(join(output, 'verification.json'), JSON.stringify(summary, null, 2));
 console.log(JSON.stringify({ automatedChecks: summary.automatedChecks, pairs: summary.pairs, interactionRuns: summary.interactionRuns, report: join(output, 'verification.json') }));

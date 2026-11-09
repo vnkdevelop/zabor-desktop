@@ -1,14 +1,14 @@
 use super::*;
-use serde_json::Value;
+use crate::reference;
 
-fn translate(language: PresenceLanguage, key: &str) -> String {
-    let source = match language {
-        PresenceLanguage::Ru => include_str!("../../../../../src/renderer/src/locales/ru.json"),
-        PresenceLanguage::En => include_str!("../../../../../src/renderer/src/locales/en.json"),
+fn translate(snapshot: &reference::Snapshot, language: PresenceLanguage, key: &str) -> String {
+    let language = match language {
+        PresenceLanguage::Ru => "ru",
+        PresenceLanguage::En => "en",
     };
-    let mut value: Value = serde_json::from_str(source).unwrap();
+    let mut value = snapshot.catalog(language);
     for segment in key.split('.') {
-        value = value[segment].clone();
+        value = &value[segment];
     }
     value.as_str().unwrap().into()
 }
@@ -26,17 +26,22 @@ fn instant(day: u8, hours: i64) -> LocalInstant {
     }
 }
 
-fn render(text: PresenceText, language: PresenceLanguage) -> String {
-    text.render(language, |key| translate(language, key))
+fn render(
+    snapshot: &reference::Snapshot,
+    text: PresenceText,
+    language: PresenceLanguage,
+) -> String {
+    text.render(language, |key| translate(snapshot, language, key))
 }
 
 #[test]
 fn missing_invalid_and_unresolvable_local_input_preserve_offline_redaction() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     for last in [ServerLastOnline::Missing, ServerLastOnline::Invalid] {
         let text = format_last_online(last, instant(8, 12));
         assert_eq!(text, PresenceText::Offline);
-        assert_eq!(render(text, PresenceLanguage::Ru), "не в сети");
-        assert_eq!(render(text, PresenceLanguage::En), "offline");
+        assert_eq!(render(&snapshot, text, PresenceLanguage::Ru), "не в сети");
+        assert_eq!(render(&snapshot, text, PresenceLanguage::En), "offline");
     }
     let mut invalid = instant(8, 12);
     invalid.local_date.month = 13;
@@ -64,6 +69,7 @@ fn missing_invalid_and_unresolvable_local_input_preserve_offline_redaction() {
 
 #[test]
 fn millisecond_thresholds_future_minutes_and_same_local_day_hours() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     let now = instant(8, 23);
     for (diff, expected) in [
         (-1, PresenceText::JustNow),
@@ -82,17 +88,18 @@ fn millisecond_thresholds_future_minutes_and_same_local_day_hours() {
         );
     }
     assert_eq!(
-        render(PresenceText::JustNow, PresenceLanguage::Ru),
+        render(&snapshot, PresenceText::JustNow, PresenceLanguage::Ru),
         "был(а) в сети только что"
     );
     assert_eq!(
-        render(PresenceText::JustNow, PresenceLanguage::En),
+        render(&snapshot, PresenceText::JustNow, PresenceLanguage::En),
         "last seen just now"
     );
 }
 
 #[test]
 fn exact_ru_minute_plurals_and_en_one_other() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     let now = instant(8, 12);
     for (count, ru_unit) in [
         (1, "минуту"),
@@ -112,11 +119,11 @@ fn exact_ru_minute_plurals_and_en_one_other() {
         let text = format_last_online(ServerLastOnline::Resolved(then), now);
         assert_eq!(text, PresenceText::Minutes(count));
         assert_eq!(
-            render(text, PresenceLanguage::Ru),
+            render(&snapshot, text, PresenceLanguage::Ru),
             format!("был(а) в сети {count} {ru_unit} назад")
         );
         assert_eq!(
-            render(text, PresenceLanguage::En),
+            render(&snapshot, text, PresenceLanguage::En),
             format!(
                 "last seen {count} {} ago",
                 if count == 1 { "minute" } else { "minutes" }
@@ -127,6 +134,7 @@ fn exact_ru_minute_plurals_and_en_one_other() {
 
 #[test]
 fn exact_ru_hour_plurals_and_en_one_other() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     let now = instant(8, 23);
     for (count, ru_unit) in [
         (1, "час"),
@@ -145,11 +153,11 @@ fn exact_ru_hour_plurals_and_en_one_other() {
         let text = format_last_online(ServerLastOnline::Resolved(then), now);
         assert_eq!(text, PresenceText::Hours(count));
         assert_eq!(
-            render(text, PresenceLanguage::Ru),
+            render(&snapshot, text, PresenceLanguage::Ru),
             format!("был(а) в сети {count} {ru_unit} назад")
         );
         assert_eq!(
-            render(text, PresenceLanguage::En),
+            render(&snapshot, text, PresenceLanguage::En),
             format!(
                 "last seen {count} {} ago",
                 if count == 1 { "hour" } else { "hours" }
@@ -160,6 +168,7 @@ fn exact_ru_hour_plurals_and_en_one_other() {
 
 #[test]
 fn local_midnight_order_precedes_yesterday_only_after_one_hour() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     let now = instant(8, 0);
     let mut then = instant(7, 23);
     then.epoch_ms = now.epoch_ms - 59_999;
@@ -175,8 +184,14 @@ fn local_midnight_order_precedes_yesterday_only_after_one_hour() {
     then.epoch_ms = now.epoch_ms - 3_600_000;
     let text = format_last_online(ServerLastOnline::Resolved(then), now);
     assert_eq!(text, PresenceText::Yesterday);
-    assert_eq!(render(text, PresenceLanguage::Ru), "был(а) в сети вчера");
-    assert_eq!(render(text, PresenceLanguage::En), "last seen yesterday");
+    assert_eq!(
+        render(&snapshot, text, PresenceLanguage::Ru),
+        "был(а) в сети вчера"
+    );
+    assert_eq!(
+        render(&snapshot, text, PresenceLanguage::En),
+        "last seen yesterday"
+    );
 }
 
 #[test]
@@ -195,6 +210,7 @@ fn previous_local_day_23_and_25_hour_dst_midnights_round_like_reference() {
 
 #[test]
 fn dates_same_year_changed_year_and_exact_ru_en_months() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     let now = instant(8, 12);
     for (month, ru, en) in [
         (1, "января", "January"),
@@ -221,21 +237,21 @@ fn dates_same_year_changed_year_and_exact_ru_en_months() {
             }
         );
         assert_eq!(
-            render(text, PresenceLanguage::Ru),
+            render(&snapshot, text, PresenceLanguage::Ru),
             format!("был(а) в сети 5 {ru}")
         );
         assert_eq!(
-            render(text, PresenceLanguage::En),
+            render(&snapshot, text, PresenceLanguage::En),
             format!("last seen {en} 5")
         );
         then.local_date.year = 2025;
         let text = format_last_online(ServerLastOnline::Resolved(then), now);
         assert_eq!(
-            render(text, PresenceLanguage::Ru),
+            render(&snapshot, text, PresenceLanguage::Ru),
             format!("был(а) в сети 5 {ru} 2025 г.")
         );
         assert_eq!(
-            render(text, PresenceLanguage::En),
+            render(&snapshot, text, PresenceLanguage::En),
             format!("last seen {en} 5, 2025")
         );
     }
@@ -243,6 +259,7 @@ fn dates_same_year_changed_year_and_exact_ru_en_months() {
 
 #[test]
 fn local_timezone_day_not_utc_controls_hours_and_year_transition() {
+    let snapshot = reference::Snapshot::admit("catalogs");
     let now = LocalInstant {
         epoch_ms: 86_400_000 + 1_800_000,
         local_midnight_ms: 86_400_000 - 10 * 3_600_000,
@@ -271,7 +288,7 @@ fn local_timezone_day_not_utc_controls_hours_and_year_transition() {
     };
     let text = format_last_online(ServerLastOnline::Resolved(then), now);
     assert_eq!(
-        render(text, PresenceLanguage::En),
+        render(&snapshot, text, PresenceLanguage::En),
         "last seen December 29, 2025"
     );
 }

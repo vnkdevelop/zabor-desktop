@@ -1,0 +1,139 @@
+{
+  "scope": "Standalone rustc compiles exact source/test module closure, not whole native Cargo/media build",
+  "tests": 0,
+  "passed": false,
+  "originalOutcomes": [
+    {
+      "command": [
+        "node",
+        "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\scripts\\native\\reference-contract.cjs",
+        "--freeze",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v2-3vppgwcr\\frozen"
+      ],
+      "exitCode": 0,
+      "stdout": "{\"root\":\"C:\\\\Users\\\\porad\\\\AppData\\\\Local\\\\Temp\\\\opencode\\\\native-reference-rust-v2-3vppgwcr\\\\frozen\",\"files\":15,\"manifestSha256\":\"229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a\",\"packagesAdmitted\":false,\"visualAcceptance\":false}",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--version"
+      ],
+      "exitCode": 0,
+      "stdout": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--edition=2024",
+        "--test",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v2-3vppgwcr\\affected.rs",
+        "-o",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v2-3vppgwcr\\target\\affected.exe",
+        "-L",
+        "dependency=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps",
+        "-C",
+        "target-feature=+crt-static",
+        "--extern",
+        "serde=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+        "--extern",
+        "serde_json=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+        "--extern",
+        "thiserror=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+        "--extern",
+        "futures_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+        "--extern",
+        "tokio=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+        "--extern",
+        "tokio_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+        "--extern",
+        "tokio_tungstenite=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+        "--extern",
+        "url=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+        "--extern",
+        "reqwest=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib"
+      ],
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "error[E0432]: unresolved import `base64`\n   --> C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\rust\\crates\\zabor-native\\src\\protocol.rs:109:13\n    |\n109 |         use base64::Engine;\n    |             ^^^^^^ use of unresolved module or unlinked crate `base64`\n    |\n    = help: you might be missing a crate named `base64`\n\nerror[E0433]: cannot find module or crate `base64` in this scope\n   --> C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\rust\\crates\\zabor-native\\src\\protocol.rs:112:13\n    |\n112 |             base64::engine::general_purpose::STANDARD\n    |             ^^^^^^ use of unresolved module or unlinked crate `base64`\n    |\n    = help: you might be missing a crate named `base64`\n\nerror[E0433]: cannot find `avatar` in the crate root\n   --> C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\rust\\crates\\zabor-native\\src\\protocol.rs:113:40\n    |\n113 |                 .encode(vec![0; crate::avatar::MAX_FILE_BYTES])\n    |                                        ^^^^^^ could not find `avatar` in the crate root\n\nerror: aborting due to 3 previous errors\n\nSome errors have detailed explanations: E0432, E0433.\nFor more information about an error, try `rustc --explain E0432`.\n"
+    }
+  ],
+  "sources": {
+    "scripts/native/reference-contract.cjs": "2964b2b4d87c54724390c2cb16236160ea5e52e57349a7c0dd9447f1e1beb563",
+    "scripts/native/reference-paths.py": "7f600ddf88528c426e866e319ec1036907b77cb16419445fe42fd9b6d1059055",
+    "scripts/native/verify.cjs": "51851c24c5140a1056e796755729758425f3bd04bae3db610b88feace461aeb7",
+    "scripts/native/capture-react.cjs": "59ad7af206c728ea0cdf2fe840b09365a5a4ef38b347b523dd3d69bad039a059",
+    "tests/native-reference/manifest.json": "229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa",
+    "tests/native-reference/contract.test.cjs": "09521cdbedb6bdebe927c06300bb824b6fd29eea71eefcd3f4fae569fe409094",
+    "rust/crates/zabor-native/tests/reference/contract.rs": "ab5e5061c6dbd7a23ddb60911ce74f59f977c9c73ee6e85cad71ac6926529577",
+    "rust/crates/zabor-native/tests/voice-reference.cjs": "f7c6e62cac174a8919343986f0cd33b9f9f5cd860235931e1648ef4143b6e764",
+    "rust/crates/zabor-native/tests/vad-reference.cjs": "e868a85f4fdeca5fdeb5916810323029784420f5fba9053021b538a88b5aa91f",
+    "rust/crates/zabor-native/tests/silero-reference.cjs": "5fe7aaaca059a969b7ea34d8483c14db7fa3ebb362fc71775e23d2f4e2579a6b",
+    "rust/crates/zabor-native/tests/neural-reference.mjs": "c7849b3cf5b240ef3ef42dab857bfefa3eff12044447425245a12a2da9cf3976",
+    "rust/crates/zabor-native/src/achievements/tests.rs": "8fdc6d1f393f96e494ecbb69be909f6607d60c45c0f671a6d3389d2c2484ece7",
+    "rust/crates/zabor-native/src/presence/tests.rs": "6a3bbe61a11aa9b46ac10d007ce1233c4757e70e51c4b53f2fea0484e02075e5",
+    "rust/crates/zabor-native/src/localization.rs": "1a7994d551927e0e05e27c0d240d38c3f91ef1d7eca6e0c32076b3dcb75c5ade",
+    "rust/crates/zabor-native/src/achievements.rs": "a93f46c746ae8f64707543b793c18acbb63ac4212facbef34c8f9a9634d8b9ec",
+    "rust/crates/zabor-native/src/presence.rs": "434861756f0717418c76b33b8e24c417ce65a4eba11832454b5349d4d14becf8",
+    "rust/crates/zabor-native/src/critical_intents.rs": "75221e725ef8fda3c0d2e1115d19b5c8a8b5f29136bbb0a928a8dbaf9f781248",
+    "rust/crates/zabor-native/src/hub.rs": "c06230d5c1ca21e7a173bde9cbf0d0059c638269d00d0a21154bc1b4ed637fde",
+    "rust/crates/zabor-native/src/protocol.rs": "f3d06033b97e7d362a526448771460b11c041965eb400aaa767237e4b18bcfd3",
+    "rust/crates/zabor-native/Cargo.toml": "c1331cebe377ff1e42428334469c4503776c2b9230d5e2df137bccf2235e3957",
+    "rust/Cargo.toml": "9da9a5dc7733144d5d424af0157c8508b7b2d9914a1ab471a4151f3e8ba22f2f",
+    "rust/Cargo.lock": "48db95ccb660a6d1e48a4056ee8dbf0855f640e33ec78de42e6075a289c9c31c",
+    ".cargo/config.toml": "8feb1d003d7cca188186af5cc2523152f2e2ac3abaa95409315f7eb015f358b9",
+    "package-lock.json": "8eaa580fe89dede5ba22b3064496ca32f8346583705e04e3a061d0ccd5547c37"
+  },
+  "dependencyFingerprintSource": "2f49d1487163d832",
+  "sdk": {
+    "serde": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+      "sha256": "3351f8911787b08b2d2618540f592fdfe8b8bbd80aa598007cddfce1081d7046",
+      "fingerprint": 13778454799618568188
+    },
+    "serde_json": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+      "sha256": "5cb32cc1596f9d682a8f5a4f0358547ab50eab348400da6ceea608c0a3d3254e",
+      "fingerprint": 13836475259000838342
+    },
+    "thiserror": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+      "sha256": "2e2704890c72d744f6e53d7cb47a908b90eb179fd348e5476a682ba773f86ead",
+      "fingerprint": 1121792929245877005
+    },
+    "futures_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+      "sha256": "8ebb99f44c662b53427adb22c8009a6618569bea1cdb00f64685d1f022b60d51",
+      "fingerprint": 13879001378624573752
+    },
+    "tokio": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+      "sha256": "99242fe1aff80af1c1e886fa07d5263fb9004b0d41d1f511edade810496ad39a",
+      "fingerprint": 18142639122434583119
+    },
+    "tokio_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+      "sha256": "61969158f101b2baad1999b50af489da1a9861f39da6c61172adf1e84860d5b8",
+      "fingerprint": 16555775765130003229
+    },
+    "tokio_tungstenite": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+      "sha256": "b87a8cc363ab3890daabf926e6bc4ce30e4d97cdb8354842548c32868f395f08",
+      "fingerprint": 3741319618123961936
+    },
+    "url": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+      "sha256": "05fd91d9d53a4a3e6fa00a8dce52ae76d0eb3006b5eb0fd8126e9ac1204576cc",
+      "fingerprint": 17321916557742098263
+    },
+    "reqwest": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib",
+      "sha256": "ea8ee077c47ce4631ab38ebf862f88711f62f853eda7a66a97a01aa0fbe0443f",
+      "fingerprint": 14121496218506268594
+    }
+  },
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "error": "Original subprocess failed with exit code 1"
+}

@@ -1,0 +1,16 @@
+{
+  "originalJob": "sh_1bf01dfb40015OPhlI4s3SFDPT",
+  "nodes": 14865,
+  "edges": 32687,
+  "communities": 578,
+  "duplicateNodeIds": 0,
+  "missingEndpointEdges": 0,
+  "danglingEndpointEdges": 0,
+  "selfLoops": 0,
+  "duplicateUndirectedExportPairs": 0,
+  "absoluteSourceRows": 0,
+  "zeroNodeSourceWarnings": 16,
+  "semanticRefresh": false,
+  "htmlSkippedAbove5000": true,
+  "caveat": "Export-level checks cannot reconstruct already collapsed extraction edges; borrowed primary graph/report were not a transactional semantic snapshot; code-only CLI sync is not semantic documentation or whole-client acceptance"
+}

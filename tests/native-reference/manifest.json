@@ -1,0 +1,246 @@
+{
+  "version": 1,
+  "sourceCommit": "c8a622f727a60a269752013d1e222b9864c50d49",
+  "scope": "Test-only exact working bytes; Git provenance is not publisher trust or client acceptance",
+  "files": [
+    {
+      "path": "src/renderer/src/locales/ru.json",
+      "size": 30087,
+      "sha256": "066fd2522dc46cdf7987df79a653521e8d34516b09dffb037356303353194fcc",
+      "gitBlob": "8028fcf5985247fc6065c0a1fc0c3e6c59274e2a",
+      "gitSha256": "7a2512aa21bc7a42c907d041108382a6a49a7f758870fbd2ab3c6becad1980d8",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/src/locales/en.json",
+      "size": 21345,
+      "sha256": "a353e37199ad8e79aa2ea44d3afdacedaca13af4e28382db9f8ea0a23793958a",
+      "gitBlob": "9bb216da76c296138ec1ddd20c8797f804d588f8",
+      "gitSha256": "6ed418c42471b4a96f6a247b65025ae3e4db5091012ca4cff96a41d3d19d6e10",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/src/achievements.ts",
+      "size": 7701,
+      "sha256": "342b44c3ac604da4b68cf47598c5b99a45a1b0bb9b2eebb336729329e4d568f8",
+      "gitBlob": "542be00d62cf8868454b9d0f5277c6ba41d5a007",
+      "gitSha256": "e10c9fa810e26bbe869f94927229d7ed1cee26d63cf9e63b39a31e7c3777460b",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/src/services/voice-shaping.ts",
+      "size": 19367,
+      "sha256": "7674e9832732473df1c091cd2805d60bc87071c7130a4a04e26315feb4dac25d",
+      "gitBlob": "c25b3c325670cfe8ca8cc218f6c65906f141cfe5",
+      "gitSha256": "5cb8f1482d563de264f41e28bc61591c566f4196fdfb108bed2a88d478e171ef",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/src/services/manual-gate-processor.ts",
+      "size": 8142,
+      "sha256": "1f3e5eaae3379ce4aeb77dcb6d26d86b995319eeaf4d55b21ed9318983ebdd7e",
+      "gitBlob": "8bea0cf52c7a48f01188a7be8db9ab751f1ea7a7",
+      "gitSha256": "2264f91ad72bd91084b33c7d7b7cd2a5ce9a485343c886cccdcfc598c6190b28",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/src/services/mic-pipeline-core.ts",
+      "size": 77944,
+      "sha256": "1c52074728381f157d3b5b4a9b157cb292b8ed128f8839b89ba5504dce713961",
+      "gitBlob": "2392a563913055420ff6fca920cd35568924c6cf",
+      "gitSha256": "0021941e7dada9ea245978755d09c1ae6038ab1f9f9e24d7a1b99f86b4d3111d",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/src/services/webrtc-vad.ts",
+      "size": 9557,
+      "sha256": "2294ea3ba32feeff62f06269886ee339759f12b831ed88797fb437e0881879d1",
+      "gitBlob": "fef525f0b9f341f8ccd8fff0aed315d53de04e03",
+      "gitSha256": "0cf338db2d870a61542c1621dc6e6ba7157abc4bc3098b3f62b049e73c3212e1",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/src/services/fvad-binary.ts",
+      "size": 27464,
+      "sha256": "e1357a796c31d245ff99ccd2ab9b260fc8738623142491e9f495d5b7fe929277",
+      "gitBlob": "861b841d9800545d32c7a900058dcbcb93065ee2",
+      "gitSha256": "ec447e493c35c5f25de1158c52ed12045fad96d2bab6125e2e3d7c5e8bf6b18c",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/src/services/silero-vad.worker.ts",
+      "size": 5809,
+      "sha256": "665c74ac45180eeadcdfff637d182b50c9a3a6bebd5efe06709d81b156ef9686",
+      "gitBlob": "fd02fac9a91b4bdc76be328aff3d290fbdc2093b",
+      "gitSha256": "c1b83f211737d7ec0fb5bd42a6149f5caa71d53c6ecae38ee14c7a4165fc83b9",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/public/silero_vad.onnx",
+      "size": 2327524,
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "gitBlob": "80c5592ef1f4c9ede3e357bbd02eb863358a6a9d",
+      "gitSha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "checkout": "exact",
+      "seed": "rust/crates/zabor-native/assets/models/silero_vad.onnx"
+    },
+    {
+      "path": "src/renderer/public/deepfilternet3/pkg/df_bg.wasm",
+      "size": 9068001,
+      "sha256": "0027c731a1093589b78f73a997a6b10c387862f451542041b5b673eea10e4812",
+      "gitBlob": "b1e6f4e620820528b7cb059d478b1b3f66cf76ad",
+      "gitSha256": "0027c731a1093589b78f73a997a6b10c387862f451542041b5b673eea10e4812",
+      "checkout": "exact"
+    },
+    {
+      "path": "src/renderer/public/deepfilternet3/models/DeepFilterNet3_onnx.tar.gz",
+      "size": 7983136,
+      "sha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+      "gitBlob": "1c4f4ffe1015fbb4541433cf291234ca32338871",
+      "gitSha256": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+      "checkout": "exact",
+      "seed": "rust/crates/zabor-native/assets/models/DeepFilterNet3_onnx.tar.gz"
+    },
+    {
+      "path": "src/renderer/src/components/UpdaterWindow.tsx",
+      "size": 12119,
+      "sha256": "33b572befd3d884856ef1faed5288c33e6c40f54541eef7215919e62f9eca556",
+      "gitBlob": "9207b18c3cdcceef005d1276cdd4afdecd640d34",
+      "gitSha256": "16fe8afc9f8f8a4876ed63aaabd831d8670cf9f43f6167543c54011029653a1d",
+      "checkout": "crlf"
+    },
+    {
+      "path": "src/renderer/src/index.css",
+      "size": 12690,
+      "sha256": "8cfb1c6904cc09346fff43a93a144177d7ca80cd9f194eff88b8984256405402",
+      "gitBlob": "fd7a471f36172eda07800f9afe1a047ebca23918",
+      "gitSha256": "10da00b68e03321a52aa574111db45d1518c9d9e2b60c62668fd1fdfe208d1f1",
+      "checkout": "crlf"
+    },
+    {
+      "path": "tailwind.config.js",
+      "size": 1216,
+      "sha256": "90dc8d1b1be60b5af5557b61eedab5a7041950e440c306ff25ce0422d9adaa06",
+      "gitBlob": "fe2de66811898674b1ea53dbcf819c69825ee434",
+      "gitSha256": "d275ce64c3a3154503c7b395c1ce031f3beb7a82dbd99eb3cceb57e22263bc28",
+      "checkout": "crlf"
+    }
+  ],
+  "groups": {
+    "catalogs": [
+      "src/renderer/src/locales/ru.json",
+      "src/renderer/src/locales/en.json"
+    ],
+    "achievements": [
+      "src/renderer/src/locales/ru.json",
+      "src/renderer/src/locales/en.json",
+      "src/renderer/src/achievements.ts"
+    ],
+    "voice": [
+      "src/renderer/src/services/voice-shaping.ts",
+      "src/renderer/src/services/manual-gate-processor.ts",
+      "src/renderer/src/services/mic-pipeline-core.ts"
+    ],
+    "vad": [
+      "src/renderer/src/services/webrtc-vad.ts",
+      "src/renderer/src/services/fvad-binary.ts"
+    ],
+    "silero": [
+      "src/renderer/src/services/silero-vad.worker.ts",
+      "src/renderer/public/silero_vad.onnx"
+    ],
+    "neural": [
+      "src/renderer/public/deepfilternet3/pkg/df_bg.wasm",
+      "src/renderer/public/deepfilternet3/models/DeepFilterNet3_onnx.tar.gz"
+    ],
+    "capture": [
+      "src/renderer/src/components/UpdaterWindow.tsx",
+      "src/renderer/src/index.css",
+      "tailwind.config.js",
+      "src/renderer/src/locales/ru.json",
+      "src/renderer/src/locales/en.json"
+    ]
+  },
+  "bundle": {
+    "path": "tests/native-reference/sources.json.gz",
+    "sha256": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa"
+  },
+  "packages": {
+    "typescript": {
+      "version": "5.9.3",
+      "integrity": "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==",
+      "admitted": false
+    },
+    "@echogarden/fvad-wasm": {
+      "version": "0.2.0",
+      "integrity": "sha512-jPPzN6uV23dsOkKnGxajBDw81Xx3ICecw72sIzI+m4PzFWpSf/QOLvlgf7mySfqCngD54LRC1aDgD5haB45dbg==",
+      "admitted": false
+    },
+    "onnxruntime-web": {
+      "version": "1.27.0",
+      "integrity": "sha512-ogDLsqIozHZwifPuN37OproAo0byX6t43/bP8GzeZWBWD6MOGExswFAx3up4NS/vvWBOg2u2PXomDt3rMmdQSg==",
+      "admitted": false
+    },
+    "@timephy/rnnoise-wasm": {
+      "version": "1.0.0",
+      "integrity": "sha512-zzRdFyALbhaNIuEo3LKazPWxabatbPxkaBrHzRjGDlVHX2dFklh68HUENHlvHkKsq+OOQSC1ag5sGPDMDgg2CA==",
+      "admitted": false
+    },
+    "deepfilter-standalone": {
+      "version": "1.0.2",
+      "integrity": "sha512-9BV9HC/dqP3tYcz6CV2XBwarsLrGjKTLRSwbOIiRCRE3cZ8E2l1W46jApuVF+lFZrqoss4HCXKJE557z+V4P6Q==",
+      "admitted": false
+    },
+    "electron": {
+      "version": "44.4.3",
+      "integrity": "sha512-LTpSFTB40qVCXIX5xMo+cgHI/Jjkbjw7VpB26PccEbroqOn72LBukeaDwPVo1fBYzSzs0c9iPuAucFCO7Tw81Q==",
+      "admitted": false
+    },
+    "esbuild": {
+      "version": "0.21.5",
+      "integrity": "sha512-mg3OPMV4hXywwpoDxu3Qda5xCKQi+vCTZq8S9J/EpkhB2HzKXq4SNFZE3+NK93JYxc8VMSep+lOUSC/RVKaBqw==",
+      "admitted": false
+    },
+    "postcss": {
+      "version": "8.5.28",
+      "integrity": "sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==",
+      "admitted": false
+    },
+    "tailwindcss": {
+      "version": "3.4.19",
+      "integrity": "sha512-3ofp+LL8E+pK/JuPLPggVAIaEuhvIz4qNcf3nA1Xn2o/7fb7s/TYpHhwGDv1ZU3PkBluUVaF8PyCHcm48cKLWQ==",
+      "admitted": false
+    },
+    "react": {
+      "version": "18.3.1",
+      "integrity": "sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==",
+      "admitted": false
+    },
+    "react-dom": {
+      "version": "18.3.1",
+      "integrity": "sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==",
+      "admitted": false
+    },
+    "i18next": {
+      "version": "26.1.0",
+      "integrity": "sha512-dIU6td04DvQuIqVst5S9g0GviTmhZ0DYD4b9ociVGJmuCa5vZ2de/t+Enf4olvj87mF8Y2lwjNQBwC9QZsvzKQ==",
+      "admitted": false
+    },
+    "react-i18next": {
+      "version": "17.0.7",
+      "integrity": "sha512-rwtPXsb/zwzDafN+gytcjF5YnqGQQIRmCQ6DctBC1VSipRB8GD/MWEVrFP42vjMyuYydxWxM8CZRt+yiNuuoHg==",
+      "admitted": false
+    },
+    "@phosphor-icons/react": {
+      "version": "2.1.10",
+      "integrity": "sha512-vt8Tvq8GLjheAZZYa+YG/pW7HDbov8El/MANW8pOAz4eGxrwhnbfrQZq0Cp4q8zBEu8NIhHdnr+r8thnfRSNYA==",
+      "admitted": false
+    }
+  },
+  "packageLock": {
+    "path": "package-lock.json",
+    "gitBlob": "8c1cd9279bf5a055cb80a9508e26866e0a787f70",
+    "gitSha256": "a199ccaa069437b9580c67fbbed0481a5e2fa58dde1c4e577398c9950c186b87"
+  },
+  "captureGate": "Original whole-renderer Tailwind candidate closure and transitive packages are not frozen; preserve existing captures, do not manufacture parity"
+}

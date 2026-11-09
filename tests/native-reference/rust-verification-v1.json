@@ -1,0 +1,29 @@
+{
+  "scope": "Standalone rustc compiles exact source/test module closure, not whole native Cargo/media build",
+  "tests": 0,
+  "passed": false,
+  "sources": {
+    "scripts/native/reference-contract.cjs": "7ce535e21b018a6abdf11aada090f607db466b248588e99ecd054289233b810a",
+    "scripts/native/reference-paths.py": "7f600ddf88528c426e866e319ec1036907b77cb16419445fe42fd9b6d1059055",
+    "scripts/native/verify.cjs": "51851c24c5140a1056e796755729758425f3bd04bae3db610b88feace461aeb7",
+    "scripts/native/capture-react.cjs": "59ad7af206c728ea0cdf2fe840b09365a5a4ef38b347b523dd3d69bad039a059",
+    "tests/native-reference/manifest.json": "fea3fab3b49865e50aa35a0834b50be6e2cdb4c7b8c528ec609065cb483b4b54",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa",
+    "tests/native-reference/contract.test.cjs": "be2e35b4450c333037aae0656128b1a92ef2572657825884bfb38b5b16695853",
+    "rust/crates/zabor-native/tests/reference/contract.rs": "ab5e5061c6dbd7a23ddb60911ce74f59f977c9c73ee6e85cad71ac6926529577",
+    "rust/crates/zabor-native/src/achievements/tests.rs": "8fdc6d1f393f96e494ecbb69be909f6607d60c45c0f671a6d3389d2c2484ece7",
+    "rust/crates/zabor-native/src/presence/tests.rs": "6a3bbe61a11aa9b46ac10d007ce1233c4757e70e51c4b53f2fea0484e02075e5",
+    "rust/crates/zabor-native/src/localization.rs": "1a7994d551927e0e05e27c0d240d38c3f91ef1d7eca6e0c32076b3dcb75c5ade",
+    "rust/crates/zabor-native/src/achievements.rs": "a93f46c746ae8f64707543b793c18acbb63ac4212facbef34c8f9a9634d8b9ec",
+    "rust/crates/zabor-native/src/presence.rs": "434861756f0717418c76b33b8e24c417ce65a4eba11832454b5349d4d14becf8",
+    "rust/crates/zabor-native/src/critical_intents.rs": "75221e725ef8fda3c0d2e1115d19b5c8a8b5f29136bbb0a928a8dbaf9f781248",
+    "rust/crates/zabor-native/src/hub.rs": "c06230d5c1ca21e7a173bde9cbf0d0059c638269d00d0a21154bc1b4ed637fde",
+    "rust/crates/zabor-native/src/protocol.rs": "f3d06033b97e7d362a526448771460b11c041965eb400aaa767237e4b18bcfd3",
+    "rust/crates/zabor-native/Cargo.toml": "c1331cebe377ff1e42428334469c4503776c2b9230d5e2df137bccf2235e3957",
+    "rust/Cargo.toml": "9da9a5dc7733144d5d424af0157c8508b7b2d9914a1ab471a4151f3e8ba22f2f",
+    "rust/Cargo.lock": "48db95ccb660a6d1e48a4056ee8dbf0855f640e33ec78de42e6075a289c9c31c",
+    ".cargo/config.toml": "8feb1d003d7cca188186af5cc2523152f2e2ac3abaa95409315f7eb015f358b9",
+    "package-lock.json": "8eaa580fe89dede5ba22b3064496ca32f8346583705e04e3a061d0ccd5547c37"
+  },
+  "error": "Nonunique exact dependency SDK admission: serde_json: 0"
+}

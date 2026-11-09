@@ -1,0 +1,217 @@
+{
+  "scope": "Standalone rustc compiles exact affected test modules and non-test support dependency closure; not whole-native Cargo/media build",
+  "tests": 12,
+  "passed": true,
+  "originalOutcomes": [
+    {
+      "command": [
+        "node",
+        "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\native-reference-completion\\scripts\\native\\reference-contract.cjs",
+        "--freeze",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\frozen"
+      ],
+      "exitCode": 0,
+      "stdout": "{\"root\":\"C:\\\\Users\\\\porad\\\\AppData\\\\Local\\\\Temp\\\\opencode\\\\native-reference-rust-v4-tgiggvbw\\\\frozen\",\"files\":15,\"manifestSha256\":\"229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a\",\"packagesAdmitted\":false,\"visualAcceptance\":false}",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--version"
+      ],
+      "exitCode": 0,
+      "stdout": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--crate-type=rlib",
+        "--crate-name=reference_support",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\support.rs",
+        "-o",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\target\\libreference_support.rlib",
+        "--edition=2024",
+        "-L",
+        "dependency=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps",
+        "-C",
+        "target-feature=+crt-static",
+        "--extern",
+        "serde=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+        "--extern",
+        "serde_json=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+        "--extern",
+        "thiserror=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+        "--extern",
+        "futures_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+        "--extern",
+        "tokio=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+        "--extern",
+        "tokio_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+        "--extern",
+        "tokio_tungstenite=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+        "--extern",
+        "url=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+        "--extern",
+        "reqwest=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--test",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\affected.rs",
+        "-o",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\target\\affected.exe",
+        "-A",
+        "dead_code",
+        "--extern",
+        "reference_support=C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\target\\libreference_support.rlib",
+        "--edition=2024",
+        "-L",
+        "dependency=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps",
+        "-C",
+        "target-feature=+crt-static",
+        "--extern",
+        "serde=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+        "--extern",
+        "serde_json=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+        "--extern",
+        "thiserror=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+        "--extern",
+        "futures_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+        "--extern",
+        "tokio=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+        "--extern",
+        "tokio_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+        "--extern",
+        "tokio_tungstenite=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+        "--extern",
+        "url=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+        "--extern",
+        "reqwest=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib"
+      ],
+      "exitCode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\target\\affected.exe",
+        "achievements::tests::standard_definitions_match_original_ids_stats_categories_max_and_units",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "stdout": "\nrunning 1 test\ntest achievements::tests::standard_definitions_match_original_ids_stats_categories_max_and_units ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 50.31s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\target\\affected.exe",
+        "achievements::tests::own_peer_rows_localization_sort_and_unknown_hidden_differ",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "stdout": "\nrunning 1 test\ntest achievements::tests::own_peer_rows_localization_sort_and_unknown_hidden_differ ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 114.00s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\target\\affected.exe",
+        "presence::tests::",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "stdout": "\nrunning 8 tests\ntest presence::tests::dates_same_year_changed_year_and_exact_ru_en_months ... ok\ntest presence::tests::exact_ru_hour_plurals_and_en_one_other ... ok\ntest presence::tests::exact_ru_minute_plurals_and_en_one_other ... ok\ntest presence::tests::local_midnight_order_precedes_yesterday_only_after_one_hour ... ok\ntest presence::tests::local_timezone_day_not_utc_controls_hours_and_year_transition ... ok\ntest presence::tests::millisecond_thresholds_future_minutes_and_same_local_day_hours ... ok\ntest presence::tests::missing_invalid_and_unresolvable_local_input_preserve_offline_redaction ... ok\ntest presence::tests::previous_local_day_23_and_25_hour_dst_midnights_round_like_reference ... ok\n\ntest result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 86.73s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-rust-v4-tgiggvbw\\target\\affected.exe",
+        "localization::tests::",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "stdout": "\nrunning 2 tests\ntest localization::tests::byte_labels_keep_legacy_format ... ok\ntest localization::tests::catalogs_match_react_keys_and_values ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 1.82s\n\n",
+      "stderr": ""
+    }
+  ],
+  "sources": {
+    "scripts/native/reference-contract.cjs": "2964b2b4d87c54724390c2cb16236160ea5e52e57349a7c0dd9447f1e1beb563",
+    "scripts/native/reference-paths.py": "7f600ddf88528c426e866e319ec1036907b77cb16419445fe42fd9b6d1059055",
+    "scripts/native/verify.cjs": "51851c24c5140a1056e796755729758425f3bd04bae3db610b88feace461aeb7",
+    "scripts/native/capture-react.cjs": "59ad7af206c728ea0cdf2fe840b09365a5a4ef38b347b523dd3d69bad039a059",
+    "tests/native-reference/manifest.json": "229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa",
+    "tests/native-reference/contract.test.cjs": "09521cdbedb6bdebe927c06300bb824b6fd29eea71eefcd3f4fae569fe409094",
+    "rust/crates/zabor-native/tests/reference/contract.rs": "24a229ee73155942962e4b3de33cd583708a75517540dd6468752e01dd665b08",
+    "rust/crates/zabor-native/tests/voice-reference.cjs": "f7c6e62cac174a8919343986f0cd33b9f9f5cd860235931e1648ef4143b6e764",
+    "rust/crates/zabor-native/tests/vad-reference.cjs": "e868a85f4fdeca5fdeb5916810323029784420f5fba9053021b538a88b5aa91f",
+    "rust/crates/zabor-native/tests/silero-reference.cjs": "5fe7aaaca059a969b7ea34d8483c14db7fa3ebb362fc71775e23d2f4e2579a6b",
+    "rust/crates/zabor-native/tests/neural-reference.mjs": "c7849b3cf5b240ef3ef42dab857bfefa3eff12044447425245a12a2da9cf3976",
+    "rust/crates/zabor-native/src/achievements/tests.rs": "8fdc6d1f393f96e494ecbb69be909f6607d60c45c0f671a6d3389d2c2484ece7",
+    "rust/crates/zabor-native/src/presence/tests.rs": "6a3bbe61a11aa9b46ac10d007ce1233c4757e70e51c4b53f2fea0484e02075e5",
+    "rust/crates/zabor-native/src/localization.rs": "1a7994d551927e0e05e27c0d240d38c3f91ef1d7eca6e0c32076b3dcb75c5ade",
+    "rust/crates/zabor-native/src/achievements.rs": "a93f46c746ae8f64707543b793c18acbb63ac4212facbef34c8f9a9634d8b9ec",
+    "rust/crates/zabor-native/src/presence.rs": "434861756f0717418c76b33b8e24c417ce65a4eba11832454b5349d4d14becf8",
+    "rust/crates/zabor-native/src/critical_intents.rs": "75221e725ef8fda3c0d2e1115d19b5c8a8b5f29136bbb0a928a8dbaf9f781248",
+    "rust/crates/zabor-native/src/hub.rs": "c06230d5c1ca21e7a173bde9cbf0d0059c638269d00d0a21154bc1b4ed637fde",
+    "rust/crates/zabor-native/src/protocol.rs": "f3d06033b97e7d362a526448771460b11c041965eb400aaa767237e4b18bcfd3",
+    "rust/crates/zabor-native/Cargo.toml": "c1331cebe377ff1e42428334469c4503776c2b9230d5e2df137bccf2235e3957",
+    "rust/Cargo.toml": "9da9a5dc7733144d5d424af0157c8508b7b2d9914a1ab471a4151f3e8ba22f2f",
+    "rust/Cargo.lock": "48db95ccb660a6d1e48a4056ee8dbf0855f640e33ec78de42e6075a289c9c31c",
+    ".cargo/config.toml": "8feb1d003d7cca188186af5cc2523152f2e2ac3abaa95409315f7eb015f358b9",
+    "package-lock.json": "8eaa580fe89dede5ba22b3064496ca32f8346583705e04e3a061d0ccd5547c37"
+  },
+  "sdk": {
+    "serde": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+      "sha256": "3351f8911787b08b2d2618540f592fdfe8b8bbd80aa598007cddfce1081d7046",
+      "fingerprint": 13778454799618568188
+    },
+    "serde_json": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+      "sha256": "5cb32cc1596f9d682a8f5a4f0358547ab50eab348400da6ceea608c0a3d3254e",
+      "fingerprint": 13836475259000838342
+    },
+    "thiserror": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+      "sha256": "2e2704890c72d744f6e53d7cb47a908b90eb179fd348e5476a682ba773f86ead",
+      "fingerprint": 1121792929245877005
+    },
+    "futures_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+      "sha256": "8ebb99f44c662b53427adb22c8009a6618569bea1cdb00f64685d1f022b60d51",
+      "fingerprint": 13879001378624573752
+    },
+    "tokio": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+      "sha256": "99242fe1aff80af1c1e886fa07d5263fb9004b0d41d1f511edade810496ad39a",
+      "fingerprint": 18142639122434583119
+    },
+    "tokio_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+      "sha256": "61969158f101b2baad1999b50af489da1a9861f39da6c61172adf1e84860d5b8",
+      "fingerprint": 16555775765130003229
+    },
+    "tokio_tungstenite": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+      "sha256": "b87a8cc363ab3890daabf926e6bc4ce30e4d97cdb8354842548c32868f395f08",
+      "fingerprint": 3741319618123961936
+    },
+    "url": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+      "sha256": "05fd91d9d53a4a3e6fa00a8dce52ae76d0eb3006b5eb0fd8126e9ac1204576cc",
+      "fingerprint": 17321916557742098263
+    },
+    "reqwest": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib",
+      "sha256": "ea8ee077c47ce4631ab38ebf862f88711f62f853eda7a66a97a01aa0fbe0443f",
+      "fingerprint": 14121496218506268594
+    }
+  },
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)"
+}

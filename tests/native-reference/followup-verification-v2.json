@@ -1,0 +1,275 @@
+{
+  "baseCommit": "2f4c19ab7221c1a70eac93aef9ccd14f22b6b371",
+  "scope": "Unfinished narrow Rust continuation only; 28 JS and 8 freeze proofs inherited with exact unchanged input guards",
+  "passed": true,
+  "inheritedGreenTests": 36,
+  "greenRustTests": 17,
+  "originalOutcomes": [
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--version"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.1634,
+      "stdout": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--crate-type=rlib",
+        "--crate-name=reference_support",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\support.rs",
+        "-o",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\libreference_support.rlib",
+        "--edition=2024",
+        "-L",
+        "dependency=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps",
+        "-C",
+        "target-feature=+crt-static",
+        "--extern",
+        "serde=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+        "--extern",
+        "serde_json=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+        "--extern",
+        "thiserror=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+        "--extern",
+        "futures_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+        "--extern",
+        "tokio=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+        "--extern",
+        "tokio_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+        "--extern",
+        "tokio_tungstenite=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+        "--extern",
+        "url=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+        "--extern",
+        "reqwest=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.4337,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\.cargo\\bin\\rustc.exe",
+        "--test",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\affected.rs",
+        "-o",
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\affected.exe",
+        "-A",
+        "dead_code",
+        "--extern",
+        "reference_support=C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\libreference_support.rlib",
+        "--edition=2024",
+        "-L",
+        "dependency=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps",
+        "-C",
+        "target-feature=+crt-static",
+        "--extern",
+        "serde=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+        "--extern",
+        "serde_json=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+        "--extern",
+        "thiserror=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+        "--extern",
+        "futures_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+        "--extern",
+        "tokio=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+        "--extern",
+        "tokio_util=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+        "--extern",
+        "tokio_tungstenite=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+        "--extern",
+        "url=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+        "--extern",
+        "reqwest=C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.3374,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\affected.exe",
+        "snapshot_contract::regressions::",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.9415,
+      "stdout": "\nrunning 3 tests\ntest snapshot_contract::regressions::every_new_snapshot_propagates_admission_failure_instead_of_using_old_bytes ... ok\ntest snapshot_contract::regressions::hundreds_of_catalog_lookups_admit_only_once_per_explicit_snapshot ... ok\ntest snapshot_contract::regressions::new_snapshot_readmits_changed_root_and_owns_only_its_admitted_bytes ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 26 filtered out; finished in 0.00s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\affected.exe",
+        "achievements::tests::standard_definitions_match_original_ids_stats_categories_max_and_units",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 3.5965,
+      "stdout": "\nrunning 1 test\ntest achievements::tests::standard_definitions_match_original_ids_stats_categories_max_and_units ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 3.55s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\affected.exe",
+        "achievements::tests::own_peer_rows_localization_sort_and_unknown_hidden_differ",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.3015,
+      "stdout": "\nrunning 1 test\ntest achievements::tests::own_peer_rows_localization_sort_and_unknown_hidden_differ ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 1.25s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\affected.exe",
+        "achievements::tests::error_acceptance_is_explicit_empty_not_achievement_grant",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.2281,
+      "stdout": "\nrunning 1 test\ntest achievements::tests::error_acceptance_is_explicit_empty_not_achievement_grant ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 1.18s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\affected.exe",
+        "achievements::tests::own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.2029,
+      "stdout": "\nrunning 1 test\ntest achievements::tests::own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 1.16s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\affected.exe",
+        "presence::tests::",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 8.3474,
+      "stdout": "\nrunning 8 tests\ntest presence::tests::dates_same_year_changed_year_and_exact_ru_en_months ... ok\ntest presence::tests::exact_ru_hour_plurals_and_en_one_other ... ok\ntest presence::tests::exact_ru_minute_plurals_and_en_one_other ... ok\ntest presence::tests::local_midnight_order_precedes_yesterday_only_after_one_hour ... ok\ntest presence::tests::local_timezone_day_not_utc_controls_hours_and_year_transition ... ok\ntest presence::tests::millisecond_thresholds_future_minutes_and_same_local_day_hours ... ok\ntest presence::tests::missing_invalid_and_unresolvable_local_input_preserve_offline_redaction ... ok\ntest presence::tests::previous_local_day_23_and_25_hour_dst_midnights_round_like_reference ... ok\n\ntest result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 8.30s\n\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "C:\\Users\\porad\\AppData\\Local\\Temp\\opencode\\native-reference-followup-v2-v736d3ma\\target\\affected.exe",
+        "localization::tests::",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.1825,
+      "stdout": "\nrunning 2 tests\ntest localization::tests::byte_labels_keep_legacy_format ... ok\ntest localization::tests::catalogs_match_react_keys_and_values ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 1.14s\n\n",
+      "stderr": ""
+    }
+  ],
+  "sources": {
+    ".cargo/config.toml": "8feb1d003d7cca188186af5cc2523152f2e2ac3abaa95409315f7eb015f358b9",
+    "package-lock.json": "8eaa580fe89dede5ba22b3064496ca32f8346583705e04e3a061d0ccd5547c37",
+    "rust/Cargo.lock": "48db95ccb660a6d1e48a4056ee8dbf0855f640e33ec78de42e6075a289c9c31c",
+    "rust/Cargo.toml": "9da9a5dc7733144d5d424af0157c8508b7b2d9914a1ab471a4151f3e8ba22f2f",
+    "rust/crates/zabor-native/Cargo.toml": "c1331cebe377ff1e42428334469c4503776c2b9230d5e2df137bccf2235e3957",
+    "rust/crates/zabor-native/assets/catalogs/en.json": "a353e37199ad8e79aa2ea44d3afdacedaca13af4e28382db9f8ea0a23793958a",
+    "rust/crates/zabor-native/assets/catalogs/ru.json": "066fd2522dc46cdf7987df79a653521e8d34516b09dffb037356303353194fcc",
+    "rust/crates/zabor-native/assets/models/DeepFilterNet3_onnx.tar.gz": "c94d91f70911001c946e0fabb4aa9adc37045f45a03b56008cb0c8244cb63616",
+    "rust/crates/zabor-native/assets/models/silero_vad.onnx": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+    "rust/crates/zabor-native/assets/resources.json": "ede7a7d4d1d10d8430b58eac6cfe30c4323dd2a9a164b15dbb089f14ab9fc4b8",
+    "rust/crates/zabor-native/src/achievements.rs": "a93f46c746ae8f64707543b793c18acbb63ac4212facbef34c8f9a9634d8b9ec",
+    "rust/crates/zabor-native/src/achievements/tests.rs": "5150d4219904a07b7d1056cbb591199d003c7f18b9c4150b20116abb8aefb5fb",
+    "rust/crates/zabor-native/src/critical_intents.rs": "75221e725ef8fda3c0d2e1115d19b5c8a8b5f29136bbb0a928a8dbaf9f781248",
+    "rust/crates/zabor-native/src/hub.rs": "c06230d5c1ca21e7a173bde9cbf0d0059c638269d00d0a21154bc1b4ed637fde",
+    "rust/crates/zabor-native/src/localization.rs": "9d39c4c8e26c18ff3e940c9b2309aa28aa75a932c1926b05c45e4dd68d430ec5",
+    "rust/crates/zabor-native/src/presence.rs": "434861756f0717418c76b33b8e24c417ce65a4eba11832454b5349d4d14becf8",
+    "rust/crates/zabor-native/src/presence/tests.rs": "6d0eaa29818d211e341e267321f22720f19bc2d1bbe925a4047ae5714860bb8b",
+    "rust/crates/zabor-native/src/protocol.rs": "f3d06033b97e7d362a526448771460b11c041965eb400aaa767237e4b18bcfd3",
+    "rust/crates/zabor-native/tests/neural-reference.mjs": "c7849b3cf5b240ef3ef42dab857bfefa3eff12044447425245a12a2da9cf3976",
+    "rust/crates/zabor-native/tests/reference/contract.rs": "658557fa9bd5d12f5f9a43d63a7c77408e4b8a45955a445951b4e6026a3d20e2",
+    "rust/crates/zabor-native/tests/silero-reference.cjs": "5fe7aaaca059a969b7ea34d8483c14db7fa3ebb362fc71775e23d2f4e2579a6b",
+    "rust/crates/zabor-native/tests/vad-reference.cjs": "e868a85f4fdeca5fdeb5916810323029784420f5fba9053021b538a88b5aa91f",
+    "rust/crates/zabor-native/tests/voice-reference.cjs": "f7c6e62cac174a8919343986f0cd33b9f9f5cd860235931e1648ef4143b6e764",
+    "scripts/native/capture-react.cjs": "59ad7af206c728ea0cdf2fe840b09365a5a4ef38b347b523dd3d69bad039a059",
+    "scripts/native/reference-contract.cjs": "fcff2dd918fdc176ff0ba9ae574da89bbf763df5222a461e67c7485e52b97844",
+    "scripts/native/reference-paths.py": "2fea1679b2544a27531dcc8831f9b11612811fa064677035fd1208d942d04ec8",
+    "scripts/native/verify.cjs": "51851c24c5140a1056e796755729758425f3bd04bae3db610b88feace461aeb7",
+    "tests/native-reference/contract.test.cjs": "faaab08b3b9e49e7c390f0676a23fb2807f2a1d6f8101deb866ec8ac66156021",
+    "tests/native-reference/followup-freeze.test.cjs": "59ff037c0f4ed5eeb810a025a72e6b92b0289b9c0fa135bf57a580ae487faa42",
+    "tests/native-reference/manifest.json": "229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a",
+    "tests/native-reference/snapshot-regressions.rs": "d041fd1719d8d6cf1b38e4afce80491d351442afd40fa49024594fb0e9dbaa88",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa"
+  },
+  "sdk": {
+    "serde": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde-1f52108a0ea6acf3.rlib",
+      "sha256": "3351f8911787b08b2d2618540f592fdfe8b8bbd80aa598007cddfce1081d7046",
+      "fingerprint": 13778454799618568188
+    },
+    "serde_json": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libserde_json-f502d674e6299ef4.rlib",
+      "sha256": "5cb32cc1596f9d682a8f5a4f0358547ab50eab348400da6ceea608c0a3d3254e",
+      "fingerprint": 13836475259000838342
+    },
+    "thiserror": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libthiserror-620a939baa348799.rlib",
+      "sha256": "2e2704890c72d744f6e53d7cb47a908b90eb179fd348e5476a682ba773f86ead",
+      "fingerprint": 1121792929245877005
+    },
+    "futures_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libfutures_util-077c36a559f3c65f.rlib",
+      "sha256": "8ebb99f44c662b53427adb22c8009a6618569bea1cdb00f64685d1f022b60d51",
+      "fingerprint": 13879001378624573752
+    },
+    "tokio": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio-7406c6aeff5aa97e.rlib",
+      "sha256": "99242fe1aff80af1c1e886fa07d5263fb9004b0d41d1f511edade810496ad39a",
+      "fingerprint": 18142639122434583119
+    },
+    "tokio_util": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_util-73beb159fa8e2240.rlib",
+      "sha256": "61969158f101b2baad1999b50af489da1a9861f39da6c61172adf1e84860d5b8",
+      "fingerprint": 16555775765130003229
+    },
+    "tokio_tungstenite": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libtokio_tungstenite-e7b468015058f768.rlib",
+      "sha256": "b87a8cc363ab3890daabf926e6bc4ce30e4d97cdb8354842548c32868f395f08",
+      "fingerprint": 3741319618123961936
+    },
+    "url": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\liburl-45afd7a03c0d705a.rlib",
+      "sha256": "05fd91d9d53a4a3e6fa00a8dce52ae76d0eb3006b5eb0fd8126e9ac1204576cc",
+      "fingerprint": 17321916557742098263
+    },
+    "reqwest": {
+      "path": "C:\\Users\\porad\\.local\\share\\opencode\\worktree\\b1b3f5\\rust-p0-backend-bench\\rust\\target\\debug\\deps\\libreqwest-2d950df24eda4454.rlib",
+      "sha256": "ea8ee077c47ce4631ab38ebf862f88711f62f853eda7a66a97a01aa0fbe0443f",
+      "fingerprint": 14121496218506268594
+    }
+  },
+  "originalProofs": {
+    "tests/native-reference/rust-verification-v1.json": "22f5488d562c6f4c026345d982515502b3dce5d1fa2444a15c86fca32dd464fe",
+    "tests/native-reference/rust-verification-v2.json": "1bb443fd49d8e6ef4b020dea0f46d2e11f7c049d301075aef32813888b0ab390",
+    "tests/native-reference/rust-verification-v3.json": "e9f7b83242924323bdfc314eda5e0ea1a59e9955efd74e61b8c5b40fdfebb712",
+    "tests/native-reference/rust-verification-v4.json": "0a088953d37dfab0a8cd37e2dd350f2a838e18ba263b029aa942b8c3645b7ad4",
+    "tests/native-reference/js-verification.json": "ec3708638f9957708c54b6ed134b49ad175f9c4f273facfb2a0eab49d89def0b",
+    "tests/native-reference/source-integrity.json": "dabcb90199e92039045711b07c460cafa7b96dd6b143bd9b7b5de1d0e26bcb72",
+    "tests/native-reference/graph-integrity.json": "b240b988416e37a86588fa3de46901126ccb1560adc0c9d6cfbee2fd90a8ec1e",
+    "tests/native-reference/manifest.json": "229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa"
+  },
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "rustRuntimeSeconds": {
+    "snapshot_contract::regressions::": 0.0,
+    "achievements::tests::standard_definitions_match_original_ids_stats_categories_max_and_units": 3.55,
+    "achievements::tests::own_peer_rows_localization_sort_and_unknown_hidden_differ": 1.25,
+    "achievements::tests::error_acceptance_is_explicit_empty_not_achievement_grant": 1.18,
+    "achievements::tests::own_durable_primary_boundary_failure_stale_logout_and_catalog_isolation": 1.16,
+    "presence::tests::": 8.3,
+    "localization::tests::": 1.14
+  }
+}

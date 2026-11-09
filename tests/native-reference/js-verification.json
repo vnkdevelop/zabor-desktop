@@ -1,0 +1,27 @@
+{
+  "originalJob": "sh_1befb7177001BBIkjYdIYdqaAj",
+  "originalInitialJob": "sh_1bef7ae9d001c2ADky0G7saQHx",
+  "command": "cmd.exe /c node --test tests/native-reference/contract.test.cjs",
+  "tests": 27,
+  "passed": 27,
+  "failed": 0,
+  "skipped": 0,
+  "cancelled": 0,
+  "syntaxChecks": 8,
+  "unchangedSources": {
+    "scripts/native/reference-contract.cjs": "2964b2b4d87c54724390c2cb16236160ea5e52e57349a7c0dd9447f1e1beb563",
+    "scripts/native/reference-paths.py": "7f600ddf88528c426e866e319ec1036907b77cb16419445fe42fd9b6d1059055",
+    "scripts/native/verify.cjs": "51851c24c5140a1056e796755729758425f3bd04bae3db610b88feace461aeb7",
+    "scripts/native/capture-react.cjs": "59ad7af206c728ea0cdf2fe840b09365a5a4ef38b347b523dd3d69bad039a059",
+    "tests/native-reference/manifest.json": "229d2e6e63f7bce7e2c990b18e81c030d11b01376e83cf83ea25702d7a7e0d6a",
+    "tests/native-reference/sources.json.gz": "49c869511f25ffeaee775d04af4f99066754c522d17652bda8b11fbe1043e4aa",
+    "tests/native-reference/contract.test.cjs": "09521cdbedb6bdebe927c06300bb824b6fd29eea71eefcd3f4fae569fe409094",
+    "rust/crates/zabor-native/tests/voice-reference.cjs": "f7c6e62cac174a8919343986f0cd33b9f9f5cd860235931e1648ef4143b6e764",
+    "rust/crates/zabor-native/tests/vad-reference.cjs": "e868a85f4fdeca5fdeb5916810323029784420f5fba9053021b538a88b5aa91f",
+    "rust/crates/zabor-native/tests/silero-reference.cjs": "5fe7aaaca059a969b7ea34d8483c14db7fa3ebb362fc71775e23d2f4e2579a6b",
+    "rust/crates/zabor-native/tests/neural-reference.mjs": "c7849b3cf5b240ef3ef42dab857bfefa3eff12044447425245a12a2da9cf3976"
+  },
+  "ownedFixtureCleanup": "Node after hook completed without errors",
+  "packagesAdmitted": false,
+  "wholeNativeAcceptance": false
+}
