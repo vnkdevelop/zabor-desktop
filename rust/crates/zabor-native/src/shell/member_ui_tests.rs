@@ -36,6 +36,18 @@ fn member() -> User {
 }
 
 fn fixture() -> Fixture {
+    fixture_with_adapter(|_, _, _, _, _| {})
+}
+
+fn fixture_with_adapter(
+    install: impl FnOnce(
+        &NativeApp,
+        &Rc<RefCell<AppUi>>,
+        &Rc<RefCell<Bootstrap>>,
+        &CommandQueue,
+        &Arc<CriticalIntents>,
+    ),
+) -> Fixture {
     slint::platform::set_platform(Box::new(Headless)).unwrap();
     let ui = NativeApp::new().unwrap();
     ui.on_tr(|key, language| {
@@ -68,10 +80,11 @@ fn fixture() -> Fixture {
         &ui,
         state.clone(),
         app.clone(),
-        commands,
+        commands.clone(),
         intents.clone(),
         data.clone(),
     );
+    install(&ui, &app, &data, &commands, &intents);
     (ui, state, app, data, receiver, intents, timer)
 }
 
@@ -99,6 +112,294 @@ fn load(
         },
         intents,
     );
+}
+
+#[test]
+fn member_snapshot_survives_first_original_app_context_callback_before_periodic_refresh() {
+    std::thread::spawn(|| {
+        let mut app_timer = None;
+        let (ui, state, app, data, mut receiver, intents, _timer) =
+            fixture_with_adapter(|ui, app, data, commands, intents| {
+                app_timer = Some(super::super::app_ui::bind(
+                    ui,
+                    app.clone(),
+                    commands,
+                    intents.clone(),
+                    data.clone(),
+                    Rc::new(RefCell::new(super::super::avatar_ui::AvatarUi::new())),
+                ));
+            });
+        load(&ui, &state, &app, &data, &mut receiver, &intents);
+        ui.invoke_open_member_profile("member".into());
+        let Command::LookupProfile(query) = receiver.try_recv().unwrap().command else {
+            panic!("missing original member lookup")
+        };
+        ui.invoke_app_context_changed();
+        assert_eq!(app.borrow().member_profile, Some(member()));
+        let mut fresh = member();
+        fresh.display_name = "Fresh Member".into();
+        state
+            .borrow_mut()
+            .profile_lookup(&ui, &app, &query, Ok(Some(fresh.clone())), &intents);
+        ui.invoke_app_context_changed();
+        assert_eq!(app.borrow().member_profile, Some(fresh));
+        ui.set_user_id("replacement".into());
+        ui.invoke_app_context_changed();
+        assert!(app.borrow().member_profile.is_none());
+        drop(app_timer);
+    })
+    .join()
+    .unwrap();
+}
+
+#[test]
+fn original_avatar_friend_and_self_profiles_do_not_reapply_over_batched_member_navigation() {
+    std::thread::spawn(|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let avatars = Rc::new(RefCell::new(super::super::avatar_ui::AvatarUi::new()));
+        let setup = Rc::new(RefCell::new(None));
+        let stop = tokio_util::sync::CancellationToken::new();
+        let mut avatar_timer = None;
+        let (ui, state, app, data, mut receiver, intents, _timer) =
+            fixture_with_adapter(|ui, _, data, commands, intents| {
+                avatar_timer = Some(super::super::avatar_ui::bind(
+                    ui,
+                    avatars.clone(),
+                    data.clone(),
+                    setup.clone(),
+                    super::super::avatar_ui::Bindings {
+                        commands: commands.clone(),
+                        runtime: runtime.handle().clone(),
+                        update: Arc::new(|_| panic!("adapter fixture must not start avatar IO")),
+                        intents: intents.clone(),
+                        stop: stop.clone(),
+                    },
+                ));
+            });
+        let prior = User {
+            id: "prior-friend".into(),
+            username: "Prior".into(),
+            display_name: "Prior Friend".into(),
+            ..Default::default()
+        };
+        data.borrow_mut().friends.push(prior);
+        data.borrow_mut().user.username = "Owner".into();
+        data.borrow_mut().user.display_name = "Owner".into();
+        for id in ["prior-friend", "owner"] {
+            ui.set_profile_source(if id == "owner" { "none" } else { "friends" }.into());
+            ui.invoke_open_profile(id.into());
+            if id != "owner" {
+                receiver.try_recv().unwrap();
+            }
+            assert_eq!(ui.get_profile_id(), id);
+            load(&ui, &state, &app, &data, &mut receiver, &intents);
+            ui.invoke_open_member_profile("member".into());
+            receiver.try_recv().unwrap();
+            ui.invoke_avatar_context_changed();
+            avatars
+                .borrow_mut()
+                .refresh(&ui, &data.borrow(), None, &intents);
+            assert_eq!(ui.get_profile_id(), "member");
+            assert_eq!(ui.get_profile_name(), "Member");
+            assert!(!ui.get_profile_friend());
+            assert_eq!(ui.get_profile_source(), "channelMembers");
+            assert!(data.borrow().channel_users.is_empty());
+            ui.invoke_close_member_profile();
+            ui.invoke_avatar_context_changed();
+        }
+        stop.cancel();
+        let (jobs, failed) = avatars.borrow_mut().take_jobs(&ui);
+        assert!(!failed && jobs.is_empty());
+        drop(avatar_timer);
+    })
+    .join()
+    .unwrap();
+}
+
+#[test]
+fn member_origin_friend_callbacks_use_actual_original_worker_and_reject_late_closed_results() {
+    for mode in [
+        "true", "false", "null", "leave", "logout", "view", "window", "friend",
+    ] {
+        std::thread::spawn(move || {
+            let (ui, state, app, data, mut receiver, intents, _timer) = fixture();
+            ui.set_user_id("fixture-owner".into());
+            data.borrow_mut().user.id = "fixture-owner".into();
+            ui.invoke_open_channel_members("channel".into());
+            let Command::MemberAction(request) = receiver.try_recv().unwrap().command else {
+                panic!("member-origin list request missing")
+            };
+            let peer = User {
+                id: "fixture-peer".into(),
+                ..member()
+            };
+            state.borrow_mut().handle(
+                &ui,
+                &app,
+                &data.borrow(),
+                Event {
+                    request,
+                    result: Ok(Response::Members(vec![peer])),
+                },
+                &intents,
+            );
+            ui.invoke_open_member_profile("fixture-peer".into());
+            let Command::LookupProfile(lookup) = receiver.try_recv().unwrap().command else {
+                panic!("member-origin lookup missing")
+            };
+            ui.invoke_member_profile_action("friend".into());
+            let queued = receiver.try_recv().unwrap();
+            let Command::ProfileAddFriend(query) = queued.command else {
+                panic!("member-origin friend request missing")
+            };
+            assert_eq!(queued.ticket, query.ticket);
+            assert_eq!(ui.get_profile_request_status(), 1);
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .unwrap();
+            let result = runtime.block_on(
+                super::super::main_session_tests::member_origin_friend_original_worker(
+                    query.clone(),
+                    intents.clone(),
+                    mode,
+                    || {
+                        if mode == "view" {
+                            ui.invoke_close_member_profile();
+                        }
+                    },
+                ),
+            );
+            assert_eq!(
+                result,
+                match mode {
+                    "true" | "leave" => Some(true),
+                    "logout" | "view" | "window" => None,
+                    _ => Some(false),
+                }
+            );
+            if let Some(sent) = result {
+                state
+                    .borrow_mut()
+                    .friend_result(&ui, &query, sent, &intents);
+                assert_eq!(ui.get_profile_request_status(), if sent { 2 } else { 0 });
+            } else if mode != "window" {
+                state
+                    .borrow_mut()
+                    .friend_result(&ui, &query, true, &intents);
+                assert_ne!(ui.get_profile_request_status(), 2);
+            } else {
+                assert_eq!(ui.get_profile_request_status(), 1);
+            }
+            if mode == "view" {
+                assert!(!lookup.alive() && !query.alive());
+            }
+            assert!(data.borrow().friends.is_empty() && data.borrow().channel_users.is_empty());
+            assert!(receiver.try_recv().is_err());
+        })
+        .join()
+        .unwrap();
+    }
+}
+
+#[test]
+fn selected_member_outgoing_request_is_displayed_for_current_owner() {
+    std::thread::spawn(|| {
+        let (ui, state, app, data, mut receiver, intents, _timer) = fixture();
+        ui.invoke_open_channel_members("channel".into());
+        let Command::MemberAction(request) = receiver.try_recv().unwrap().command else {
+            panic!("selected outgoing list missing")
+        };
+        let user = User {
+            friend_requests_received: vec!["owner".into()],
+            ..member()
+        };
+        state.borrow_mut().handle(
+            &ui,
+            &app,
+            &data.borrow(),
+            Event {
+                request,
+                result: Ok(Response::Members(vec![user])),
+            },
+            &intents,
+        );
+        ui.invoke_open_member_profile("member".into());
+        receiver.try_recv().unwrap();
+        assert_eq!(ui.get_profile_request_status(), 2);
+        ui.invoke_member_profile_action("friend".into());
+        assert!(receiver.try_recv().is_err());
+    })
+    .join()
+    .unwrap();
+}
+
+#[test]
+fn fresh_and_cached_member_outgoing_status_preserves_original_pending_and_replacement_owner() {
+    std::thread::spawn(|| {
+        let (ui, state, app, data, mut receiver, intents, _timer) = fixture();
+        load(&ui, &state, &app, &data, &mut receiver, &intents);
+        ui.invoke_open_member_profile("member".into());
+        let Command::LookupProfile(query) = receiver.try_recv().unwrap().command else {
+            panic!("fresh outgoing lookup missing")
+        };
+        let outgoing = User {
+            friend_requests_received: vec!["owner".into()],
+            ..member()
+        };
+        state
+            .borrow_mut()
+            .profile_lookup(&ui, &app, &query, Ok(Some(outgoing.clone())), &intents);
+        assert_eq!(ui.get_profile_request_status(), 2);
+        ui.invoke_close_member_profile();
+        ui.invoke_open_member_profile("member".into());
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(ui.get_profile_request_status(), 2);
+        ui.set_user_id("replacement".into());
+        data.borrow_mut().user.id = "replacement".into();
+        load(&ui, &state, &app, &data, &mut receiver, &intents);
+        ui.invoke_open_member_profile("member".into());
+        let Command::LookupProfile(current) = receiver.try_recv().unwrap().command else {
+            panic!("replacement outgoing lookup missing")
+        };
+        assert_eq!(ui.get_profile_request_status(), 0);
+        state
+            .borrow_mut()
+            .profile_lookup(&ui, &app, &query, Ok(Some(outgoing.clone())), &intents);
+        assert_eq!(ui.get_profile_request_status(), 0);
+        ui.invoke_member_profile_action("friend".into());
+        let Command::ProfileAddFriend(pending) = receiver.try_recv().unwrap().command else {
+            panic!("replacement original pending request missing")
+        };
+        let outgoing = User {
+            friend_requests_received: vec!["replacement".into()],
+            ..outgoing
+        };
+        state
+            .borrow_mut()
+            .profile_lookup(&ui, &app, &current, Ok(Some(outgoing)), &intents);
+        assert_eq!(ui.get_profile_request_status(), 1);
+        assert!(state
+            .borrow()
+            .friend_request
+            .as_ref()
+            .unwrap()
+            .same(&pending));
+        ui.invoke_close_member_profile();
+        assert!(!pending.alive());
+        ui.invoke_open_member_profile("member".into());
+        assert_eq!(ui.get_profile_request_status(), 2);
+        state
+            .borrow_mut()
+            .friend_result(&ui, &pending, false, &intents);
+        assert_eq!(ui.get_profile_request_status(), 2);
+    })
+    .join()
+    .unwrap();
 }
 
 #[test]

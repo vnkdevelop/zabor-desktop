@@ -23,11 +23,16 @@ impl Platform for Headless {
     fn clipboard_text(&self, _: slint::platform::Clipboard) -> Option<String> {
         Some(CLIPBOARD.with(|clipboard| clipboard.borrow().clone()))
     }
+
+    fn duration_since_start(&self) -> Duration {
+        CLOCK.with(Cell::get)
+    }
 }
 
 thread_local! {
     static CLIPBOARD: RefCell<String> = const { RefCell::new(String::new()) };
     static PLATFORM_READY: Cell<bool> = const { Cell::new(false) };
+    static CLOCK: Cell<Duration> = const { Cell::new(Duration::ZERO) };
 }
 
 type Fixture = (
@@ -40,6 +45,16 @@ type Fixture = (
 );
 
 fn fixture() -> Fixture {
+    fixture_with_profile(
+        Rc::new(RefCell::new(Bootstrap::default())),
+        Rc::new(RefCell::new(super::super::avatar_ui::AvatarUi::new())),
+    )
+}
+
+fn fixture_with_profile(
+    latest: Rc<RefCell<Bootstrap>>,
+    avatars: Rc<RefCell<super::super::avatar_ui::AvatarUi>>,
+) -> Fixture {
     PLATFORM_READY.with(|ready| {
         if !ready.replace(true) {
             slint::platform::set_platform(Box::new(Headless)).unwrap();
@@ -70,7 +85,8 @@ fn fixture() -> Fixture {
         state.clone(),
         &commands,
         intents.clone(),
-        Rc::new(RefCell::new(Bootstrap::default())),
+        latest,
+        avatars,
     );
     (ui, state, commands, receiver, intents, timer)
 }
@@ -84,6 +100,103 @@ fn result(query: AchievementQuery) -> Event {
         catalog: None,
         storage_failed: false,
     }))
+}
+
+#[test]
+fn ordinary_fresh_profile_presence_never_resurrects_redacted_bootstrap_timestamp() {
+    for source in ["friends", "voiceUsers"] {
+        let peer = User {
+            id: "peer".into(),
+            username: "Peer".into(),
+            display_name: "Peer".into(),
+            last_online: Some("2024-03-10T09:59:59Z".into()),
+            ..Default::default()
+        };
+        let mut data = Bootstrap::default();
+        data.user.id = "owner".into();
+        if source == "friends" {
+            data.friends.push(peer.clone());
+        } else {
+            data.channel_users
+                .insert("channel".into(), vec![peer.clone()]);
+        }
+        let data = Rc::new(RefCell::new(data));
+        let avatars = Rc::new(RefCell::new(super::super::avatar_ui::AvatarUi::new()));
+        let (ui, _app, queue, mut receiver, intents, _app_timer) =
+            fixture_with_profile(data.clone(), avatars.clone());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let stop = tokio_util::sync::CancellationToken::new();
+        let _avatar_timer = super::super::avatar_ui::bind(
+            &ui,
+            avatars.clone(),
+            data.clone(),
+            Rc::new(RefCell::new(None)),
+            super::super::avatar_ui::Bindings {
+                commands: queue,
+                runtime: runtime.handle().clone(),
+                update: Arc::new(|_| panic!("presence fixture must not start avatar IO")),
+                intents: intents.clone(),
+                stop: stop.clone(),
+            },
+        );
+        ui.set_profile_source(source.into());
+        ui.invoke_open_profile("peer".into());
+        let Command::LookupProfile(query) = receiver.try_recv().unwrap().command else {
+            panic!("ordinary original lookup missing")
+        };
+        let fresh = User {
+            last_online: None,
+            ..peer
+        };
+        avatars
+            .borrow_mut()
+            .profile_lookup(&ui, &query, Ok(Some(fresh)), &intents);
+        CLOCK.with(|clock| clock.set(clock.get() + Duration::from_millis(250)));
+        slint::platform::update_timers_and_animations();
+        assert_eq!(
+            ui.get_profile_presence().as_str(),
+            Strings::new(ui.get_language().as_str())
+                .unwrap()
+                .text("presence.offline")
+        );
+        assert!(if source == "friends" {
+            data.borrow().friends[0].last_online.is_some()
+        } else {
+            data.borrow().channel_users["channel"][0]
+                .last_online
+                .is_some()
+        });
+        stop.cancel();
+        let (jobs, failed) = avatars.borrow_mut().take_jobs(&ui);
+        assert!(!failed && jobs.is_empty());
+    }
+}
+
+#[test]
+fn headless_achievements_first_creation_focus_closes_with_return_and_escape() {
+    use slint::platform::WindowEvent;
+    for language in ["ru", "en"] {
+        for text in [slint::platform::Key::Return, slint::platform::Key::Escape] {
+            let (ui, _state, _queue, mut receiver, _intents, _timer) = fixture();
+            ui.set_language(language.into());
+            ui.show().unwrap();
+            ui.invoke_open_achievements();
+            receiver.try_recv().unwrap();
+            slint::platform::update_timers_and_animations();
+            ui.window().take_snapshot().unwrap();
+            assert_eq!(ui.get_modal(), 10);
+            let text: slint::SharedString = text.into();
+            ui.window()
+                .dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+            ui.window()
+                .dispatch_event(WindowEvent::KeyReleased { text });
+            assert_eq!(ui.get_modal(), 0);
+            ui.hide().unwrap();
+        }
+    }
 }
 
 #[test]
@@ -157,11 +270,16 @@ fn actual_app_clipboard_is_optimistic_suppressed_for_two_seconds_and_selection_s
     let until = state.borrow().copied.as_ref().unwrap().2;
     ui.invoke_copy_profile_login();
     assert_eq!(state.borrow().copied.as_ref().unwrap().2, until);
+    state.borrow_mut().tick(
+        &ui,
+        &Bootstrap::default(),
+        None,
+        until - Duration::from_nanos(1),
+    );
+    assert!(ui.get_profile_login_copied());
     state
         .borrow_mut()
-        .tick(&ui, &Bootstrap::default(), until - Duration::from_nanos(1));
-    assert!(ui.get_profile_login_copied());
-    state.borrow_mut().tick(&ui, &Bootstrap::default(), until);
+        .tick(&ui, &Bootstrap::default(), None, until);
     assert!(!ui.get_profile_login_copied());
     ui.invoke_copy_profile_login();
     ui.set_profile_id("other".into());
@@ -172,9 +290,12 @@ fn actual_app_clipboard_is_optimistic_suppressed_for_two_seconds_and_selection_s
     assert!(state.borrow().copied.is_none());
     let now = Instant::now();
     state.borrow_mut().feedback(&ui, "profile.userOffline", now);
-    state
-        .borrow_mut()
-        .tick(&ui, &Bootstrap::default(), now + Duration::from_secs(3));
+    state.borrow_mut().tick(
+        &ui,
+        &Bootstrap::default(),
+        None,
+        now + Duration::from_secs(3),
+    );
     assert!(ui.get_app_feedback().is_empty());
 }
 
@@ -268,13 +389,13 @@ fn call_failure_is_owner_selection_scoped_for_three_seconds_and_fresh_member_pre
         last_online: Some("2024-03-10T09:59:59Z".into()),
         ..Default::default()
     });
-    state.borrow_mut().tick(&ui, &data, Instant::now());
+    state.borrow_mut().tick(&ui, &data, None, Instant::now());
     state.borrow_mut().member_profile = Some(User {
         id: "peer".into(),
         last_online: None,
         ..Default::default()
     });
-    state.borrow_mut().tick(&ui, &data, Instant::now());
+    state.borrow_mut().tick(&ui, &data, None, Instant::now());
     assert_eq!(
         ui.get_profile_presence().as_str(),
         Strings::new(ui.get_language().as_str())
@@ -303,8 +424,8 @@ fn call_failure_is_owner_selection_scoped_for_three_seconds_and_fresh_member_pre
     let until = state.borrow().feedback_until.unwrap();
     state
         .borrow_mut()
-        .tick(&ui, &data, until - Duration::from_nanos(1));
+        .tick(&ui, &data, None, until - Duration::from_nanos(1));
     assert!(!ui.get_app_feedback().is_empty());
-    state.borrow_mut().tick(&ui, &data, until);
+    state.borrow_mut().tick(&ui, &data, None, until);
     assert!(ui.get_app_feedback().is_empty());
 }

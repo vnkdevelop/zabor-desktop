@@ -35,6 +35,10 @@ Native member/profile actions получают уже предусмотренн
 
 Native member/profile actions obtain existing account, presence, achievement, and channel-membership metadata through the signaling server. Their bounded UI caches exist only in client memory, clear on sign-out, and create no separate Controller archive or log. Normal sign-out retains local hidden-achievement history; new durable publication in the developing native client remains blocked. These changes do not expand the technical ability to disclose message, file, or media contents. See the [data map](chat-data-flow.md) for limits and the current verification scope.
 
+Отсутствующее в принятом свежем профиле время присутствия не восстанавливается из старого UI-кэша. Коррекции отображения и исходящих запросов не создают новый архив, журнал или категорию доступных Оператору сведений.
+
+A missing last-presence timestamp in an accepted fresh profile is not restored from an older UI cache. Display and outgoing-request corrections create no new archive, log, or category of data available to the Controller.
+
 ---
 
 ## 3. Порядок рассмотрения запроса

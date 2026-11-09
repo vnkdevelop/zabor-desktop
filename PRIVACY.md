@@ -114,6 +114,8 @@
 
 В разрабатываемом native клиенте отдельный кэш списков зарегистрированных участников находится только в оперативной памяти: до 32 каналов, до 4096 пользователей и 2 МиБ JSON на ответ. Он очищается при выходе или смене владельца и не предоставляет разрешения чата/RTC. Списки и profile actions используют прежние команды сервера без нового маршрута медиа, записи или телеметрии. Локальная hidden-achievement история сохраняется при выходе; запись новых определений пока блокируется до доказанной crash-durability Windows metadata ordering. Проверки synthetic/headless/loopback не являются полной клиентской или физической приёмкой.
 
+Принятый свежий профиль определяет отображение последнего присутствия: отсутствие времени в ответе не заменяется старым временем из roster. Этот выбранный снимок остаётся только в памяти и привязан к владельцу сессии; новых данных или журналов Оператора не создаётся.
+
 ### 7. Передача третьим лицам
 
 Диагностические журналы не передаются автоматически. В них не записываются содержимое сообщений и файлов, названия захватываемых окон, пароли, ключи, адреса участников или SDP. Записываются время, состояния соединений, тип маршрута и транспорта, счётчики кадров/пакетов, потерь и задержки. Пользователь может самостоятельно передать журналы для разбора неисправности.
@@ -275,6 +277,8 @@ Deleting a message in the interface deletes it **on the user's device**; a copy 
 Normal sign-out terminates connections and unfinished file transfers and removes session data, but does not delete chat history or saved files. History is reloaded for the same account within its 14-day retention period. Histories of different accounts are separated by owner identifier; an unfinished load from a previous session must not populate a new session's interface. The short-lived profile cache exists only in memory, is limited to 100 profiles and 15 seconds, and is cleared on sign-out.
 
 The developing native client keeps a separate registered-member-list cache only in memory: up to 32 channels, with each response limited to 4096 users and 2 MiB JSON. It clears on sign-out or owner replacement and grants no chat/RTC permissions. Lists and profile actions use existing server commands without a new media route, recording, or telemetry. Local hidden-achievement history survives sign-out; new definitions remain write-blocked until Windows metadata crash durability is proven. Synthetic/headless/loopback checks do not establish complete client or physical acceptance.
+
+An accepted fresh profile controls last-presence display: a missing timestamp in its response is not replaced with an older roster timestamp. The selected snapshot remains memory-only and session-owner-bound; it creates no new Controller data or logs.
 
 ### 7. Disclosure to third parties
 

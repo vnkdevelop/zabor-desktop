@@ -97,6 +97,20 @@ impl MemberUi {
                 .is_some_and(|user| user.id == ui.get_profile_id().as_str())
     }
 
+    fn profile_request_status(&self, user: &User) -> i32 {
+        if self.friend_request.is_some() {
+            1
+        } else if user
+            .friend_requests_received
+            .iter()
+            .any(|owner| owner == &self.owner)
+        {
+            2
+        } else {
+            0
+        }
+    }
+
     fn visible(&self, ui: &NativeApp) -> bool {
         ui.get_modal() == 11
             || ui.get_modal() == 12
@@ -285,6 +299,7 @@ impl MemberUi {
         self.profile = None;
         self.query = Some(request.clone());
         ui.set_modal(11);
+        ui.invoke_avatar_context_changed();
         ui.set_members_selection(0);
         ui.set_members_focus_reset(ui.get_members_focus_reset().wrapping_add(1));
         if !queue(commands, request) {
@@ -314,7 +329,11 @@ impl MemberUi {
         }
         self.cancel_profile_requests(intents, Instant::now());
         self.profile = Some(user.clone());
-        app.borrow_mut().member_profile = Some(user.clone());
+        {
+            let mut app = app.borrow_mut();
+            app.context(ui);
+            app.member_profile = Some(user.clone());
+        }
         ui.set_profile_source("channelMembers".into());
         super::avatar_ui::apply_profile(ui, &user);
         ui.set_profile_friend(
@@ -322,7 +341,7 @@ impl MemberUi {
                 && !self.removed.contains(&user.id),
         );
         ui.set_profile_editing(false);
-        ui.set_profile_request_status(0);
+        ui.set_profile_request_status(self.profile_request_status(&user));
         ui.set_modal(9);
         match self
             .profiles
@@ -332,6 +351,7 @@ impl MemberUi {
                 self.profile = Some((*user).clone());
                 app.borrow_mut().member_profile = Some((*user).clone());
                 super::avatar_ui::apply_profile(ui, &user);
+                ui.set_profile_request_status(self.profile_request_status(&user));
             }
             Some(Lookup::Pending(request)) => self.lookup = Some(request),
             Some(Lookup::Start(request)) => {
@@ -387,6 +407,7 @@ impl MemberUi {
             self.profile = Some((*user).clone());
             app.borrow_mut().member_profile = Some((*user).clone());
             super::avatar_ui::apply_profile(ui, &user);
+            ui.set_profile_request_status(self.profile_request_status(&user));
         }
     }
 

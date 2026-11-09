@@ -83,6 +83,7 @@ export component AchievementsPanel inherits Rectangle {
     accessible-label: root.tr(root.own-view ? "achievements.myTitle" : "achievements.title", root.language);
     forward-focus: keys;
     keys := FocusScope {
+        init => { root.focus-close(); }
         key-pressed(event) => {
             if event.text == Key.Escape { root.close-requested(); return accept; }
             if event.text == Key.Tab { close-button.focus(); return accept; }

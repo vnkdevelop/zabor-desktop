@@ -633,6 +633,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         &commands,
         intents.clone(),
         latest.clone(),
+        avatars.clone(),
     );
     let member_state = Rc::new(RefCell::new(member_ui::MemberUi::default()));
     let member_timer = member_ui::bind(
@@ -3838,6 +3839,18 @@ async fn worker(
             } else {
                 None
             };
+            let member_channel = match &command {
+                Command::MemberAction(request)
+                    if matches!(request.operation, member_actions::Operation::Invite { .. }) =>
+                {
+                    VoiceWork::new(&intents, request.ticket, &stop, update.as_ref())
+                        .commit_resource(voice_ticket, || {
+                            voice.as_ref().and_then(|voice| voice.channel.clone())
+                        })
+                        .flatten()
+                }
+                _ => None,
+            };
             let result = run_session!(work, async {
                 match command {
                     Command::Achievements(query) => {
@@ -3859,6 +3872,7 @@ async fn worker(
                                     &connection,
                                     user,
                                     friend,
+                                    member_channel.as_deref(),
                                     &intents,
                                 )
                                 .await

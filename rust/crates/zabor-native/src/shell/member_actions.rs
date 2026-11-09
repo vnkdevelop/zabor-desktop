@@ -88,6 +88,7 @@ pub(super) async fn execute(
     connection: &HubConnection,
     user: &User,
     friend: bool,
+    current_channel: Option<&str>,
     intents: &CriticalIntents,
 ) -> Result<Response, AuthError> {
     if request.owner != user.id || request.stop.is_cancelled() {
@@ -100,7 +101,7 @@ pub(super) async fn execute(
             Duration::from_secs(6),
         ),
         Operation::Invite { channel, target }
-            if target.is_online && user.current_channel_id.as_deref() == Some(&channel.id) =>
+            if target.is_online && current_channel == Some(channel.id.as_str()) =>
         {
             (
                 "CallToChannel",

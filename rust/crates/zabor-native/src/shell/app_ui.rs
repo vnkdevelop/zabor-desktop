@@ -209,7 +209,7 @@ impl AppUi {
         self.feedback_until = Some(now + Duration::from_secs(3));
     }
 
-    fn tick(&mut self, ui: &NativeApp, data: &Bootstrap, now: Instant) {
+    fn tick(&mut self, ui: &NativeApp, data: &Bootstrap, profile: Option<&User>, now: Instant) {
         self.context(ui);
         if self
             .copied
@@ -231,17 +231,19 @@ impl AppUi {
             return;
         }
         let id = ui.get_profile_id();
-        let user = self
-            .member_profile
-            .as_ref()
-            .filter(|user| ui.get_profile_source() == "channelMembers" && user.id == id.as_str())
-            .or_else(|| {
+        let user = if ui.get_profile_source() == "channelMembers" {
+            self.member_profile
+                .as_ref()
+                .filter(|user| user.id == id.as_str())
+        } else {
+            profile.filter(|user| user.id == id.as_str()).or_else(|| {
                 std::iter::once(&data.user)
                     .chain(data.friends.iter())
                     .chain(data.channel_users.values().flatten())
                     .chain(data.call_user.iter())
                     .find(|user| user.id == id.as_str())
-            });
+            })
+        };
         let Ok(strings) = Strings::new(ui.get_language().as_str()) else {
             return;
         };
@@ -278,6 +280,7 @@ pub(super) fn bind(
     commands: &CommandQueue,
     intents: Arc<CriticalIntents>,
     latest: Rc<RefCell<Bootstrap>>,
+    avatars: Rc<RefCell<super::avatar_ui::AvatarUi>>,
 ) -> Timer {
     let weak = ui.as_weak();
     let context = state.clone();
@@ -346,7 +349,7 @@ pub(super) fn bind(
     });
     let weak = ui.as_weak();
     let copying = state.clone();
-    let original = intents;
+    let original = intents.clone();
     ui.on_copy_profile_login(move || {
         let Some(ui) = weak.upgrade().filter(|ui| {
             ui.get_authenticated() && ui.get_modal() == 9 && !ui.get_profile_login().is_empty()
@@ -370,9 +373,13 @@ pub(super) fn bind(
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, Duration::from_millis(250), move || {
         if let Some(ui) = weak.upgrade() {
-            state
-                .borrow_mut()
-                .tick(&ui, &latest.borrow(), Instant::now());
+            let avatars = avatars.borrow();
+            state.borrow_mut().tick(
+                &ui,
+                &latest.borrow(),
+                avatars.profile_snapshot(&ui, &intents),
+                Instant::now(),
+            );
         }
     });
     timer
