@@ -88,6 +88,87 @@ current-session compact `msg_1bf3090c3001c2OmhoMUPLcMEw` (`delivery: steer`). Ex
 receipts remain in `sol-stage3-v2/stage-delivery.json`; neither admission is a new
 verification job, integration acceptance or authorization to replace primary files.
 
+### Single-defect member friend completion follow-up — 2026-11-09
+
+Primary reports checked candidate admission against `2b9c618` and requests only the
+reviewer's pending AddFriend/fresh-outgoing/false-completion defect from
+`ses_e40f6cb6affeVVOL2El9jYp1fS`. This supersedes any automatic continuation from
+the read-only Invite design below: no inert-audio support, Invite work, new app
+features, renderer/Slint/catalog edits, primary/RC/common data hooks or manifest/lock
+changes are authorized. Checked `b209c23` / `76d7f34` and docs-only `97a0f51` are
+preserved; initial own status contains only inherited untracked `target/`. All 23
+stage-3 source hashes match before new regressions; previous temporary API helpers
+have exited/self-cleaned. No previous original check or Graphify job is pending.
+
+Own Graphify queries preceded targeted reads. Two additive regression tests use
+the original MemberUi callbacks to create the pending friend request and original
+fresh lookup query. The unchanged ProfileLookup handler accepts the fresh payload
+while the unchanged original worker holds SendFriendRequest; its actual false/null/
+true completion must reconcile accepted outgoing state without consuming/replacing
+the pending request prematurely. Separate affected guard cases retain real close/
+reopen callbacks and modal, Logout, authentication, owner/profile/source/login,
+identity and cancellation rejection. No UI status is assigned to fabricate outgoing.
+
+Original predecessor job `sh_1bf46d09f001vgzGAusyOhiyE9` COMPLETED against 26 frozen
+paths, evidence `sol-friend-completion-red-v1/`. Only member_ui_tests.rs differs from
+the checked stage-3 source; runtime friend_result was unchanged. Fmt/diff-check
+passed; Rust/Slint compiled; the original worker false-completion regression failed
+exactly with status 0 instead of 2, after the worker and all original IO/audio/server
+cleanup joins were observed. The separate guarded-completion regression passed.
+The expected FAILED test receipt remains explicit, with all 26 hashes unchanged;
+the original runner and owned fixture directory self-cleaned after exit.
+
+Checked source commit `16731e5` changes only member_ui.rs and additive own regression
+tests in member_ui_tests.rs. Only friend_result's status calculation changes: after clearing the
+matching original pending request, success remains Sent; false reuses the existing
+selected/fresh/cached profile helper, keeping confirmed outgoing as Sent and
+otherwise restoring AddFriend. Existing request identity, owner/ticket/view/cache
+and cancellation guards are unchanged. The two new regression assertions and all
+predecessor tests are preserved. No dispatch/main_session source changed.
+
+Original focused green/quality job `sh_1bf4a324e001E7M9pJ8ILz9lxw` COMPLETED/PASSED
+against 26 frozen paths (`sol-friend-completion-green-v1/`): two new regressions,
+four affected predecessor tests (selected outgoing, fresh/cache pending, closed
+replacement and MemberUi-generated actual original-worker contracts), fmt/diff-check
+and normal-binary/fixture native-media Clippy `-D warnings`. Only two source paths
+differ from stage 3; 21 other stage-3 hashes match. A separate main_session worker
+filter, unchanged adapter/focus/redaction tests and full matrix are not rerun.
+One own Graphify code update `sh_1bf4a3304001Y11BhsWInVfvhi` COMPLETED on the same
+frozen source; log `sol-friend-completion-graph-v1.log`: 14663 nodes/34464 edges,
+the same 9 zero-node warnings, code-only with no semantic/docs/clustering refresh.
+All nine green checks exited 0; six focused tests passed, comprising two NEW tests
+and four affected predecessor reruns. The new response regression completed six
+confirmed/unconfirmed by true/false/null original-worker scenarios; the other new
+test completed 22 UI guard scenarios. Scenarios/reruns are not new distinct tests,
+and neither the old 14 reruns nor the inherited 44 tests are counted as new proof.
+The red Cargo exit 101 is expected evidence, not an all-green predecessor receipt;
+its enclosing runner, the green runner and the one Graphify command exited 0.
+
+`sol-friend-completion-green-v1/checked-followup-audit.json` independently matches
+all 26 current hashes, 21 unchanged stage-3 hashes and 24 unchanged Git blobs out
+of the 26 compared against b209c23. It verifies the runtime file differs ONLY in
+this status calculation, all old test source/assertions remain byte-for-byte after
+line-ending normalization, and the new red/green regression source hash is identical.
+The first read-only audit attempt exited 1 because inherited combined Git stderr
+included CRLF warnings in its path parser; separating stdout fixed the audit, with
+no source changes or repeated original tests. This diagnostic is recorded explicitly.
+
+Current SHA256 values:
+- member_ui.rs: `7a4780471fcbcb48438e74622136da9130a62eee8b0038694a824ba62e854b22`
+- member_ui_tests.rs: `55db6f4ac9e22f38d0091594705ee444f1775e2f984fa6a54798df89fa1dc3a1`
+
+No original job remains pending. Both original runners/owned fixture directories
+self-cleaned only after resource exit; actual worker/SessionIo/AchievementIo/audio/
+server joins are preserved in the unchanged worker helper. No original command was
+polled, restarted, duplicated, killed or detached. Apply only the contextual
+`sol-friend-completion-green-v1/member-friend-followup.patch`; preserve the checked
+prerequisite chain. Primary still independently re-reviews before integration;
+this follow-up is not primary/RC integration or full acceptance. No primary/RC/
+audio-support writes, source reset, push/merge or new app/catalog/renderer features.
+Unchanged 44-test stage-3 and normal tree/build receipts remain inherited, not a
+new full-matrix run. Production HiddenStore-before-journal-open and all outstanding
+post-Join Invite/physical/full acceptance gates remain FALSE.
+
 ### Post-compact bounded Invite design — read-only
 
 Continuation from `b209c23` / `76d7f34` queried the current own graph before targeted
