@@ -55,6 +55,7 @@ mod avatar_ui;
 mod chat_io;
 #[cfg(test)]
 mod critical_tests;
+mod file_io;
 mod leave_work;
 mod profile_lookup;
 use leave_work::{close_logout_connection, VoiceLeave};
@@ -2462,6 +2463,7 @@ async fn worker(
         session_io,
     } = media;
     let chat_io = session_io.chat_io.clone();
+    let file_io = session_io.file_io.clone();
     let audio_controls = audio_preferences.controls.clone();
     let signing = match Attestation::from_environment(zabor_native::release::TARGET_BETA_VERSION) {
         Ok(signing) => signing,
@@ -2480,9 +2482,8 @@ async fn worker(
     let mut voice: Option<VoiceSession> = None;
     let mut media_events: Option<mpsc::Receiver<MediaEvent>> = None;
     let mut voice_ticket: Option<IntentTicket> = None;
-    let mut chat: Option<ChatEngine> = None;
-    let mut chat_transport: Option<ChatTransport> = None;
-    let mut file_jobs: Option<FileJobs> = None;
+    let mut chat_resources = file_io.own();
+    let (chat, chat_transport, file_jobs) = chat_resources.split();
     let mut file_progress = BTreeMap::<(String, String), i32>::new();
     let mut file_watch = tokio::time::interval(Duration::from_secs(1));
     file_watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -2604,12 +2605,14 @@ async fn worker(
                 };
                 match initialized {
                     Ok(engine) => {
-                        chat = Some(engine);
-                        file_jobs = Some(FileJobs::with_stop(
+                        *chat = Some(engine);
+                        *file_jobs = Some(file_io::FileIo::bound(
                             &profile.root().join("chat-files"),
-                            intents.session_token(iteration_ticket),
+                            intents.clone(),
+                            iteration_ticket,
+                            stop.clone(),
                         ));
-                        chat_transport = ChatTransport::with_stop(
+                        *chat_transport = ChatTransport::with_stop(
                             user.id.clone(),
                             friends.iter().cloned(),
                             chat_ice.clone(),
@@ -2636,7 +2639,7 @@ async fn worker(
         });
         if session_work.is_current() && chat_transport.is_none() && session_ready {
             if let Some(user) = &current_user {
-                chat_transport = ChatTransport::with_stop(
+                *chat_transport = ChatTransport::with_stop(
                     user.id.clone(),
                     friends.iter().cloned(),
                     chat_ice.clone(),
@@ -2758,7 +2761,7 @@ async fn worker(
                                 previous
                             });
                             let Some(previous) = previous else { continue; };
-                            if run_session!(session_work, chat_io::reconcile(&session_work, &chat_io, &mut chat, &mut chat_transport, &mut file_jobs, &previous, &friends)).is_none() { continue; }
+                            if run_session!(session_work, chat_io::reconcile(&session_work, &chat_io, chat, chat_transport, file_jobs, &previous, &friends)).is_none() { continue; }
                         }
                         if let (Some(transport), Some(hub), Some(peer), Some(payload)) = (chat_transport.as_mut(), hub.as_ref(), event.arguments.first().and_then(serde_json::Value::as_str), event.arguments.get(1).and_then(serde_json::Value::as_str)) {
                             if payload.starts_with("zabor-chat:") && run_session!(session_work, transport.handle_signal(hub, &event.target, peer, payload)).is_none() { continue; }
@@ -2877,7 +2880,7 @@ async fn worker(
                             VoiceWork::new(&intents, ticket, &stop, update.as_ref()).commit_resource(voice_ticket, || call_recovery.disconnected(std::time::Instant::now()));
                         }
                         audio_preferences.disconnect();
-                        events = None; hub = None; session_ready = false; chat_transport = None;
+                        events = None; hub = None; session_ready = false; *chat_transport = None;
                         if let Some(engine) = chat.as_mut() { engine.fail_downloads(None, now_ms()); }
                         if let Some(jobs) = file_jobs.as_mut() { for peer in &friends { jobs.disconnect(peer); } }
                         if saved_credentials.is_some() { retry_at = Some(tokio::time::Instant::now() + Duration::from_secs(2)); } update(UiEvent::Disconnected);
@@ -3266,10 +3269,8 @@ async fn worker(
                             std::mem::take(&mut stream_drops),
                             events.take(),
                             current_user.take(),
-                            file_jobs.take(),
+                            file_io.retire_session(file_jobs.take(), chat.take(), chat_transport.take()),
                             std::mem::take(&mut file_progress),
-                            chat.take(),
-                            chat_transport.take(),
                             std::mem::take(&mut friends),
                             selected_chat.take(),
                             incoming_call.take(),
@@ -3286,17 +3287,13 @@ async fn worker(
                 disposed.0, disposed.1, disposed.2, disposed.3, disposed.4, disposed.5, disposed.6,
                 disposed.7,
             ));
-            if let Some(mut engine) = disposed.8 {
-                engine.fail_downloads(None, now_ms());
-            }
             drop((
+                disposed.8,
                 disposed.9,
                 disposed.10,
                 disposed.11,
                 disposed.12,
                 disposed.13,
-                disposed.14,
-                disposed.15,
             ));
             logout_work.publish(UiEvent::VoiceEnded);
             logout_work.publish(UiEvent::SignedOut);
@@ -3308,6 +3305,9 @@ async fn worker(
             }
             if matches!(run_session!(logout_work, clearing), Some(Err(_))) {
                 logout_work.publish(UiEvent::Toast("validation.sessionSaveError"));
+            }
+            if matches!(run_session!(logout_work, file_io.finish()), Some(Err(_))) {
+                logout_work.publish(UiEvent::Toast("chat.file.failed"));
             }
             continue;
         }
@@ -3624,9 +3624,9 @@ async fn worker(
                         chat_io::reconcile(
                             &auth_work,
                             &chat_io,
-                            &mut chat,
-                            &mut chat_transport,
-                            &mut file_jobs,
+                            chat,
+                            chat_transport,
+                            file_jobs,
                             &previous,
                             &friends
                         )
@@ -3723,9 +3723,7 @@ async fn worker(
                     let Some(disposed) = auth_work.commit(|| {
                         chat_failed = false;
                         (
-                            file_jobs.take(),
-                            chat.take(),
-                            chat_transport.take(),
+                            file_io.retire_session(file_jobs.take(), chat.take(), chat_transport.take()),
                             voice.take(),
                             media_events.take(),
                             saved_credentials.take(),
@@ -3737,13 +3735,7 @@ async fn worker(
                     }) else {
                         continue;
                     };
-                    if let Some(mut engine) = disposed.1 {
-                        engine.fail_downloads(None, now_ms());
-                    }
-                    drop((
-                        disposed.0, disposed.2, disposed.3, disposed.4, disposed.5, disposed.6,
-                        disposed.7, disposed.8, disposed.9,
-                    ));
+                    drop(disposed);
                     auth_work.publish(UiEvent::VoiceEnded);
                     auth_work.publish(UiEvent::SignedOut);
                     if !reset {
@@ -3751,6 +3743,9 @@ async fn worker(
                     }
                     if matches!(run_session!(auth_work, clearing), Some(Err(_))) {
                         auth_work.publish(UiEvent::Toast("validation.sessionSaveError"));
+                    }
+                    if matches!(run_session!(auth_work, file_io.finish()), Some(Err(_))) {
+                        auth_work.publish(UiEvent::Toast("chat.file.failed"));
                     }
                     continue;
                 }

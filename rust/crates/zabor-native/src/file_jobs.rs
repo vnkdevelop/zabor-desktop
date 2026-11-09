@@ -37,6 +37,7 @@ pub enum FileEvent {
 pub struct FileJobs {
     root: PathBuf,
     stop: CancellationToken,
+    authority: Arc<dyn Fn() -> bool + Send + Sync + 'static>,
     jobs: JoinSet<TrackedFileEvent>,
     operations: Vec<Arc<FileOperation>>,
     failed: bool,
@@ -64,9 +65,18 @@ impl FileJobs {
     }
 
     pub fn with_stop(root: &Path, stop: CancellationToken) -> Self {
+        Self::with_stop_and_authority(root, stop, Arc::new(|| true))
+    }
+
+    pub fn with_stop_and_authority(
+        root: &Path,
+        stop: CancellationToken,
+        authority: Arc<dyn Fn() -> bool + Send + Sync + 'static>,
+    ) -> Self {
         Self {
             root: root.into(),
             stop,
+            authority,
             jobs: JoinSet::new(),
             operations: Vec::new(),
             failed: false,
@@ -150,17 +160,19 @@ impl FileJobs {
                 previous.stop.cancel();
             }
         }
+        let authority = self.authority.clone();
         self.jobs.spawn_blocking(move || TrackedFileEvent {
             event: FileEvent::Saved {
                 peer,
                 id,
                 stored_name: info.stored_name,
-                path: files::save_verified(
+                path: files::save_verified_if(
                     source,
                     &target,
                     info.size,
                     &info.sha256,
                     &operation.stop,
+                    || authority(),
                 ),
             },
             operation,
@@ -597,5 +609,468 @@ mod tests {
         assert!(jobs.finish().await.is_err());
         assert!(!jobs.has_jobs());
         assert!(jobs.finish().await.is_err());
+    }
+
+    mod publication {
+        use super::*;
+        use crate::chat_crypto::ChatIdentity;
+        use crate::chat_store::{ChatMessage, ChatStore, RETENTION_MS};
+        use crate::critical_intents::{IntentScope, IntentTicket};
+        use sha2::{Digest, Sha256};
+        use std::io::Seek;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{mpsc, Mutex};
+        use tokio::sync::oneshot;
+
+        type Authority = Arc<dyn Fn() -> bool + Send + Sync + 'static>;
+        const CONTENT: &[u8] = b"original verified publication";
+        const PREVIOUS: &[u8] = b"previous destination";
+        const NOW: i64 = RETENTION_MS * 3;
+
+        struct Fixture {
+            root: tempfile::TempDir,
+            source: PathBuf,
+            destination: PathBuf,
+            target: PathBuf,
+        }
+
+        impl Fixture {
+            fn new() -> Self {
+                let root = tempfile::tempdir().unwrap();
+                let source = root.path().join("source.bin");
+                let destination = root.path().join("destination");
+                std::fs::create_dir(&destination).unwrap();
+                let target = destination.join("target.bin");
+                std::fs::write(&source, CONTENT).unwrap();
+                std::fs::write(&target, PREVIOUS).unwrap();
+                std::fs::write(destination.join(".unrelated.part"), b"keep").unwrap();
+                Self {
+                    root,
+                    source,
+                    destination,
+                    target,
+                }
+            }
+
+            fn info(&self) -> FileInfo {
+                FileInfo {
+                    name: "source.bin".into(),
+                    size: CONTENT.len() as u64,
+                    sha256: format!("{:x}", Sha256::digest(CONTENT)),
+                    stored_name: "fixture.bin".into(),
+                }
+            }
+
+            fn save(&self, jobs: &mut FileJobs, target: PathBuf) {
+                jobs.save(
+                    "peer".into(),
+                    "message".into(),
+                    std::fs::File::open(&self.source).unwrap(),
+                    self.info(),
+                    target,
+                )
+                .unwrap();
+            }
+
+            fn incoming(&self) -> ChatEngine {
+                let cache = self.root.path().join("cache");
+                let info = FileBroker::new(&cache)
+                    .unwrap()
+                    .stage(&self.source)
+                    .unwrap();
+                let store = ChatStore::open(&self.root.path().join("chat.sqlite")).unwrap();
+                assert!(store
+                    .save(
+                        &ChatMessage {
+                            id: "message".into(),
+                            owner_id: "owner".into(),
+                            conversation_id: "peer".into(),
+                            sender_id: "peer".into(),
+                            target_id: "owner".into(),
+                            kind: "file".into(),
+                            text: String::new(),
+                            created_at: NOW,
+                            sequence: 1,
+                            delivery: "delivered".into(),
+                            file: Some(serde_json::json!({
+                                "name": info.name,
+                                "size": info.size,
+                                "sha256": info.sha256,
+                                "storedName": info.stored_name,
+                                "transferState": "available",
+                                "sourceAvailable": true,
+                                "progress": 1
+                            })),
+                        },
+                        NOW,
+                    )
+                    .unwrap());
+                let mut engine = ChatEngine::new("owner".into(), ChatIdentity::generate(), store);
+                engine.set_file_root(&cache).unwrap();
+                engine.set_friends(["peer".into()]);
+                engine
+            }
+
+            fn assert_destination(&self, content: &[u8], entries: usize) {
+                assert_eq!(std::fs::read(&self.target).unwrap(), content);
+                assert_eq!(std::fs::read(&self.source).unwrap(), CONTENT);
+                assert_eq!(
+                    std::fs::read(self.destination.join(".unrelated.part")).unwrap(),
+                    b"keep"
+                );
+                assert_eq!(
+                    std::fs::read_dir(&self.destination).unwrap().count(),
+                    entries
+                );
+            }
+        }
+
+        struct Release(Option<mpsc::Sender<()>>);
+
+        impl Release {
+            fn release(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        impl Drop for Release {
+            fn drop(&mut self) {
+                self.release();
+            }
+        }
+
+        struct Gate {
+            authority: Authority,
+            checks: Arc<AtomicUsize>,
+            entered: oneshot::Receiver<()>,
+            release: Release,
+        }
+
+        fn gate(intents: Arc<CriticalIntents>, ticket: IntentTicket, panic_after: bool) -> Gate {
+            let checks = Arc::new(AtomicUsize::new(0));
+            let counted = checks.clone();
+            let (started, entered) = oneshot::channel();
+            let started = Mutex::new(Some(started));
+            let (release, blocked) = mpsc::channel();
+            let blocked = Mutex::new(blocked);
+            let caller = std::thread::current().id();
+            let authority = Arc::new(move || {
+                assert_ne!(std::thread::current().id(), caller);
+                let check = counted.fetch_add(1, Ordering::SeqCst);
+                assert!(intents.is_current(ticket, IntentScope::Session));
+                assert_eq!(
+                    intents.commit(ticket, IntentScope::Session, || true),
+                    Some(true)
+                );
+                if check == 1 {
+                    started.lock().unwrap().take().unwrap().send(()).unwrap();
+                    blocked
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(10))
+                        .unwrap();
+                    assert!(!panic_after, "original publication authority panic");
+                }
+                intents.is_current(ticket, IntentScope::Session)
+            });
+            Gate {
+                authority,
+                checks,
+                entered,
+                release: Release(Some(release)),
+            }
+        }
+
+        async fn entered(gate: &mut Gate) {
+            tokio::time::timeout(Duration::from_secs(10), &mut gate.entered)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+
+        async fn next(jobs: &mut FileJobs) -> Option<FileEvent> {
+            tokio::time::timeout(Duration::from_secs(10), jobs.next_event())
+                .await
+                .unwrap()
+        }
+
+        async fn finish(jobs: &mut FileJobs) -> Result<(), FileError> {
+            let result = tokio::time::timeout(Duration::from_secs(10), jobs.finish())
+                .await
+                .unwrap();
+            assert!(!jobs.has_jobs());
+            result
+        }
+
+        fn admit(fixture: &Fixture, jobs: &mut FileJobs, incoming: bool) -> Option<ChatEngine> {
+            if incoming {
+                let engine = fixture.incoming();
+                jobs.set_target("peer", "message", fixture.target.clone());
+                jobs.finish_incoming(&engine, "peer", "message", NOW)
+                    .unwrap();
+                Some(engine)
+            } else {
+                fixture.save(jobs, fixture.target.clone());
+                None
+            }
+        }
+
+        #[tokio::test]
+        async fn leave_at_post_sync_keeps_bound_original_direct_and_incoming_authority() {
+            for incoming in [false, true] {
+                let fixture = Fixture::new();
+                let intents = Arc::new(CriticalIntents::default());
+                let ticket = intents.ticket();
+                let mut gate = gate(intents.clone(), ticket, false);
+                let mut jobs = FileJobs::with_stop_and_authority(
+                    fixture.root.path(),
+                    intents.session_token(ticket),
+                    gate.authority.clone(),
+                );
+                let engine = admit(&fixture, &mut jobs, incoming);
+                entered(&mut gate).await;
+                fixture.assert_destination(PREVIOUS, 3);
+                intents.request(CriticalAction::Leave);
+                assert!(intents.is_current(ticket, IntentScope::Session));
+                assert!(!intents.is_current(ticket, IntentScope::Voice));
+                assert!(!jobs.operations.last().unwrap().stop.is_cancelled());
+                gate.release.release();
+                let event = next(&mut jobs).await;
+                let drained = finish(&mut jobs).await;
+                assert!(
+                    matches!(event, Some(FileEvent::Saved { peer, id, path: Ok(path), .. })
+                    if peer == "peer" && id == "message" && path == fixture.target)
+                );
+                drained.unwrap();
+                assert_eq!(gate.checks.load(Ordering::SeqCst), 2);
+                fixture.assert_destination(CONTENT, 2);
+                drop(engine);
+            }
+        }
+
+        #[tokio::test]
+        async fn logout_at_post_sync_rejects_original_direct_and_incoming_even_with_fresh_session()
+        {
+            for incoming in [false, true] {
+                let fixture = Fixture::new();
+                let intents = Arc::new(CriticalIntents::default());
+                let ticket = intents.ticket();
+                let mut gate = gate(intents.clone(), ticket, false);
+                let mut jobs = FileJobs::with_stop_and_authority(
+                    fixture.root.path(),
+                    CancellationToken::new(),
+                    gate.authority.clone(),
+                );
+                let engine = admit(&fixture, &mut jobs, incoming);
+                entered(&mut gate).await;
+                fixture.assert_destination(PREVIOUS, 3);
+                intents.request(CriticalAction::Logout);
+                assert_eq!(intents.next().await, CriticalAction::Logout);
+                assert!(intents.is_current(intents.ticket(), IntentScope::Session));
+                assert!(!intents.is_current(ticket, IntentScope::Session));
+                assert!(!jobs.operations.last().unwrap().stop.is_cancelled());
+                gate.release.release();
+                let event = next(&mut jobs).await;
+                let drained = finish(&mut jobs).await;
+                assert!(
+                    matches!(event, Some(FileEvent::Saved { peer, id, path: Err(_), .. })
+                    if peer == "peer" && id == "message")
+                );
+                drained.unwrap();
+                assert_eq!(gate.checks.load(Ordering::SeqCst), 2);
+                fixture.assert_destination(PREVIOUS, 2);
+                drop(engine);
+            }
+        }
+
+        #[tokio::test]
+        async fn replacement_same_peer_message_cannot_reactivate_original_blocked_save() {
+            let fixture = Fixture::new();
+            let intents = Arc::new(CriticalIntents::default());
+            let ticket = intents.ticket();
+            let mut gate = gate(intents.clone(), ticket, false);
+            let mut jobs = FileJobs::with_stop_and_authority(
+                fixture.root.path(),
+                intents.session_token(ticket),
+                gate.authority.clone(),
+            );
+            fixture.save(&mut jobs, fixture.target.clone());
+            entered(&mut gate).await;
+            let original = jobs.operations.last().unwrap().clone();
+            let replacement = fixture.destination.join("replacement.bin");
+            fixture.save(&mut jobs, replacement.clone());
+            let replacement_event = next(&mut jobs).await;
+            let original_cancelled = original.stop.is_cancelled();
+            let replacement_cancelled = jobs.operations.last().unwrap().stop.is_cancelled();
+            gate.release.release();
+            let original_event = next(&mut jobs).await;
+            let drained = finish(&mut jobs).await;
+            assert!(
+                matches!(replacement_event, Some(FileEvent::Saved { path: Ok(path), .. })
+                if path == replacement)
+            );
+            assert!(original_cancelled);
+            assert!(!replacement_cancelled);
+            assert!(original_event.is_none());
+            drained.unwrap();
+            assert_eq!(gate.checks.load(Ordering::SeqCst), 4);
+            assert_eq!(std::fs::read(replacement).unwrap(), CONTENT);
+            fixture.assert_destination(PREVIOUS, 3);
+        }
+
+        #[tokio::test]
+        async fn cancellation_inside_accepting_post_sync_callback_still_rejects_publication() {
+            let fixture = Fixture::new();
+            let stop = CancellationToken::new();
+            let cancel = stop.clone();
+            let checks = Arc::new(AtomicUsize::new(0));
+            let counted = checks.clone();
+            let caller = std::thread::current().id();
+            let mut jobs = FileJobs::with_stop_and_authority(
+                fixture.root.path(),
+                stop,
+                Arc::new(move || {
+                    assert_ne!(std::thread::current().id(), caller);
+                    if counted.fetch_add(1, Ordering::SeqCst) == 1 {
+                        cancel.cancel();
+                    }
+                    true
+                }),
+            );
+            fixture.save(&mut jobs, fixture.target.clone());
+            let event = next(&mut jobs).await;
+            let drained = finish(&mut jobs).await;
+            assert!(event.is_none());
+            drained.unwrap();
+            assert_eq!(checks.load(Ordering::SeqCst), 2);
+            fixture.assert_destination(PREVIOUS, 2);
+        }
+
+        #[tokio::test]
+        async fn cancel_and_disconnect_at_post_sync_remain_fail_closed_with_current_authority() {
+            for disconnect in [false, true] {
+                let fixture = Fixture::new();
+                let intents = Arc::new(CriticalIntents::default());
+                let ticket = intents.ticket();
+                let mut gate = gate(intents.clone(), ticket, false);
+                let mut jobs = FileJobs::with_stop_and_authority(
+                    fixture.root.path(),
+                    intents.session_token(ticket),
+                    gate.authority.clone(),
+                );
+                fixture.save(&mut jobs, fixture.target.clone());
+                entered(&mut gate).await;
+                if disconnect {
+                    jobs.disconnect("peer");
+                } else {
+                    jobs.cancel("peer", "message");
+                }
+                assert!(intents.is_current(ticket, IntentScope::Session));
+                gate.release.release();
+                let event = next(&mut jobs).await;
+                let drained = finish(&mut jobs).await;
+                assert!(event.is_none());
+                drained.unwrap();
+                assert_eq!(gate.checks.load(Ordering::SeqCst), 2);
+                fixture.assert_destination(PREVIOUS, 2);
+            }
+        }
+
+        #[tokio::test]
+        async fn denied_admission_does_not_read_open_source_or_touch_destination() {
+            let fixture = Fixture::new();
+            let source = std::fs::File::open(&fixture.source).unwrap();
+            let mut cursor = source.try_clone().unwrap();
+            let mut options = std::fs::OpenOptions::new();
+            options.read(true);
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                options.share_mode(0);
+            }
+            let locked_target = options.open(&fixture.target).unwrap();
+            let checks = Arc::new(AtomicUsize::new(0));
+            let counted = checks.clone();
+            let caller = std::thread::current().id();
+            let mut jobs = FileJobs::with_stop_and_authority(
+                fixture.root.path(),
+                CancellationToken::new(),
+                Arc::new(move || {
+                    assert_ne!(std::thread::current().id(), caller);
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    false
+                }),
+            );
+            jobs.save(
+                "peer".into(),
+                "message".into(),
+                source,
+                fixture.info(),
+                fixture.target.clone(),
+            )
+            .unwrap();
+            let event = next(&mut jobs).await;
+            let drained = finish(&mut jobs).await;
+            assert!(matches!(event, Some(FileEvent::Saved { path: Err(_), .. })));
+            drained.unwrap();
+            assert_eq!(checks.load(Ordering::SeqCst), 1);
+            assert_eq!(cursor.stream_position().unwrap(), 0);
+            drop(locked_target);
+            fixture.assert_destination(PREVIOUS, 2);
+        }
+
+        #[tokio::test]
+        async fn post_sync_callback_panic_is_retained_after_original_event_join() {
+            let fixture = Fixture::new();
+            let intents = Arc::new(CriticalIntents::default());
+            let mut gate = gate(intents.clone(), intents.ticket(), true);
+            let mut jobs = FileJobs::with_stop_and_authority(
+                fixture.root.path(),
+                CancellationToken::new(),
+                gate.authority.clone(),
+            );
+            fixture.save(&mut jobs, fixture.target.clone());
+            entered(&mut gate).await;
+            gate.release.release();
+            let event = next(&mut jobs).await;
+            let drained = finish(&mut jobs).await;
+            assert!(event.is_none());
+            assert!(drained.is_err());
+            assert!(finish(&mut jobs).await.is_err());
+            assert_eq!(gate.checks.load(Ordering::SeqCst), 2);
+            fixture.assert_destination(PREVIOUS, 2);
+        }
+
+        #[tokio::test]
+        async fn cancelled_wait_keeps_original_panicking_publication_join_for_drain() {
+            let fixture = Fixture::new();
+            let intents = Arc::new(CriticalIntents::default());
+            let mut gate = gate(intents.clone(), intents.ticket(), true);
+            let stop = CancellationToken::new();
+            let mut jobs = FileJobs::with_stop_and_authority(
+                fixture.root.path(),
+                stop.clone(),
+                gate.authority.clone(),
+            );
+            fixture.save(&mut jobs, fixture.target.clone());
+            entered(&mut gate).await;
+            stop.cancel();
+            assert!(next(&mut jobs).await.is_none());
+            assert!(jobs.has_jobs());
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), jobs.finish())
+                    .await
+                    .is_err()
+            );
+            assert!(jobs.has_jobs());
+            fixture.assert_destination(PREVIOUS, 3);
+            gate.release.release();
+            assert!(finish(&mut jobs).await.is_err());
+            assert!(finish(&mut jobs).await.is_err());
+            assert_eq!(gate.checks.load(Ordering::SeqCst), 2);
+            fixture.assert_destination(PREVIOUS, 2);
+        }
     }
 }

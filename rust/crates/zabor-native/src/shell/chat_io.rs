@@ -11,6 +11,7 @@ use zabor_native::chat_transport::ChatTransport;
 
 #[derive(Default)]
 pub(super) struct ChatIo {
+    pub(super) file_io: Arc<super::file_io::FileIo>,
     jobs: Mutex<Vec<Arc<ChatJob>>>,
     drain: tokio::sync::Mutex<()>,
     failed: Arc<AtomicBool>,
@@ -31,8 +32,7 @@ impl Drop for JobFailure {
 }
 
 pub(super) struct ChatChange {
-    pub(super) engine: Option<ChatEngine>,
-    pub(super) transport: Option<ChatTransport>,
+    pub(super) resources: super::file_io::OwnedFiles,
     pub(super) revoked: Option<FriendRevocations>,
     pub(super) friends: Vec<String>,
 }
@@ -76,13 +76,13 @@ impl ChatIo {
         let failed = self.failed.clone();
         let receiver = self.dispatch(move || {
             let result = match change.revoked.take() {
-                Some(revoked) => match change.engine.as_mut() {
+                Some(revoked) => match change.resources.engine.as_mut() {
                     Some(engine) => engine.finish_friend_revocations(revoked).is_ok(),
                     None => false,
                 },
                 None => true,
             };
-            if let Some(transport) = change.transport.as_mut() {
+            if let Some(transport) = change.resources.transport.as_mut() {
                 transport.set_friends(&change.friends);
             }
             if !result {
@@ -110,6 +110,9 @@ impl ChatIo {
                 .unwrap_or_else(|error| error.into_inner())
                 .clone();
             if jobs.is_empty() {
+                if self.file_io.finish().await.is_err() {
+                    self.failed.store(true, Ordering::Release);
+                }
                 break;
             }
             for job in &jobs {
@@ -149,13 +152,16 @@ pub(super) async fn reconcile(
                 files.disconnect(peer);
             }
         }
-        let mut engine = chat.take();
-        let revoked = engine
+        let mut resources = io.file_io.own();
+        resources.jobs = files.take();
+        resources.engine = chat.take();
+        resources.transport = transport.take();
+        let revoked = resources
+            .engine
             .as_mut()
             .map(|engine| engine.replace_friends(friends.iter().cloned()));
         ChatChange {
-            engine,
-            transport: transport.take(),
+            resources,
             revoked,
             friends: friends.to_vec(),
         }
@@ -163,7 +169,7 @@ pub(super) async fn reconcile(
     let Some(change) = change else {
         return;
     };
-    if change.engine.is_none() && change.transport.is_none() {
+    if change.resources.engine.is_none() && change.resources.transport.is_none() {
         return;
     }
     match io.reconcile(change).await {
@@ -171,8 +177,9 @@ pub(super) async fn reconcile(
             let mut change = Some(change);
             work.commit(|| {
                 let returned = change.as_mut().unwrap();
-                *chat = returned.engine.take();
-                *transport = returned.transport.take();
+                *chat = returned.resources.engine.take();
+                *transport = returned.resources.transport.take();
+                *files = returned.resources.jobs.take();
             });
             drop(change);
             if !success {
@@ -260,9 +267,10 @@ mod tests {
         let holder = rusqlite::Connection::open(root.join("bob.sqlite")).unwrap();
         holder.execute_batch("BEGIN IMMEDIATE").unwrap();
         let revoked = original.replace_friends(Vec::new());
+        let mut resources = io.file_io.own();
+        resources.engine = Some(original);
         drop(io.reconcile(ChatChange {
-            engine: Some(original),
-            transport: None,
+            resources,
             revoked: Some(revoked),
             friends: Vec::new(),
         }));
@@ -349,17 +357,19 @@ mod tests {
             ChatIdentity::generate(),
             ChatStore::open(&root.path().join("replacement.sqlite")).unwrap(),
         );
+        let mut resources = io.file_io.own();
+        resources.engine = Some(replacement);
         let (change, success) = io
             .reconcile(ChatChange {
-                engine: Some(replacement),
-                transport: None,
+                resources,
                 revoked: Some(revoked),
                 friends: Vec::new(),
             })
             .await
             .unwrap();
         assert!(!success);
-        assert_eq!(change.engine.as_ref().unwrap().owner(), "owner");
+        assert_eq!(change.resources.engine.as_ref().unwrap().owner(), "owner");
+        drop(change);
         assert!(io.finish().await.is_err());
         assert!(io.finish().await.is_err());
     }
@@ -636,5 +646,53 @@ mod tests {
             "failed original cleanup admitted replacement store"
         );
         assert_eq!(calls.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn current_reconciliation_returns_the_original_admitted_file_job() {
+        let root = tempfile::tempdir().unwrap();
+        let io = ChatIo::default();
+        let intents = Arc::new(CriticalIntents::default());
+        let ticket = intents.ticket();
+        let stop = CancellationToken::new();
+        let update = |_| panic!("current file owner reconciliation published an error");
+        let work = super::super::SessionWork::new(&intents, ticket, &stop, &update);
+        let source = root.path().join("source.bin");
+        std::fs::write(&source, b"preserved original").unwrap();
+        let mut chat = Some(engine(root.path(), "owner"));
+        let mut transport = None;
+        let mut files = Some(super::super::file_io::FileIo::bound(
+            &root.path().join("owner"),
+            intents.clone(),
+            ticket,
+            stop.clone(),
+        ));
+        files
+            .as_mut()
+            .unwrap()
+            .stage("peer".into(), source.clone())
+            .unwrap();
+        reconcile(
+            &work,
+            &io,
+            &mut chat,
+            &mut transport,
+            &mut files,
+            &["peer".into()],
+            &["peer".into()],
+        )
+        .await;
+        assert_eq!(chat.as_ref().unwrap().owner(), "owner");
+        assert!(files.as_ref().unwrap().has_jobs());
+        assert!(matches!(
+            files.as_mut().unwrap().next_event().await,
+            Some(zabor_native::file_jobs::FileEvent::Staged { file: Ok(_), .. })
+        ));
+        drop(
+            io.file_io
+                .retire_session(files.take(), chat.take(), transport.take()),
+        );
+        io.finish().await.unwrap();
+        assert_eq!(std::fs::read(source).unwrap(), b"preserved original");
     }
 }

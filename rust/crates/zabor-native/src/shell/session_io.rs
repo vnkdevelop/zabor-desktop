@@ -13,6 +13,7 @@ use zabor_native::profile::{PreparedSession, Profile, ProfileError, SavedSession
 
 pub(super) struct SessionIo {
     pub(super) chat_io: Arc<super::chat_io::ChatIo>,
+    pub(super) file_io: Arc<super::file_io::FileIo>,
     profile: Option<Arc<Profile>>,
     intents: Arc<CriticalIntents>,
     stop: CancellationToken,
@@ -41,8 +42,10 @@ impl SessionIo {
         intents: Arc<CriticalIntents>,
         stop: CancellationToken,
     ) -> Arc<Self> {
+        let chat_io = Arc::new(super::chat_io::ChatIo::default());
         Arc::new(Self {
-            chat_io: Arc::new(super::chat_io::ChatIo::default()),
+            file_io: chat_io.file_io.clone(),
+            chat_io,
             profile,
             intents,
             stop,
@@ -172,6 +175,9 @@ impl SessionIo {
                 .clone();
             if jobs.is_empty() {
                 if self.chat_io.finish().await.is_err() {
+                    self.failed.store(true, Ordering::Release);
+                }
+                if self.file_io.finish().await.is_err() {
                     self.failed.store(true, Ordering::Release);
                 }
                 if self
