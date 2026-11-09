@@ -2,14 +2,197 @@
 
 Original session: `ses_e43ccd019ffeP2Q43srQQQySTh`. Worktree/branch: `native-app-completion`.
 Original base: `fd8783f0d744b586051ce62fdf89a686e2e4700b`. Checked clock-source slice:
-`19c1dccc4f334f2ddd960c65212512dfe489ffdb`; no checked app integration commit.
+`19c1dccc4f334f2ddd960c65212512dfe489ffdb`. Checked P1 source: `cf3dec9`;
+checked dev manifest/lock delivery: `ebd7064`; crash durability/full app remain FALSE.
 The initially supplied worktree was clean detached `c5d0734`; it was switched to
 the new owned branch at the requested base without resets or discarded work.
 Primary architecture was read from both original and primary GRAPH_REPORT before
 targeted source reads. Primary graph has seven historical zero-node warnings and
 HTML >5000 limitation; it is not copied or modified by this child.
 
-## Current sole-owner handoff — 2026-11-08
+## Fresh sole-owner stage — 2026-11-09
+
+Session `ses_e411cbb1fffeAMLQAdk0IRfvV4` moved first to this worktree; old failed
+provider context was not resumed. Primary Graphify query preceded source reads.
+Inherited HEAD is `cf3dec9`, with checked `ebd7064`, `19c1dcc`, `3968c29` retained.
+No resets, discarded WIP, primary writes, shared cache changes or detached joins.
+
+Checked bounded P1 follow-up commit `9b61f48` contains ONLY `shell/achievement_io.rs`
+and `shell/achievement_io_tests.rs`: missing metadata ordering is rejected before
+HiddenStore::open, including a pre-existing journal that must remain untouched.
+Both current hashes match the original PASSED `members-v2` receipt exactly; that
+receipt includes 5 achievement-IO and 4 actual achievement-worker tests, both
+native-media Clippy modes, normal library/native feature trees/builds. No current
+member/UI WIP is certified by this commit. Crash durability remains FALSE.
+Stage-1 handoff is saved before a real current-session API compaction request;
+continue pending frozen stage-2 checks in the next context, do not replace owner.
+
+Actual inherited `members-v2/verification.json` is PASSED with 20 unchanged hashes:
+45 unique affected tests, native-media library/all-target Clippy `-D warnings`,
+normal library/native feature trees and builds passed. This supersedes the old
+RUNNING entry for original `sh_1bd19ac15001yuQt3D3FEHggVo`. Its obsolete shell ID
+and old Graphify `sh_1bd19e9890011nd5aGMsyH3kyk` no longer resolve in the current
+service (404); no job was polled, restarted, killed or silently certified. The
+existing evidence is retained; current own Graphify directory was absent.
+
+New bounded follow-up fixes the real generic overlay overpainting modals 11/12,
+defaults kick keyboard focus to Cancel, keeps empty-list selection nonnegative,
+cancels original lookup/friend requests on member-profile close/replacement,
+releases dead profile-cache pending entries before reopening the same user,
+rechecks current owner/connection at kick confirmation, and revokes the older
+member refresh before optimistic kick. Reopening bumps the view revision so a
+late rollback cannot restore a superseded list. Added 3 synthetic headless tests;
+these new changes are WIP until the original current receipt below is complete.
+
+Original `sh_1bee945f4001YQj3iQY7t6vAYN` COMPLETED, frozen 20 source/manifest/lock
+paths, evidence `native-app-completion-2026-11-09/sol-members-v3/`. Uses only
+`cmd.exe /c`, `--locked --offline -j2`, owned `target/native-app-completion`,
+short read-only primary SDK/libclang/ONNX 1.31.1 paths, static CRT and scrubbed
+MSVC discovery retaining ProgramData/ALLUSERSPROFILE/prerelease. Group includes
+affected member/app/achievement IO/original-worker/clock tests, Clippy, normal
+feature trees/builds; unchanged library tests reuse the checked inherited receipt.
+Temporary runner and its fixture directory self-clean on original completion.
+No full visual/audio/neural matrix, physical input/capture or user profile access.
+First new group passed fmt/diff-check and stopped before tests on the new snapshot
+fixture using non-existent `SharedPixelBuffer::as_pixels`; corrected narrowly to
+the pinned public `as_slice`. This is our test compilation failure, not a provider,
+cache or production renderer blocker. Source freeze was released on completion.
+Original `sh_1bef23fca001T5eZYaHxISOtEX` COMPLETED against corrected frozen
+20 paths, identical approved rules, evidence `sol-members-v4/`. Rust/Slint compiled;
+4 member callback/guard tests passed. New headless overlay pixel check passed, but
+keyboard Return left modal 11 unchanged: initial conditional FocusScope creation
+did not trigger its changed-reset handler. This is a real first-open focus defect,
+not a reason to weaken the test. Later affected/Clippy/tree/build checks did not run.
+Follow-up needs the pinned widget-style `FocusScope.init` initial focus in both
+member-list and kick-confirm scopes, preserving the reset handlers for later use.
+Graphify correction original `sh_1bef3e8ed001UEzvuKWjlkUdBF` COMPLETED: 14631 nodes/
+34331 edges, same 9 zero-node warnings, code-only. Both FocusScope.init fixes now
+use the pinned official widget pattern. New original affected group
+`sh_1bef64751001QEA3610X9qcZIW` RUNNING, `sol-members-v5/`, frozen same 20 paths;
+no source edits/polls/duplicate checks before its original automatic receipt.
+
+Original own Graphify `sh_1beea6399001cLime2JyXOfHPI` COMPLETED: `update . --no-cluster`,
+14630 nodes/34330 edges, 9 inherited zero-node warnings, code-only without
+semantic/docs/clustering refresh. Local interpreter metadata was restored without
+copying the primary graph. No Graphify job is pending; do not duplicate it or poll
+the original affected check, and do not edit frozen sources before its receipt.
+RU/EN privacy/data-flow/legal notes now describe memory-only member/profile caches,
+existing RPC metadata, no permission grants/content route, and blocked production
+hidden-achievement durability. These notes do not claim complete native acceptance.
+Parent continues update-host; none of its files/worktrees is modified here.
+Windows metadata crash durability, full native/physical/accessibility/raster/motion
+and release gates remain FALSE. Pending stage delivery/commit and real API compact
+must retain this handoff and exact original job results in the next context.
+
+Next bounded worker coverage must distinguish the existing stand-alone `execute`
+wire-contract test from the actual `worker` members test: Invite/Kick/RemoveFriend
+and member-origin ProfileAddFriend still need actual original-worker scenarios.
+Inspect Invite's worker-side current-channel source before accepting it: existing
+worker `current_user` gets UserUpdated/UserJoined/audio state, while UI handles
+UserJoinedChannel separately; the current wire test sets `current_channel_id`
+manually. Do not certify successful real joins from that stand-alone fixture.
+Full adapter coverage also needs prior AvatarUi friend/self-profile → registered
+member transitions (including before the 250 ms refresh) and first AppUi owner
+initialization; current member fixtures bind MemberUi without AvatarUi. Preserve
+AvatarUi ownership and use an app-owned adapter/test seam rather than overwriting
+that module. These integration gates remain explicit even if bounded tests pass.
+
+## Historical sole-owner handoff — 2026-11-08
+
+2026-11-09 continuation supersedes the old resolver blocker. Primary cache-only
+original `sh_1bcf51d8f001E2168nZrKWWw87` completed/passed; receipt was read once from
+`../rust-p0-backend-bench/migration-artifacts/native-ui/slint-testing-cache-2026-11-08/checked-v1/verification.json`.
+Exact official `i-slint-backend-testing=1.18.1` checksum:
+`01943d6c5ea5bc913d497bdaa423c309e7627afff47a6794bfd13be5c564209f`.
+No pending cache job, network install or pin change. New original affected Cargo
+job `sh_1bcf753ac001iupn9i6wsf1E3l` completed once: fmt/diff-check passed, first
+`--locked --offline` app callback test stopped before compilation because lock
+needed dev-feature resolution. Own offline resolution then added only that exact
+package and necessary dependency links in 3 Slint records; no package removed,
+existing version/source/checksum changed. Retained `dev-lock-v1/lock-comparison.json`.
+Lock SHA256 now `cce8b9fad07b05c584455091a1747358a80616ba7a4881ca78119decfeb6cfc9`.
+This is an app-owned dev-feature lock change, not production renderer approval.
+
+Production achievement IO now fails closed BEFORE preparing/publishing a replacement
+when the missing metadata-ordering primitive is unavailable; previous history is
+loaded but unchanged, storage failure is retained through the original observed
+join, and the UI may display only the ephemeral RPC response plus storage error.
+Only explicitly named `cfg(test)` `unverified_transaction_fixture` enables logical
+publication/rollback tests; normal constructor stays blocked even in tests. Added
+constructor and actual-original-worker metadata-blocked regression cases. No unsafe
+exemption, environment override or unverified flush-after-rename guarantee exists.
+Windows durable journal install/replacement/restoration/retirement remains FALSE.
+
+Original `sh_1bcfa969a001PJexkF4JT3evWk` completed: offline resolution/Slint software
+compilation advanced; Rust stopped on the existing seed fixture passing unwrapped
+AchievementData where `AchievementsView::accept` requires Result. Corrected only
+that argument to retain the original Result; no new cache/package blocker appeared.
+Original `sh_1bcfdbbc60012d6v6aT2FKKbKn` completed: headless callbacks passed 3,
+achievement tests passed 16/17; only a historical fixture still unwrapped success
+after a newly cancelled selected-view query. Corrected the test to assert Leave
+keeps the original query alive, replacement cancels it, and load/accept return
+Cancelled/rejection. Original `sh_1bd01eb13001IFrFrd7kG05zfp` then completed with
+unchanged frozen source and 38 unique passing Cargo tests: app3, achievements17,
+store6, IO5, actual worker4, clock3. Their protocol/cleanup coverage is NOT crash
+durability approval. No-default/non-native library Clippy stopped on 5 pre-existing
+dead-code diagnostics in out-of-scope mic_test.rs; no source/suppression was changed.
+Original `sh_1bd05b8a1001oqlZv2Ei6c03Qd` completed/passed with unchanged 17 hashes:
+native-media/no-default library and all-target Clippy `-D warnings`, normal library/
+native feature trees and builds. Normal runtime graphs exclude software renderer
+and testing backend packages. Existing slint-build/compiler default build-only
+renderer-software feature remains visible/unchanged; literal all-build-feature
+absence is NOT claimed. Evidence: `affected-quality-v1/verification.json`.
+Commit `ebd7064` contains ONLY native dev Slint manifest addition and 21-line root
+lock addition/link diff. Commit `cf3dec9` contains the 14 checked P1/achievement/UI
+source files matching the 38 passing Cargo tests plus the quality receipt. The
+production constructor still forbids durable publication because metadata ordering
+is unavailable; synthetic transaction tests do not authorize production success.
+
+Original members group `sh_1bd129152001SoIVlQ2W5jzYaJ` completed with unchanged
+20 hashes: all 45 unique affected tests passed, native-media library Clippy passed;
+all-target Clippy stopped only on new Operation/Command enum sizes and a fixture
+clone-to-slice diagnostic. Boxed only the Invite user payload (which also bounds
+Command size) and replaced the fixture clone with from_ref; no suppression or
+production dependency change. Added authoritative-update retention for successful
+friend removal, with owner/session-bound UI-only suppression and no permission
+set mutation. Also moved the production metadata refusal BEFORE HiddenStore::open
+so unsupported journal recovery is never attempted; a pending-journal fixture
+asserts both journal and previous destination bytes remain untouched.
+New original `sh_1bd19ac15001yuQt3D3FEHggVo` is RUNNING against frozen 20 paths,
+own target and the same approved command/pin rules. No poll/duplicate group.
+Member actions/controller are now wired into actual NativeApp callbacks and the
+original SessionWork dispatch: GetChannelMembersList6s, separate registered source,
+fresh existing GetUserByUsername profile lookup, member return, CallToChannel exact
+args/30s sent guard/3s offline feedback, owner-confirmed Kick guarded optimistic
+rollback, friend-only RemoveFriend UI optimism without roster/transport insertion,
+existing SendFriendRequest literal-true result, scoped CallFailed3s feedback. No
+registered member is added to Bootstrap.channel_users/friends or worker permission
+sets. Synthetic callbacks/contracts/original actual-worker tests are added but
+UNCHECKED pending this new original receipt; no physical/raster/motion approval.
+Own Graphify original `sh_1bd12d10a001EsFaSGnsKEE2lG` completed once on unchanged
+source (`update . --no-cluster`): 14624 nodes/34307 edges, 9 zero-node warnings;
+code-only, no semantic/docs/clustering refresh. No graph job remains pending;
+Own fresh Graphify original `sh_1bd19e9890011nd5aGMsyH3kyk` is RUNNING after the
+follow-up changes; do not poll/duplicate it or the original members check.
+
+The previous P1 commands used frozen 17 source/
+manifest/lock paths, `--locked --offline`, own `target/native-app-completion`, `-j2`,
+scrubbed MSVC env and read-only primary WebRTC/libclang pins. No poll or duplicate
+check; do not edit these frozen files before the original receipt. Planned group:
+headless app callbacks, achievements/store/achievement_io/original-worker/native
+clock tests, no-default library and native-media all-target Clippy, normal library/
+native feature trees and builds. No full-neural/physical/visual matrix requested.
+Software runtime renderer/backend-testing must be absent from normal graphs; the
+existing slint-build/compiler default build-only `renderer-software` feature is
+separately visible in the tree and is NOT a runtime renderer dependency or a new
+production feature change. The temporary runner/test fixtures self-clean on exit.
+Retained evidence root: `migration-artifacts/native-ui/native-app-completion-2026-11-09/`.
+P1 tests/quality are now checked separately from the current members group. New
+member_actions.rs/member_ui.rs/member_ui_tests.rs and their narrow wiring are WIP
+and not certified by the earlier P1 group.
+Root membership/helper manifest stay primary-owned. Future lock integration must
+apply only the exact Slint addition/link hunks, preserving the primary helper
+package record and every existing version/checksum. Whole acceptance FALSE.
 
 Fresh-context takeover: `ses_e4317ba39ffeB5seOBOzCJYo0V`, sole app owner. The prior
 pre-consume quota failure did not execute its request; no WIP was reset or replayed.
