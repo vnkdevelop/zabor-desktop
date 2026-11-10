@@ -3,7 +3,7 @@ slint::include_modules!();
 #[cfg(test)]
 mod tests {
     use super::DesktopUiFixture;
-    use i_slint_renderer_software::MinimalSoftwareWindow;
+    use slint::platform::software_renderer::MinimalSoftwareWindow;
     use slint::platform::{Key, Platform, PlatformError, WindowAdapter, WindowEvent};
     use slint::{ComponentHandle, PhysicalSize};
     use std::cell::{Cell, RefCell};

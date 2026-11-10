@@ -1,7 +1,10 @@
 use super::*;
+use crate::critical_intents::{CriticalIntents, IntentScope, IntentTicket};
 use crate::media::{ChannelLease, RemoteControlEvent};
 use crate::remote_input::{InputState, RemoteInput};
+use crate::remote_viewer::desktop::{HostBinding, ViewerRequest};
 use libwebrtc::data_channel::DataChannelState;
+use std::sync::atomic::AtomicBool;
 use tokio_util::sync::CancellationToken;
 use zabor_input::{Packet, Signal};
 
@@ -27,9 +30,69 @@ pub struct ControlTarget {
         crate::video::VideoFrameStamp,
         crate::critical_intents::IntentTicket,
     )>,
+    request: Option<Arc<ViewerRequest>>,
+    ticket: Option<IntentTicket>,
+    voice: Option<CancellationToken>,
+    stopped: Arc<AtomicBool>,
+    host_fence: Option<Arc<AtomicBool>>,
 }
 
 impl ControlTarget {
+    pub fn with_request(
+        mut self,
+        request: Arc<ViewerRequest>,
+        ticket: IntentTicket,
+        voice: CancellationToken,
+    ) -> Self {
+        self.request = Some(request);
+        self.ticket = Some(ticket);
+        self.voice = Some(voice);
+        self.stopped = Arc::new(AtomicBool::new(false));
+        self
+    }
+
+    pub fn request(&self) -> Option<Arc<ViewerRequest>> {
+        self.request.clone()
+    }
+
+    pub fn voice(&self) -> Option<CancellationToken> {
+        self.voice.clone()
+    }
+
+    pub fn same_request(&self, other: &Self) -> bool {
+        self.lifetime.is_same(&other.lifetime)
+            && self.channel.is_same(&other.channel)
+            && self.ticket == other.ticket
+            && self
+                .request
+                .as_ref()
+                .zip(other.request.as_ref())
+                .is_some_and(|(original, incoming)| Arc::ptr_eq(original, incoming))
+    }
+
+    pub fn is_retired(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+            || self
+                .voice
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            || !self.lifetime.is_alive()
+            || !self.channel.is_alive()
+    }
+
+    fn same_host(&self, host: &Host) -> bool {
+        self.lifetime.is_same(&host.lifetime)
+            && self.channel.is_same(&host.channel)
+            && self
+                .host_fence
+                .as_ref()
+                .is_some_and(|fence| Arc::ptr_eq(fence, &host.authorized))
+            && host
+                .context
+                .as_ref()
+                .is_some_and(|(_, ticket)| self.ticket == Some(*ticket))
+    }
+
     pub fn with_frame(
         mut self,
         frame: crate::video::VideoFrameStamp,
@@ -40,11 +103,15 @@ impl ControlTarget {
     }
 
     pub fn input_ticket(&self) -> Option<crate::critical_intents::IntentTicket> {
-        self.frame.as_ref().map(|(_, ticket)| *ticket)
+        self.ticket
+            .or_else(|| self.frame.as_ref().map(|(_, ticket)| *ticket))
     }
 
     pub fn send_stop(&self) {
-        if self.lifetime.is_alive() && self.channel.is_alive() {
+        if !self.stopped.swap(true, Ordering::AcqRel)
+            && self.lifetime.is_alive()
+            && self.channel.is_alive()
+        {
             let _ = self.wire.send(&Packet::Signal(Signal::Stop).encode(), true);
         }
     }
@@ -63,6 +130,7 @@ struct Viewer {
     requested: std::time::Instant,
     ping: std::time::Instant,
     host_active: bool,
+    target: ControlTarget,
 }
 
 struct Host {
@@ -71,6 +139,16 @@ struct Host {
     channel: ChannelLease,
     input: RemoteInput,
     last_state: InputState,
+    capture: Arc<zabor_input::CaptureLease>,
+    voice: CancellationToken,
+    authorized: Arc<AtomicBool>,
+    context: Option<(Arc<CriticalIntents>, IntentTicket)>,
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        self.authorized.store(false, Ordering::Release);
+    }
 }
 
 #[derive(Default)]
@@ -80,11 +158,60 @@ pub(super) struct RemoteControl {
     host: Option<Host>,
     viewer: Option<Viewer>,
     notice: Option<(std::time::Instant, &'static str)>,
+    context: Option<(Arc<CriticalIntents>, IntentTicket)>,
+    activity: Option<ControlTarget>,
     #[cfg(test)]
     synthetic_input: bool,
 }
 
 impl VoiceSession {
+    pub fn bind_control_intents(&mut self, intents: Arc<CriticalIntents>, ticket: IntentTicket) {
+        if self.remote.host.is_none()
+            && self.remote.viewer.is_none()
+            && intents.is_current(ticket, IntentScope::Voice)
+        {
+            self.remote.context = Some((intents, ticket));
+        }
+    }
+
+    pub fn control_viewer_target(&self) -> Option<ControlTarget> {
+        self.remote
+            .viewer
+            .as_ref()
+            .map(|viewer| viewer.target.clone())
+    }
+
+    pub fn take_control_activity(&mut self) -> Option<ControlTarget> {
+        self.remote.activity.take()
+    }
+
+    pub fn host_control_binding(&self) -> Option<HostBinding> {
+        let host = self.remote.host.as_ref()?;
+        let (intents, ticket) = host.context.as_ref()?;
+        if !host.authorized.load(Ordering::Acquire)
+            || host.voice.is_cancelled()
+            || host.capture.snapshot().is_none()
+            || !intents.is_current(*ticket, IntentScope::Voice)
+        {
+            return None;
+        }
+        let mut target = self.control_targets().into_iter().find(|target| {
+            target.lifetime.is_same(&host.lifetime) && target.channel.is_same(&host.channel)
+        })?;
+        target.ticket = Some(*ticket);
+        target.voice = Some(host.voice.clone());
+        target.host_fence = Some(host.authorized.clone());
+        Some(HostBinding {
+            intents: intents.clone(),
+            ticket: *ticket,
+            target,
+            capture: host.capture.clone(),
+            consent: self.remote.allowed,
+            voice: host.voice.clone(),
+            authorized: host.authorized.clone(),
+        })
+    }
+
     pub fn remote_control_view(&self) -> RemoteControlView {
         let host = self.remote.host.as_ref();
         let viewer = self.remote.viewer.as_ref();
@@ -126,6 +253,11 @@ impl VoiceSession {
                     channel,
                     wire: self.engine.remote_control_wire(peer)?,
                     frame: None,
+                    request: None,
+                    ticket: None,
+                    voice: None,
+                    stopped: Arc::new(AtomicBool::new(false)),
+                    host_fence: None,
                 })
             })
             .collect()
@@ -139,15 +271,17 @@ impl VoiceSession {
     pub(super) fn reset_remote_control(&mut self) {
         self.stop_host_control(false);
         if let Some(viewer) = self.remote.viewer.take() {
-            let _ = self
-                .engine
-                .send_remote_control(&viewer.peer, Packet::Signal(Signal::Stop));
+            viewer.target.send_stop();
         }
+        self.remote.activity = None;
         self.set_control_stream(None);
     }
 
     fn stop_host_control(&mut self, permanent: bool) {
         self.remote.revoked = permanent;
+        if let Some(host) = &self.remote.host {
+            host.authorized.store(false, Ordering::Release);
+        }
         if let Some(host) = self.remote.host.take() {
             host.input.stop();
             let _ = self.engine.send_remote_control(
@@ -169,8 +303,34 @@ impl VoiceSession {
         self.stop_host_control(true);
     }
 
+    pub fn revoke_remote_control_target(&mut self, target: &ControlTarget) -> bool {
+        if !self
+            .remote
+            .host
+            .as_ref()
+            .is_some_and(|host| target.same_host(host))
+        {
+            return false;
+        }
+        self.revoke_remote_control();
+        true
+    }
+
     pub fn release_remote_control(&mut self) {
         self.reset_remote_control();
+    }
+
+    pub fn release_remote_control_target(&mut self, target: &ControlTarget) -> bool {
+        if !self
+            .remote
+            .viewer
+            .as_ref()
+            .is_some_and(|viewer| viewer.target.same_request(target))
+        {
+            return false;
+        }
+        self.reset_remote_control();
+        true
     }
 
     async fn open_control_input(
@@ -230,6 +390,23 @@ impl VoiceSession {
             self.reset_remote_control();
             return Ok(());
         }
+        let target = self
+            .control_targets()
+            .into_iter()
+            .find(|target| target.peer == peer)
+            .ok_or(MediaError::UnauthorizedPeer)?;
+        self.toggle_remote_control_target(hub, target).await
+    }
+
+    pub async fn toggle_remote_control_target(
+        &mut self,
+        hub: &HubConnection,
+        target: ControlTarget,
+    ) -> Result<(), MediaError> {
+        let peer = target.peer.as_str();
+        if !self.control_target_current(&target) || target.is_retired() {
+            return Err(MediaError::UnauthorizedPeer);
+        }
         let (lifetime, channel, permitted, _, state) = self
             .engine
             .remote_control_info(peer)
@@ -255,6 +432,7 @@ impl VoiceSession {
             requested: std::time::Instant::now(),
             ping: std::time::Instant::now(),
             host_active: false,
+            target: target.clone(),
         });
         if state == DataChannelState::Open {
             self.engine
@@ -263,12 +441,11 @@ impl VoiceSession {
         self.set_stream_focus(hub, Some(peer.into())).await
     }
 
-    pub fn send_control_input(&mut self, peer: &str, packet: Packet) -> Result<(), MediaError> {
-        let Some(viewer) = self
-            .remote
-            .viewer
-            .as_ref()
-            .filter(|viewer| viewer.peer == peer && viewer.accepted)
+    pub fn send_control_input(&mut self, peer: &str, packet: Packet) -> Result<bool, MediaError> {
+        let Some(viewer) =
+            self.remote.viewer.as_ref().filter(|viewer| {
+                viewer.peer == peer && viewer.accepted && !viewer.target.is_retired()
+            })
         else {
             return Err(MediaError::UnauthorizedPeer);
         };
@@ -284,7 +461,7 @@ impl VoiceSession {
             return Err(MediaError::UnauthorizedPeer);
         }
         if viewer.host_active && !packet.is_release() {
-            return Ok(());
+            return Ok(false);
         }
         if !matches!(
             packet,
@@ -300,22 +477,33 @@ impl VoiceSession {
         } = packet
         {
             if !zabor_input::key_safe(vk, modifiers) {
-                return Ok(());
+                return Ok(false);
             }
         }
         if self.engine.send_remote_control(peer, packet).is_err() {
             self.reset_remote_control();
             return Err(MediaError::Backend);
         }
-        Ok(())
+        Ok(true)
     }
 
     pub fn send_control_target_input(
         &mut self,
         target: &ControlTarget,
         packet: Packet,
-    ) -> Result<(), MediaError> {
+    ) -> Result<bool, MediaError> {
         if !self.control_target_current(target) {
+            return Err(MediaError::UnauthorizedPeer);
+        }
+        if !self.remote.viewer.as_ref().is_some_and(|viewer| {
+            if target.request.is_some() {
+                viewer.target.same_request(target)
+            } else {
+                viewer.target.request.is_none()
+                    && viewer.lifetime.is_same(&target.lifetime)
+                    && viewer.channel.is_same(&target.channel)
+            }
+        }) {
             return Err(MediaError::UnauthorizedPeer);
         }
         let current = self.remote.viewer.as_ref().is_some_and(|viewer| {
@@ -345,6 +533,11 @@ impl VoiceSession {
         voice: CancellationToken,
     ) -> Result<(), MediaError> {
         if voice.is_cancelled()
+            || self
+                .remote
+                .context
+                .as_ref()
+                .is_some_and(|(intents, ticket)| !intents.is_current(*ticket, IntentScope::Voice))
             || !self.peers.contains(peer)
             || !self
                 .engine
@@ -468,7 +661,12 @@ impl VoiceSession {
                     })
                     .ok_or(MediaError::Backend)?;
                 let input = match self
-                    .open_control_input(geometry, voice.clone(), lifetime.clone(), channel.clone())
+                    .open_control_input(
+                        geometry.clone(),
+                        voice.clone(),
+                        lifetime.clone(),
+                        channel.clone(),
+                    )
                     .await
                 {
                     Ok(input) => input,
@@ -479,6 +677,9 @@ impl VoiceSession {
                     }
                 };
                 if voice.is_cancelled()
+                    || geometry.snapshot().is_none()
+                    || !self.remote.allowed
+                    || self.remote.revoked
                     || !self
                         .engine
                         .remote_control_matches(peer, &lifetime, &channel)
@@ -496,6 +697,10 @@ impl VoiceSession {
                     channel,
                     input,
                     last_state: InputState::Ready,
+                    capture: geometry,
+                    voice: voice.clone(),
+                    authorized: Arc::new(AtomicBool::new(true)),
+                    context: self.remote.context.clone(),
                 });
             }
             if self
@@ -516,7 +721,11 @@ impl VoiceSession {
             self.renegotiate(hub, peer).await?;
         } else if self.remote.host.as_ref().is_some_and(|host| {
             host.peer == peer
+                && host.lifetime.is_same(&lifetime)
+                && host.channel.is_same(&channel)
                 && (matches!(packet, Packet::Signal(Signal::Reset | Signal::Stop))
+                    || !host.authorized.load(Ordering::Acquire)
+                    || host.voice.is_cancelled()
                     || !host.input.feed(packet))
         }) {
             self.stop_host_control(false);
@@ -538,6 +747,8 @@ impl VoiceSession {
                 .engine
                 .remote_control_matches(&host.peer, &host.lifetime, &host.channel)
                 || !self.remote.allowed
+                || !host.authorized.load(Ordering::Acquire)
+                || host.voice.is_cancelled()
                 || !self.is_sharing()
                 || matches!(state, InputState::Ended | InputState::Revoked)
         });
@@ -561,6 +772,7 @@ impl VoiceSession {
                     .remote_control_info(&viewer.peer)
                     .is_some_and(|(_, _, permitted, _, _)| permitted)
                 || !self.control_stream_focused(&viewer.peer)
+                || viewer.target.is_retired()
                 || (!viewer.accepted && viewer.requested.elapsed() >= Duration::from_secs(15))
         });
         if stop_viewer {
@@ -569,9 +781,12 @@ impl VoiceSession {
         if let Some(viewer) = self.remote.viewer.as_mut() {
             if viewer.ping.elapsed() >= Duration::from_secs(2) {
                 viewer.ping = std::time::Instant::now();
-                let _ = self
+                let admitted = self
                     .engine
                     .send_remote_control(&viewer.peer, Packet::Signal(Signal::Ping));
+                if admitted.is_ok() && viewer.accepted && !viewer.target.is_retired() {
+                    self.remote.activity = Some(viewer.target.clone());
+                }
             }
         }
     }
@@ -587,6 +802,225 @@ mod tests {
     };
     use libwebrtc::video_frame::{I420Buffer, VideoFrame, VideoRotation};
     use libwebrtc::video_source::{native::NativeVideoSource, VideoResolution};
+
+    #[tokio::test]
+    async fn idle_context_can_change_but_live_canonical_owner_is_never_reticketed() {
+        let mut session = session();
+        session.engine.authorize_peers(["peer".into()]);
+        session
+            .engine
+            .create_data_channel(
+                "peer",
+                "rc-context-fixture",
+                libwebrtc::data_channel::DataChannelInit::default(),
+            )
+            .unwrap();
+        let original = Arc::new(CriticalIntents::default());
+        let ticket = original.ticket();
+        session.bind_control_intents(original.clone(), ticket);
+        let target = session.control_targets().pop().unwrap().with_request(
+            Arc::new(ViewerRequest::default()),
+            ticket,
+            original.voice_token(ticket),
+        );
+        session.remote.viewer = Some(Viewer {
+            peer: target.peer.clone(),
+            lifetime: target.lifetime.clone(),
+            channel: target.channel.clone(),
+            accepted: false,
+            accepted_at: None,
+            requested: std::time::Instant::now(),
+            ping: std::time::Instant::now(),
+            host_active: false,
+            target,
+        });
+        let replacement = Arc::new(CriticalIntents::default());
+        session.bind_control_intents(replacement.clone(), replacement.ticket());
+        assert!(Arc::ptr_eq(
+            &session.remote.context.as_ref().unwrap().0,
+            &original
+        ));
+        session.remote.viewer = None;
+        session.bind_control_intents(replacement.clone(), replacement.ticket());
+        assert!(Arc::ptr_eq(
+            &session.remote.context.as_ref().unwrap().0,
+            &replacement
+        ));
+        let cleanup = session.audio_runtime.cleanup_tracker();
+        drop(session);
+        cleanup.wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn canonical_stop_release_input_and_ping_keep_original_same_channel_request() {
+        let fixture = fixture([]).await;
+        let (hub, _hub_events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let (engine, _events, _remote, mut received) = connected().await;
+        let mut session = session();
+        session.engine = engine;
+        session.engine.test_remote_metadata("peer", true, 2);
+        session
+            .handle(&hub, "UserStartedStreaming", &[json!("peer")])
+            .await
+            .unwrap();
+        session
+            .set_stream_focus(&hub, Some("peer".into()))
+            .await
+            .unwrap();
+        let intents = Arc::new(CriticalIntents::default());
+        let ticket = intents.ticket();
+        session.bind_control_intents(intents.clone(), ticket);
+        let original = Arc::new(ViewerRequest::default());
+        let target = session
+            .control_targets()
+            .into_iter()
+            .find(|target| target.peer == "peer")
+            .unwrap();
+        let old =
+            target
+                .clone()
+                .with_request(original.clone(), ticket, intents.voice_token(ticket));
+        session
+            .toggle_remote_control_target(&hub, old.clone())
+            .await
+            .unwrap();
+        assert_eq!(signal(&mut received).await, Signal::Start);
+        assert!(Arc::ptr_eq(
+            &session.control_viewer_target().unwrap().request().unwrap(),
+            &original
+        ));
+        old.send_stop();
+        old.send_stop();
+        assert!(session.release_remote_control_target(&old));
+        assert_eq!(signal(&mut received).await, Signal::Stop);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), signal(&mut received))
+                .await
+                .is_err()
+        );
+        let replacement = Arc::new(ViewerRequest::default());
+        let fresh = target.with_request(replacement.clone(), ticket, intents.voice_token(ticket));
+        session
+            .toggle_remote_control_target(&hub, fresh.clone())
+            .await
+            .unwrap();
+        assert_eq!(signal(&mut received).await, Signal::Start);
+        assert!(!session.release_remote_control_target(&old));
+        assert!(session
+            .send_control_target_input(
+                &old,
+                Packet::Mouse {
+                    button: 0,
+                    down: false
+                }
+            )
+            .is_err());
+        assert!(session
+            .control_viewer_target()
+            .unwrap()
+            .same_request(&fresh));
+        assert!(!fresh.is_retired());
+        let viewer = session.remote.viewer.as_mut().unwrap();
+        viewer.accepted = true;
+        viewer.accepted_at = Some(std::time::Instant::now());
+        viewer.ping = std::time::Instant::now() - Duration::from_secs(3);
+        session.maintain_remote_control();
+        assert_eq!(signal(&mut received).await, Signal::Ping);
+        let admitted = session.take_control_activity().unwrap();
+        assert!(admitted.same_request(&fresh));
+        assert!(!admitted.same_request(&old));
+        assert!(Arc::ptr_eq(&admitted.request().unwrap(), &replacement));
+        assert!(session.release_remote_control_target(&fresh));
+        let cleanup = session.audio_runtime.cleanup_tracker();
+        drop(session);
+        cleanup.wait().await.unwrap();
+        hub.close();
+        fixture.server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn original_host_capture_token_and_fence_survive_handoff_and_revoke_before_replacement() {
+        let fixture = fixture([]).await;
+        let (hub, _hub_events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let (engine, _events, _remote, mut received) = connected().await;
+        let mut session = session();
+        session.engine = engine;
+        share(&mut session, "high");
+        let ShareCapture::Desktop(capture) = &session.capture.as_ref().unwrap().capture else {
+            panic!()
+        };
+        let geometry = capture.geometry.clone();
+        geometry.update(zabor_input::Rect {
+            left: -1920,
+            top: -1080,
+            width: 1920,
+            height: 1080,
+        });
+        session.remote.synthetic_input = true;
+        session.remote.allowed = true;
+        session.engine.set_remote_control_allowed(true);
+        session.engine.test_remote_metadata("peer", false, 2);
+        let intents = Arc::new(CriticalIntents::default());
+        let ticket = intents.ticket();
+        session.bind_control_intents(intents.clone(), ticket);
+        let voice = intents.voice_token(ticket);
+        let (lifetime, channel, _, _, _) = session.engine.remote_control_info("peer").unwrap();
+        session
+            .handle_remote_control(
+                &hub,
+                "peer",
+                RemoteControlEvent::Packet(Packet::Signal(Signal::Start)),
+                lifetime.clone(),
+                channel.clone(),
+                voice.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(signal(&mut received).await, Signal::Accept);
+        let original = session.host_control_binding().unwrap();
+        let duplicate = session.host_control_binding().unwrap();
+        assert_eq!(original.ticket, ticket);
+        assert!(Arc::ptr_eq(&original.capture, &geometry));
+        assert!(Arc::ptr_eq(&original.authorized, &duplicate.authorized));
+        assert!(original.consent && original.authorized.load(Ordering::Acquire));
+        assert!(session.revoke_remote_control_target(&original.target));
+        assert!(!original.authorized.load(Ordering::Acquire));
+        session
+            .audio_runtime
+            .cleanup_tracker()
+            .wait()
+            .await
+            .unwrap();
+        session.remote.allowed = true;
+        session.remote.revoked = false;
+        session.engine.set_remote_control_allowed(true);
+        session
+            .handle_remote_control(
+                &hub,
+                "peer",
+                RemoteControlEvent::Packet(Packet::Signal(Signal::Start)),
+                lifetime,
+                channel,
+                voice,
+            )
+            .await
+            .unwrap();
+        let replacement = session.host_control_binding().unwrap();
+        assert!(!Arc::ptr_eq(&original.authorized, &replacement.authorized));
+        assert!(!session.revoke_remote_control_target(&original.target));
+        assert!(replacement.authorized.load(Ordering::Acquire));
+        assert!(session.revoke_remote_control_target(&replacement.target));
+        assert!(!replacement.authorized.load(Ordering::Acquire));
+        let cleanup = session.audio_runtime.cleanup_tracker();
+        drop(session);
+        cleanup.wait().await.unwrap();
+        hub.close();
+        fixture.server.await.unwrap();
+    }
 
     async fn signal(events: &mut mpsc::Receiver<MediaEvent>) -> Signal {
         tokio::time::timeout(Duration::from_secs(3), async {

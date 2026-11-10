@@ -41,6 +41,7 @@ use zabor_native::mic_test_ui::MicTestUi;
 use zabor_native::native_audio::NativeAudio;
 use zabor_native::picker::{PickerImage, PickerQuery};
 use zabor_native::profile::Profile;
+use zabor_native::remote_viewer::desktop::{P2pFrameSource, ViewerRequest};
 use zabor_native::roster::{respond_notification, NotificationKind};
 use zabor_native::screen::{ScreenCapture, ScreenSource, SourceKind};
 use zabor_native::strings::Strings;
@@ -63,6 +64,9 @@ mod member_actions;
 mod member_ui;
 mod presence_clock;
 mod profile_lookup;
+mod rc_desktop;
+#[cfg(test)]
+mod rc_ui_interactions;
 use leave_work::{close_logout_connection, VoiceLeave};
 #[cfg(test)]
 mod leave_tests;
@@ -119,7 +123,11 @@ enum Command {
     StartShare(String, String, bool, bool),
     ToggleControl(zabor_native::voice::ControlTarget),
     ControlInput(zabor_native::voice::ControlTarget, zabor_input::Packet),
+    ReleaseControlRequest(zabor_native::voice::ControlTarget),
+    RevokeControlTarget(zabor_native::voice::ControlTarget),
+    #[cfg(test)]
     ReleaseControl,
+    #[cfg(test)]
     RevokeControl,
     FocusStreamAudio(String),
     StopShare,
@@ -148,13 +156,15 @@ impl Command {
             | Self::StartShare(_, _, _, _)
             | Self::ToggleControl(_)
             | Self::ControlInput(_, _)
-            | Self::ReleaseControl
-            | Self::RevokeControl
+            | Self::ReleaseControlRequest(_)
+            | Self::RevokeControlTarget(_)
             | Self::FocusStreamAudio(_)
             | Self::StopShare
             | Self::CheckShare
             | Self::MaintainStreams
             | Self::Notification(NotificationKind::Channel, _, true) => IntentScope::Voice,
+            #[cfg(test)]
+            Self::ReleaseControl | Self::RevokeControl => IntentScope::Voice,
             _ => IntentScope::Session,
         }
     }
@@ -212,10 +222,12 @@ impl CommandQueue {
 }
 
 fn queue_control_command(queue: &CommandQueue, runtime: &tokio::runtime::Handle, command: Command) {
-    let ticket = if let Command::ControlInput(target, _) = &command {
-        target.input_ticket()
-    } else {
-        None
+    let ticket = match &command {
+        Command::ToggleControl(target)
+        | Command::ControlInput(target, _)
+        | Command::ReleaseControlRequest(target)
+        | Command::RevokeControlTarget(target) => target.input_ticket(),
+        _ => None,
     };
     let result = if let Some(ticket) = ticket {
         queue
@@ -285,10 +297,8 @@ enum UiEvent {
     Cameras(PickerQuery, Option<Vec<zabor_camera::Device>>),
     SourcePreview(PickerQuery, String, Option<PickerImage>),
     Sharing(bool),
-    RemoteControl(
-        zabor_native::voice::RemoteControlView,
-        Vec<zabor_native::voice::ControlTarget>,
-    ),
+    RemoteControl(Box<rc_desktop::Update>),
+    ControlActivity(zabor_native::voice::ControlTarget),
     RemoveVideo(String),
     NotificationResolved(NotificationKind, String, bool),
     PickedFiles(String, String, Vec<PathBuf>),
@@ -363,6 +373,7 @@ struct DisplayedFrame {
     generation: u64,
     stamp: VideoFrameStamp,
     source_epoch: Option<u64>,
+    source: Option<Arc<P2pFrameSource>>,
 }
 
 impl DisplayedFrame {
@@ -372,6 +383,7 @@ impl DisplayedFrame {
             generation: update.generation,
             stamp: update.frame.stamp(&update.lease),
             source_epoch: update.source_epoch,
+            source: update.frame.p2p_source(),
         }
     }
 
@@ -392,7 +404,9 @@ impl DisplayedFrame {
     }
 
     fn matches_p2p(&self, lifetime: &zabor_native::media::PeerLifetime, since: Instant) -> bool {
-        self.source_epoch.is_none() && self.stamp.is_current_since(lifetime, since)
+        self.source_epoch.is_none()
+            && self.source.is_some()
+            && self.stamp.is_current_since(lifetime, since)
     }
 
     fn attach(
@@ -648,6 +662,22 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     );
     let pending_files = Rc::new(RefCell::new(None::<(String, String, Vec<PathBuf>)>));
     let video_generation = Arc::new(AtomicU64::new(0));
+    let rc_desktop = Rc::new(RefCell::new(rc_desktop::Desktop::new(
+        audio_runtime.clone(),
+        runtime.handle().clone(),
+        intents.clone(),
+        video_generation.clone(),
+        commands.clone(),
+        preview_mode,
+    )));
+    let rc_timer = Timer::default();
+    let rc_ui = ui.as_weak();
+    let maintained_rc = rc_desktop.clone();
+    rc_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
+        if let Some(ui) = rc_ui.upgrade() {
+            maintained_rc.borrow_mut().maintain(&ui);
+        }
+    });
     let mailbox = Arc::new(Mutex::new(BTreeMap::<String, FrameUpdate>::new()));
     let scheduled = Arc::new(AtomicBool::new(false));
     let video_mailbox = mailbox.clone();
@@ -680,6 +710,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let displayed_targets = control_targets.clone();
     let displayed_authorized = control_authorized.clone();
     let displayed_since = control_since.clone();
+    let displayed_rc = rc_desktop.clone();
     ui.on_process_video(move || {
         scheduled.store(false, Ordering::Release);
         let frames = mailbox
@@ -725,6 +756,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             if admitted {
+                displayed_rc.borrow_mut().decoded(&ui, &id, &displayed);
                 displayed_frames.borrow_mut().insert(id, displayed);
             }
         }
@@ -748,7 +780,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                             })
                     })
             });
-        ui.set_control_ready(ready);
+        ui.set_control_ready(ready && displayed_rc.borrow().ready());
     });
     let (updates, updates_rx) = std::sync::mpsc::sync_channel(128);
     let wake_ui = ui.as_weak();
@@ -883,7 +915,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let logout_test = mic_test_ui.clone();
     let logout_audio = audio_runtime.clone();
     let logout_ui = ui.as_weak();
+    let logout_rc = rc_desktop.clone();
     ui.on_logout(move || {
+        logout_rc.borrow_mut().close();
         let _ = logout_commands.try_send(Command::Logout);
         logout_test.borrow_mut().close();
         logout_audio.reset();
@@ -1094,7 +1128,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let leave_demand = audio_runtime.demand.clone();
     let leave_updates = send_update.clone();
     let leave_ui = ui.as_weak();
+    let leave_rc = rc_desktop.clone();
     ui.on_leave_voice(move || {
+        leave_rc.borrow_mut().close();
         let _ = leave_commands.try_send(Command::Leave);
         leave_demand.reset();
         if let Some(ui) = leave_ui.upgrade() {
@@ -1226,6 +1262,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let delete_commands = commands.clone();
     let drop_update = send_update.clone();
     let weak = ui.as_weak();
+    let window_rc = rc_desktop.clone();
     ui.window().on_winit_window_event(move |_, event| {
         use slint::winit_030::{winit::event::WindowEvent, EventResult};
         let Some(ui) = weak.upgrade() else {
@@ -1233,10 +1270,21 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         };
         match event {
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                window_rc.borrow_mut().rescale(*scale_factor);
                 if std::env::var("SLINT_SCALE_FACTOR").is_err() {
                     ui.set_mic_test_text_scale(*scale_factor as f32);
                 }
             }
+            WindowEvent::Resized(_) => window_rc
+                .borrow_mut()
+                .rescale(f64::from(ui.window().scale_factor())),
+            WindowEvent::Focused(focused) => {
+                window_rc.borrow_mut().focus(*focused);
+                if !focused {
+                    ui.invoke_release_control();
+                }
+            }
+            WindowEvent::Destroyed => window_rc.borrow_mut().close(),
             WindowEvent::HoveredFile(_) => ui.set_file_drag(
                 ui.get_authenticated()
                     && ui.get_active_tab() == 1
@@ -1512,14 +1560,35 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     });
     let target_commands = commands.clone();
     let targets = control_targets.clone();
+    let toggle_rc = rc_desktop.clone();
+    let toggle_ui = ui.as_weak();
+    let toggle_runtime = runtime.handle().clone();
     ui.on_toggle_control(move |peer| {
+        let Some(ui) = toggle_ui.upgrade() else {
+            return;
+        };
+        let releasing = toggle_rc.borrow().target(peer.as_str()).is_some();
+        if releasing {
+            ui.invoke_release_control();
+            return;
+        }
         if let Some(target) = targets
             .borrow()
             .iter()
             .find(|target| target.peer == peer.as_str())
             .cloned()
         {
-            let _ = target_commands.try_send(Command::ToggleControl(target));
+            let ticket = target_commands.intents.ticket();
+            let request = Arc::new(ViewerRequest::default());
+            let target =
+                target.with_request(request, ticket, target_commands.intents.voice_token(ticket));
+            if toggle_rc.borrow_mut().start(&ui, target.clone()) {
+                queue_control_command(
+                    &target_commands,
+                    &toggle_runtime,
+                    Command::ToggleControl(target),
+                );
+            }
         }
     });
     let weak = ui.as_weak();
@@ -1527,46 +1596,53 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         weak.upgrade()
             .is_some_and(|ui| ui.get_control_permitted().iter().any(|id| id == peer))
     });
-    let control_commands = commands.clone();
-    let control_runtime = runtime.handle().clone();
     let weak = ui.as_weak();
-    let targets = control_targets.clone();
+    let released_rc = rc_desktop.clone();
     let released_authorization = control_authorized.clone();
     let released_since = control_since.clone();
     ui.on_release_control(move || {
+        released_rc.borrow_mut().release();
         released_authorization.set(false);
         *released_since.borrow_mut() = None;
         if let Some(ui) = weak.upgrade() {
-            if let Some(target) = targets
-                .borrow()
-                .iter()
-                .find(|target| target.peer == ui.get_control_viewer().as_str())
-            {
-                target.send_stop();
-            }
             ui.set_control_ready(false);
         }
-        queue_control_command(&control_commands, &control_runtime, Command::ReleaseControl);
     });
-    let control_commands = commands.clone();
-    let control_runtime = runtime.handle().clone();
-    let targets = control_targets.clone();
+    let revoked_rc = rc_desktop.clone();
     let weak = ui.as_weak();
     ui.on_revoke_control(move || {
+        revoked_rc.borrow_mut().revoke_host();
         if let Some(ui) = weak.upgrade() {
-            if let Some(target) = targets
-                .borrow()
-                .iter()
-                .find(|target| target.peer == ui.get_control_controller().as_str())
-            {
-                target.emergency_stop();
-            }
             ui.set_control_controller("".into());
         }
-        queue_control_command(&control_commands, &control_runtime, Command::RevokeControl);
+    });
+    let viewport_rc = rc_desktop.clone();
+    let weak = ui.as_weak();
+    ui.on_control_viewport(move |peer, x, y, width, height| {
+        if let Some(ui) = weak.upgrade() {
+            viewport_rc.borrow_mut().layout(
+                &ui,
+                peer.to_string(),
+                [
+                    f64::from(x),
+                    f64::from(y),
+                    f64::from(width),
+                    f64::from(height),
+                ],
+            );
+        }
+    });
+    let confinement_rc = rc_desktop.clone();
+    let weak = ui.as_weak();
+    ui.on_control_confinement(move |peer, confined| {
+        if let Some(ui) = weak.upgrade() {
+            confinement_rc
+                .borrow_mut()
+                .confinement(&ui, peer.as_str(), confined);
+        }
     });
     let weak = ui.as_weak();
-    let targets = control_targets.clone();
+    let pointer_rc = rc_desktop.clone();
     let control_commands = commands.clone();
     let control_runtime = runtime.handle().clone();
     let pointer_frames = control_frames.clone();
@@ -1580,12 +1656,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }) else {
             return;
         };
-        let Some(target) = targets
-            .borrow()
-            .iter()
-            .find(|target| target.peer == peer.as_str())
-            .cloned()
-        else {
+        let Some(target) = pointer_rc.borrow().target(peer.as_str()) else {
             return;
         };
         let Some(frame) = pointer_frames.borrow().get(peer.as_str()).cloned() else {
@@ -1624,7 +1695,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     });
-    let targets = control_targets.clone();
+    let wheel_rc = rc_desktop.clone();
     let control_commands = commands.clone();
     let control_runtime = runtime.handle().clone();
     let weak = ui.as_weak();
@@ -1642,12 +1713,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }) else {
             return;
         };
-        if let Some(target) = targets
-            .borrow()
-            .iter()
-            .find(|target| target.peer == peer.as_str())
-            .cloned()
-        {
+        let target = wheel_rc.borrow().target(peer.as_str());
+        if let Some(target) = target {
             let Some(frame) = wheel_frames.borrow().get(peer.as_str()).cloned() else {
                 ui.invoke_release_control();
                 return;
@@ -1674,7 +1741,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     });
-    let targets = control_targets.clone();
+    let key_rc = rc_desktop.clone();
     let control_commands = commands.clone();
     let control_runtime = runtime.handle().clone();
     let weak = ui.as_weak();
@@ -1689,14 +1756,8 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }) else {
             return;
         };
-        if let (Some(vk), Some(target)) = (
-            zabor_native::remote_viewer::key_code(&text),
-            targets
-                .borrow()
-                .iter()
-                .find(|target| target.peer == peer.as_str())
-                .cloned(),
-        ) {
+        let target = key_rc.borrow().target(peer.as_str());
+        if let (Some(vk), Some(target)) = (zabor_native::remote_viewer::key_code(&text), target) {
             let Some(frame) = key_frames.borrow().get(peer.as_str()).cloned() else {
                 ui.invoke_release_control();
                 return;
@@ -1727,10 +1788,15 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let weak = ui.as_weak();
     let stream_commands = commands.clone();
     let stream_runtime = runtime.handle().clone();
+    let focused_rc = rc_desktop.clone();
     ui.on_focus_stream_audio(move |peer| {
         let Some(ui) = weak.upgrade().filter(|ui| ui.get_voice_active()) else {
             return;
         };
+        let previous = focused_rc.borrow().target(ui.get_control_viewer().as_str());
+        if previous.is_some_and(|target| target.peer != peer.as_str()) {
+            ui.invoke_release_control();
+        }
         if peer.is_empty() || ui.get_video_frames().iter().any(|video| video.id == peer) {
             if let Err(error) =
                 stream_commands.try_send(Command::FocusStreamAudio(peer.to_string()))
@@ -1784,6 +1850,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let updated_members = member_state.clone();
     let control_frame_generation = video_generation.clone();
     let control_frame_stop = stop.clone();
+    let updated_rc = rc_desktop.clone();
     ui.on_process_updates(move || {
         if update_stop.is_cancelled() {
             return;
@@ -1844,6 +1911,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_busy(false);
                 }
                 UiEvent::SignedOut => {
+                    updated_rc.borrow_mut().close();
                     control_frames.borrow_mut().clear();
                     control_authorized.set(false);
                     *control_since.borrow_mut() = None;
@@ -1956,6 +2024,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_busy(false);
                 }
                 UiEvent::VoiceEnded => {
+                    updated_rc.borrow_mut().close();
                     control_frames.borrow_mut().clear();
                     control_authorized.set(false);
                     *control_since.borrow_mut() = None;
@@ -2144,7 +2213,15 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_modal(0);
                     }
                 }
-                UiEvent::RemoteControl(state, targets) => {
+                UiEvent::RemoteControl(mut update) => {
+                    if !updated_rc.borrow_mut().update(&ui, &update) {
+                        continue;
+                    }
+                    updated_rc
+                        .borrow_mut()
+                        .update_host(&ui, update.host.take(), &update.state);
+                    let state = update.state;
+                    let targets = update.targets;
                     if let Some(key) = state.notice {
                         if let Ok(strings) = Strings::new(ui.get_language().as_str()) {
                             ui.set_error(strings.text(key).into());
@@ -2154,6 +2231,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     control_authorized.set(state.viewer_ready);
                     *control_since.borrow_mut() = state.viewer_accepted_at;
                     let ready = state.viewer_ready
+                        && updated_rc.borrow().ready()
                         && state.viewer_accepted_at.is_some_and(|since| {
                             control_targets
                                 .borrow()
@@ -2186,7 +2264,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_control_host_active(state.host_active);
                     ui.set_control_controller(state.controller.into());
                 }
+                UiEvent::ControlActivity(target) => updated_rc.borrow().activity(&target),
                 UiEvent::RemoveVideo(peer) => {
+                    updated_rc.borrow_mut().remove_video(&peer);
                     control_frames.borrow_mut().remove(&peer);
                     if ui.get_focused_video() == peer {
                         ui.set_focused_video("".into());
@@ -2983,8 +3063,10 @@ async fn worker(
                     },
                     MediaEvent::RemoteControl { peer, event, lifetime, channel } => {
                         if let (Some(voice), Some(hub)) = (voice.as_mut(), hub.as_ref()) {
+                            voice.bind_control_intents(intents.clone(), ticket);
+                            let original = voice.control_viewer_target();
                             let _ = voice.handle_remote_control(hub, &peer, event, lifetime.clone(), channel, intents.voice_token(ticket)).await;
-                            work.publish_peer(&lifetime, UiEvent::RemoteControl(voice.remote_control_view(), voice.control_targets()));
+                            work.publish_peer(&lifetime, UiEvent::RemoteControl(Box::new(rc_desktop::Update::from_session(voice, original))));
                         }
                     },
                     MediaEvent::StreamVideoReady { peer, epoch, track, lifetime, lease } => {
@@ -2993,7 +3075,7 @@ async fn worker(
                             let sink = video_sink.clone();
                             let generation = video_generation.load(Ordering::Acquire);
                             let id = peer.clone();
-                            let mut receiver = VideoReceiver::with_audio_runtime(track, lifetime.clone(), Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), ticket, generation, lease: delivery.lease, frame: delivery.frame, source_epoch: epoch }); }), audio_runtime.as_ref());
+                            let mut receiver = VideoReceiver::with_audio_runtime(track, lifetime.clone(), Arc::new(move |delivery| { sink(FrameUpdate { peer: id.clone(), ticket, generation, lease: delivery.lease, frame: delivery.frame, source_epoch: epoch }); }), audio_runtime.as_ref()).with_source_epoch(epoch);
                             let mut retired_video = None;
                             let Some(watch) = work.commit_peer_resource(voice_ticket, &lifetime, || {
                                 retired_video = video_jobs.remove(&peer);
@@ -3340,7 +3422,11 @@ async fn worker(
                             std::mem::take(&mut stream_drops),
                             events.take(),
                             current_user.take(),
-                            file_io.retire_session(file_jobs.take(), chat.take(), chat_transport.take()),
+                            file_io.retire_session(
+                                file_jobs.take(),
+                                chat.take(),
+                                chat_transport.take(),
+                            ),
                             std::mem::take(&mut file_progress),
                             std::mem::take(&mut friends),
                             selected_chat.take(),
@@ -3794,7 +3880,11 @@ async fn worker(
                     let Some(disposed) = auth_work.commit(|| {
                         chat_failed = false;
                         (
-                            file_io.retire_session(file_jobs.take(), chat.take(), chat_transport.take()),
+                            file_io.retire_session(
+                                file_jobs.take(),
+                                chat.take(),
+                                chat_transport.take(),
+                            ),
                             voice.take(),
                             media_events.take(),
                             saved_credentials.take(),
@@ -4441,14 +4531,17 @@ async fn worker(
                         .as_mut()
                         .filter(|session| session.control_target_current(&target))
                         .ok_or(AuthError::Network)?;
+                    session.bind_control_intents(
+                        intents.clone(),
+                        target.input_ticket().ok_or(AuthError::Network)?,
+                    );
                     session
-                        .toggle_remote_control(&connection, &target.peer)
+                        .toggle_remote_control_target(&connection, target.clone())
                         .await
                         .map_err(|_| AuthError::Network)?;
-                    Ok(UiEvent::RemoteControl(
-                        session.remote_control_view(),
-                        session.control_targets(),
-                    ))
+                    Ok(UiEvent::RemoteControl(Box::new(
+                        rc_desktop::Update::from_session(session, Some(target)),
+                    )))
                 }
                 Command::ControlInput(target, packet) => {
                     let session = voice
@@ -4456,31 +4549,43 @@ async fn worker(
                         .filter(|session| session.control_target_current(&target))
                         .ok_or(AuthError::Network)?;
                     match session.send_control_target_input(&target, packet) {
-                        Ok(()) => Ok(UiEvent::Connected),
-                        Err(_) => Ok(UiEvent::RemoteControl(
-                            session.remote_control_view(),
-                            session.control_targets(),
-                        )),
+                        Ok(true) => Ok(UiEvent::ControlActivity(target)),
+                        Ok(false) => Ok(UiEvent::Connected),
+                        Err(_) => Ok(UiEvent::RemoteControl(Box::new(
+                            rc_desktop::Update::from_session(session, Some(target)),
+                        ))),
                     }
                 }
-                Command::ReleaseControl | Command::RevokeControl => {
+                Command::ReleaseControlRequest(target) => {
                     if let Some(session) = voice.as_mut() {
-                        if matches!(command, Command::RevokeControl) {
-                            session.revoke_remote_control();
-                        } else {
-                            session.release_remote_control();
-                        }
-                        Ok(UiEvent::RemoteControl(
-                            session.remote_control_view(),
-                            session.control_targets(),
-                        ))
+                        session.release_remote_control_target(&target);
+                        Ok(UiEvent::RemoteControl(Box::new(
+                            rc_desktop::Update::from_session(session, Some(target)),
+                        )))
                     } else {
                         Ok(UiEvent::Connected)
                     }
                 }
+                Command::RevokeControlTarget(target) => {
+                    if let Some(session) = voice.as_mut() {
+                        let original = session.control_viewer_target();
+                        session.revoke_remote_control_target(&target);
+                        Ok(UiEvent::RemoteControl(Box::new(
+                            rc_desktop::Update::from_session(session, original),
+                        )))
+                    } else {
+                        Ok(UiEvent::Connected)
+                    }
+                }
+                #[cfg(test)]
+                Command::ReleaseControl | Command::RevokeControl => Ok(UiEvent::Connected),
                 Command::MaintainStreams => {
+                    let original = voice.as_ref().and_then(VoiceSession::control_viewer_target);
                     if let Some(session) = voice.as_mut() {
                         session.maintain_streams(&connection).await;
+                        if let Some(target) = session.take_control_activity() {
+                            voice_work.publish(UiEvent::ControlActivity(target));
+                        }
                     }
                     if let Some(retired) =
                         voice_work.retire_videos(&mut video_jobs, voice_ticket, |_, receiver| {
@@ -4498,10 +4603,9 @@ async fn worker(
                         }
                     }
                     if let Some(session) = voice.as_ref() {
-                        Ok(UiEvent::RemoteControl(
-                            session.remote_control_view(),
-                            session.control_targets(),
-                        ))
+                        Ok(UiEvent::RemoteControl(Box::new(
+                            rc_desktop::Update::from_session(session, original),
+                        )))
                     } else {
                         Ok(UiEvent::Connected)
                     }

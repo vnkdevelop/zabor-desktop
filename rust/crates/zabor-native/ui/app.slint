@@ -125,6 +125,7 @@ export component NativeApp inherits Window {
     in property <[string]> control-permitted;
     in property <string> control-viewer;
     in property <bool> control-ready;
+    in property <bool> control-confined: true;
     in property <bool> control-host-active;
     in property <string> control-controller;
     in-out property <string> incoming-call-id;
@@ -221,6 +222,8 @@ export component NativeApp inherits Window {
     callback control-pointer(string, float, float, float, float, int, int);
     callback control-wheel(string, float, float);
     callback control-key(string, string, bool, int);
+    callback control-viewport(string, float, float, float, float);
+    callback control-confinement(string, bool);
     pure callback control-can-request(string) -> bool;
     callback focus-stream-audio(string);
     changed focused-video => { root.focus-stream-audio(root.focused-video); }
@@ -464,10 +467,14 @@ export component NativeApp inherits Window {
                     RemoteViewer {
                         y: 36px; width: parent.width; height: parent.height - 36px; frame: video.frame;
                         active: root.control-ready && root.control-viewer == video.id && root.modal == 0 && root.focused-video == video.id;
+                        confined: root.control-confined;
+                        init => { self.viewport(self.viewport-x, self.viewport-y, self.viewport-width, self.viewport-height); }
                         activate => { root.focused-video = root.focused-video == video.id ? "" : video.id; }
                         pointer(x, y, width, height, kind, button) => { root.control-pointer(video.id, x, y, width, height, kind, button); }
                         wheel(y, x) => { root.control-wheel(video.id, y, x); }
                         key(text, down, modifiers) => { root.control-key(video.id, text, down, modifiers); }
+                        viewport(x, y, width, height) => { root.control-viewport(video.id, x, y, width, height); }
+                        confinement(confined) => { root.control-confinement(video.id, confined); }
                         release => { root.release-control(); }
                     }
                     Text { x: 16px; height: 36px; text: video.title; color: white; font-size: 14px; font-weight: 700; vertical-alignment: center; }

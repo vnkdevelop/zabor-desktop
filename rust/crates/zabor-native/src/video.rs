@@ -1,5 +1,7 @@
 use crate::audio_runtime::{AudioCleanup, AudioCleanupError, SharedAudio, SharedAudioDevice};
 use crate::media::{MediaError, PeerLifetime};
+#[cfg(windows)]
+use crate::remote_viewer::desktop::P2pFrameSource;
 use futures_util::StreamExt;
 use libwebrtc::video_frame::{
     native::VideoFrameBufferExt, BoxVideoFrame, VideoBuffer, VideoFormatType, VideoRotation,
@@ -51,11 +53,18 @@ pub struct DecodedVideo {
     pub height: u32,
     pub rgba: Vec<u8>,
     decoded_at: Instant,
+    #[cfg(windows)]
+    source: Option<Arc<P2pFrameSource>>,
 }
 
 impl DecodedVideo {
     pub fn decoded_at(&self) -> Instant {
         self.decoded_at
+    }
+
+    #[cfg(windows)]
+    pub fn p2p_source(&self) -> Option<Arc<P2pFrameSource>> {
+        self.source.clone()
     }
 
     pub fn stamp(&self, lease: &VideoFrameLease) -> VideoFrameStamp {
@@ -137,6 +146,7 @@ pub struct VideoReceiver {
     subscription: Option<VideoSubscription>,
     sink: Arc<dyn Fn(VideoDelivery) + Send + Sync>,
     cleanup: Arc<AudioCleanup>,
+    source_epoch: Option<u64>,
 }
 
 impl VideoReceiver {
@@ -169,7 +179,13 @@ impl VideoReceiver {
             subscription: None,
             sink,
             cleanup,
+            source_epoch: None,
         }
+    }
+
+    pub fn with_source_epoch(mut self, source_epoch: Option<u64>) -> Self {
+        self.source_epoch = source_epoch;
+        self
     }
 
     pub fn is_alive(&self) -> bool {
@@ -207,12 +223,18 @@ impl VideoReceiver {
         };
         let live = lease.clone();
         let sink = self.sink.clone();
+        #[cfg(windows)]
+        let source_epoch = self.source_epoch;
         let mut stream = retirement.hold(NativeVideoStream::new(self.track.clone()));
         let stop = CancellationToken::new();
         let cancel = stop.clone();
         let retired = VideoLeaseRetirement(live.active.clone());
         let task = prepared.spawn(stop.clone(), async move {
             let _retired = retired;
+            #[cfg(windows)]
+            let mut source = None;
+            #[cfg(windows)]
+            let mut source_initialized = false;
             loop {
                 let frame = tokio::select! {
                     biased;
@@ -228,6 +250,18 @@ impl VideoReceiver {
                 }
                 if let Ok(frame) = decode_frame(frame) {
                     if live.is_alive() {
+                        #[cfg(windows)]
+                        let frame = {
+                            let mut frame = frame;
+                            if !source_initialized {
+                                source =
+                                    P2pFrameSource::from_delivery(frame.stamp(&live), source_epoch)
+                                        .map(Arc::new);
+                                source_initialized = true;
+                            }
+                            frame.source = source.clone();
+                            frame
+                        };
                         sink(VideoDelivery {
                             frame,
                             lease: live.clone(),
@@ -276,6 +310,8 @@ pub fn decode_frame(frame: BoxVideoFrame) -> Result<DecodedVideo, MediaError> {
             height,
             rgba,
             decoded_at: Instant::now(),
+            #[cfg(windows)]
+            source: None,
         });
     }
     let source = image::RgbaImage::from_raw(width, height, rgba).ok_or(MediaError::Backend)?;
@@ -290,6 +326,8 @@ pub fn decode_frame(frame: BoxVideoFrame) -> Result<DecodedVideo, MediaError> {
         height: image.height(),
         rgba: image.into_raw(),
         decoded_at: Instant::now(),
+        #[cfg(windows)]
+        source: None,
     })
 }
 
@@ -408,6 +446,75 @@ mod tests {
         );
         let track = factory.create_video_track("video-cleanup", source.clone());
         (factory, source, track)
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn actual_delivery_source_is_pinned_once_and_restart_never_retags_original_frames() {
+        for epoch in [None, Some(7)] {
+            let shared = shared();
+            let (mut engine, lifetime, _events) = peer();
+            let (_factory, source, track) = native_video();
+            let (sender, mut frames) = mpsc::channel(8);
+            let mut receiver = VideoReceiver::with_audio_runtime(
+                track,
+                lifetime,
+                Arc::new(move |frame| {
+                    let _ = sender.try_send(frame);
+                }),
+                shared.as_ref(),
+            )
+            .with_source_epoch(epoch);
+            receiver.start();
+            source.capture_frame(&VideoFrame::new(
+                VideoRotation::VideoRotation0,
+                I420Buffer::new_black(160, 96),
+            ));
+            let first = timeout(Duration::from_secs(2), frames.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let stamp = first.frame.stamp(&first.lease);
+            let original = first.frame.p2p_source();
+            assert_eq!(original.is_some(), epoch.is_none());
+            source.capture_frame(&VideoFrame::new(
+                VideoRotation::VideoRotation0,
+                I420Buffer::new_black(160, 96),
+            ));
+            let second = timeout(Duration::from_secs(2), frames.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let Some(original) = &original {
+                assert!(Arc::ptr_eq(original, &second.frame.p2p_source().unwrap()));
+            } else {
+                assert!(second.frame.p2p_source().is_none());
+            }
+            assert_eq!(stamp.decoded_at(), first.frame.decoded_at());
+            receiver.stop();
+            receiver.wait_for_cleanup().await.unwrap();
+            assert!(!stamp.is_alive());
+            receiver.start();
+            source.capture_frame(&VideoFrame::new(
+                VideoRotation::VideoRotation0,
+                I420Buffer::new_black(160, 96),
+            ));
+            let fresh = timeout(Duration::from_secs(2), frames.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if let Some(original) = original {
+                assert!(!Arc::ptr_eq(&original, &fresh.frame.p2p_source().unwrap()));
+            } else {
+                assert!(fresh.frame.p2p_source().is_none());
+            }
+            assert!(!stamp.is_alive());
+            assert!(fresh.lease.is_alive());
+            receiver.stop();
+            drop(receiver);
+            shared.wait_for_cleanup().await.unwrap();
+            engine.close();
+        }
     }
 
     #[tokio::test]
