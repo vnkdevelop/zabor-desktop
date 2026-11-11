@@ -458,7 +458,40 @@ impl HealthBootstrap {
         {
             return Err("private-health-bootstrap-identity-rejected".into());
         }
+        let mut trailing = [0; 1];
+        if input
+            .read(&mut trailing)
+            .map_err(|_| "private-health-bootstrap-read-failed")?
+            != 0
+        {
+            return Err("private-health-bootstrap-trailing-data".into());
+        }
         Ok(Self { frame, pipe })
+    }
+
+    pub fn validate_execution(
+        &self,
+        execution: &crate::update_helper::HeldStartupPackage,
+    ) -> Result<()> {
+        if self.frame[104..136] != hash_bytes(execution.root_sha256())?
+            || self.frame[136..168] != hash_bytes(execution.manifest_sha256())?
+            || now_ms()? >= number(&self.frame, 64)
+        {
+            return Err("health-bootstrap-root-or-manifest-rejected".into());
+        }
+        execution.check_health(
+            number(&self.frame, 8),
+            &self.frame[72..104],
+            number(&self.frame, 64),
+        )
+    }
+
+    pub fn acknowledge_execution(
+        self,
+        execution: &crate::update_helper::HeldStartupPackage,
+    ) -> Result<()> {
+        self.validate_execution(execution)?;
+        self.acknowledge(execution.root_sha256(), execution.manifest_sha256())
     }
 
     pub fn acknowledge(

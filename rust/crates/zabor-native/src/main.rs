@@ -15,18 +15,46 @@ slint::include_modules!();
 mod shell;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if arguments.is_empty()
-        || arguments.iter().any(|argument| argument == "--app")
-        || arguments
-            .windows(2)
-            .any(|pair| pair[0] == "--preview" && pair[1] != "updater")
-    {
-        return shell::run(&arguments);
+    use zabor_native::startup_route::StartupRoute;
+    let arguments: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|argument| {
+            argument
+                .into_string()
+                .map_err(|_| "Non-Unicode startup argument")
+        })
+        .collect::<Result<_, _>>()?;
+    if zabor_native::migration::is_command(&arguments) {
+        return zabor_native::migration::run_cli(&arguments).map_err(Into::into);
     }
-    if arguments.iter().any(|argument| argument == "--help") {
-        println!("Native client under development, not a released client.\n--app --server URL --locale ru|en\n--preview login|confirm|setup|home --snapshot FILE.png --scale 1|1.25|1.5|2\n--preview updater --state downloading|installing|error --locale ru|en\n--snapshot FILE.png --at-ms 0 --scale 1|1.25|1.5|2 --reduced-motion\n--interaction-check");
-        return Ok(());
+    let route = StartupRoute::parse(&arguments)?;
+    match route {
+        StartupRoute::Help => {
+            println!("Native client under development, not a released client.\n--app --server URL --locale ru|en (requires independently provisioned installation trust)\n--preview login|confirm|setup|home --snapshot FILE.png --scale 1|1.25|1.5|2\n--preview updater --state downloading|installing|error --locale ru|en\n--snapshot FILE.png --at-ms 0 --scale 1|1.25|1.5|2 --reduced-motion\n--interaction-check\n--native-update-health (private inherited startup only)\n--native-establish-baseline --bundle SIGNED.json --archive PACKAGE.zip (explicit accepted installation only)");
+            return Ok(());
+        }
+        StartupRoute::Preview { updater: false } => return shell::run(&arguments),
+        StartupRoute::Preview { updater: true } => {}
+        StartupRoute::App | StartupRoute::Health => {
+            let startup = zabor_native::startup::StartupOwner::prepare(
+                &route,
+                zabor_native::startup::StartupConfig::from_environment()?,
+            )?;
+            let shell_arguments = if route == StartupRoute::Health {
+                Vec::new()
+            } else {
+                arguments
+            };
+            return startup.finish(shell::run(&shell_arguments));
+        }
+        StartupRoute::Baseline { bundle, archive } => {
+            zabor_native::startup::StartupOwner::establish_baseline(
+                zabor_native::startup::StartupConfig::from_environment()?,
+                bundle,
+                archive,
+            )?;
+            return Ok(());
+        }
     }
     let mut locale = "ru".to_string();
     let mut phase = Phase::Downloading;

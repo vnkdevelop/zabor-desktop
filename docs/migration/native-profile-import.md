@@ -135,6 +135,20 @@ metadata durability under abrupt power loss. Any surviving journal blocks startu
 
 ## Main-agent wiring and remaining gates
 
+Development CLI integration on `1f8c4f7` is now implemented by `migration.rs` and
+an early `main.rs` dispatch; see [native-import-command.md](native-import-command.md).
+Fresh independent account login, explicit server/action/key/bundle approval, original
+intent/helper-registry retirement, authorized recovery and profile reopen are wired.
+The historical checklist below records the original module handoff, not a claim
+that the separate CLI remains missing. UI, real Chromium/profile and full-client
+acceptance remain outside this integration.
+
+The bounded resume retains actual helper/registry retirement receipts and offers
+`MigrationOperation::execute_for_reuse` plus `MigrationPublication::install` to
+transfer the reopened Profile under its original ticket without a path-only reopen.
+Existing importer/recovery/rollback APIs remain unchanged; application readers still
+require their own completed FileIo/ChatIo/SessionIo drains before rollback.
+
 - Provide an explicit migration/recovery/rollback command or UI using existing
   original Session/intent ownership, without creating a normal beta first.
 - Independently authenticate selected account and establish a trusted public-key

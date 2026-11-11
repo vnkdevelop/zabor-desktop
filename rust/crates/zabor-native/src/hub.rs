@@ -342,6 +342,40 @@ impl HubConnection {
             .map_err(|_| HubError::Closed)??;
         Ok(())
     }
+
+    pub async fn set_show_last_online(&self, show: bool) -> Result<(), HubError> {
+        self.invoke(
+            "SetShowLastOnline",
+            vec![serde_json::Value::Bool(show)],
+            Duration::from_secs(10),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn update_user_password(&self, new_password: &str) -> Result<bool, HubError> {
+        let res = self
+            .invoke(
+                "UpdateUserPassword",
+                vec![serde_json::Value::String(new_password.to_string())],
+                Duration::from_secs(10),
+            )
+            .await?;
+        match res {
+            serde_json::Value::Bool(b) => Ok(b),
+            _ => Err(HubError::Protocol),
+        }
+    }
+
+    pub async fn delete_my_account(&self) -> Result<bool, HubError> {
+        let res = self
+            .invoke("DeleteMyAccount", Vec::new(), Duration::from_secs(10))
+            .await?;
+        match res {
+            serde_json::Value::Bool(b) => Ok(b),
+            _ => Err(HubError::Protocol),
+        }
+    }
 }
 
 pub fn validate_endpoint(endpoint: &str) -> Result<Url, HubError> {

@@ -16,6 +16,7 @@ pub mod audio_route;
 pub mod audio_runtime;
 pub mod audio_settings;
 pub mod auth;
+pub mod autostart;
 pub mod avatar;
 pub mod call_recovery;
 #[cfg(all(windows, feature = "native-media"))]
@@ -31,6 +32,7 @@ pub mod file_jobs;
 pub mod files;
 pub mod hub;
 pub mod localization;
+pub mod logger;
 pub mod manual_gate;
 #[cfg(feature = "native-media")]
 pub mod media;
@@ -39,6 +41,7 @@ pub mod mic_test;
 pub mod mic_test_ui;
 #[cfg(feature = "native-media")]
 pub mod microphone;
+pub mod migration;
 pub mod motion;
 #[cfg(all(windows, feature = "native-media"))]
 pub mod native_audio;
@@ -61,9 +64,13 @@ pub mod roster;
 #[cfg(feature = "native-media")]
 pub mod screen;
 pub mod smart_gate;
+#[cfg(windows)]
+pub mod startup;
+pub mod startup_route;
 #[cfg(all(windows, feature = "native-media"))]
 pub mod stream_audio;
 pub mod strings;
+pub mod tray;
 pub mod update;
 #[cfg(windows)]
 pub mod update_helper;
@@ -77,3 +84,4 @@ pub mod video;
 pub mod voice;
 pub mod voice_activity;
 pub mod voice_filters;
+pub mod wipe;

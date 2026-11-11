@@ -55,6 +55,20 @@ original immutable entry and observation even after registry history reclamation
 
 ### Exact MAIN integration recipe
 
+The separate development CLI now follows this recipe in `zabor_native::migration`,
+with the native path dependency (no `test-source`), original intent/token/registry,
+fresh selected-server authentication, independent expected key, explicit consent,
+runtime/helper pins and whole-bundle approval. Authorized recovery is guarded by
+the journal owner and original admission. See [native-import-command.md](native-import-command.md).
+The historical remaining-MAIN statements below describe the earlier stage;
+actual Chromium provenance and end-to-end real-profile acceptance are still required.
+
+Bounded resume adds `MigrationOperation::with_registry` for the original caller-owned
+registry and retains `MigrationRetirement` from real original entry/drain observations.
+`execute_for_reuse`/`MigrationPublication::install` hold the actual profile gate until
+installation under the original operation/ticket. These typed receipts are not
+account/key/consent or client-readiness flags. Helper APIs, source and pins are unchanged.
+
 - Root workspace registration and the single helper lock record are checked above.
   MAIN still adds the native path dependency
   `zabor-profile-helper = { path = "../zabor-profile-helper" }`, preserving the

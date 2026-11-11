@@ -100,6 +100,10 @@ pub(crate) struct HeldExecutable {
     proofs: Vec<File>,
 }
 
+#[path = "startup_package.rs"]
+mod startup_package;
+pub use startup_package::HeldStartupPackage;
+
 impl HeldExecutable {
     fn open(path: &Path) -> Result<Self> {
         let parent = path.parent().ok_or("host-image-parent-missing")?;

@@ -2,8 +2,11 @@ use super::{HostJob, UpdateHost};
 use crate::update_helper::{
     CrashPoint, NativePlatform, Result, SignedBundle, StageContext, TrustPins, UpdateRoot,
 };
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 pub struct BootstrapSelection {
     pub root: Arc<UpdateRoot>,
@@ -11,6 +14,16 @@ pub struct BootstrapSelection {
 }
 
 impl UpdateHost {
+    pub(crate) fn startup_task<
+        T: Send + 'static,
+        F: Future<Output = Result<T>> + Send + 'static,
+    >(
+        &self,
+        work: impl FnOnce(CancellationToken, Instant) -> F + Send + 'static,
+    ) -> Result<HostJob<T>> {
+        self.register(None, work)
+    }
+
     pub fn bootstrap(
         &self,
         path: PathBuf,

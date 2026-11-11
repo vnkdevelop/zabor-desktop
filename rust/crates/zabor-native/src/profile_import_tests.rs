@@ -654,3 +654,116 @@ fn beta_junction_and_path_escape_are_rejected_before_any_write() {
     assert!(check_path(&fixture.parent.path().join("settings.json:stream"), true).is_err());
     assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn authorized_recovery_rejects_wrong_account_login_key_and_revoked_original_intent() {
+    for variant in 0..4 {
+        let fixture = Fixture::new();
+        let snapshot = fixture.snapshot();
+        drop(fixture.prepare(&snapshot).unwrap());
+        snapshot.close().unwrap();
+        let owner = ImportOwner::verified(
+            if variant == 0 { "other" } else { "alice" },
+            if variant == 1 {
+                "other-login"
+            } else {
+                "fixture"
+            },
+            Some(if variant == 2 {
+                ChatIdentity::generate().public_key().unwrap()
+            } else {
+                fixture.owner.public_key.as_ref().unwrap().clone()
+            }),
+        )
+        .unwrap();
+        assert!(recover_authorized(
+            fixture.parent.path(),
+            RecoveryAction::PublishVerifiedStage,
+            &owner,
+            || variant != 3
+        )
+        .is_err());
+        assert!(fixture.parent.path().join(JOURNAL).is_file());
+        assert!(fixture.parent.path().join(STAGE).is_dir());
+        assert!(!fixture.parent.path().join(BETA_PROFILE).exists());
+        assert!(Profile::open(&fixture.parent.path().join(BETA_PROFILE)).is_err());
+    }
+}
+
+#[test]
+fn authorized_recovery_checks_before_rename_and_quarantines_revoked_publication() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for revoke_at in [1, 2] {
+        let fixture = Fixture::new();
+        let snapshot = fixture.snapshot();
+        drop(fixture.prepare(&snapshot).unwrap());
+        snapshot.close().unwrap();
+        let calls = AtomicUsize::new(0);
+        assert!(recover_authorized(
+            fixture.parent.path(),
+            RecoveryAction::PublishVerifiedStage,
+            &fixture.owner,
+            || { calls.fetch_add(1, Ordering::SeqCst) < revoke_at }
+        )
+        .is_err());
+        assert!(!fixture.parent.path().join(BETA_PROFILE).exists());
+        if revoke_at == 1 {
+            assert!(fixture.parent.path().join(JOURNAL).exists());
+            assert!(fixture.parent.path().join(STAGE).exists());
+        } else {
+            assert!(!fixture.parent.path().join(JOURNAL).exists());
+            assert!(fixture.parent.path().join(ABORTED).exists());
+        }
+    }
+}
+
+#[test]
+fn authorized_confirm_reads_owner_secrets_without_normal_beta_open_or_receipt_changes() {
+    let fixture = Fixture::new();
+    let snapshot = fixture.snapshot();
+    drop(fixture.prepare(&snapshot).unwrap());
+    snapshot.close().unwrap();
+    std::fs::rename(
+        fixture.parent.path().join(STAGE),
+        fixture.parent.path().join(BETA_PROFILE),
+    )
+    .unwrap();
+    let before = hashes(&fixture.parent.path().join(BETA_PROFILE), false).unwrap();
+    recover_authorized(
+        fixture.parent.path(),
+        RecoveryAction::ConfirmPublished,
+        &fixture.owner,
+        || true,
+    )
+    .unwrap();
+    assert_eq!(
+        before,
+        hashes(&fixture.parent.path().join(BETA_PROFILE), false).unwrap()
+    );
+    assert!(Profile::open(&fixture.parent.path().join(BETA_PROFILE)).is_ok());
+}
+
+#[test]
+fn authorized_abort_and_rollback_recovery_cannot_clear_another_owners_journal() {
+    let fixture = Fixture::new();
+    let snapshot = fixture.snapshot();
+    drop(fixture.prepare(&snapshot).unwrap());
+    snapshot.close().unwrap();
+    let other = ImportOwner::verified("other", "fixture", None).unwrap();
+    for action in [
+        RecoveryAction::AbortUnpublishedStage,
+        RecoveryAction::FinishRollback,
+        RecoveryAction::FinishAbortedPublication,
+    ] {
+        assert!(recover_authorized(fixture.parent.path(), action, &other, || true).is_err());
+        assert!(fixture.parent.path().join(JOURNAL).exists());
+    }
+    recover_authorized(
+        fixture.parent.path(),
+        RecoveryAction::AbortUnpublishedStage,
+        &fixture.owner,
+        || true,
+    )
+    .unwrap();
+    assert!(fixture.parent.path().join(ABORTED).exists());
+}

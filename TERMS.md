@@ -80,6 +80,8 @@
 
 ### 7. Данные пользователей
 
+Дополнение native-разработки от 9 ноября 2026 года: отдельный CLI copy-import/recovery/rollback требует явного согласия на точное действие, независимого входа в аккаунт и подтверждения source-key/runtime/helper/всего bundle; он не меняет ограничения допуска к серверам из раздела 4. Подключение к серверу и его влияние на presence/primary connection требуют отдельного разрешения; успешный экспорт не является доказательством владельца. Оригинальный профиль сохраняется, rollback только помещает полный native beta в quarantine без обратного слияния или удаления. Этот локально синтетически проверяемый код не означает опубликованный импорт, совместимость реального Chromium или полную приёмку клиента; [команды и предпосылки](docs/migration/native-import-command.md).
+
 Нативные аудио/DSP-адаптеры и ограниченный микшер подключены к голосовым сессиям разрабатываемого клиента и проходят локальные испытания; физическая приёмка, hotplug и полная совместимость ещё не завершены. Они не являются модерацией содержимого, не добавляют запись голоса на сервер или диск и не изменяют права пользователей, возрастные ограничения либо лицензию продукта. Их наличие не означает готовности или публикации native beta.
 
 Смена и восстановление WASAPI-маршрута реализованы в коде с сохранением DSP/RTC-треков, системным default fallback без изменения выбранного ID и ограниченными повторами. Этот синтетически проверяемый механизм не означает физическую приёмку hotplug/AEC или готовность интерфейса настроек и mic-test.
@@ -218,6 +220,8 @@ Responsibility for content transmitted through the Service rests with the user w
 3. The Operator is not obliged to justify enforcement decisions or restore access, but will consider appeals via [GitHub Issues](https://github.com/vnkdevelop/zabor-desktop/issues).
 
 ### 7. User data
+
+Native-development addendum of 9 November 2026: a separate copy-import/recovery/rollback CLI requires explicit consent for the exact action, independent account login and source-key/runtime/helper/whole-bundle approval; it does not change server admission restrictions in section 4. Server connection and its presence/primary-connection effects need separate authorization; successful export is not owner proof. The original profile is preserved, and rollback only quarantines the complete native beta without reverse merging or deletion. This locally synthetically checked code does not constitute published import, real-Chromium compatibility or full-client acceptance; see [commands and prerequisites](docs/migration/native-import-command.md).
 
 Native audio/DSP adapters and the bounded mixer are connected to voice sessions in the client under development and undergo local testing; physical acceptance, hotplug and complete compatibility remain unfinished. They do not moderate content, add voice recording on the server or disk, or change user rights, age restrictions or the product licence. Their presence does not constitute native beta readiness or publication.
 

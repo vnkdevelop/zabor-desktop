@@ -175,12 +175,14 @@ pub struct MicTest {
     state: Mutex<State>,
 }
 
+#[allow(dead_code)]
 pub(crate) struct MicTestDispose<'a> {
     state: MutexGuard<'a, State>,
     replaced: State,
     applied: bool,
 }
 
+#[allow(dead_code)]
 pub(crate) struct MicTestMaintenance<'a> {
     state: MutexGuard<'a, State>,
     replaced: State,
@@ -277,6 +279,7 @@ impl MicTest {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn try_prepare_dispose(&self) -> Result<Option<MicTestDispose<'_>>, &'static str> {
         let state = match self.state.try_lock() {
             Ok(state) => state,
@@ -298,6 +301,7 @@ impl MicTest {
         }))
     }
 
+    #[allow(dead_code)]
     pub(crate) fn prepare_maintenance(&self, now: Instant) -> Option<MicTestMaintenance<'_>> {
         let state = self.state.lock().ok()?;
         let failure = state.capture.as_ref().and_then(|capture| {
@@ -376,6 +380,7 @@ impl MicTest {
         .then_some(CaptureToken(state.generation, state.input_revision))
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_capture_token<T>(
         &self,
         token: CaptureToken,

@@ -18,7 +18,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
 png = "0.18"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "fs", "signal"] }
 tokio-util = "0.7"
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
@@ -39,6 +39,7 @@ fs2 = "0.4"
 tempfile = "3"
 libwebrtc = { version = "=0.4.0", optional = true }
 zabor-dsp = { path = "../zabor-dsp" }
+zabor-profile-helper = { path = "../zabor-profile-helper" }
 webrtc-vad = "=0.4.0"
 zabor-input = { path = "../zabor-input", optional = true }
 df = { package = "deep_filter", git = "https://github.com/Rikorose/DeepFilterNet", rev = "d375b2d8309e0935d165700c91da9de862a99c31", default-features = false, features = ["tract"], optional = true }
@@ -67,6 +68,7 @@ zip = { version = "=9.4.1", default-features = false, features = ["deflate-flate
 default = ["native-media", "neural-dsp"]
 native-media = ["dep:libwebrtc", "dep:zabor-camera", "dep:zabor-stream-audio", "dep:zabor-input"]
 camera-test-source = ["native-media", "zabor-camera/test-source"]
+profile-import-test-source = []
 stream-audio-test-source = ["native-media", "zabor-stream-audio/test-source"]
 audio-test-source = ["native-media"]
 neural-dsp = ["dep:df", "dep:ndarray", "dep:rnnoise2", "dep:ort", "dep:tract-core", "dep:tract-data", "dep:tract-hir", "dep:tract-linalg", "dep:tract-nnef", "dep:tract-onnx", "dep:tract-onnx-opl", "dep:tract-pulse", "dep:tract-pulse-opl"]

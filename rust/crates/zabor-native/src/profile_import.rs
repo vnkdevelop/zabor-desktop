@@ -350,18 +350,7 @@ impl PreparedImport {
     }
 
     fn mark_aborted(&mut self) -> Result<(), ImportError> {
-        self.journal.operation = "abort".into();
-        check_path(&self.parent.join(JOURNAL), false)?;
-        let mut file =
-            tempfile::NamedTempFile::new_in(&self.parent).map_err(|_| ImportError::Storage)?;
-        file.write_all(&serde_json::to_vec(&self.journal).map_err(|_| ImportError::Storage)?)
-            .map_err(|_| ImportError::Storage)?;
-        file.as_file()
-            .sync_all()
-            .map_err(|_| ImportError::Storage)?;
-        file.persist(self.parent.join(JOURNAL))
-            .map_err(|_| ImportError::Storage)?;
-        Ok(())
+        mark_aborted(&self.parent, &mut self.journal)
     }
 }
 
@@ -375,14 +364,49 @@ pub enum RecoveryAction {
 }
 
 pub fn recover(parent: &Path, action: RecoveryAction) -> Result<(), ImportError> {
+    recover_checked(parent, action, None)
+}
+
+pub fn recover_authorized(
+    parent: &Path,
+    action: RecoveryAction,
+    owner: &ImportOwner,
+    accept: impl Fn() -> bool,
+) -> Result<(), ImportError> {
+    recover_checked(parent, action, Some((owner, &accept)))
+}
+
+fn recover_checked(
+    parent: &Path,
+    action: RecoveryAction,
+    authorization: Option<(&ImportOwner, &dyn Fn() -> bool)>,
+) -> Result<(), ImportError> {
     check_path(parent, false)?;
     let _gate = gate(parent)?;
-    let journal = load_journal(parent)?;
+    let mut journal = load_journal(parent)?;
+    if authorization.is_some_and(|(owner, accept)| journal.owner != owner.user_id || !accept()) {
+        return Err(ImportError::Invalid);
+    }
     let stage = present(&parent.join(STAGE))?;
     let beta = present(&parent.join(BETA_PROFILE))?;
+    let accepting = matches!(
+        action,
+        RecoveryAction::PublishVerifiedStage | RecoveryAction::ConfirmPublished
+    );
+    if accepting {
+        if let Some((owner, _)) = authorization {
+            verify_owner(
+                &parent.join(if stage { STAGE } else { BETA_PROFILE }),
+                owner,
+            )?;
+        }
+    }
     match (journal.operation.as_str(), action) {
         ("publish", RecoveryAction::PublishVerifiedStage) if stage && !beta => {
             verify_stage(&parent.join(STAGE), &journal)?;
+            if authorization.is_some_and(|(_, accept)| !accept()) {
+                return Err(ImportError::Invalid);
+            }
             std::fs::rename(parent.join(STAGE), parent.join(BETA_PROFILE))
                 .map_err(|_| ImportError::Storage)?;
         }
@@ -419,7 +443,73 @@ pub fn recover(parent: &Path, action: RecoveryAction) -> Result<(), ImportError>
         }
         _ => return Err(ImportError::Recovery),
     }
+    if accepting && authorization.is_some_and(|(_, accept)| !accept()) {
+        mark_aborted(parent, &mut journal)?;
+        quarantine(parent, BETA_PROFILE, ABORTED)?;
+        finish(parent)?;
+        return Err(ImportError::Invalid);
+    }
     finish(parent)
+}
+
+fn verify_owner(root: &Path, owner: &ImportOwner) -> Result<(), ImportError> {
+    let session: super::SavedSession =
+        serde_json::from_slice(&import_secret(&root.join("session.enc"))?)
+            .map_err(|_| ImportError::Invalid)?;
+    if session.user_id != owner.user_id || session.username != owner.username {
+        return Err(ImportError::Invalid);
+    }
+    let identity = if present(&root.join("chat-identity.enc"))? {
+        Some(import_secret(&root.join("chat-identity.enc"))?)
+    } else {
+        None
+    };
+    match (identity, &owner.public_key) {
+        (Some(identity), Some(expected)) => {
+            let identity = ChatIdentity::import(
+                std::str::from_utf8(&identity).map_err(|_| ImportError::Invalid)?,
+            )
+            .map_err(|_| ImportError::Invalid)?;
+            if fingerprint(&identity.public_key().map_err(|_| ImportError::Invalid)?)?
+                != fingerprint(expected)?
+            {
+                return Err(ImportError::Invalid);
+            }
+        }
+        (None, None) => {}
+        _ => return Err(ImportError::Invalid),
+    }
+    Ok(())
+}
+
+fn import_secret(path: &Path) -> Result<Zeroizing<Vec<u8>>, ImportError> {
+    #[cfg(windows)]
+    {
+        let data = read_bytes(path, 2 * 1024 * 1024)?;
+        let body = data.strip_prefix(b"ZNS1").ok_or(ImportError::Invalid)?;
+        windows_dpapi::decrypt_data(body, windows_dpapi::Scope::User, Some(b"zabor-native-v1"))
+            .map(Zeroizing::new)
+            .map_err(|_| ImportError::Invalid)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err(ImportError::Invalid)
+    }
+}
+
+fn mark_aborted(parent: &Path, journal: &mut Journal) -> Result<(), ImportError> {
+    journal.operation = "abort".into();
+    check_path(&parent.join(JOURNAL), false)?;
+    let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|_| ImportError::Storage)?;
+    file.write_all(&serde_json::to_vec(journal).map_err(|_| ImportError::Storage)?)
+        .map_err(|_| ImportError::Storage)?;
+    file.as_file()
+        .sync_all()
+        .map_err(|_| ImportError::Storage)?;
+    file.persist(parent.join(JOURNAL))
+        .map_err(|_| ImportError::Storage)?;
+    Ok(())
 }
 
 pub fn rollback(parent: &Path, owner: &ImportOwner) -> Result<PathBuf, ImportError> {
