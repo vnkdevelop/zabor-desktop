@@ -24,6 +24,7 @@ not release acceptance. This audit starts from `8500535` on
 | Runtime dependencies = 0 | Нет Electron/Node/WebView runtime, но neural-сборка требует закреплённые `onnxruntime.dll` и `onnxruntime_providers_shared.dll` |
 | FemtoVG = DirectX | Выбран femtovg/winit; renderer использует OpenGL. Отсутствие веб-движка не означает DirectX |
 | Всё завершено после четырёх тестов | Эти проверки не покрывают установку, доверенный startup, tray, full UI/motion, реальные устройства или two-device acceptance |
+| EXE меньше 35 МБ | Фактическая полная optimized-сборка — 82,12 МиБ; `.text` — 53,44 МиБ, `.rdata` — 26,89 МиБ, без debug-секций |
 
 These are implementation and evidence boundaries, not grounds for removing
 security gates. In particular, local tests never provision publisher trust,
@@ -53,6 +54,11 @@ approve installation, or establish physical Windows 10/11/two-device acceptance.
 - Отключён incremental cache в `.cargo/config.toml`; generated `rust/target-*`
   исключены из Git. Удалены только compiler intermediates, исходники/WIP, готовые
   application binaries, SDK/model pins, эталоны и база сессий сохранены.
+- В PE composition policy добавлены существующие системные Windows DLL:
+  `combase.dll`, `msdmo.dll`, `uiautomationcore.dll`. До этого full native binary
+  ошибочно считался зависимым от отсутствующих сторонних библиотек. Никакие
+  версии или внешние runtime-получатели не добавлены; arbitrary DLL по-прежнему
+  запрещены.
 
 The fixes preserve storage formats, encryption, retention, backend/SFU contracts
 and model versions. No production account, user profile, physical audio device,
@@ -66,7 +72,7 @@ remote-control session or signing credential was used.
 | Новый Slint keyboard/focus/reduced-motion test | 1 passed |
 | Logger unit tests | 6 passed |
 | Autostart unit tests | 3 passed |
-| Package security tests | 28 passed |
+| Package security tests | 29 passed, включая regression Windows COM/media/accessibility imports |
 | Новый package-reference verifier | 7 passed; финальные 122 packages / 12 628 files проверены |
 | Immutable reference contract | 28 passed |
 | Marked cleanup/freeze fixtures | 17 passed |
@@ -141,3 +147,23 @@ this variable; it is not shipped or needed by the native runtime.
 
 Release compilation and publication are separate outcomes. An unsigned optimized
 binary is a development artifact, not an accepted installable native release.
+
+## Release-mode binary
+
+Полная offline/LTO/static-CRT сборка выполнена с default features
+`native-media` и `neural-dsp`. Код приложения — commit `364b50f`.
+
+- Binary: `rust/target-native-release/release/zabor-native.exe`.
+- Size: `86 109 184` bytes (82.12 MiB).
+- SHA-256: `113dab9e41d35b15b4ab6b7545dbbe76236a4d5a1df921021ae65eb741a5a12c`.
+- PE32+ AMD64, без CLR/Electron/Node/WebView imports; external runtime —
+  закреплённый `onnxruntime.dll`, рядом сохраняется providers DLL.
+- `--help` отработал; обычная установка/startup не приняты и не обходились.
+- Source branch pushed: `audit/native-parity-release`. Release tag и GitHub
+  installation release не опубликованы: отсутствуют complete-native acceptance,
+  human Windows/two-device и publisher/helper/manifest trust.
+
+Локальная папка сборки: `release/native-audit-3.8.0-rust-x64/`. В ней EXE,
+две закреплённые ONNX DLL, 561 компонент полной license inventory, SHA-256/PE
+receipt и явный `BUILD-STATUS.txt`. Это **development release-mode build**, не
+installer: `nativeClientReady=false`, `installationAllowed=false`, подписи нет.

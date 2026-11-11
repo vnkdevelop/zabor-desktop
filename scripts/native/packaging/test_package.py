@@ -84,6 +84,17 @@ class PackageTests(unittest.TestCase):
             PACKAGE.make_archive(self.stage, path, False, True)
         self.assertEqual(PACKAGE.digest(path), before)
 
+    def test_windows_com_media_and_accessibility_imports_are_system_dependencies(self):
+        for name in ("combase.dll", "msdmo.dll", "uiautomationcore.dll"):
+            self.assertIn(name, PACKAGE.POLICY["systemDlls"])
+            (self.stage / "zabor-native.exe").write_bytes(fixture_pe(name))
+            path = self.archive()
+            result = PACKAGE.verify_archive(path)
+            self.assertEqual(result["peImports"]["zabor-native.exe"], [name])
+            self.assertFalse(result["installationAllowed"])
+            path.unlink()
+            (self.stage / "native-package.json").unlink()
+
     def test_native_helper_is_exactly_allowlisted_and_hashed(self):
         helper = self.stage / PACKAGE.POLICY["updateHelper"]
         helper.write_bytes(fixture_pe("kernel32.dll"))
