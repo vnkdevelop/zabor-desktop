@@ -636,3 +636,57 @@ async fn untouched_profile_is_not_rewritten_and_storage_failure_is_explicit() {
         0
     );
 }
+
+#[tokio::test]
+async fn checked_final_save_returns_failure_instead_of_only_emitting_a_toast() {
+    let temporary = tempfile::tempdir().unwrap();
+    let profile = Arc::new(Profile::open(temporary.path()).unwrap());
+    let preferences = AudioPreferences::new(&json!({}));
+    assert!(preferences.language("en"));
+    std::fs::create_dir(temporary.path().join("settings.json")).unwrap();
+    let stop = CancellationToken::new();
+    stop.cancel();
+    let failures = Arc::new(AtomicUsize::new(0));
+    let observed = failures.clone();
+    assert!(preferences
+        .run_local_checked(
+            Some(profile),
+            stop,
+            Arc::new(move || {
+                observed.fetch_add(1, Ordering::AcqRel);
+            }),
+        )
+        .await
+        .is_err());
+    assert_eq!(failures.load(Ordering::Acquire), 1);
+}
+
+#[tokio::test]
+async fn checked_final_save_observes_latest_original_settings_and_preserves_untouched_bytes() {
+    let temporary = tempfile::tempdir().unwrap();
+    let profile = Arc::new(Profile::open(temporary.path()).unwrap());
+    profile
+        .write_settings(&json!({"language":"ru","untouched":true}))
+        .unwrap();
+    let original = std::fs::read(temporary.path().join("settings.json")).unwrap();
+    let preferences = AudioPreferences::new(&profile.read_settings().unwrap());
+    let stop = CancellationToken::new();
+    stop.cancel();
+    preferences
+        .clone()
+        .run_local_checked(Some(profile.clone()), stop, no_failure())
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read(temporary.path().join("settings.json")).unwrap(),
+        original
+    );
+    assert!(preferences.language("en"));
+    let stop = CancellationToken::new();
+    stop.cancel();
+    preferences
+        .run_local_checked(Some(profile.clone()), stop, no_failure())
+        .await
+        .unwrap();
+    assert_eq!(profile.read_settings().unwrap()["language"], json!("en"));
+}

@@ -12,6 +12,10 @@ use tokio_tungstenite::tungstenite::{
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+#[path = "hub_lifetime.rs"]
+mod lifetime;
+pub use lifetime::HubLifetime;
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum HubError {
     #[error("connection closed")]
@@ -65,7 +69,7 @@ impl HubConnection {
     ) -> Result<(Self, mpsc::Receiver<HubEvent>), HubError> {
         timeout(
             Duration::from_secs(35),
-            Self::connect_inner(endpoint, attestation),
+            Self::connect_inner(endpoint, attestation, None),
         )
         .await
         .map_err(|_| HubError::Timeout)?
@@ -74,6 +78,7 @@ impl HubConnection {
     async fn connect_inner(
         endpoint: &str,
         attestation: Option<&str>,
+        lifetime: Option<&HubLifetime>,
     ) -> Result<(Self, mpsc::Receiver<HubEvent>), HubError> {
         let mut url = validate_endpoint(endpoint)?;
         let mut negotiate = url.clone();
@@ -184,9 +189,9 @@ impl HubConnection {
         }
         let (requests_tx, mut requests_rx) = mpsc::channel::<Request>(64);
         let (events_tx, events_rx) = mpsc::channel(128);
-        let stop = CancellationToken::new();
+        let stop = lifetime.map(HubLifetime::socket_stop).unwrap_or_default();
         let worker_stop = stop.clone();
-        tokio::spawn(async move {
+        let worker = async move {
             let mut pending = BTreeMap::<String, Request>::new();
             let mut next_id = 0_u64;
             let mut clock = tokio::time::interval(Duration::from_millis(100));
@@ -264,7 +269,12 @@ impl HubConnection {
                 let _ = request.reply.send(Err(failure.clone()));
             }
             let _ = timeout(Duration::from_secs(1), socket.close(None)).await;
-        });
+        };
+        if let Some(lifetime) = lifetime {
+            lifetime.spawn(worker)?;
+        } else {
+            tokio::spawn(worker);
+        }
         Ok((
             Self(Arc::new(Inner {
                 requests: requests_tx,

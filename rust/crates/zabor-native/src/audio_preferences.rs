@@ -1,9 +1,9 @@
 use crate::audio_mix::AudioControls;
 use crate::audio_settings::AudioSettings;
 use crate::hub::{HubConnection, HubError};
-use crate::profile::Profile;
+use crate::profile::{Profile, ProfileError};
 use serde_json::{json, Value};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use std::time::Duration;
 use tokio::sync::watch;
@@ -421,6 +421,31 @@ impl AudioPreferences {
         let mut raw = serde_json::to_value(&state.settings).ok()?;
         raw[LOCAL_SYNC_KEY] = json!({"owner":state.owner,"pending":state.dirty});
         Some((state.serial, raw))
+    }
+
+    pub async fn run_local_checked(
+        self: Arc<Self>,
+        profile: Option<Arc<Profile>>,
+        stop: CancellationToken,
+        failed: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<(), ProfileError> {
+        let incomplete = Arc::new(AtomicBool::new(false));
+        let observed = incomplete.clone();
+        self.clone()
+            .run_local(
+                profile,
+                stop,
+                Arc::new(move || {
+                    observed.store(true, Ordering::Release);
+                    failed();
+                }),
+            )
+            .await;
+        if incomplete.load(Ordering::Acquire) || self.local_snapshot().is_none() {
+            Err(ProfileError::Storage)
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn run_local(

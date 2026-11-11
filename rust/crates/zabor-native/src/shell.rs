@@ -3667,8 +3667,9 @@ async fn worker(
                 .session_for_login(std::time::Instant::now())
                 .map(|_| call_recovery.remaining(std::time::Instant::now()));
             let connecting = async {
-                let future =
-                    HubConnection::connect(&server, token.as_ref().map(|token| token.as_str()));
+                let future = session_io
+                    .hub_io
+                    .connect(&server, token.as_ref().map(|token| token.as_str()));
                 match resume_budget {
                     Some(budget) => tokio::time::timeout(budget, future)
                         .await

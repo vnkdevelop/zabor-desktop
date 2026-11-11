@@ -14,6 +14,7 @@ use zabor_native::profile::{PreparedSession, Profile, ProfileError, SavedSession
 pub(super) struct SessionIo {
     pub(super) chat_io: Arc<super::chat_io::ChatIo>,
     pub(super) file_io: Arc<super::file_io::FileIo>,
+    pub(super) hub_io: Arc<zabor_native::hub::HubLifetime>,
     profile: Option<Arc<Profile>>,
     intents: Arc<CriticalIntents>,
     stop: CancellationToken,
@@ -46,6 +47,7 @@ impl SessionIo {
         Arc::new(Self {
             file_io: chat_io.file_io.clone(),
             chat_io,
+            hub_io: Arc::new(zabor_native::hub::HubLifetime::default()),
             profile,
             intents,
             stop,
@@ -174,6 +176,9 @@ impl SessionIo {
                 .unwrap_or_else(|error| error.into_inner())
                 .clone();
             if jobs.is_empty() {
+                if self.hub_io.finish().await.is_err() {
+                    self.failed.store(true, Ordering::Release);
+                }
                 if self.chat_io.finish().await.is_err() {
                     self.failed.store(true, Ordering::Release);
                 }
