@@ -486,3 +486,147 @@ fn app_facing_desktop_records_are_thread_affine_while_receipts_are_shareable() {
     fn shareable<T: Send + Sync>() {}
     shareable::<CursorCompletion>();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn adversarial_rc_v5_provenance_fence_sfu_and_monotonicity_stress_test() {
+    // 1. FRAME PROVENANCE TIMEOUT:
+    // Unconfirmed frame provenance drops lease and drops input dispatch.
+    {
+        let lease = ViewerCursorLease::new(42);
+        assert!(lease.is_alive());
+        let t0 = Instant::now();
+        lease.acknowledge_at(t0);
+        let viewport = Rect {
+            left: 0,
+            top: 0,
+            width: 1920,
+            height: 1080,
+        };
+        lease.decoded_p2p_frame(viewport, (1920, 1080), t0);
+        assert!(lease.is_alive());
+        assert!(lease.is_ready());
+
+        // Frame admitted at exact edge (750ms)
+        assert!(frame_admitted(
+            None,
+            true,
+            t0,
+            t0,
+            t0 + Duration::from_millis(750)
+        ));
+        // Past edge (751ms) -> timeout drops admission
+        assert!(!frame_admitted(
+            None,
+            true,
+            t0,
+            t0,
+            t0 + Duration::from_millis(751)
+        ));
+        // Stale frame before ack -> unconfirmed provenance drops admission
+        assert!(!frame_admitted(
+            None,
+            true,
+            t0 - Duration::from_millis(1),
+            t0,
+            t0
+        ));
+        // Premature frame in the future -> drops admission
+        assert!(!frame_admitted(
+            None,
+            true,
+            t0 + Duration::from_millis(50),
+            t0,
+            t0
+        ));
+
+        // Lease revocation on frame clear drops input readiness and liveliness
+        lease.clear_frame();
+        assert!(!lease.is_alive());
+        assert!(!lease.is_ready());
+    }
+
+    // 2. REJECTION OF SFU FRAMES AS DIRECT P2P SOURCES:
+    // Frames with source_epoch != None are SFU routed and must be rejected.
+    {
+        let ack = Instant::now();
+        let decoded = ack;
+        let now = ack + Duration::from_millis(100);
+
+        // Direct P2P (source_epoch is None) is admitted
+        assert!(frame_admitted(None, true, decoded, ack, now));
+
+        // Any SFU route epoch is strictly rejected
+        for sfu_epoch in [0, 1, 2, 7, 42, 1024, u64::MAX] {
+            assert!(
+                !frame_admitted(Some(sfu_epoch), true, decoded, ack, now),
+                "SFU epoch {sfu_epoch} must never be admitted as direct P2P source"
+            );
+        }
+    }
+
+    // 3. FENCE DISARM:
+    // When host exits, peer connection drops, or authorization is lost,
+    // control fences disarm and cursor capture releases.
+    {
+        let cleanup = Arc::new(AudioCleanup::default());
+        let permitted = Rc::new(Cell::new(true));
+        let fail = Rc::new(Cell::new(false));
+        let (mut pill, mut completion, destroyed, shown) =
+            synthetic_pill(cleanup.clone(), permitted.clone(), fail.clone());
+        pill.update().unwrap();
+        assert_eq!(shown.borrow().len(), 1);
+        assert!(!destroyed.get());
+
+        // Host fence disarm: permitted becomes false (host exits / connection drops)
+        permitted.set(false);
+        assert_eq!(pill.update(), Err(InputError::Unavailable));
+        assert!(destroyed.get());
+
+        // Cleanup completes successfully, restoring cursor capture bounds
+        cleanup.wait().await.unwrap();
+        assert_eq!(completion.wait().await, Ok(CleanupState::Restored));
+
+        // Re-enabling permission afterwards CANNOT revive the destroyed/retired pill
+        permitted.set(true);
+        assert_eq!(pill.update(), Err(InputError::Unavailable));
+        assert_eq!(shown.borrow().len(), 1);
+    }
+
+    // 4. MONOTONIC INTENT SEQUENCE NUMBERS & REPLAY REJECTION:
+    // Reject replayed or reordered input packets and stale tickets.
+    {
+        let intents = Arc::new(CriticalIntents::default());
+        let t1 = intents.ticket();
+        assert!(intents.is_current(t1, IntentScope::Session));
+        assert!(intents.is_current(t1, IntentScope::Voice));
+
+        // Voice intent changes on Leave
+        intents.request(CriticalAction::Leave);
+        assert!(!intents.is_current(t1, IntentScope::Voice));
+        assert!(intents.is_current(t1, IntentScope::Session));
+
+        // Monotonic step to ticket T2
+        let t2 = intents.take_leave(t1).expect("take_leave succeeds");
+        assert_ne!(t1, t2);
+        assert!(intents.is_current(t2, IntentScope::Voice));
+        assert!(
+            !intents.is_current(t1, IntentScope::Voice),
+            "Replayed T1 ticket must be rejected"
+        );
+
+        // Logout invalidates both T1 and T2
+        intents.request(CriticalAction::Logout);
+        assert!(!intents.is_current(t1, IntentScope::Session));
+        assert!(!intents.is_current(t1, IntentScope::Voice));
+        assert!(!intents.is_current(t2, IntentScope::Session));
+        assert!(!intents.is_current(t2, IntentScope::Voice));
+
+        // ViewerRequest sequence / identity replay rejection
+        let r1 = ViewerRequest::default();
+        let r2 = ViewerRequest::default();
+        let now = Instant::now();
+        assert!(r1.accepts_ack(&r1, now));
+        assert!(!r2.accepts_ack(&r1, now));
+        assert!(!r1.accepts_ack(&r2, now));
+    }
+}

@@ -1347,4 +1347,97 @@ mod tests {
         hub.close();
         fixture.server.await.unwrap();
     }
+
+    #[tokio::test]
+    async fn adversarial_voice_rc_fence_disarm_and_replay_rejection_stress_test() {
+        let fixture = fixture([]).await;
+        let (hub, _hub_events) = HubConnection::connect(&fixture.endpoint, None)
+            .await
+            .unwrap();
+        let (engine, _events, _remote, mut received) = connected().await;
+        let mut session = session();
+        session.engine = engine;
+        share(&mut session, "high");
+        let ShareCapture::Desktop(capture) = &session.capture.as_ref().unwrap().capture else {
+            panic!()
+        };
+        capture.geometry.update(zabor_input::Rect {
+            left: 0,
+            top: 0,
+            width: 1920,
+            height: 1080,
+        });
+        session.remote.synthetic_input = true;
+        session.remote.allowed = true;
+        session.engine.set_remote_control_allowed(true);
+        session.engine.test_remote_metadata("peer", false, 2);
+
+        let intents = Arc::new(CriticalIntents::default());
+        let t1 = intents.ticket();
+        session.bind_control_intents(intents.clone(), t1);
+        let (lifetime, channel, _, _, _) = session.engine.remote_control_info("peer").unwrap();
+        let voice = intents.voice_token(t1);
+
+        // 1. Host start and binding verification
+        session
+            .handle_remote_control(
+                &hub,
+                "peer",
+                RemoteControlEvent::Packet(Packet::Signal(Signal::Start)),
+                lifetime.clone(),
+                channel.clone(),
+                voice.clone(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(signal(&mut received).await, Signal::Accept);
+
+        let binding = session
+            .host_control_binding()
+            .expect("host binding must exist");
+        assert!(binding.authorized.load(Ordering::Acquire));
+        let fence = binding.authorized.clone();
+
+        // 2. Peer disconnect stress: peer connection drops
+        session.engine.disconnect_peer("peer");
+        session.maintain_remote_control();
+
+        // Fence disarmed immediately upon peer disconnect
+        assert!(
+            !fence.load(Ordering::Acquire),
+            "Fence must be disarmed when peer drops"
+        );
+        assert!(
+            session.host_control_binding().is_none(),
+            "Binding must be cleared"
+        );
+
+        // 3. Stale intent replay: simulate voice generation change (Leave)
+        intents.request(crate::critical_intents::CriticalAction::Leave);
+        let t2 = intents.take_leave(t1).unwrap();
+        assert_ne!(t1, t2);
+        assert!(!intents.is_current(t1, IntentScope::Voice));
+
+        // Replaying input with old target and invalid ticket T1
+        if let Some(target) = session
+            .control_targets()
+            .into_iter()
+            .find(|t| t.peer == "peer")
+        {
+            let stale_target = target.with_request(
+                Arc::new(ViewerRequest::default()),
+                t1,
+                intents.voice_token(t1),
+            );
+            assert!(session
+                .send_control_target_input(&stale_target, Packet::Move { x: 0.5, y: 0.5 })
+                .is_err());
+        }
+
+        let cleanup = session.audio_runtime.cleanup_tracker();
+        drop(session);
+        cleanup.wait().await.unwrap();
+        hub.close();
+        fixture.server.await.unwrap();
+    }
 }
