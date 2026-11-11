@@ -822,7 +822,7 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         },
     ));
     let local_errors = send_update.clone();
-    let local_settings_job = runtime.spawn(audio_preferences.clone().run_local(
+    let local_settings_job = runtime.spawn(audio_preferences.clone().run_local_checked(
         profile.clone(),
         stop.clone(),
         Arc::new(move || local_errors(UiEvent::Toast("validation.sessionSaveError"))),
@@ -2558,34 +2558,47 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     app_timer.stop();
     member_timer.stop();
     let (avatar_jobs, mut avatar_join_failed) = avatars.borrow_mut().take_jobs(&ui);
-    worker.abort();
-    let (session_io_result, achievement_io_result, audio_cleanup_result) =
-        runtime.block_on(async {
-            let _ = worker.await;
-            for job in avatar_jobs {
-                avatar_join_failed |= job.await.is_err();
-            }
-            let _ = local_settings_job.await;
-            let _ = remote_settings_job.await;
-            let audio_runtime_result = audio_runtime_job.await;
-            let session_result = session_io.finish().await;
-            let achievement_result = achievement_io.finish().await;
-            let audio_seal_result = audio_runtime.seal_cleanup();
-            let audio_result = audio_runtime.wait_for_cleanup().await;
-            (
-                session_result,
-                achievement_result,
-                audio_runtime_result
-                    .map_err(|_| zabor_native::audio_runtime::AudioCleanupError::Incomplete)
-                    .and(audio_seal_result)
-                    .and(audio_result),
-            )
-        });
+    let (
+        session_io_result,
+        achievement_io_result,
+        audio_cleanup_result,
+        settings_result,
+        workers_complete,
+    ) = runtime.block_on(async {
+        let worker_complete = worker.await.is_ok();
+        for job in avatar_jobs {
+            avatar_join_failed |= job.await.is_err();
+        }
+        let settings_result = local_settings_job
+            .await
+            .map_err(|_| zabor_native::profile::ProfileError::Storage)
+            .and_then(|result| result);
+        let remote_complete = remote_settings_job.await.is_ok();
+        let audio_runtime_result = audio_runtime_job.await;
+        let session_result = session_io.finish().await;
+        let achievement_result = achievement_io.finish().await;
+        let audio_seal_result = audio_runtime.seal_cleanup();
+        let audio_result = audio_runtime.wait_for_cleanup().await;
+        (
+            session_result,
+            achievement_result,
+            audio_runtime_result
+                .map_err(|_| zabor_native::audio_runtime::AudioCleanupError::Incomplete)
+                .and(audio_seal_result)
+                .and(audio_result),
+            settings_result,
+            worker_complete && remote_complete,
+        )
+    });
     runtime.shutdown_timeout(Duration::from_secs(2));
     ui_result?;
     session_io_result?;
     achievement_io_result?;
     audio_cleanup_result?;
+    settings_result?;
+    if !workers_complete {
+        return Err("Application worker did not complete normally".into());
+    }
     avatar_join_failed |= avatars.borrow().failed();
     if avatar_join_failed {
         return Err("Avatar worker did not complete normally".into());

@@ -104,9 +104,39 @@ const openReference = (options = {}) => {
   const requirePackage = name => {
     const pin = manifest.packages[name];
     if (!pin) fail(`unlisted package: ${name}`);
+    if (process.env.ZABOR_NATIVE_PACKAGE_REFERENCE_ROOT) return require(packageFile(name, 'package.json', true));
     fail(`package closure not frozen: ${name}@${pin.version}; lock integrity ${pin.integrity}; no checkout/node_modules fallback`);
   };
-  const packagePath = (name, file) => { logicalPath(file); return requirePackage(name); };
+  let packageRoot;
+  let packageRows;
+  const packageFile = (name, file, entry = false) => {
+    logicalPath(file);
+    const pin = manifest.packages[name];
+    if (!pin) fail(`unlisted package: ${name}`);
+    if (!process.env.ZABOR_NATIVE_PACKAGE_REFERENCE_ROOT) return requirePackage(name);
+    if (!packageRoot) {
+      const candidate = canonical(process.env.ZABOR_NATIVE_PACKAGE_REFERENCE_ROOT);
+      const script = checkedPath(repository, 'scripts/native/package-reference.py');
+      const checked = JSON.parse(execFileSync('cmd.exe', ['/d', '/v:off', '/s', '/c', `""python" "-B" "${script}" "check" "--root" "${candidate}""`], { windowsVerbatimArguments: true, maxBuffer: 1024 * 1024 }));
+      const bytes = fs.readFileSync(checkedPath(repository, 'tests/native-delivery/closure.json'));
+      if (checked.root !== candidate || checked.closureSha256 !== hash(bytes) || checked.nativeClientReady !== false) fail('package reference verification mismatch');
+      packageRows = new Map(JSON.parse(bytes).packages.map(row => [row.path, row]));
+      packageRoot = candidate;
+    }
+    const directory = `node_modules/${name}`;
+    const row = packageRows.get(directory);
+    if (!row || row.version !== pin.version || row.integrity !== pin.integrity) fail(`package reference pin mismatch: ${name}`);
+    let result = checkedPath(packageRoot, `${directory}/${file}`);
+    if (entry) {
+      const metadata = JSON.parse(fs.readFileSync(result));
+      result = require.resolve(path.dirname(result));
+      const relative = path.relative(path.join(packageRoot, directory), result).replaceAll('\\', '/');
+      if (metadata.version !== pin.version || !row.files.some(item => item.path === relative)) fail(`package entry outside frozen inventory: ${name}`);
+      result = checkedPath(packageRoot, `${directory}/${relative}`);
+    } else if (!row.files.some(item => item.path === file)) fail(`package file outside frozen inventory: ${name}/${file}`);
+    return result;
+  };
+  const packagePath = (name, file) => packageFile(name, file);
   const capture = () => { fail(manifest.captureGate); };
   const snapshot = name => {
     if (!Object.hasOwn(manifest.groups, name)) fail(`unknown group: ${name}`);

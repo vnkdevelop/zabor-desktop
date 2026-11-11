@@ -71,6 +71,7 @@ tmp/
 temp/
 *.local
 /rust/target/
+/rust/target-*/
 /rust/target-reference-archives/
 /migration-artifacts/
 /benchmarks/backend/.build/

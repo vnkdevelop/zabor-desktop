@@ -1,3 +1,6 @@
+[build]
+incremental = false
+
 [env]
 LK_CUSTOM_WEBRTC = { value = "rust/target/webrtc-win-x64-a545de4", relative = true }
 ORT_LIB_LOCATION = { value = "rust/target/onnxruntime-win-x64-1.31.1/native", relative = true }

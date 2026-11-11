@@ -22,3 +22,9 @@ unsafe_code = "forbid"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[profile.dev]
+debug = 1
+
+[profile.test]
+debug = 1

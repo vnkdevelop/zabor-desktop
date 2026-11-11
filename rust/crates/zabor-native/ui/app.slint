@@ -1,4 +1,4 @@
-import { FormButton, FormField, IconButton } from "controls.slint";
+import { FormButton, FormField, IconButton, ControlMotion } from "controls.slint";
 import { ScrollView } from "std-widgets.slint";
 import { AudioSettingsPanel, AudioSettingsView, AudioDeviceItem, AudioSlider, RelaySetting, StreamAudioSetting } from "audio-settings.slint";
 import { MicTestPanel, MicTestView, MicButtonFeedback } from "mic-test.slint";
@@ -137,6 +137,8 @@ export component NativeApp inherits Window {
     in-out property <string> selected-id;
     in property <string> selected-name;
     in property <bool> reduced-motion;
+    init => { ControlMotion.reduced-motion = root.reduced-motion; }
+    changed reduced-motion => { ControlMotion.reduced-motion = root.reduced-motion; }
     in property <AudioSettingsView> audio-settings;
     in property <[AudioDeviceItem]> input-devices;
     in property <[AudioDeviceItem]> output-devices;
@@ -536,7 +538,7 @@ export component NativeApp inherits Window {
                 for tab[index] in ["settings.tabs.general", "settings.tabs.audio", "settings.tabs.privacy", "settings.tabs.account"] : FormButton { height: 40px; label-size: 13px; label: root.tr(tab, root.language); primary: root.settings-tab == index; activated => { root.settings-tab = index; } }
             }
             Rectangle { x: 0px; y: 124px; width: parent.width; height: 1px; background: #ffffff12; }
-            ScrollView { x: 24px; y: 140px; width: parent.width - 48px; height: parent.height - 164px; viewport-y <=> root.settings-scroll-y;
+            ScrollView { x: 24px; y: 140px; width: parent.width - 48px; height: parent.height - 164px; content-y <=> root.settings-scroll-y;
                 VerticalLayout { spacing: 24px;
                     if root.settings-tab == 0 : VerticalLayout { spacing: 12px;
                         Text { text: root.tr("settings.general.language", root.language); color: white; font-size: 15px; font-weight: 600; }

@@ -267,7 +267,7 @@ impl MicProcessor {
                     .store((-100.0_f32).to_bits(), Ordering::Release);
             }
         }
-        if intent.publish {
+        if intent.publish || self.failed {
             self.controls
                 .processor_failed
                 .store(self.failed, Ordering::Release);

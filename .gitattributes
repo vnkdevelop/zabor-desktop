@@ -6,6 +6,7 @@
 *.ico binary
 *.icns binary
 *.png binary
+/legacy/*.zip binary
 /rust/crates/zabor-native/assets/catalogs/*.json -text whitespace=cr-at-eol
 /licenses/native/texts/** -text
 /licenses/native/*.json -text

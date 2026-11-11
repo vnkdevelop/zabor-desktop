@@ -1,6 +1,6 @@
 # ZABOR 
 
-Редакция / updated: 2026-11-06.
+Редакция / updated: 2026-11-12.
 
 [![Build](https://github.com/vnkdevelop/zabor-desktop/actions/workflows/build.yml/badge.svg)](https://github.com/vnkdevelop/zabor-desktop/actions/workflows/build.yml)
 [![Version](https://img.shields.io/github/package-json/v/vnkdevelop/zabor-desktop?label=version)](https://github.com/vnkdevelop/zabor-desktop/releases)
@@ -24,6 +24,16 @@ ZABOR - приложение для голосового общения, P2P-з�
 - Скрытые достижения и ачивки.
 
 ## Быстрый старт
+
+В нативной ветке `npm run dev` и `npm run build` уже выбирают Rust-клиент через
+`native.bat`. Инструкция Electron ниже — историческая; не выполняйте `npm ci`
+через junction `node_modules` существующего рабочего дерева. Проверка переноса
+и открытые release-блокеры: [native audit](docs/migration/native-audit-2026-11-12.md).
+Старый клиент навсегда сохранён в [legacy](legacy/README.md).
+
+On the native branch, default development/build commands select Rust. The
+Electron instructions below are historical. Never install dependencies through a
+shared worktree junction; see the audit and permanently retained legacy archive.
 
 Требования: [Node.js 20+](https://nodejs.org/) и npm.
 
@@ -62,9 +72,9 @@ Rust migration is experimental on the beta branch and its work branches. The fir
 
 В `rust/native-client` идёт полный перенос на Rust + Slint 1.18.1 (winit/femtovg), без браузера в нативном клиенте. Точка восстановления прежнего рабочего клиента — `d088795`. Добавлены формы авторизации и основная оболочка, SignalR/WebSocket, нативный libwebrtc/WASAPI, DPAPI/SQLite и шифрованный резервный текстовый чат. Полный функциональный паритет, трансляции/neural DSP, импорт и установщик/updater ещё в работе. `3.8.0-rust` — целевая версия, а не опубликованный полноценный нативный релиз.
 
-Для разработки нужны Windows, Rust 1.92+ с MSVC toolchain и C++ Build Tools. Запуск: `cmd.exe /c native.bat`. Полная проверка окна против React: `cmd.exe /c native.bat check`; дополнительно нужны Node.js 24, установленные npm-зависимости и Python с Pillow. Она снимает 54 пары кадров, проверяет четыре DPI-масштаба, оба языка, анимации и клавиатурные действия. Команды, границы проверок и оставшиеся этапы: [native-client-status.md](docs/migration/native-client-status.md).
+Для разработки нужны Windows, Rust 1.92+ с MSVC toolchain и C++ Build Tools. `cmd.exe /c native.bat check` запускает Rust fmt/Clippy/unit/bin checks, а не полную проверку UI. Сравнение эталона вызывается отдельно через `native.bat reference-check` и требует независимых reference prerequisites. Нормальный запуск требует provisioned installation trust; preview не подтверждает готовность установки. Актуальная сверка: [native audit](docs/migration/native-audit-2026-11-12.md).
 
-The `rust/native-client` branch develops a native Rust + Slint port from checkpoint `d088795`. Authentication/shell views, SignalR/WebSocket, libwebrtc/WASAPI, DPAPI/SQLite and encrypted fallback text chat are implemented or being integrated. Full parity, video/neural DSP, import and installer/updating remain in progress. `3.8.0-rust` is a target, not a published complete native release. `native.bat` opens the native shell; `native.bat check` runs core checks and the updater comparison (Windows, Rust 1.92+, MSVC, Node 24, npm dependencies, Python/Pillow). See the linked status for limits.
+The `rust/native-client` branch develops a native Rust + Slint port from checkpoint `d088795`. Authentication/shell views, SignalR/WebSocket, libwebrtc/WASAPI, DPAPI/SQLite and encrypted fallback text chat are implemented or being integrated. Full parity, import and installer/updating remain in progress. `3.8.0-rust` is a target, not a published complete native release. `native.bat check` runs Rust fmt/Clippy/unit/bin checks, not complete visual acceptance; `reference-check` is separate. Normal launch requires provisioned installation trust. See the audit for actual results and remaining blockers.
 
 
 ## Команды
@@ -73,9 +83,10 @@ The `rust/native-client` branch develops a native Rust + Slint port from checkpo
 | ------------------ | -------------------------------------- |
 | `npm run dev`      | Запуск приложения в режиме разработки  |
 | `npm run build`    | Production-сборка приложения           |
-| `npm run dist:win` | Создание Windows x64 NSIS-инсталлятора |
+| `npm run dist:win` | Нативный distribution gate; не Electron NSIS |
 | `native.bat` | Запуск разрабатываемого нативного клиента |
-| `native.bat check` | Проверки Rust и сравнение окна с React |
+| `native.bat check` | Проверки Rust fmt/Clippy/unit/bin |
+| `native.bat reference-check` | Отдельная проверка эталона с prerequisites |
 
 ## Установка для пользователей
 

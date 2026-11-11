@@ -35,18 +35,17 @@ pub fn sanitize(input: &str) -> String {
 
         if i + 10 <= len && &bytes[i..i + 10] == b"\"password\"" {
             let mut j = i + 10;
-            while j < len && (bytes[j] == b' ' || bytes[j] == b':') {
+            while j < len && bytes[j].is_ascii_whitespace() {
                 j += 1;
             }
-            if j < len && bytes[j] == b'"' {
+            if j < len && bytes[j] == b':' {
                 j += 1;
-                while j < len && bytes[j] != b'"' {
+                while j < len && bytes[j].is_ascii_whitespace() {
                     j += 1;
                 }
                 if j < len && bytes[j] == b'"' {
-                    j += 1;
                     out.push_str("\"password\":\"***\"");
-                    i = j;
+                    i = json_string_end(bytes, j);
                     continue;
                 }
             }
@@ -54,18 +53,17 @@ pub fn sanitize(input: &str) -> String {
 
         if i + 3 <= len && &bytes[i..i + 3] == b"\"d\"" {
             let mut j = i + 3;
-            while j < len && (bytes[j] == b' ' || bytes[j] == b':') {
+            while j < len && bytes[j].is_ascii_whitespace() {
                 j += 1;
             }
-            if j < len && bytes[j] == b'"' {
+            if j < len && bytes[j] == b':' {
                 j += 1;
-                while j < len && bytes[j] != b'"' {
+                while j < len && bytes[j].is_ascii_whitespace() {
                     j += 1;
                 }
                 if j < len && bytes[j] == b'"' {
-                    j += 1;
                     out.push_str("\"d\":\"***\"");
-                    i = j;
+                    i = json_string_end(bytes, j);
                     continue;
                 }
             }
@@ -83,11 +81,24 @@ pub fn sanitize(input: &str) -> String {
             }
         }
 
-        out.push(bytes[i] as char);
-        i += 1;
+        let character = input[i..].chars().next().unwrap();
+        out.push(character);
+        i += character.len_utf8();
     }
 
     out
+}
+
+fn json_string_end(bytes: &[u8], opening: usize) -> usize {
+    let mut index = opening + 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'"' => return index + 1,
+            _ => index += 1,
+        }
+    }
+    bytes.len()
 }
 
 pub struct RotatingLogger {
@@ -152,6 +163,29 @@ impl RotatingLogger {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unicode_diagnostics_preserve_readable_text() {
+        let text = "микрофон отключён · 音声 🎙️";
+        assert_eq!(sanitize(text), text);
+    }
+
+    #[test]
+    fn escaped_and_multiline_json_secrets_are_completely_redacted() {
+        for field in ["password", "d"] {
+            let text = format!(
+                "{{\"{field}\"\t:\n\"prefix\\\"secret-tail\\\\suffix\",\"state\":\"готово\"}}"
+            );
+            assert_eq!(
+                sanitize(&text),
+                format!("{{\"{field}\":\"***\",\"state\":\"готово\"}}")
+            );
+            assert_eq!(
+                sanitize(&format!("\"{field}\":\"unterminated\\\"secret-tail")),
+                format!("\"{field}\":\"***\"")
+            );
+        }
+    }
 
     #[test]
     fn test_jwt_redaction() {
