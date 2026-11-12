@@ -1,6 +1,6 @@
 # Third-party notices
 
-Updated: 2026-11-07.
+Updated: 2026-11-12.
 
 ZABOR Desktop is distributed under GPL-3.0-only. It redistributes the third-party
 components listed below. Their own licence terms apply to them.
@@ -26,6 +26,12 @@ domain), windows-dpapi (MIT OR Apache-2.0, user scope), fs2 (MIT OR Apache-2.0),
 and RustCrypto p256, aes-gcm, hmac, sha2 (MIT OR Apache-2.0). getrandom
 (MIT OR Apache-2.0) provides operating-system randomness. tempfile
 (MIT OR Apache-2.0) is used by local tests and native atomic file saving.
+
+The native shell's system tray and autostart live in the local
+`zabor-desktop-platform` crate, which uses the Microsoft `windows` 0.62.2 crate
+(MIT OR Apache-2.0) for the same Win32 APIs already bound by `zabor-input`.
+No third-party tray, autostart or registry library is added; the icon is drawn
+in code and no external icon file is redistributed.
 
 Native media uses libwebrtc 0.4.0 / webrtc-sys 0.3.53 (Apache-2.0,
 Copyright LiveKit, Inc.), <https://github.com/livekit/rust-sdks>, wrapping

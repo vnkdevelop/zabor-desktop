@@ -2136,6 +2136,12 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_auth_step(0);
                     ui.set_modal(0);
                     ui.set_password("".into());
+                    ui.set_password_input("".into());
+                    ui.set_password_error("".into());
+                    ui.set_password_pending(false);
+                    ui.set_delete_confirm_input("".into());
+                    ui.set_delete_error("".into());
+                    ui.set_delete_pending(false);
                     ui.set_login("".into());
                     ui.set_busy(false);
                     ui.set_channels(ModelRc::default());
