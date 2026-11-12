@@ -22,8 +22,8 @@ decision remain open and cannot be closed by local checks.
 | Win32 tray | Новый крейт `zabor-desktop-platform`: скрытое окно-владелец, `Shell_NotifyIconW`, меню «открыть zabor» / «выйти», левый клик и `NIN_KEYSELECT` восстанавливают окно, `WM_CONTEXTMENU` открывает меню, `TaskbarCreated` пересоздаёт значок после перезапуска проводника |
 | Значок | 16×16 значок рисуется в коде (скруглённый квадрат цветом `#C81E70` и белая «z»), создаётся через `CreateIcon` и освобождается `DestroyIcon`; сторонние ассеты не добавлены |
 | Автозапуск | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, значение `zabor-native-beta`, команда `"<путь>\zabor-native.exe" --app`; проверка пути (абсолютный, `.exe`, без кавычек, управляющих символов и `..`) сохранена |
-| Сворачивание в трей | Настройка «сворачивать в трей»: закрытие прячет окно только при готовом значке, иначе приложение завершается. `Esc`/явный выход из меню всегда завершают процесс |
-| Общие настройки | Вкладка «общие» получила «система»: запуск вместе с Windows и сворачивание в трей; состояние читается из реестра при старте |
+| Сворачивание в трей | Настройка «сворачивать в трей»: закрытие прячет окно только при готовом значке, иначе приложение завершается. Явный пункт «выйти» в меню трея всегда завершает процесс |
+| Общие настройки | Вкладка «общие» получила «система»: запуск вместе с Windows и сворачивание в трей; состояние читается из реестра при старте, устаревший путь автозапуска (после переноса файла) обновляется на текущий исполняемый файл |
 | Приватность | Переключатель «показывать время последнего входа» (`SetShowLastOnline`), смена пароля (`UpdateUserPassword`) с локальной проверкой длины/символов и сохранением нового пароля в DPAPI-сессии, удаление аккаунта (`DeleteMyAccount`) с подтверждающим словом |
 | Локальные параметры | `nativeDesktop` в `settings.json` beta-профиля: только `openAtLogin` и `minimizeToTray`, исключены из payload `SaveAudioSettings` так же, как `nativeAudioSync` |
 | Клавиатура | `AudioToggle` активируется `Space` только после нажатия на нём же, `Enter` не повторяется при удержании, фокус-ринг и `reduced-motion` наследуются от `ControlMotion` |
@@ -31,17 +31,30 @@ decision remain open and cannot be closed by local checks.
 
 ## Проверки / checks
 
-- `cargo check` для `zabor-desktop-platform` и `zabor-native` с
-  `camera-test-source,stream-audio-test-source` — без ошибок и без новых
-  предупреждений; 90 предупреждений `tract-core` остаются видимыми.
+| Команда | Результат |
+| --- | --- |
+| `cargo check -p zabor-desktop-platform` | без ошибок и предупреждений |
+| `cargo check -p zabor-native --features camera-test-source,stream-audio-test-source` | без ошибок; 90 предупреждений `tract-core` остаются видимыми |
+| `cargo test -p zabor-native --lib audio_runtime::` | 33 passed |
+| `cargo test -p zabor-native --lib audio_preferences::` | 3 passed |
+| `cargo test -p zabor-native --lib tray::` | 4 passed |
+| `cargo test -p zabor-native --lib autostart::` | 3 passed |
+| `cargo test -p zabor-native --lib strings::` | 2 passed |
+| `cargo test -p zabor-native --test audio_preferences_local` | 12 passed |
+| `cargo fmt -p zabor-native -p zabor-desktop-platform -- --check` | без diff |
+
 - `audio_preferences_local.rs` дополнительно утверждает, что `nativeDesktop`
   не попадает в payload `SaveAudioSettings`.
 - Новые unit-тесты: локальные desktop-параметры (разбор, round-trip через
-  локальный файл, отсутствие серверной синхронизации) и правило
-  «прятать окно только при готовом трее».
+  локальный файл, отсутствие серверной синхронизации), правило
+  «прятать окно только при готовом трее» и проверка пароля без логина.
 - Тест `native_views_reference_existing_bilingual_keys` проверяет, что все
   ключи, использованные в новых `.slint`-экранах, существуют в обоих каталогах
   (`assets/catalogs/ru.json`, `en.json`).
+- Тесты `startup::` и `update_helper/host/io` в этом прогоне не пригодны:
+  им нужны `ZABOR_UPDATE_TEST_DIRECTORY` и `ZABOR_UPDATE_TEST_HELPER` из
+  `scripts/native/packaging/verify-update-*.py`. Без них они падают на
+  предполёте, а не из-за кода. Это ограничение прогона, а не успех.
 
 ## Остаётся / remaining
 
@@ -57,8 +70,9 @@ decision remain open and cannot be closed by local checks.
    hotplug/sleep/AEC, длительные сессии и утечки.
 6. Ключи издателя, подписанные приложение и helper, финальная инвентаризация
    пакета и Corresponding Source.
-7. Документ-сверка лицензий транзитивных зависимостей нового крейта
-   (`windows` crate) для будущей поставки.
+7. Полный комплект лицензий транзитивных зависимостей и Corresponding Source
+   для будущей нативной поставки: новый крейт уже описан в
+   `THIRD-PARTY-NOTICES.md`, но итоговый bundle собирается упаковщиком.
 
 ## Границы заявлений / claim boundaries
 
