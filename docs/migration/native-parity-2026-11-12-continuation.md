@@ -55,6 +55,13 @@ decision remain open and cannot be closed by local checks.
   им нужны `ZABOR_UPDATE_TEST_DIRECTORY` и `ZABOR_UPDATE_TEST_HELPER` из
   `scripts/native/packaging/verify-update-*.py`. Без них они падают на
   предполёте, а не из-за кода. Это ограничение прогона, а не успех.
+- Полный набор из 20 integration-файлов в этой итерации повторно не
+  прогонялся: изменения не затрагивают chat/media/voice, а `audio_preferences_local`
+  прогнан отдельно (12 passed). Предыдущий baseline 132 passed относится к
+  коммиту `5f27f71`.
+- Артефакт `release/native-audit-3.8.0-rust-x64/` собран из коммита `364b50f`
+  и **не содержит** изменений этой итерации; его файлы и receipt не
+  перезаписывались.
 
 ## Остаётся / remaining
 
