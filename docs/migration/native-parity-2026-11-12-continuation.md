@@ -39,7 +39,8 @@ decision remain open and cannot be closed by local checks.
 | `cargo test -p zabor-native --lib audio_preferences::` | 3 passed |
 | `cargo test -p zabor-native --lib tray::` | 4 passed |
 | `cargo test -p zabor-native --lib autostart::` | 3 passed |
-| `cargo test -p zabor-native --lib strings::` | 2 passed |
+| `cargo test -p zabor-native --lib strings::` | 2 passed (после добавления новых экранов) |
+| `cargo test -p zabor-native --lib auth::` | 5 passed, включая проверку пароля без логина |
 | `cargo test -p zabor-native --test audio_preferences_local` | 12 passed |
 | `cargo fmt -p zabor-native -p zabor-desktop-platform -- --check` | без diff |
 
