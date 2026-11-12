@@ -6,6 +6,7 @@ pub enum StartupRoute {
     Help,
     Preview { updater: bool },
     App,
+    Developer,
     Health,
     Baseline { bundle: PathBuf, archive: PathBuf },
 }
@@ -42,6 +43,7 @@ impl StartupRoute {
         let mut snapshot = false;
         let mut interaction = false;
         let mut app = false;
+        let mut developer = false;
         let mut index = 0;
         while index < arguments.len() {
             let option = arguments[index].as_str();
@@ -50,6 +52,7 @@ impl StartupRoute {
             }
             match option {
                 "--app" => app = true,
+                "--developer" => developer = true,
                 "--interaction-check" => interaction = true,
                 "--reduced-motion" => {}
                 "--locale" | "--server" | "--profile" | "--snapshot" | "--preview" | "--scale"
@@ -75,6 +78,19 @@ impl StartupRoute {
         }
         if snapshot && interaction {
             return Err("snapshot-interaction-routes-cannot-mix");
+        }
+        if developer {
+            if app
+                || preview.is_some()
+                || snapshot
+                || interaction
+                || seen.contains("--profile")
+                || seen.contains("--state")
+                || seen.contains("--at-ms")
+            {
+                return Err("developer-route-cannot-mix");
+            }
+            return Ok(Self::Developer);
         }
         if preview.is_some() || snapshot || interaction {
             Ok(Self::Preview {
@@ -113,6 +129,34 @@ mod tests {
             vec!["--app", "--preview", "home"],
             vec!["--profile", "other"],
             vec!["--state", "error"],
+        ] {
+            assert!(StartupRoute::parse(&args(&input)).is_err(), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn developer_route_is_explicit_and_cannot_mix_with_other_routes() {
+        assert_eq!(
+            StartupRoute::parse(&args(&["--developer"])),
+            Ok(StartupRoute::Developer)
+        );
+        assert_eq!(
+            StartupRoute::parse(&args(&[
+                "--developer",
+                "--locale",
+                "en",
+                "--server",
+                "http://127.0.0.1:8080/zabor_v3"
+            ])),
+            Ok(StartupRoute::Developer)
+        );
+        for input in [
+            vec!["--developer", "--app"],
+            vec!["--developer", "--preview", "home"],
+            vec!["--developer", "--snapshot", "a.png"],
+            vec!["--developer", "--interaction-check"],
+            vec!["--developer", "--profile", "other"],
+            vec!["--developer", "--developer"],
         ] {
             assert!(StartupRoute::parse(&args(&input)).is_err(), "{input:?}");
         }

@@ -463,10 +463,16 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut reduced_motion = false;
     let mut profile_path: Option<PathBuf> = None;
     let mut interaction_check = false;
+    let mut developer = false;
     let mut index = 0;
     while index < arguments.len() {
         let option = arguments[index].as_str();
         if option == "--app" {
+            index += 1;
+            continue;
+        }
+        if option == "--developer" {
+            developer = true;
             index += 1;
             continue;
         }
@@ -509,7 +515,13 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let profile = if snapshot.is_none() && preview.is_none() && !interaction_check {
         let root = match profile_path {
             Some(path) => path,
-            None => Profile::default_path()?,
+            None => {
+                if developer {
+                    Profile::developer_path()?
+                } else {
+                    Profile::default_path()?
+                }
+            }
         };
         Some(Arc::new(Profile::open(&root)?))
     } else {
@@ -594,11 +606,16 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let audio_controls = audio_preferences.controls.clone();
     let stop = CancellationToken::new();
     let preview_mode = preview.is_some() || snapshot.is_some() || interaction_check;
+    let autostart_name = if developer {
+        zabor_native::autostart::DEVELOPER_VALUE_NAME
+    } else {
+        zabor_native::autostart::VALUE_NAME
+    };
     let desktop = audio_preferences.desktop();
     ui.set_open_at_login(desktop.open_at_login);
     ui.set_minimize_to_tray(desktop.minimize_to_tray);
     if !preview_mode {
-        match zabor_native::autostart::reconcile_autostart() {
+        match zabor_native::autostart::reconcile_autostart_named(autostart_name) {
             Ok(enabled) => {
                 if enabled != desktop.open_at_login {
                     audio_preferences.desktop_setting("openAtLogin", enabled);
@@ -1069,7 +1086,9 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if key == "openAtLogin" && !preview_mode {
             let result = std::env::current_exe()
                 .map_err(|_| zabor_native::autostart::AutostartError::InvalidPath)
-                .and_then(|exe| zabor_native::autostart::configure_autostart(&exe, value));
+                .and_then(|exe| {
+                    zabor_native::autostart::configure_autostart_named(autostart_name, &exe, value)
+                });
             if result.is_err() {
                 show_error(&ui, AuthError::Validation("validation.sessionSaveError"));
                 return;

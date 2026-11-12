@@ -19,6 +19,7 @@ impl std::error::Error for AutostartError {}
 
 pub const REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 pub const VALUE_NAME: &str = "zabor-native-beta";
+pub const DEVELOPER_VALUE_NAME: &str = "zabor-native-dev";
 
 pub fn format_command(exe_path: &Path) -> Result<String, AutostartError> {
     let path_str = exe_path.to_str().ok_or(AutostartError::InvalidPath)?;
@@ -48,33 +49,52 @@ pub fn format_command(exe_path: &Path) -> Result<String, AutostartError> {
 
 #[cfg(windows)]
 pub fn configure_autostart(exe_path: &Path, enabled: bool) -> Result<(), AutostartError> {
+    configure_autostart_named(VALUE_NAME, exe_path, enabled)
+}
+
+#[cfg(windows)]
+pub fn configure_autostart_named(
+    value_name: &str,
+    exe_path: &Path,
+    enabled: bool,
+) -> Result<(), AutostartError> {
     let command = enabled.then(|| format_command(exe_path)).transpose()?;
-    zabor_desktop_platform::autostart::configure(command.as_deref())
+    zabor_desktop_platform::autostart::configure(value_name, command.as_deref())
         .map_err(|error| AutostartError::CommandFailed(error.to_string()))
 }
 
 #[cfg(windows)]
 pub fn is_autostart_enabled() -> Result<bool, AutostartError> {
+    is_autostart_enabled_named(VALUE_NAME)
+}
+
+#[cfg(windows)]
+pub fn is_autostart_enabled_named(value_name: &str) -> Result<bool, AutostartError> {
     let exe = std::env::current_exe()
         .map_err(|error| AutostartError::CommandFailed(error.to_string()))?;
     let expected = format_command(&exe)?;
-    zabor_desktop_platform::autostart::command()
+    zabor_desktop_platform::autostart::command(value_name)
         .map(|command| command.as_deref() == Some(expected.as_str()))
         .map_err(|error| AutostartError::CommandFailed(error.to_string()))
 }
 
 #[cfg(windows)]
 pub fn reconcile_autostart() -> Result<bool, AutostartError> {
+    reconcile_autostart_named(VALUE_NAME)
+}
+
+#[cfg(windows)]
+pub fn reconcile_autostart_named(value_name: &str) -> Result<bool, AutostartError> {
     let exe = std::env::current_exe()
         .map_err(|error| AutostartError::CommandFailed(error.to_string()))?;
     let expected = format_command(&exe)?;
-    let stored = zabor_desktop_platform::autostart::command()
+    let stored = zabor_desktop_platform::autostart::command(value_name)
         .map_err(|error| AutostartError::CommandFailed(error.to_string()))?;
     let Some(stored) = stored else {
         return Ok(false);
     };
     if stored != expected {
-        zabor_desktop_platform::autostart::configure(Some(&expected))
+        zabor_desktop_platform::autostart::configure(value_name, Some(&expected))
             .map_err(|error| AutostartError::CommandFailed(error.to_string()))?;
     }
     Ok(true)

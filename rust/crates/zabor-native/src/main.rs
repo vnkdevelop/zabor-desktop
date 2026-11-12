@@ -30,11 +30,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let route = StartupRoute::parse(&arguments)?;
     match route {
         StartupRoute::Help => {
-            println!("Native client under development, not a released client.\n--app --server URL --locale ru|en (requires independently provisioned installation trust)\n--preview login|confirm|setup|home --snapshot FILE.png --scale 1|1.25|1.5|2\n--preview updater --state downloading|installing|error --locale ru|en\n--snapshot FILE.png --at-ms 0 --scale 1|1.25|1.5|2 --reduced-motion\n--interaction-check\n--native-update-health (private inherited startup only)\n--native-establish-baseline --bundle SIGNED.json --archive PACKAGE.zip (explicit accepted installation only)");
+            println!("Native client under development, not a released client.\n--app --server URL --locale ru|en (requires independently provisioned installation trust)\n--developer --server URL --locale ru|en (explicit development preview: bypasses installation trust, separate zabor-desktop-native-dev profile, never release acceptance)\n--preview login|confirm|setup|home --snapshot FILE.png --scale 1|1.25|1.5|2\n--preview updater --state downloading|installing|error --locale ru|en\n--snapshot FILE.png --at-ms 0 --scale 1|1.25|1.5|2 --reduced-motion\n--interaction-check\n--native-update-health (private inherited startup only)\n--native-establish-baseline --bundle SIGNED.json --archive PACKAGE.zip (explicit accepted installation only)");
             return Ok(());
         }
         StartupRoute::Preview { updater: false } => return shell::run(&arguments),
         StartupRoute::Preview { updater: true } => {}
+        StartupRoute::Developer => {
+            eprintln!(
+                "zabor developer preview: installation trust bypassed, separate development profile, not an accepted installation"
+            );
+            return shell::run(&arguments);
+        }
         StartupRoute::App | StartupRoute::Health => {
             let startup = zabor_native::startup::StartupOwner::prepare(
                 &route,

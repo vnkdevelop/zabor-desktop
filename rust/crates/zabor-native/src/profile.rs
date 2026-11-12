@@ -50,6 +50,12 @@ impl Profile {
             .ok_or(ProfileError::Storage)
     }
 
+    pub fn developer_path() -> Result<PathBuf, ProfileError> {
+        std::env::var_os("APPDATA")
+            .map(|path| PathBuf::from(path).join("zabor-desktop-native-dev"))
+            .ok_or(ProfileError::Storage)
+    }
+
     pub fn open(root: &Path) -> Result<Self, ProfileError> {
         import::check_path(root, true).map_err(|_| ProfileError::Storage)?;
         let import_lock = import::profile_gate(root).map_err(|_| ProfileError::Storage)?;
