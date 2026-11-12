@@ -28,6 +28,7 @@ decision remain open and cannot be closed by local checks.
 | Локальные параметры | `nativeDesktop` в `settings.json` beta-профиля: только `openAtLogin` и `minimizeToTray`, исключены из payload `SaveAudioSettings` так же, как `nativeAudioSync` |
 | Клавиатура | `AudioToggle` активируется `Space` только после нажатия на нём же, `Enter` не повторяется при удержании, фокус-ринг и `reduced-motion` наследуются от `ControlMotion` |
 | Ошибка процессора микрофона | `MicProcessor::process_shared` больше не публикует `processor_failed`, `speaking` и `mic_db` до проверки исходного capture-commit. Публикация остаётся в `AudioFlow::capture`/`submit_frame`, поэтому устаревший кадр не может сбросить состояние нового захвата. Это исправляет ранее падавший unit-тест `shared_processor_success_and_failure_do_not_publish_before_original_capture_commit` |
+| Developer-запуск | Явный `--developer`: обходит только обёртку доверия к установке, использует профиль `zabor-desktop-native-dev` и значение автозапуска `zabor-native-dev`, не смешивается с `--app`/preview/snapshot/`--profile`. Допуск к серверу не обходится: attestation остаётся из `ZABOR_CLIENT_SECRET` |
 
 ## Проверки / checks
 
@@ -41,8 +42,13 @@ decision remain open and cannot be closed by local checks.
 | `cargo test -p zabor-native --lib autostart::` | 3 passed |
 | `cargo test -p zabor-native --lib strings::` | 2 passed (после добавления новых экранов) |
 | `cargo test -p zabor-native --lib auth::` | 5 passed, включая проверку пароля без логина |
+| `cargo test -p zabor-native --lib startup_route::` | 3 passed, включая запрет смешивания `--developer` с другими маршрутами |
 | `cargo test -p zabor-native --test audio_preferences_local` | 12 passed |
 | `cargo fmt -p zabor-native -p zabor-desktop-platform -- --check` | без diff |
+| `zabor-native.exe --developer --server http://127.0.0.1:9/...` | окно «zabor», профиль `zabor-desktop-native-dev`, процесс жив |
+| `ZABOR-Dev-Setup.exe /quiet` | установка в `%LOCALAPPDATA%\ZaborDev`, ярлыки и запись удаления созданы |
+| `ZABOR-Dev-Setup.exe --uninstall /quiet` | каталог, ярлыки и запись удаления удалены; профиль в `%APPDATA%` сохранён |
+| повторная установка | exit 0, файлы совпадают по SHA-256 |
 
 - `audio_preferences_local.rs` дополнительно утверждает, что `nativeDesktop`
   не попадает в payload `SaveAudioSettings`.
@@ -81,6 +87,17 @@ decision remain open and cannot be closed by local checks.
 показывает только системные Windows DLL и `onnxruntime.dll` — Electron, Node.js,
 WebView2 и Python в импортах отсутствуют. **Это оптимизированный артефакт
 разработки, а не установщик и не release acceptance.**
+
+### Developer-установщик
+
+`release/ZABOR-Dev-Setup.exe` (50 116 608 Б, SHA-256
+`ade959292da0064189117ec50b72d8b6a98063452559254f44320bc3f2a148c3`) собран из
+`scripts/native/packaging/dev-installer.cs` с встроенным payload. Он ставит файлы
+в `%LOCALAPPDATA%\ZaborDev`, создаёт ярлык «zabor (dev)» на рабочем столе и в
+меню «Пуск», запись удаления в `HKCU` и не требует администратора. Ярлык
+запускает клиент с `--developer`. Установщик **не подписан**, не публикуется и
+не является релизом; при запущенном клиенте он отказывается работать, потому что
+закрытие окна сворачивает приложение в трей — выходить нужно пунктом «выйти».
 
 ## Остаётся / remaining
 

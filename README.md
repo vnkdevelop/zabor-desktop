@@ -129,6 +129,8 @@ Copyright (C) 2026 vnkdevelop. Код распространяется по ли
 | [docs/legal-requests.md](docs/legal-requests.md) | Порядок рассмотрения запросов уполномоченных органов |
 | [docs/content-complaints.md](docs/content-complaints.md) | Порядок направления жалоб на содержимое |
 | [docs/compliance-checklist.md](docs/compliance-checklist.md) | Состояние соответствия требованиям и открытые вопросы |
+| [docs/migration/native-cutover-plan.md](docs/migration/native-cutover-plan.md) | План перехода Electron → native: буферная версия, профили, версии |
+| [docs/migration/native-parity-2026-11-12-continuation.md](docs/migration/native-parity-2026-11-12-continuation.md) | Текущее состояние native-переноса, проверки и блокеры |
 
 Приложение использует сквозное шифрование переписки. Ключи формируются и хранятся только на устройствах участников, поэтому содержимое сообщений и файлов недоступно Оператору — подробности и ограничения защитных свойств в [CRYPTO-NOTICE.md](CRYPTO-NOTICE.md).
 
