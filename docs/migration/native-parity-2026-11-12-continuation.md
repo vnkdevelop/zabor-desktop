@@ -61,8 +61,26 @@ decision remain open and cannot be closed by local checks.
   прогнан отдельно (12 passed). Предыдущий baseline 132 passed относится к
   коммиту `5f27f71`.
 - Артефакт `release/native-audit-3.8.0-rust-x64/` собран из коммита `364b50f`
-  и **не содержит** изменений этой итерации; его файлы и receipt не
-  перезаписывались.
+  и не перезаписывался. Актуальная сборка этой итерации — отдельный каталог
+  ниже.
+
+## Сборка этой итерации / build
+
+`cargo build --release -p zabor-native --offline` (default features:
+`native-media`, `neural-dsp`, static CRT, LTO) завершился за 21 м 36 с.
+Результат скопирован в `release/native-continuation-2026-11-12/`:
+
+| Файл | Байт | SHA-256 |
+| --- | --- | --- |
+| `zabor-native.exe` | 86 907 904 | `b02812b72188f0c76e7b8c6a4299f2445d698acf6509a4ef7c94f56bd724b275` |
+| `onnxruntime.dll` | 17 253 728 | `cb2fa518b18356617f6f9f460c012501da2819ec7e5c1d80bd8f5de20492db0c` |
+| `onnxruntime_providers_shared.dll` | 21 816 | `8cea20be64259950cda8643af0ed42c2a424400fc3bb9bb29f9a35cee6b3419f` |
+
+`build-receipt.json` фиксирует `applicationSourceCommit 8483162`, `signed: false`,
+`nativeClientReady: false`, `installationAllowed: false`. `dumpbin /dependents`
+показывает только системные Windows DLL и `onnxruntime.dll` — Electron, Node.js,
+WebView2 и Python в импортах отсутствуют. **Это оптимизированный артефакт
+разработки, а не установщик и не release acceptance.**
 
 ## Остаётся / remaining
 
