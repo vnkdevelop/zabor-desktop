@@ -106,6 +106,9 @@ enum Command {
     Achievements(zabor_native::achievements::AchievementQuery),
     MemberAction(member_actions::Request),
     Logout,
+    SetShowLastOnline(bool),
+    ChangePassword(Zeroizing<String>),
+    DeleteAccount,
     Join(String),
     Leave,
     Audio,
@@ -276,6 +279,10 @@ enum UiEvent {
     Hub(HubEvent),
     Disconnected,
     SignedOut,
+    ShowLastOnline(bool),
+    PasswordChanged,
+    PasswordFailed(AuthError),
+    DeleteAccountResult(Result<(), AuthError>),
     Avatar(avatar_ui::Event),
     App(app_ui::Event),
     Members(member_ui::Event),
@@ -587,6 +594,49 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let audio_controls = audio_preferences.controls.clone();
     let stop = CancellationToken::new();
     let preview_mode = preview.is_some() || snapshot.is_some() || interaction_check;
+    let desktop = audio_preferences.desktop();
+    ui.set_open_at_login(desktop.open_at_login);
+    ui.set_minimize_to_tray(desktop.minimize_to_tray);
+    if !preview_mode {
+        match zabor_native::autostart::reconcile_autostart() {
+            Ok(enabled) => {
+                if enabled != desktop.open_at_login {
+                    audio_preferences.desktop_setting("openAtLogin", enabled);
+                    ui.set_open_at_login(enabled);
+                }
+            }
+            Err(_) => show_error(&ui, AuthError::Validation("validation.sessionSaveError")),
+        }
+    }
+    let tray = Rc::new(RefCell::new(None::<zabor_desktop_platform::tray::Tray>));
+    if !preview_mode {
+        let strings = zabor_native::tray::get_tray_strings(ui.get_language().as_str());
+        let tray_ui = ui.as_weak();
+        let tray_stop = stop.clone();
+        match zabor_desktop_platform::tray::Tray::new(strings.restore, strings.quit, move |event| {
+            let weak = tray_ui.clone();
+            let stop = tray_stop.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    if event == zabor_desktop_platform::tray::Event::Quit {
+                        stop.cancel();
+                        let _ = slint::quit_event_loop();
+                    } else {
+                        let _ = ui.show();
+                        ui.window().set_minimized(false);
+                        ui.window()
+                            .with_winit_window(|window| window.focus_window());
+                        if event == zabor_desktop_platform::tray::Event::Unavailable {
+                            show_error(&ui, AuthError::Validation("validation.sessionSaveError"));
+                        }
+                    }
+                }
+            });
+        }) {
+            Ok(icon) => *tray.borrow_mut() = Some(icon),
+            Err(_) => show_error(&ui, AuthError::Validation("validation.sessionSaveError")),
+        }
+    }
     let audio_runtime = if preview_mode {
         SharedAudio::new(audio_controls.clone(), stop.child_token(), |_, _, _| {
             Box::pin(async { Err(MediaError::Microphone) })
@@ -928,12 +978,109 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let language_preferences = audio_preferences.clone();
     let language_errors = send_update.clone();
     let language_ui = ui.as_weak();
+    let language_tray = tray.clone();
     ui.on_language_changed(move |language| {
         if !language_preferences.language(language.as_str()) {
             language_errors(UiEvent::Toast("validation.sessionSaveError"));
         }
         if let Some(ui) = language_ui.upgrade() {
             refresh_audio_names(&ui);
+        }
+        if let Some(tray) = language_tray.borrow().as_ref() {
+            let strings = zabor_native::tray::get_tray_strings(language.as_str());
+            tray.labels(strings.restore, strings.quit);
+        }
+    });
+    let privacy_commands = commands.clone();
+    let privacy_ui = ui.as_weak();
+    ui.on_toggle_show_last_online(move |show| {
+        if let Some(ui) = privacy_ui.upgrade().filter(|ui| ui.get_authenticated()) {
+            if privacy_commands
+                .try_send(Command::SetShowLastOnline(show))
+                .is_err()
+            {
+                show_error(&ui, AuthError::Network);
+            }
+        }
+    });
+    let password_commands = commands.clone();
+    let password_ui = ui.as_weak();
+    ui.on_change_password(move |value| {
+        let Some(ui) = password_ui
+            .upgrade()
+            .filter(|ui| ui.get_authenticated() && ui.get_connected())
+        else {
+            return;
+        };
+        if ui.get_password_pending() {
+            return;
+        }
+        ui.set_password_error("".into());
+        ui.set_password_pending(true);
+        if password_commands
+            .try_send(Command::ChangePassword(Zeroizing::new(value.to_string())))
+            .is_err()
+        {
+            ui.set_password_pending(false);
+            show_error(&ui, AuthError::Network);
+        }
+    });
+    let delete_commands = commands.clone();
+    let delete_ui = ui.as_weak();
+    ui.on_delete_account(move || {
+        let Some(ui) = delete_ui
+            .upgrade()
+            .filter(|ui| ui.get_authenticated() && ui.get_connected())
+        else {
+            return;
+        };
+        if ui.get_delete_pending() {
+            return;
+        }
+        let typed = ui.get_delete_confirm_input().trim().to_lowercase();
+        let expected = Strings::new(ui.get_language().as_str())
+            .map(|strings| {
+                strings
+                    .text("settings.privacy.deleteAccountConfirmWord")
+                    .trim()
+                    .to_lowercase()
+            })
+            .unwrap_or_default();
+        if typed.is_empty() || (typed != expected && typed != "подтверждаю" && typed != "confirm")
+        {
+            return;
+        }
+        ui.set_delete_error("".into());
+        ui.set_delete_pending(true);
+        if delete_commands.try_send(Command::DeleteAccount).is_err() {
+            ui.set_delete_pending(false);
+            show_error(&ui, AuthError::Network);
+        }
+    });
+    let desktop_preferences = audio_preferences.clone();
+    let desktop_ui = ui.as_weak();
+    ui.on_desktop_setting_changed(move |key, value| {
+        let Some(ui) = desktop_ui.upgrade() else {
+            return;
+        };
+        if !matches!(key.as_str(), "openAtLogin" | "minimizeToTray") {
+            return;
+        }
+        if key == "openAtLogin" && !preview_mode {
+            let result = std::env::current_exe()
+                .map_err(|_| zabor_native::autostart::AutostartError::InvalidPath)
+                .and_then(|exe| zabor_native::autostart::configure_autostart(&exe, value));
+            if result.is_err() {
+                show_error(&ui, AuthError::Validation("validation.sessionSaveError"));
+                return;
+            }
+        }
+        if desktop_preferences.desktop_setting(key.as_str(), value) {
+            let desktop = desktop_preferences.desktop();
+            ui.set_open_at_login(desktop.open_at_login);
+            ui.set_minimize_to_tray(desktop.minimize_to_tray);
+        } else {
+            show_error(&ui, AuthError::Validation("validation.sessionSaveError"));
         }
     });
     let edit_preferences = audio_preferences.clone();
@@ -1815,12 +1962,25 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     });
     let weak = ui.as_weak();
     let close_stop = stop.clone();
+    let close_tray = tray.clone();
     ui.on_window_action(move |action| {
         if let Some(ui) = weak.upgrade() {
             match action.as_str() {
                 "close" => {
-                    close_stop.cancel();
-                    let _ = ui.hide();
+                    let hide = !preview_mode
+                        && zabor_native::tray::hides_on_close(
+                            ui.get_minimize_to_tray(),
+                            close_tray
+                                .borrow()
+                                .as_ref()
+                                .is_some_and(|tray| tray.ready()),
+                        );
+                    if hide {
+                        let _ = ui.hide();
+                    } else {
+                        close_stop.cancel();
+                        let _ = slint::quit_event_loop();
+                    }
                 }
                 "minimize" => ui.window().set_minimized(true),
                 "maximize" => {
@@ -1837,8 +1997,23 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let close_stop = stop.clone();
+    let close_ui = ui.as_weak();
+    let close_tray = tray.clone();
     ui.window().on_close_requested(move || {
-        close_stop.cancel();
+        let hide = !preview_mode
+            && close_ui.upgrade().is_some_and(|ui| {
+                zabor_native::tray::hides_on_close(
+                    ui.get_minimize_to_tray(),
+                    close_tray
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|tray| tray.ready()),
+                )
+            });
+        if !hide {
+            close_stop.cancel();
+            let _ = slint::quit_event_loop();
+        }
         slint::CloseRequestResponse::HideWindow
     });
     let weak = ui.as_weak();
@@ -1909,6 +2084,42 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                 UiEvent::Disconnected => {
                     ui.set_connected(false);
                     ui.set_busy(false);
+                }
+                UiEvent::ShowLastOnline(show) => {
+                    latest.borrow_mut().user.show_last_online = Some(show);
+                    ui.set_show_last_online(show);
+                }
+                UiEvent::PasswordChanged => {
+                    ui.set_password_pending(false);
+                    ui.set_password_input("".into());
+                    ui.set_password_error("".into());
+                    ui.set_modal(0);
+                    updated_app.borrow_mut().feedback(
+                        &ui,
+                        "toasts.passwordChanged",
+                        Instant::now(),
+                    );
+                }
+                UiEvent::PasswordFailed(error) => {
+                    ui.set_password_pending(false);
+                    if let Ok(strings) = Strings::new(ui.get_language().as_str()) {
+                        ui.set_password_error(strings.auth_error(&error).into());
+                    }
+                }
+                UiEvent::DeleteAccountResult(result) => {
+                    ui.set_delete_pending(false);
+                    match result {
+                        Ok(()) => {
+                            ui.set_delete_confirm_input("".into());
+                            ui.set_delete_error("".into());
+                            ui.set_modal(0);
+                        }
+                        Err(error) => {
+                            if let Ok(strings) = Strings::new(ui.get_language().as_str()) {
+                                ui.set_delete_error(strings.auth_error(&error).into());
+                            }
+                        }
+                    }
                 }
                 UiEvent::SignedOut => {
                     updated_rc.borrow_mut().close();
@@ -2549,7 +2760,13 @@ pub fn run(arguments: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             },
         );
     }
-    let ui_result = ui.run();
+    ui.show()?;
+    let ui_result = if preview_mode {
+        slint::run_event_loop()
+    } else {
+        slint::run_event_loop_until_quit()
+    };
+    tray.borrow_mut().take();
     ui.invoke_cancel_picker_query();
     clear_picker_rows(&ui);
     mic_test_ui.borrow_mut().close();
@@ -4082,6 +4299,11 @@ async fn worker(
                     work.publish(UiEvent::SignedIn(data));
                 }
                 Ok(MainResult::Event(event)) => {
+                    if let UiEvent::DeleteAccountResult(Ok(())) = event {
+                        work.publish(UiEvent::DeleteAccountResult(Ok(())));
+                        intents.request(CriticalAction::Logout);
+                        continue;
+                    }
                     if let UiEvent::App(app_ui::Event::Achievements(result)) = event {
                         let mut job = achievement_io.start(*result, update.clone());
                         let completed = run_session!(work, &mut job.receiver);
@@ -4104,6 +4326,29 @@ async fn worker(
                     } else {
                         work.publish(event);
                     }
+                }
+                Ok(MainResult::PasswordChanged(credentials)) => {
+                    saved_credentials = Some(credentials.clone());
+                    if let (Some(user), true) = (current_user.as_ref(), profile.is_some()) {
+                        let prepared =
+                            run_session!(work, session_io.prepare(user.id.clone(), credentials));
+                        match prepared {
+                            Some(Ok(prepared)) => {
+                                match run_session!(work, session_io.save(command_ticket, prepared))
+                                {
+                                    Some(Ok(true)) => {}
+                                    Some(Err(_)) | Some(Ok(false)) | None => {
+                                        work.publish(UiEvent::Toast("validation.sessionSaveError"))
+                                    }
+                                }
+                            }
+                            Some(Err(_)) => {
+                                work.publish(UiEvent::Toast("validation.sessionSaveError"))
+                            }
+                            None => {}
+                        }
+                    }
+                    work.publish(UiEvent::PasswordChanged);
                 }
                 Ok(MainResult::Profile(result)) => {
                     if !result.query.alive() {
@@ -4197,6 +4442,9 @@ async fn worker(
                 | Command::ProfileAddFriend(..)
                 | Command::Achievements(..)
                 | Command::MemberAction(..)
+                | Command::SetShowLastOnline(..)
+                | Command::ChangePassword(..)
+                | Command::DeleteAccount
                 | Command::Audio => unreachable!(),
                 Command::Notification(kind, id, accept) => {
                     if !respond_notification(&connection, kind, &id, accept)
@@ -5961,6 +6209,7 @@ fn color(value: &str) -> slint::Color {
 
 fn apply_bootstrap(ui: &NativeApp, data: &Bootstrap) {
     ui.set_user_id(data.user.id.clone().into());
+    ui.set_show_last_online(data.user.show_last_online.unwrap_or(true));
     ui.set_muted(data.user.is_muted || data.user.is_server_muted || data.user.is_server_deafened);
     ui.set_deafened(data.user.is_deafened || data.user.is_server_deafened);
     ui.set_user_name(data.user.display_name.clone().into());

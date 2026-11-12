@@ -7946,6 +7946,13 @@ name = "zabor-core"
 version = "0.1.0"
 
 [[package]]
+name = "zabor-desktop-platform"
+version = "0.1.0"
+dependencies = [
+ "windows",
+]
+
+[[package]]
 name = "zabor-dsp"
 version = "0.1.0"
 
@@ -8011,6 +8018,7 @@ dependencies = [
  "webrtc-vad",
  "windows-dpapi",
  "zabor-camera",
+ "zabor-desktop-platform",
  "zabor-dsp",
  "zabor-input",
  "zabor-profile-helper",

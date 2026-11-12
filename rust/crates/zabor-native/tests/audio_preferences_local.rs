@@ -72,6 +72,7 @@ impl Fixture {
                         serde_json::from_str(arguments[0].as_str().unwrap()).unwrap();
                     assert!(settings.is_object());
                     assert!(settings.get("nativeAudioSync").is_none());
+                    assert!(settings.get("nativeDesktop").is_none());
                     let (reply, response) = oneshot::channel();
                     if sender.send(Request { settings, reply }).await.is_err() {
                         return;

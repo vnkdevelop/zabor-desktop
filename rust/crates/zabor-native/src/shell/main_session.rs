@@ -6,6 +6,7 @@ use zabor_native::roster::{respond_notification, NotificationKind};
 
 pub(super) enum MainResult {
     Authentication(LoginOutcome, Credentials),
+    PasswordChanged(Credentials),
     Event(UiEvent),
     Profile(super::UserProfileResult),
 }
@@ -21,6 +22,9 @@ pub(super) fn is_session_command(command: &Command) -> bool {
             | Command::ProfileAddFriend(..)
             | Command::Achievements(..)
             | Command::MemberAction(..)
+            | Command::SetShowLastOnline(..)
+            | Command::ChangePassword(..)
+            | Command::DeleteAccount
             | Command::Notification(
                 NotificationKind::Friend | NotificationKind::Channel,
                 _,
@@ -130,6 +134,55 @@ pub(super) async fn compute(
             Ok(MainResult::Event(UiEvent::NotificationResolved(
                 kind, id, accept,
             )))
+        }
+        Command::SetShowLastOnline(show) => {
+            user.ok_or(AuthError::Network)?;
+            connection
+                .set_show_last_online(show)
+                .await
+                .map_err(AuthError::from)?;
+            Ok(MainResult::Event(UiEvent::ShowLastOnline(show)))
+        }
+        Command::ChangePassword(password) => {
+            let result = async {
+                let user = user.ok_or(AuthError::Network)?;
+                zabor_native::auth::validate_password(&password)?;
+                if !connection
+                    .update_user_password(&password)
+                    .await
+                    .map_err(AuthError::from)?
+                {
+                    return Err(AuthError::Validation(
+                        "settings.privacy.changePasswordFailed",
+                    ));
+                }
+                Ok(Credentials {
+                    username: user.username,
+                    password,
+                })
+            }
+            .await;
+            Ok(match result {
+                Ok(credentials) => MainResult::PasswordChanged(credentials),
+                Err(error) => MainResult::Event(UiEvent::PasswordFailed(error)),
+            })
+        }
+        Command::DeleteAccount => {
+            let result = async {
+                user.ok_or(AuthError::Network)?;
+                if !connection
+                    .delete_my_account()
+                    .await
+                    .map_err(AuthError::from)?
+                {
+                    return Err(AuthError::Validation(
+                        "settings.privacy.deleteAccountFailed",
+                    ));
+                }
+                Ok(())
+            }
+            .await;
+            Ok(MainResult::Event(UiEvent::DeleteAccountResult(result)))
         }
         Command::Modal { kind, value } => {
             let target = if kind == 1 {

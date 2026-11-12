@@ -59,6 +59,7 @@ tract-pulse-opl = { version = "=0.21.4", optional = true }
 [target.'cfg(windows)'.dependencies]
 flate2 = { version = "=1.1.10", features = ["rust_backend"] }
 windows-dpapi = "0.2"
+zabor-desktop-platform = { path = "../zabor-desktop-platform" }
 wasapi = "=0.26.0"
 zabor-camera = { path = "../zabor-camera", optional = true }
 zabor-stream-audio = { path = "../zabor-stream-audio", optional = true }

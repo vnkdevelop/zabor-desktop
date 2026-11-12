@@ -428,6 +428,21 @@ pub fn validate_credentials(credentials: &Credentials) -> Result<(), AuthError> 
     Ok(())
 }
 
+pub fn validate_password(value: &str) -> Result<(), AuthError> {
+    if value.encode_utf16().count() < 4 {
+        return Err(AuthError::Validation("validation.minChars"));
+    }
+    if value.encode_utf16().count() > 25 {
+        return Err(AuthError::Validation("validation.maxChars"));
+    }
+    if !value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || b"!@#$%^&*()_+={}[]:;\"'<>,.?/\\|-".contains(&byte)
+    }) {
+        return Err(AuthError::Validation("validation.latinOnly"));
+    }
+    Ok(())
+}
+
 pub fn validate_name(value: &str) -> Result<(), AuthError> {
     if value.trim().is_empty() {
         return Err(AuthError::Validation("validation.emptyName"));
@@ -459,6 +474,27 @@ mod tests {
             Err(AuthError::Validation("validation.maxNameChars"))
         );
         assert_eq!(validate_name("Виктор"), Ok(()));
+    }
+
+    #[test]
+    fn password_validation_matches_credential_rules_without_a_username() {
+        assert_eq!(validate_password("abcd"), Ok(()));
+        assert_eq!(
+            validate_password("abc"),
+            Err(AuthError::Validation("validation.minChars"))
+        );
+        assert_eq!(
+            validate_password(&"a".repeat(26)),
+            Err(AuthError::Validation("validation.maxChars"))
+        );
+        assert_eq!(
+            validate_password("абвг"),
+            Err(AuthError::Validation("validation.latinOnly"))
+        );
+        assert_eq!(
+            validate_password("p@ss word"),
+            Err(AuthError::Validation("validation.latinOnly"))
+        );
     }
 
     #[test]

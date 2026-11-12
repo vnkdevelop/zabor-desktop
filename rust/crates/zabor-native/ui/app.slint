@@ -1,6 +1,6 @@
 import { FormButton, FormField, IconButton, ControlMotion } from "controls.slint";
 import { ScrollView } from "std-widgets.slint";
-import { AudioSettingsPanel, AudioSettingsView, AudioDeviceItem, AudioSlider, RelaySetting, StreamAudioSetting } from "audio-settings.slint";
+import { AudioSettingsPanel, AudioSettingsView, AudioDeviceItem, AudioSlider, AudioToggle, RelaySetting, StreamAudioSetting } from "audio-settings.slint";
 import { MicTestPanel, MicTestView, MicButtonFeedback } from "mic-test.slint";
 import { StreamSource } from "stream-source.slint";
 import { RemoteViewer } from "remote-viewer.slint";
@@ -165,6 +165,15 @@ export component NativeApp inherits Window {
     out property <length> settings-dialog-y: 36px + (root.height - 36px - min(640px, root.height - 84px - root.test-reserve) - root.test-reserve) / 2;
     out property <length> mic-test-panel-y: root.settings-dialog-y + min(640px, root.height - 84px - root.test-reserve) + 12px;
     in-out property <int> settings-tab;
+    in property <bool> open-at-login;
+    in property <bool> minimize-to-tray: true;
+    in-out property <bool> show-last-online: true;
+    in-out property <string> password-input;
+    in-out property <string> password-error;
+    in-out property <bool> password-pending;
+    in-out property <string> delete-confirm-input;
+    in-out property <string> delete-error;
+    in-out property <bool> delete-pending;
     in-out property <length> settings-scroll-y;
     in-out property <string> volume-peer;
     in-out property <string> volume-name;
@@ -232,6 +241,10 @@ export component NativeApp inherits Window {
     callback stop-share;
     callback process-video;
     callback audio-setting-changed(string, string);
+    callback desktop-setting-changed(string, bool);
+    callback change-password(string);
+    callback toggle-show-last-online(bool);
+    callback delete-account;
     callback refresh-audio-devices;
     callback show-user-volume(string, string);
     callback peer-volume-changed(float);
@@ -541,6 +554,9 @@ export component NativeApp inherits Window {
             ScrollView { x: 24px; y: 140px; width: parent.width - 48px; height: parent.height - 164px; content-y <=> root.settings-scroll-y;
                 VerticalLayout { spacing: 24px;
                     if root.settings-tab == 0 : VerticalLayout { spacing: 12px;
+                        Text { text: root.tr("settings.general.system", root.language); color: white; font-size: 15px; font-weight: 600; }
+                        AudioToggle { label: root.tr("settings.general.autoLaunch", root.language); hint: root.tr("settings.general.autoLaunchDesc", root.language); checked: root.open-at-login; reduced-motion: root.reduced-motion; toggled(value) => { root.desktop-setting-changed("openAtLogin", value); } }
+                        AudioToggle { label: root.tr("settings.general.minimizeToTray", root.language); hint: root.tr("settings.general.minimizeToTrayDesc", root.language); checked: root.minimize-to-tray; reduced-motion: root.reduced-motion; toggled(value) => { root.desktop-setting-changed("minimizeToTray", value); } }
                         Text { text: root.tr("settings.general.language", root.language); color: white; font-size: 15px; font-weight: 600; }
                         Text { text: root.tr("settings.general.languageDesc", root.language); color: #949ba4; font-size: 12px; wrap: word-wrap; }
                         HorizontalLayout { spacing: 12px;
@@ -549,7 +565,14 @@ export component NativeApp inherits Window {
                         }
                     }
                     if root.settings-tab == 1 : AudioSettingsPanel { audio: root.audio-settings; inputs: root.input-devices; outputs: root.output-devices; input-name: root.input-device-name; output-name: root.output-device-name; reduced-motion: root.reduced-motion; devices-failed: root.audio-devices-failed; mic-db: root.mic-db; tr(key) => { return root.tr(key, root.language); } edited(key, value) => { root.audio-setting-changed(key, value); } }
-                    if root.settings-tab == 2 : RelaySetting { relay-only: root.audio-settings.relay-only; reduced-motion: root.reduced-motion; tr(key) => { return root.tr(key, root.language); } toggled(value) => { root.audio-setting-changed("relayOnly", value ? "true" : "false"); } }
+                    if root.settings-tab == 2 : VerticalLayout { spacing: 16px;
+                        Text { text: root.tr("settings.privacy.visibility", root.language); color: white; font-size: 15px; font-weight: 600; }
+                        AudioToggle { label: root.tr("settings.privacy.showLastOnline", root.language); checked: root.show-last-online; disabled: !root.connected; reduced-motion: root.reduced-motion; toggled(value) => { root.toggle-show-last-online(value); } }
+                        RelaySetting { relay-only: root.audio-settings.relay-only; reduced-motion: root.reduced-motion; tr(key) => { return root.tr(key, root.language); } toggled(value) => { root.audio-setting-changed("relayOnly", value ? "true" : "false"); } }
+                        Text { text: root.tr("settings.privacy.changePasswordTitle", root.language); color: white; font-size: 15px; font-weight: 600; }
+                        FormButton { label: root.tr("settings.privacy.changePassword", root.language); activated => { root.password-input = ""; root.password-error = ""; root.modal = 13; } }
+                        FormButton { label: root.tr("settings.privacy.deleteAccount", root.language); foreground: #da373c; activated => { root.delete-confirm-input = ""; root.delete-error = ""; root.modal = 14; } }
+                    }
                     if root.settings-tab == 3 : VerticalLayout { spacing: 12px;
                         FormButton { label: root.tr("profile.editTitle", root.language); activated => { root.profile-source = "none"; root.open-profile(root.user-id); root.edit-profile(); } }
                         FormButton { label: root.tr("settings.privacy.logout", root.language); foreground: #da373c; activated => { root.logout(); } }
@@ -695,12 +718,59 @@ export component NativeApp inherits Window {
             }
         }
     }
+    if root.modal == 13 : Rectangle {
+        y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
+        TouchArea { }
+        Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: min(400px, parent.width - 48px); height: 300px; background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
+            FocusScope { width: parent.width; height: parent.height;
+                init => { password-field.focus-input(); }
+                key-pressed(event) => {
+                    if event.text == Key.Escape { root.modal = 0; return accept; }
+                    return reject;
+                }
+                VerticalLayout { padding: 24px; spacing: 16px;
+                    Text { text: root.tr("settings.privacy.changePasswordTitle", root.language); font-size: 20px; font-weight: 700; color: white; }
+                    Text { text: root.tr("settings.privacy.passwordHint", root.language); font-size: 12px; color: #949ba4; }
+                    password-field := FormField { text <=> root.password-input; label: root.tr("settings.privacy.newPassword", root.language); placeholder: root.tr("settings.privacy.newPassword", root.language); password: true; disabled: root.password-pending; accepted => { if !root.password-pending && root.connected && root.password-input != "" { root.change-password(root.password-input); } } }
+                    if root.password-error != "" : Text { text: root.password-error; color: #da373c; font-size: 14px; wrap: word-wrap; }
+                    HorizontalLayout { spacing: 12px;
+                        FormButton { label: root.tr("common.cancel", root.language); disabled: root.password-pending; activated => { root.modal = 0; } }
+                        FormButton { label: root.tr(root.password-pending ? "common.loading" : "settings.privacy.confirmButton", root.language); primary: true; disabled: root.password-pending || !root.connected || root.password-input == ""; activated => { root.change-password(root.password-input); } }
+                    }
+                }
+            }
+        }
+    }
+    if root.modal == 14 : Rectangle {
+        y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
+        TouchArea { }
+        Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: min(400px, parent.width - 48px); height: 340px; background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
+            FocusScope { width: parent.width; height: parent.height;
+                init => { delete-field.focus-input(); }
+                key-pressed(event) => {
+                    if event.text == Key.Escape { root.modal = 0; return accept; }
+                    return reject;
+                }
+                VerticalLayout { padding: 24px; spacing: 16px;
+                    Text { text: root.tr("settings.privacy.deleteAccountTitle", root.language); font-size: 20px; font-weight: 700; color: white; }
+                    Text { text: root.tr("settings.privacy.deleteAccountWarning", root.language); font-size: 13px; color: #949ba4; wrap: word-wrap; }
+                    Text { text: root.tr("settings.privacy.deleteAccountPrompt", root.language); font-size: 13px; color: #f2f3f5; wrap: word-wrap; }
+                    delete-field := FormField { text <=> root.delete-confirm-input; label: root.tr("settings.privacy.deleteAccountPrompt", root.language); placeholder: root.tr("settings.privacy.deleteAccountConfirmWord", root.language); disabled: root.delete-pending; accepted => { if !root.delete-pending && root.connected && root.delete-confirm-input != "" { root.delete-account(); } } }
+                    if root.delete-error != "" : Text { text: root.delete-error; color: #da373c; font-size: 14px; wrap: word-wrap; }
+                    HorizontalLayout { spacing: 12px;
+                        FormButton { label: root.tr("common.cancel", root.language); disabled: root.delete-pending; activated => { root.modal = 0; } }
+                        FormButton { label: root.tr("settings.privacy.deleteAccountConfirmBtn", root.language); foreground: #da373c; disabled: root.delete-pending || !root.connected || root.delete-confirm-input == ""; activated => { root.delete-account(); } }
+                    }
+                }
+            }
+        }
+    }
     if root.app-feedback != "" : Rectangle {
         x: (parent.width - self.width) / 2; y: parent.height - 76px; width: min(460px, parent.width - 48px); height: 48px;
         background: #161618f0; border-radius: 12px; border-width: 1px; border-color: #ffffff12;
         Text { x: 16px; width: parent.width - 32px; height: parent.height; text: root.app-feedback; color: white; font-size: 14px; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
     }
-    if root.modal > 0 && root.modal != 3 && root.modal != 8 && root.modal != 9 && root.modal != 10 && root.modal != 11 && root.modal != 12 : Rectangle {
+    if root.modal > 0 && root.modal != 3 && root.modal != 8 && root.modal != 9 && root.modal != 10 && root.modal != 11 && root.modal != 12 && root.modal != 13 && root.modal != 14 : Rectangle {
         y: 36px; width: parent.width; height: parent.height - 36px; background: #000000b3;
         Rectangle { x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; width: root.modal == 5 ? 540px : 400px; height: root.modal == 5 ? 600px : root.modal == 3 ? 276px : 288px; background: #161618f0; border-radius: 20px; border-width: 1px; border-color: #ffffff12;
             VerticalLayout { padding: 32px; spacing: 16px;

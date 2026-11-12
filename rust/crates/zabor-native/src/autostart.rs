@@ -18,7 +18,7 @@ impl std::fmt::Display for AutostartError {
 impl std::error::Error for AutostartError {}
 
 pub const REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
-pub const VALUE_NAME: &str = "zabor";
+pub const VALUE_NAME: &str = "zabor-native-beta";
 
 pub fn format_command(exe_path: &Path) -> Result<String, AutostartError> {
     let path_str = exe_path.to_str().ok_or(AutostartError::InvalidPath)?;
@@ -46,34 +46,38 @@ pub fn format_command(exe_path: &Path) -> Result<String, AutostartError> {
     Ok(format!("\"{}\" --app", cleaned))
 }
 
+#[cfg(windows)]
 pub fn configure_autostart(exe_path: &Path, enabled: bool) -> Result<(), AutostartError> {
-    if enabled {
-        let cmd = format_command(exe_path)?;
-        let status = std::process::Command::new("reg")
-            .args([
-                "add", REG_KEY, "/v", VALUE_NAME, "/t", "REG_SZ", "/d", &cmd, "/f",
-            ])
-            .status()
-            .map_err(|e| AutostartError::CommandFailed(e.to_string()))?;
-        if !status.success() {
-            return Err(AutostartError::CommandFailed(
-                "reg add exited with non-zero status".into(),
-            ));
-        }
-    } else {
-        let _ = std::process::Command::new("reg")
-            .args(["delete", REG_KEY, "/v", VALUE_NAME, "/f"])
-            .status();
-    }
-    Ok(())
+    let command = enabled.then(|| format_command(exe_path)).transpose()?;
+    zabor_desktop_platform::autostart::configure(command.as_deref())
+        .map_err(|error| AutostartError::CommandFailed(error.to_string()))
 }
 
+#[cfg(windows)]
 pub fn is_autostart_enabled() -> Result<bool, AutostartError> {
-    let output = std::process::Command::new("reg")
-        .args(["query", REG_KEY, "/v", VALUE_NAME])
-        .output()
-        .map_err(|e| AutostartError::CommandFailed(e.to_string()))?;
-    Ok(output.status.success())
+    let exe = std::env::current_exe()
+        .map_err(|error| AutostartError::CommandFailed(error.to_string()))?;
+    let expected = format_command(&exe)?;
+    zabor_desktop_platform::autostart::command()
+        .map(|command| command.as_deref() == Some(expected.as_str()))
+        .map_err(|error| AutostartError::CommandFailed(error.to_string()))
+}
+
+#[cfg(windows)]
+pub fn reconcile_autostart() -> Result<bool, AutostartError> {
+    let exe = std::env::current_exe()
+        .map_err(|error| AutostartError::CommandFailed(error.to_string()))?;
+    let expected = format_command(&exe)?;
+    let stored = zabor_desktop_platform::autostart::command()
+        .map_err(|error| AutostartError::CommandFailed(error.to_string()))?;
+    let Some(stored) = stored else {
+        return Ok(false);
+    };
+    if stored != expected {
+        zabor_desktop_platform::autostart::configure(Some(&expected))
+            .map_err(|error| AutostartError::CommandFailed(error.to_string()))?;
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

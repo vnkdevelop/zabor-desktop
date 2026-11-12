@@ -60,12 +60,15 @@ export component AudioSlider inherits Rectangle {
     accessible-action-decrement => { root.set-value(root.value - root.step); }
 }
 
-component AudioToggle inherits Rectangle {
+export component AudioToggle inherits Rectangle {
     in property <string> label;
     in property <string> hint;
     in property <bool> checked;
     in property <bool> disabled;
     in property <bool> reduced-motion;
+    private property <bool> space-held;
+    private property <bool> enter-held;
+    changed disabled => { if root.disabled { root.space-held = false; root.enter-held = false; } }
     callback toggled(bool);
     height: max(66px, title.preferred-height + description.preferred-height + 28px);
     background: #222225b3; border-radius: 16px; border-width: 1px; border-color: root.checked ? #ffffff21 : #ffffff12;
@@ -73,12 +76,22 @@ component AudioToggle inherits Rectangle {
     title := Text { x: 16px; y: 12px; width: parent.width - 96px; text: root.label; color: white; font-size: 15px; font-weight: 700; wrap: word-wrap; }
     description := Text { x: 16px; y: title.y + title.preferred-height + 4px; width: parent.width - 96px; text: root.hint; color: #949ba4; font-size: 12px; wrap: word-wrap; }
     Rectangle { x: parent.width - 68px; y: (parent.height - 32px) / 2; width: 52px; height: 32px; border-radius: 16px; background: root.checked ? #c81e70 : #ffffff1a;
-        Rectangle { x: root.checked ? 24px : 4px; y: 4px; width: 24px; height: 24px; border-radius: 12px; background: root.checked ? white : #949ba4; animate x { duration: root.reduced-motion ? 0ms : 150ms; } }
+        Rectangle { x: root.checked ? 24px : 4px; y: 4px; width: 24px; height: 24px; border-radius: 12px; background: root.checked ? white : #949ba4; animate x { duration: root.reduced-motion ? 0ms : 150ms; easing: cubic-bezier(0.16, 1, 0.3, 1); } }
     }
     forward-focus: keys;
     keys := FocusScope { enabled: !root.disabled;
-        key-pressed(event) => { if event.text == Key.Return { root.toggled(!root.checked); return accept; } return reject; }
-        key-released(event) => { if event.text == Key.Space { root.toggled(!root.checked); return accept; } return reject; }
+        focus-lost(reason) => { root.space-held = false; root.enter-held = false; }
+        key-pressed(event) => {
+            if event.modifiers.control || event.modifiers.alt || event.modifiers.meta { return reject; }
+            if event.text == Key.Space { root.space-held = true; return accept; }
+            if event.text == Key.Return { if !root.enter-held { root.enter-held = true; root.toggled(!root.checked); } return accept; }
+            return reject;
+        }
+        key-released(event) => {
+            if event.text == Key.Space { if root.space-held { root.space-held = false; root.toggled(!root.checked); } return accept; }
+            if event.text == Key.Return { root.enter-held = false; return accept; }
+            return reject;
+        }
     }
     TouchArea { enabled: !root.disabled; clicked => { keys.focus(); root.toggled(!root.checked); } }
     if keys.has-focus : Rectangle { x: -2px; y: -2px; width: parent.width + 4px; height: parent.height + 4px; border-radius: 18px; background: transparent; border-width: 2px; border-color: #ee68a9; }

@@ -10,10 +10,54 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 const LOCAL_SYNC_KEY: &str = "nativeAudioSync";
+const DESKTOP_KEY: &str = "nativeDesktop";
 const MAX_SETTINGS_BYTES: usize = 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DesktopPreferences {
+    pub open_at_login: bool,
+    pub minimize_to_tray: bool,
+}
+
+impl Default for DesktopPreferences {
+    fn default() -> Self {
+        Self {
+            open_at_login: false,
+            minimize_to_tray: true,
+        }
+    }
+}
+
+impl DesktopPreferences {
+    fn from_json(value: &Value) -> Self {
+        Self {
+            open_at_login: value["openAtLogin"].as_bool().unwrap_or(false),
+            minimize_to_tray: value["minimizeToTray"].as_bool().unwrap_or(true),
+        }
+    }
+
+    fn to_json(self) -> Value {
+        json!({"openAtLogin": self.open_at_login, "minimizeToTray": self.minimize_to_tray})
+    }
+
+    fn edited(self, key: &str, value: bool) -> Option<Self> {
+        match key {
+            "openAtLogin" => Some(Self {
+                open_at_login: value,
+                ..self
+            }),
+            "minimizeToTray" => Some(Self {
+                minimize_to_tray: value,
+                ..self
+            }),
+            _ => None,
+        }
+    }
+}
 
 struct State {
     settings: AudioSettings,
+    desktop: DesktopPreferences,
     owner: Option<String>,
     editable: bool,
     dirty: bool,
@@ -146,6 +190,12 @@ impl AudioPreferences {
             .as_object_mut()
             .and_then(|raw| raw.remove(LOCAL_SYNC_KEY))
             .unwrap_or(Value::Null);
+        let desktop = DesktopPreferences::from_json(
+            &local
+                .as_object_mut()
+                .and_then(|raw| raw.remove(DESKTOP_KEY))
+                .unwrap_or(Value::Null),
+        );
         let owner = metadata["owner"]
             .as_str()
             .filter(|owner| !owner.is_empty() && owner.len() <= 4096)
@@ -156,6 +206,7 @@ impl AudioPreferences {
         Arc::new(Self {
             state: Mutex::new(State {
                 settings,
+                desktop,
                 dirty: owner.is_some() && metadata["pending"] == true,
                 owner,
                 editable: false,
@@ -172,6 +223,13 @@ impl AudioPreferences {
 
     pub fn settings(&self) -> Option<AudioSettings> {
         self.state.lock().ok().map(|state| state.settings.clone())
+    }
+
+    pub fn desktop(&self) -> DesktopPreferences {
+        self.state
+            .lock()
+            .map(|state| state.desktop)
+            .unwrap_or_default()
     }
 
     pub fn relay_only(&self) -> bool {
@@ -215,6 +273,21 @@ impl AudioPreferences {
         };
         let dirty = state.editable && state.owner.is_some();
         self.apply(&mut state, settings, dirty)
+    }
+
+    pub fn desktop_setting(&self, key: &str, value: bool) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let Some(desktop) = state.desktop.edited(key, value) else {
+            return false;
+        };
+        if desktop == state.desktop {
+            return true;
+        }
+        state.desktop = desktop;
+        self.notify(&mut state);
+        true
     }
 
     fn apply(&self, state: &mut State, settings: AudioSettings, dirty: bool) -> bool {
@@ -334,6 +407,7 @@ impl AudioPreferences {
         let changed = settings != state.settings;
         let next = State {
             settings: settings.clone(),
+            desktop: state.desktop,
             owner: Some(owner.into()),
             editable: true,
             dirty: state.dirty && state.owner.as_deref() == Some(owner),
@@ -420,6 +494,7 @@ impl AudioPreferences {
         let state = self.state.lock().ok()?;
         let mut raw = serde_json::to_value(&state.settings).ok()?;
         raw[LOCAL_SYNC_KEY] = json!({"owner":state.owner,"pending":state.dirty});
+        raw[DESKTOP_KEY] = state.desktop.to_json();
         Some((state.serial, raw))
     }
 
@@ -557,5 +632,72 @@ pub async fn save_audio_settings(hub: &HubConnection, payload: &str) -> Result<b
         Value::Null | Value::Bool(true) => Ok(true),
         Value::Bool(false) => Ok(false),
         _ => Err(HubError::Protocol),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn desktop_preferences_stay_local_and_never_enter_the_server_payload() {
+        let preferences = AudioPreferences::new(&json!({
+            "inputVolume": 150,
+            "nativeDesktop": {"openAtLogin": true, "minimizeToTray": false},
+            "nativeAudioSync": {"owner": "owner", "pending": false}
+        }));
+        assert_eq!(
+            preferences.desktop(),
+            DesktopPreferences {
+                open_at_login: true,
+                minimize_to_tray: false,
+            }
+        );
+        assert!(preferences.settings().is_some_and(|settings| settings
+            .extra
+            .get(DESKTOP_KEY)
+            .is_none()
+            && settings.extra.get(LOCAL_SYNC_KEY).is_none()));
+        assert!(!preferences.desktop_setting("inputVolume", true));
+    }
+
+    #[test]
+    fn desktop_preferences_round_trip_through_the_local_settings_file() {
+        let preferences = AudioPreferences::new(
+            &json!({"nativeDesktop": {"openAtLogin": false, "minimizeToTray": true}}),
+        );
+        assert!(preferences.desktop_setting("openAtLogin", true));
+        assert!(preferences.desktop_setting("minimizeToTray", false));
+        assert_eq!(
+            preferences.desktop(),
+            DesktopPreferences {
+                open_at_login: true,
+                minimize_to_tray: false,
+            }
+        );
+        let (_, snapshot) = preferences.local_snapshot().unwrap();
+        assert_eq!(snapshot[DESKTOP_KEY]["openAtLogin"], true);
+        assert_eq!(snapshot[DESKTOP_KEY]["minimizeToTray"], false);
+        assert_eq!(snapshot[LOCAL_SYNC_KEY]["pending"], false);
+        assert_eq!(
+            DesktopPreferences::from_json(&snapshot[DESKTOP_KEY]),
+            preferences.desktop()
+        );
+        assert!(preferences.ticket().is_none());
+    }
+
+    #[test]
+    fn desktop_preferences_default_to_visible_window_and_no_autostart() {
+        assert_eq!(
+            DesktopPreferences::default(),
+            DesktopPreferences {
+                open_at_login: false,
+                minimize_to_tray: true,
+            }
+        );
+        assert_eq!(
+            DesktopPreferences::from_json(&Value::Null),
+            DesktopPreferences::default()
+        );
     }
 }

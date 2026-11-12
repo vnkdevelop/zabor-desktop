@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/zabor-core", "crates/zabor-dsp", "crates/zabor-dsp-wasm", "crates/zabor-native", "crates/zabor-camera", "crates/zabor-stream-audio", "crates/zabor-input", "crates/zabor-profile-helper"]
+members = ["crates/zabor-core", "crates/zabor-dsp", "crates/zabor-dsp-wasm", "crates/zabor-native", "crates/zabor-camera", "crates/zabor-stream-audio", "crates/zabor-input", "crates/zabor-profile-helper", "crates/zabor-desktop-platform"]
 exclude = ["vendor/tract-core-0.21.4", "vendor/webrtc-vad-0.4.0", "vendor/rnnoise2-sys-0.1.2"]
 default-members = ["crates/zabor-core", "crates/zabor-dsp", "crates/zabor-dsp-wasm"]
 resolver = "2"

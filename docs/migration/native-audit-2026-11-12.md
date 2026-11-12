@@ -12,6 +12,15 @@
 not release acceptance. This audit starts from `8500535` on
 `audit/native-parity-release`, without modifying the original Electron project.
 
+Продолжение от 12 ноября 2026 года закрыло часть пунктов ниже (трей, автозапуск,
+сворачивание в трей, действия приватности и аккаунта) и оставило открытыми
+подписи, установку, updater и физическую приёмку — см.
+[native-parity-2026-11-12-continuation.md](native-parity-2026-11-12-continuation.md).
+
+The 12 November continuation closed several items below (tray, autostart,
+hide-to-tray, privacy and account actions) and left signing, installation,
+updater and physical acceptance open; see the continuation document linked above.
+
 ## Обнаруженные расхождения / findings
 
 | Утверждение | Фактическая граница |

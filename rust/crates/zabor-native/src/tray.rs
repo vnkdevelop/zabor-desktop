@@ -49,6 +49,10 @@ pub fn determine_close_action(minimize_to_tray: bool, is_explicit_quit: bool) ->
     }
 }
 
+pub fn hides_on_close(minimize_to_tray: bool, tray_ready: bool) -> bool {
+    minimize_to_tray && tray_ready
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +91,13 @@ mod tests {
             determine_close_action(false, false),
             WindowCloseAction::QuitApplication
         );
+    }
+
+    #[test]
+    fn close_hides_only_when_the_tray_is_actually_available() {
+        assert!(hides_on_close(true, true));
+        assert!(!hides_on_close(true, false));
+        assert!(!hides_on_close(false, true));
+        assert!(!hides_on_close(false, false));
     }
 }
